@@ -11,7 +11,7 @@ interface AspectRatioWheelProps {
   onChange: (value: string) => void;
 }
 
-const ITEM_HEIGHT = 40;
+const ITEM_HEIGHT = 28;
 const VISIBLE_ITEMS = 5;
 const WHEEL_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS;
 const CENTER_INDEX = Math.floor(VISIBLE_ITEMS / 2);
@@ -34,21 +34,21 @@ function parseRatio(value: string): { w: number; h: number } | null {
 }
 
 function AspectRatioPreview({ value }: { value: string }) {
-  const MAX_W = 180;
-  const MAX_H = 140;
+  const MAX_W = 110;
+  const MAX_H = 84;
   const isAuto = value === "auto";
-  let w = 110;
-  let h = 110;
+  let w = 70;
+  let h = 70;
   if (!isAuto) {
     const parsed = parseRatio(value);
     if (parsed) {
       const ratio = parsed.w / parsed.h;
       if (ratio >= MAX_W / MAX_H) {
         w = MAX_W;
-        h = Math.max(20, Math.round(MAX_W / ratio));
+        h = Math.max(14, Math.round(MAX_W / ratio));
       } else {
         h = MAX_H;
-        w = Math.max(20, Math.round(MAX_H * ratio));
+        w = Math.max(14, Math.round(MAX_H * ratio));
       }
     }
   }
@@ -209,7 +209,6 @@ export function AspectRatioWheel({ options, value, onChange }: AspectRatioWheelP
         })}
         <div className="ar-wheel__pad" style={{ height: ITEM_HEIGHT * CENTER_INDEX }} aria-hidden />
       </div>
-      <div className="ar-wheel__center-band" aria-hidden />
     </div>
   );
 }

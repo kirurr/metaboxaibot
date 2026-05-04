@@ -2977,11 +2977,13 @@ textarea::placeholder {
 .ar-wheel {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  /* Fixed-width right column locks the numbers in place — preview content can't
+     push them sideways when the rect is wide vs tall. */
+  grid-template-columns: 1fr 84px;
+  gap: 20px;
   align-items: center;
   margin-top: 4px;
-  padding: 8px 4px;
+  padding: 10px 14px;
   border-radius: 14px;
   background: var(--bg-secondary, var(--card-bg));
   border: 1px solid var(--border);
@@ -2993,13 +2995,13 @@ textarea::placeholder {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 200px;
+  gap: 6px;
+  min-height: 140px;
 }
 
 .ar-wheel__preview-stage {
   width: 100%;
-  height: 160px;
+  height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3007,30 +3009,30 @@ textarea::placeholder {
 
 .ar-wheel__preview-rect {
   border: 2px solid var(--accent);
-  border-radius: 8px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  box-shadow: 0 4px 18px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 3px 14px -8px color-mix(in srgb, var(--accent) 60%, transparent);
   transition:
     width 0.32s cubic-bezier(0.34, 1.4, 0.5, 1),
     height 0.32s cubic-bezier(0.34, 1.4, 0.5, 1);
 }
 
 .ar-wheel__preview-auto {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 1.2px;
   text-transform: uppercase;
-  padding: 28px 36px;
+  padding: 18px 24px;
   border: 2px dashed var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .ar-wheel__preview-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: 0.4px;
+  letter-spacing: 1.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3040,7 +3042,7 @@ textarea::placeholder {
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  perspective: 900px;
+  perspective: 700px;
   perspective-origin: 50% 50%;
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -3072,10 +3074,12 @@ textarea::placeholder {
   background: transparent;
   border: none;
   color: var(--text-primary);
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3px;
+  /* Generous letter-spacing so digits and the colon don't crowd each other —
+     "9:16" without it reads as a blob; with 2px it breathes. */
+  letter-spacing: 2px;
   white-space: nowrap;
   cursor: pointer;
   scroll-snap-align: center;
@@ -3085,7 +3089,9 @@ textarea::placeholder {
   transition:
     transform 0.18s cubic-bezier(0.25, 1, 0.5, 1),
     opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1),
-    color 0.18s;
+    color 0.18s,
+    font-size 0.18s,
+    font-weight 0.18s;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
@@ -3093,29 +3099,16 @@ textarea::placeholder {
 
 .ar-wheel__item--active {
   color: var(--accent);
-  font-weight: 600;
-}
-
-.ar-wheel__center-band {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: calc(50% - 16px);
-  height: 40px;
-  transform: translate(0, -50%);
-  border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  pointer-events: none;
-  border-radius: 2px;
+  font-weight: 700;
+  font-size: 17px;
 }
 
 @media (max-width: 380px) {
   .ar-wheel__preview-stage {
-    height: 130px;
+    height: 88px;
   }
   .ar-wheel__preview {
-    min-height: 170px;
+    min-height: 124px;
   }
 }
 
