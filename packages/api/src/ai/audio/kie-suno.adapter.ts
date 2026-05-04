@@ -221,26 +221,10 @@ export class KieSunoAdapter implements AudioAdapter {
       throw new Error(`Kie Suno generation failed: ${status} ${taskData?.errorMessage ?? ""}`);
     }
 
-    // TEXT_SUCCESS — успешная генерация только текста (lyrics-only mode).
-    // Для модели "music" этот статус — терминальная аномалия (аудио не будет).
-    // Когда подключим lyrics-only режим — обработать отдельно.
-    if (status === "TEXT_SUCCESS") {
-      throw new Error("Kie Suno: text-only result for music task; no audio generated");
-    }
-
-    // CALLBACK_EXCEPTION — kie не смог достучаться до нашего callback. Сама
-    // генерация может уже быть готова: если в response уже есть финальный
-    // audioUrl — забираем результат, иначе считаем терминальной ошибкой.
-    if (status === "CALLBACK_EXCEPTION") {
-      if (track?.audioUrl) {
-        return { url: track.audioUrl, ext: "mp3", contentType: "audio/mpeg" };
-      }
-      throw new Error(
-        `Kie Suno: callback exception with no audio result (${taskData?.errorMessage ?? ""})`,
-      );
-    }
-
-    // Not ready yet
+    // Все прочие статусы (PENDING, TEXT_SUCCESS, CALLBACK_EXCEPTION и т.п.) —
+    // не готово, продолжаем поллить. Suno в music-режиме идёт по цепочке
+    // PENDING → TEXT_SUCCESS → FIRST_SUCCESS → SUCCESS; TEXT_SUCCESS —
+    // intermediate (текст готов, аудио ещё нет), не terminal.
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
     // Берём только финальный audioUrl. streamAudioUrl — HLS/chunked endpoint,
