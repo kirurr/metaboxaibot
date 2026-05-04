@@ -15,7 +15,10 @@ import {
   getT,
   buildResultCaption,
   pickGenerationFailedMessage,
+  getFallbackCandidates,
+  type AIModel,
 } from "@metabox/shared";
+import type { Prisma } from "@prisma/client";
 import { notifyTechError, notifyTechErrorThrottled } from "../utils/notify-error.js";
 import {
   resolveUserFacingMessage,
@@ -24,12 +27,16 @@ import {
 } from "../utils/user-facing-error.js";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
+import { submitWithFallback } from "../utils/submit-with-fallback.js";
 import {
   acquireForSubmit,
   acquireForPoll,
   acquireForSubmitSticky,
 } from "../utils/acquire-for-processor.js";
-import { resolveKeyProvider } from "@metabox/api/ai/key-provider";
+import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
+import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
+import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
 import type { AcquiredKey } from "@metabox/api/services/key-pool";
 import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
@@ -84,6 +91,25 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
   const modelName = modelMeta?.name ?? modelId;
   const keyProvider = resolveKeyProvider(modelId);
 
+  // Fallback кандидаты для модели. Сейчас зарегистрированы только для Suno
+  // (kie primary → apipass fallback). Sticky-voice path (TTS с user-cloned
+  // voice) у моделей tts-* — fallback не подключаем (голос привязан к
+  // конкретному ключу/аккаунту провайдера).
+  const fallbackCandidates: AIModel[] = modelMeta ? getFallbackCandidates(modelId, "audio") : [];
+
+  /** Подобрать AIModel по provider строке (primary или один из fallback'ов). */
+  const findModelByProvider = (provider: string): AIModel | undefined => {
+    if (modelMeta?.provider === provider) return modelMeta;
+    return fallbackCandidates.find((m) => m.provider === provider);
+  };
+
+  /** State-shape `inputData.fallback`. Inline-формат как в video.processor. */
+  interface FallbackState {
+    primaryProvider: string;
+    effectiveProvider?: string;
+    attemptedProviders?: string[];
+  }
+
   try {
     const existingJob = await db.generationJob.findUnique({
       where: { id: dbJobId },
@@ -91,9 +117,36 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         providerJobId: true,
         providerKeyId: true,
         status: true,
+        inputData: true,
         outputs: { orderBy: { index: "asc" as const }, take: 1 },
       },
     });
+
+    /** Прочитать fallback state из inputData. */
+    const readFallbackState = (): FallbackState => {
+      const raw = (existingJob?.inputData as Record<string, unknown> | null | undefined)
+        ?.fallback as FallbackState | undefined;
+      return { primaryProvider: modelMeta?.provider ?? "", ...(raw ?? {}) };
+    };
+
+    /** Записать fallback state в inputData (мерджится). */
+    const writeFallbackState = async (next: FallbackState): Promise<void> => {
+      const current = await db.generationJob.findUnique({
+        where: { id: dbJobId },
+        select: { inputData: true },
+      });
+      const merged = {
+        ...((current?.inputData as Record<string, unknown> | null | undefined) ?? {}),
+        fallback: next,
+      };
+      await db.generationJob.update({
+        where: { id: dbJobId },
+        data: { inputData: merged as unknown as Prisma.InputJsonValue },
+      });
+      if (existingJob) {
+        (existingJob.inputData as unknown) = merged;
+      }
+    };
 
     let audioResult: { buffer?: Buffer; url?: string; ext: string; contentType: string } | null =
       null;
@@ -176,6 +229,100 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         }
       }
 
+      // submitWithFallback path: async-модель с зарегистрированными
+      // fallback'ами и без sticky-аккаунта. Sticky-voice (TTS-модели) — это
+      // привязка к конкретному ключу/провайдеру голоса; fallback там не
+      // применяем. Resume (existingJob.providerJobId) тоже не идёт через
+      // fallback — продолжаем поллить тот же task.
+      const useSubmitWithFallback =
+        !stickyVoice &&
+        !existingJob?.providerJobId &&
+        modelMeta?.isAsync === true &&
+        fallbackCandidates.length > 0 &&
+        modelMeta !== undefined;
+
+      // Если был re-clone — подменяем voice_id, чтобы адаптер дернул свежий.
+      const effectiveVoiceId = stickyVoice?.voiceId ?? voiceId;
+      const effectiveModelSettings = stickyVoice
+        ? { ...(modelSettings ?? {}), voice_id: stickyVoice.voiceId }
+        : modelSettings;
+
+      if (useSubmitWithFallback && modelMeta) {
+        // Async submit через provider fallback. Acquire ключа делает сам
+        // submitWithFallback — внешний acquireForSubmit не нужен.
+        const prevFallbackState = readFallbackState();
+        const skipProviders =
+          prevFallbackState.attemptedProviders && prevFallbackState.attemptedProviders.length > 0
+            ? new Set(prevFallbackState.attemptedProviders)
+            : undefined;
+
+        const fbResult = await submitWithFallback<string, AudioJobData>({
+          primaryModel: modelMeta,
+          fallbacks: fallbackCandidates,
+          section: "audio",
+          job,
+          token,
+          allowFiveXxFallback: job.attemptsMade >= 2,
+          jobId: dbJobId,
+          userId: userIdStr,
+          skipProviders,
+          submit: async (model, acquired) => {
+            const adapter = createAudioAdapter(model, acquired);
+            if (!adapter.submit) throw new Error(`Adapter ${model.id} has no submit()`);
+            return adapter.submit({
+              prompt: effectivePrompt,
+              voiceId: effectiveVoiceId,
+              sourceAudioUrl,
+              modelSettings: effectiveModelSettings,
+            });
+          },
+        });
+
+        const providerJobId = fbResult.result;
+        const submittedKeyId = fbResult.acquired.keyId;
+        // Накопительно: prev attempted (из poll-stage re-submit'а) + fresh
+        // attempts из этого вызова. Без union теряем primary-marker и поллер
+        // может попробовать его снова на следующей итерации.
+        const accumulated = new Set([
+          ...(prevFallbackState.attemptedProviders ?? []),
+          ...fbResult.attempts.map((a) => a.provider),
+        ]);
+        await writeFallbackState({
+          primaryProvider: modelMeta.provider,
+          effectiveProvider: fbResult.effectiveProvider,
+          attemptedProviders: Array.from(accumulated),
+        });
+
+        await db.generationJob.update({
+          where: { id: dbJobId },
+          data: {
+            providerJobId,
+            providerKeyId: submittedKeyId,
+            // Фиксируем момент перехода в poll-стадию: после Redis wipe
+            // recovery восстановит таймер с этой точки, а не с нуля.
+            pollStartedAt: new Date(),
+          },
+        });
+
+        logger.info(
+          { dbJobId, providerJobId, effectiveProvider: fbResult.effectiveProvider },
+          "Audio poll scheduled (with fallback support)",
+        );
+        await delayJob(
+          job,
+          {
+            ...job.data,
+            stage: "poll",
+            pollStartedAt: Date.now(),
+            lastIntervalMs: INITIAL_POLL_INTERVAL_MS,
+          },
+          INITIAL_POLL_INTERVAL_MS,
+          token,
+        );
+        return;
+      }
+
+      // Legacy path: sticky-voice / sync TTS / resume — без fallback.
       const acquired = stickyVoice
         ? await acquireForSubmitSticky({
             acquired: stickyVoice.acquired,
@@ -203,12 +350,6 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         : modelId;
       const adapter = createAudioAdapter(effectiveModelId, acquired);
 
-      // Если был re-clone — подменяем voice_id, чтобы адаптер дернул свежий.
-      const effectiveVoiceId = stickyVoice?.voiceId ?? voiceId;
-      const effectiveModelSettings = stickyVoice
-        ? { ...(modelSettings ?? {}), voice_id: stickyVoice.voiceId }
-        : modelSettings;
-
       if (!adapter.isAsync && adapter.generate) {
         // Sync adapter — generate inline, then fall through to finalize.
         audioResult = await submitWithThrottle({
@@ -228,7 +369,9 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
             }),
         });
       } else {
-        // Async adapter (Suno) — submit then schedule poll.
+        // Async adapter (Suno) — submit then schedule poll. Этот путь
+        // достижим только при resume (existingJob.providerJobId есть)
+        // или у моделей без fallback'ов.
         if (!adapter.submit) throw new Error(`Adapter ${modelId} has no submit()`);
 
         let providerJobId: string;
@@ -262,6 +405,16 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
               pollStartedAt: new Date(),
             },
           });
+          // Записываем effectiveProvider в inputData.fallback даже на legacy
+          // пути — иначе после смены primary в каталоге poll-стадия не сможет
+          // определить, на каком провайдере шёл submit (acquireForPoll получит
+          // mismatch keyId↔provider).
+          if (modelMeta) {
+            await writeFallbackState({
+              primaryProvider: modelMeta.provider,
+              effectiveProvider: modelMeta.provider,
+            });
+          }
         }
 
         logger.info({ dbJobId, providerJobId }, "Audio poll scheduled");
@@ -282,8 +435,26 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       const providerJobId = existingJob?.providerJobId;
       if (!providerJobId) throw new Error(`Audio poll stage without providerJobId: ${dbJobId}`);
 
-      const acquired = await acquireForPoll(existingJob?.providerKeyId, keyProvider);
-      const adapter = createAudioAdapter(modelId, acquired);
+      // Если на submit-стадии случился fallback — используем его модель/keyProvider.
+      const fbStateNow = readFallbackState();
+      let resolvedEffectiveProvider = fbStateNow.effectiveProvider;
+      // Legacy in-flight: job засабмичен до подключения inputData.fallback —
+      // определяем провайдера по ключу, на котором был submit.
+      if (!resolvedEffectiveProvider && existingJob?.providerKeyId) {
+        const pk = await db.providerKey
+          .findUnique({
+            where: { id: existingJob.providerKeyId },
+            select: { provider: true },
+          })
+          .catch(() => null);
+        resolvedEffectiveProvider = pk?.provider;
+      }
+      const effModel =
+        (resolvedEffectiveProvider && findModelByProvider(resolvedEffectiveProvider)) || modelMeta;
+      const effKeyProvider = effModel ? resolveKeyProviderForModel(effModel) : keyProvider;
+
+      const acquired = await acquireForPoll(existingJob?.providerKeyId, effKeyProvider);
+      const adapter = createAudioAdapter(effModel ?? modelId, acquired);
       if (!adapter.poll) throw new Error(`Adapter ${modelId} has no poll()`);
 
       audioResult = await adapter.poll(providerJobId);
@@ -405,6 +576,73 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       throw new UnrecoverableError(msg);
     }
+    // ── Poll-stage re-submit на provider temporary unavailable ──────────
+    // KIE 422 "high demand" / "service is currently unavailable" и т.п. —
+    // узел провайдера перегружен; defer + retry на том же провайдере не
+    // помогает. Если есть неиспользованный fallback-кандидат — переключаемся:
+    // чистим providerJobId/Key + добавляем текущий effective в attemptedProviders
+    // + re-enqueue на submit-стадию.
+    if (stage === "poll" && isProviderTemporaryUnavailable(err) && modelMeta) {
+      const dbJob = await db.generationJob.findUnique({
+        where: { id: dbJobId },
+        select: { inputData: true },
+      });
+      const inputData = (dbJob?.inputData as Record<string, unknown> | null | undefined) ?? {};
+      const fbStateNow =
+        (inputData.fallback as
+          | { effectiveProvider?: string; attemptedProviders?: string[] }
+          | undefined) ?? {};
+      const currentEff = fbStateNow.effectiveProvider ?? modelMeta.provider;
+      const alreadyAttempted = new Set(fbStateNow.attemptedProviders ?? []);
+      alreadyAttempted.add(currentEff);
+
+      const nextCandidate = fallbackCandidates.find((m) => !alreadyAttempted.has(m.provider));
+
+      if (nextCandidate) {
+        logger.warn(
+          { dbJobId, modelId, currentEff, next: nextCandidate.provider },
+          "Audio poll: provider temporary unavailable — re-enqueuing on fallback",
+        );
+        await notifyFallback({
+          section: "audio",
+          modelId,
+          primaryProvider: modelMeta.provider,
+          fallbackProvider: nextCandidate.provider,
+          reason: "persistent_5xx",
+          jobId: dbJobId,
+          userId: userIdStr,
+        });
+
+        const merged = {
+          ...inputData,
+          fallback: {
+            primaryProvider: modelMeta.provider,
+            attemptedProviders: Array.from(alreadyAttempted),
+          },
+        };
+        await db.generationJob.update({
+          where: { id: dbJobId },
+          data: {
+            providerJobId: null,
+            providerKeyId: null,
+            inputData: merged as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        await delayJob(
+          job,
+          {
+            ...job.data,
+            stage: undefined,
+            pollStartedAt: undefined,
+            lastIntervalMs: undefined,
+          },
+          1000,
+          token,
+        );
+      }
+    }
+
     // Throws DelayedError if rescheduled (propagates → BullMQ delays job).
     // Returns silently otherwise → fall through to user-facing failure handling.
     await deferIfTransientNetworkError({ err, job, token, section: "audio" });
@@ -437,6 +675,79 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     logger.error({ dbJobId, err }, "Audio job failed");
 
     const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
+
+    // ── Poll-stage fallback на KIE 5xx ──────────────────────────────────
+    // KIE при 5xx terminal failure НЕ перезапускает генерацию у себя. Если
+    // BullMQ retry'и исчерпаны и есть неиспользованный fallback-кандидат —
+    // пере-enqueue через delayJob: stage сбрасываем на "generate", чистим
+    // providerJobId, в attemptedProviders добавляем текущий effective provider.
+    // Submit-stage прочтёт attemptedProviders и через skipProviders пропустит
+    // primary, сразу возьмёт fallback.
+    if (stage === "poll" && isLastAttempt && isKieFiveXxError(err) && modelMeta) {
+      // readFallbackState/writeFallbackState — closures внутри try-блока,
+      // в catch недоступны. Refetch'аем напрямую.
+      const dbJob = await db.generationJob.findUnique({
+        where: { id: dbJobId },
+        select: { inputData: true },
+      });
+      const inputData = (dbJob?.inputData as Record<string, unknown> | null | undefined) ?? {};
+      const fbStateNow =
+        (inputData.fallback as
+          | { effectiveProvider?: string; attemptedProviders?: string[] }
+          | undefined) ?? {};
+      const currentEff = fbStateNow.effectiveProvider ?? modelMeta.provider;
+      const alreadyAttempted = new Set(fbStateNow.attemptedProviders ?? []);
+      alreadyAttempted.add(currentEff);
+
+      const nextCandidate = fallbackCandidates.find((m) => !alreadyAttempted.has(m.provider));
+
+      if (nextCandidate) {
+        logger.warn(
+          { dbJobId, modelId, currentEff, next: nextCandidate.provider },
+          "Audio poll: KIE 5xx terminal — re-enqueuing on fallback",
+        );
+        await notifyFallback({
+          section: "audio",
+          modelId,
+          primaryProvider: modelMeta.provider,
+          fallbackProvider: nextCandidate.provider,
+          reason: "persistent_5xx",
+          jobId: dbJobId,
+          userId: userIdStr,
+        });
+
+        const merged = {
+          ...inputData,
+          fallback: {
+            primaryProvider: modelMeta.provider,
+            attemptedProviders: Array.from(alreadyAttempted),
+          },
+        };
+        await db.generationJob.update({
+          where: { id: dbJobId },
+          data: {
+            providerJobId: null,
+            providerKeyId: null,
+            inputData: merged as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        // delayJob = updateData + moveToDelayed (НЕ инкрементит attemptsMade)
+        // → throws DelayedError → BullMQ просыпается мгновенно и заходит
+        // в processAudioJob с stage="generate" (default) → submit-fallback.
+        await delayJob(
+          job,
+          {
+            ...job.data,
+            stage: undefined,
+            pollStartedAt: undefined,
+            lastIntervalMs: undefined,
+          },
+          1000,
+          token,
+        );
+      }
+    }
 
     if (isLastAttempt) {
       await db.generationJob.update({

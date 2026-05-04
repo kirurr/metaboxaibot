@@ -2,16 +2,27 @@ import type { AudioAdapter } from "./base.adapter.js";
 import { OpenAiTtsAdapter } from "./openai-tts.adapter.js";
 import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
 import { CartesiaAdapter } from "./cartesia.adapter.js";
-// ApipassSunoAdapter временно не импортируется здесь — после переключения
-// Suno на kie он остаётся в репе ради шага 2 этого тикета (fallback на kie
-// через FALLBACK_AUDIO_MODELS). Импорт вернётся со вторым коммитом.
+import { ApipassSunoAdapter } from "./apipass-suno.adapter.js";
 import { KieSunoAdapter } from "./kie-suno.adapter.js";
 import { buildProxyFetch } from "../transport/proxy-fetch.js";
 import type { AdapterContext } from "../with-pool.js";
+import { AI_MODELS, type AIModel } from "@metabox/shared";
 
 export { ElevenLabsAdapter, CartesiaAdapter };
 
-export function createAudioAdapter(modelId: string, ctx?: AdapterContext): AudioAdapter {
+/**
+ * Создаёт audio-адаптер по `modelId` или `AIModel` объекту.
+ *
+ * `AIModel`-вариант нужен для fallback: у fallback-модели тот же `id` что и у
+ * primary, но другой `provider` — lookup по id вернул бы primary вместо
+ * fallback. Mirror'ит поведение `createLLMAdapter` / `createVideoAdapter`.
+ */
+export function createAudioAdapter(
+  modelOrId: string | AIModel,
+  ctx?: AdapterContext,
+): AudioAdapter {
+  const model = typeof modelOrId === "string" ? AI_MODELS[modelOrId] : modelOrId;
+  const modelId = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
   const apiKey = ctx?.apiKey;
   const fetchFn = ctx ? (buildProxyFetch(ctx.proxy) ?? undefined) : undefined;
 
@@ -36,9 +47,10 @@ export function createAudioAdapter(modelId: string, ctx?: AdapterContext): Audio
     case "music-el":
       return new ElevenLabsAdapter("music-el", apiKey, fetchFn);
     case "suno":
-      // Suno переведён на kie (с fallback на apipass — подключается отдельно
-      // через FALLBACK_AUDIO_MODELS, см. MET-148). ApipassSunoAdapter
-      // оставлен в кодовой базе именно ради этого fallback.
+      // Provider-based dispatch: kie primary, apipass fallback (см. MET-148).
+      // Если lookup по строке не дал AIModel (legacy / неизвестная конфигурация),
+      // дефолтимся на kie — primary в текущем каталоге.
+      if (model?.provider === "apipass") return new ApipassSunoAdapter(apiKey, fetchFn);
       return new KieSunoAdapter(apiKey, fetchFn);
     default:
       throw new Error(`Unknown audio model: ${modelId}`);

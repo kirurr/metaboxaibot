@@ -456,3 +456,32 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     ],
   },
 };
+
+// ── Fallback модели ────────────────────────────────────────────────────────
+// Альтернативные провайдеры с тем же modelId что у primary в AUDIO_MODELS.
+// Используются audio.processor'ом через submitWithFallback при недоступности
+// primary'а. Биллинг и UI настройки берутся из primary — поля name/description/
+// settings игнорируются.
+//
+// Перебор кандидатов в порядке добавления; processor берёт первый совместимый.
+export const FALLBACK_AUDIO_MODELS: AIModel[] = [
+  // ── Suno через apipass (sunoapi.org) — fallback при недоступности kie ─
+  // Цены ниже совпадают с primary — calculateCost ходит по primary'я,
+  // здесь они только для типобезопасности.
+  {
+    id: "suno",
+    name: "Suno (apipass fallback)",
+    description: "Fallback на sunoapi.org при недоступности kie.",
+    section: "audio",
+    provider: "apipass",
+    costUsdPerRequest: 0.06,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: false,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+  },
+];
