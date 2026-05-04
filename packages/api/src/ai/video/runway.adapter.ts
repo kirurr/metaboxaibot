@@ -14,12 +14,12 @@ const RUNWAY_API = "https://api.dev.runwayml.com/v1";
 
 /**
  * Hard cap for the inline base64 fallback. Runway rejects `promptImage`
- * data URLs above ~3.3 MB (≈2.4 MB binary after base64 inflation) with
- * 413 Request Entity Too Large. We round down to 3 MB binary as a safe
+ * data URLs above 5 MB with
+ * 413 Request Entity Too Large. We round down to 5 MB binary as a safe
  * cutoff before constructing the data URL — anything heavier should be
  * served from S3 or surfaced to the user as a precondition error.
  */
-const RUNWAY_BASE64_LIMIT_BYTES = 3 * 1024 * 1024;
+const RUNWAY_BASE64_LIMIT_BYTES = 5 * 1024 * 1024;
 
 interface RunwayTask {
   id: string;
