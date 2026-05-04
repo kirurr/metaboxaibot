@@ -129,11 +129,6 @@ export class KieSunoAdapter implements AudioAdapter {
       );
     }
 
-    // callBackUrl у kie опционален. Передаём только когда есть валидный
-    // публичный URL — без подставленного example.com kie ничему не доверяет
-    // лишнего, мы всё равно поллим.
-    const callBackUrl = config.api.publicUrl ? `${config.api.publicUrl}/suno-callback` : undefined;
-
     const body: Record<string, unknown> = customMode
       ? {
           customMode: true,
@@ -151,7 +146,6 @@ export class KieSunoAdapter implements AudioAdapter {
           model,
           prompt: input.prompt,
         };
-    if (callBackUrl) body.callBackUrl = callBackUrl;
 
     const resp = await fetchWithLog(
       `${KIE_BASE}/api/v1/generate`,
