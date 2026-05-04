@@ -2,7 +2,10 @@ import type { AudioAdapter } from "./base.adapter.js";
 import { OpenAiTtsAdapter } from "./openai-tts.adapter.js";
 import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
 import { CartesiaAdapter } from "./cartesia.adapter.js";
-import { ApipassSunoAdapter } from "./apipass-suno.adapter.js";
+// ApipassSunoAdapter временно не импортируется здесь — после переключения
+// Suno на kie он остаётся в репе ради шага 2 этого тикета (fallback на kie
+// через FALLBACK_AUDIO_MODELS). Импорт вернётся со вторым коммитом.
+import { KieSunoAdapter } from "./kie-suno.adapter.js";
 import { buildProxyFetch } from "../transport/proxy-fetch.js";
 import type { AdapterContext } from "../with-pool.js";
 
@@ -33,7 +36,10 @@ export function createAudioAdapter(modelId: string, ctx?: AdapterContext): Audio
     case "music-el":
       return new ElevenLabsAdapter("music-el", apiKey, fetchFn);
     case "suno":
-      return new ApipassSunoAdapter(apiKey, fetchFn);
+      // Suno переведён на kie (с fallback на apipass — подключается отдельно
+      // через FALLBACK_AUDIO_MODELS, см. MET-148). ApipassSunoAdapter
+      // оставлен в кодовой базе именно ради этого fallback.
+      return new KieSunoAdapter(apiKey, fetchFn);
     default:
       throw new Error(`Unknown audio model: ${modelId}`);
   }
