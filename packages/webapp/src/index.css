@@ -2972,42 +2972,151 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-/* ── Aspect ratio visual preview ─────────────────────────────────────────── */
+/* ── Aspect ratio wheel picker (iOS-style) ───────────────────────────────── */
 
-.ar-preview {
+.ar-wheel {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  background: var(--bg-secondary, var(--card-bg));
+  border: 1px solid var(--border);
+  isolation: isolate;
+}
+
+.ar-wheel__preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 200px;
+}
+
+.ar-wheel__preview-stage {
+  width: 100%;
+  height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 88px;
-  margin-top: 6px;
 }
 
-.ar-preview__frame {
-  width: 104px;
-  height: 70px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ar-preview__rect {
-  border: 1.5px solid var(--accent);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.ar-wheel__preview-rect {
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 4px 18px -8px color-mix(in srgb, var(--accent) 60%, transparent);
   transition:
-    width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
-    height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 8px;
-  min-height: 8px;
+    width 0.32s cubic-bezier(0.34, 1.4, 0.5, 1),
+    height 0.32s cubic-bezier(0.34, 1.4, 0.5, 1);
 }
 
-.ar-preview__auto-text {
-  font-size: 11px;
-  font-weight: 500;
+.ar-wheel__preview-auto {
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-secondary);
-  letter-spacing: 0.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  padding: 28px 36px;
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+}
+
+.ar-wheel__preview-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ar-wheel__scroller {
+  position: relative;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  perspective: 900px;
+  perspective-origin: 50% 50%;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 22%,
+    black 78%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent 0, black 22%, black 78%, transparent 100%);
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}
+
+.ar-wheel__scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.ar-wheel__pad {
+  width: 100%;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.ar-wheel__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  cursor: pointer;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  transition:
+    transform 0.18s cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1),
+    color 0.18s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ar-wheel__item--active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ar-wheel__center-band {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(50% - 16px);
+  height: 40px;
+  transform: translate(0, -50%);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+@media (max-width: 380px) {
+  .ar-wheel__preview-stage {
+    height: 130px;
+  }
+  .ar-wheel__preview {
+    min-height: 170px;
+  }
 }
 
 /* ── Family cards (image model selection) ─────────────────────────────────── */
