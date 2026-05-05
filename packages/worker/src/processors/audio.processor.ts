@@ -1,12 +1,18 @@
 import { UnrecoverableError, DelayedError, type Job } from "bullmq";
 import { delayJob } from "../utils/delay-job.js";
+import { withRetry } from "../utils/with-retry.js";
 import { Api, InputFile } from "grammy";
 import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
 import { db } from "@metabox/api/db";
 import { createAudioAdapter } from "@metabox/api/ai/audio";
 import type { AudioResult } from "@metabox/api/ai/audio";
-import { deductTokens, calculateCost, translatePromptIfNeeded } from "@metabox/api/services";
+import {
+  deductTokens,
+  refundTokens,
+  calculateCost,
+  translatePromptIfNeeded,
+} from "@metabox/api/services";
 import type { DeductResult } from "@metabox/api/services";
 import { buildS3Key, uploadBuffer, uploadFromUrl, getFileUrl } from "@metabox/api/services/s3";
 import { logger } from "../logger.js";
@@ -63,30 +69,33 @@ async function sendAudioBatch(
   const ready = (
     await Promise.all(
       tracks.map(async (t, i) => {
-        let buf = t.buffer;
+        let buf: Buffer | null = t.buffer ?? null;
         if (!buf && t.url) {
-          try {
-            const res = await fetch(t.url);
-            if (!res.ok) {
-              logger.warn(
-                { status: res.status, trackIndex: i },
-                "sendAudioBatch: track fetch returned non-OK",
-              );
-              return null;
-            }
-            buf = Buffer.from(await res.arrayBuffer());
-          } catch (err) {
-            logger.warn({ err, trackIndex: i }, "sendAudioBatch: track fetch threw");
+          // 3 попытки — провайдер-CDN'ы (Suno/Cartesia/EL) изредка блипуют
+          // 404/5xx; разовые сетевые проблемы покрываются inner-retry без
+          // burning'а BullMQ attempt'а.
+          const url = t.url;
+          buf = await withRetry(`audio.fetchTrack[${i}]`, 3, async () => {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return Buffer.from(await res.arrayBuffer());
+          }).catch((err) => {
+            logger.warn({ err, trackIndex: i }, "sendAudioBatch: track fetch failed after retries");
             return null;
-          }
+          });
+          if (!buf) return null;
         }
         return buf ? { buf, ext: t.ext } : null;
       }),
     )
   ).filter((x): x is { buf: Buffer; ext: string } => !!x);
 
+  // 2 попытки — multipart upload в Telegram'е иногда падает на network
+  // blip'ах. Single retry — безопасный второй шанс без double-send'а.
   if (ready.length === 1) {
-    await telegram.sendAudio(chatId, new InputFile(ready[0].buf, `audio.${ready[0].ext}`));
+    await withRetry("audio.sendAudio", 2, () =>
+      telegram.sendAudio(chatId, new InputFile(ready[0].buf, `audio.${ready[0].ext}`)),
+    );
   } else if (ready.length >= 2) {
     // Telegram лимит media-group: 2-10 элементов. Suno возвращает 2, в лимит
     // мы не упрёмся, но slice(0, 10) защитит на будущее.
@@ -94,7 +103,7 @@ async function sendAudioBatch(
       type: "audio" as const,
       media: new InputFile(r.buf, `audio_${i + 1}.${r.ext}`),
     }));
-    await telegram.sendMediaGroup(chatId, media);
+    await withRetry("audio.sendMediaGroup", 2, () => telegram.sendMediaGroup(chatId, media));
   }
   // ready.length === 0: ни один трек не скачался — caption всё равно отправим,
   // юзер увидит хотя бы текст с информацией о генерации.
@@ -860,10 +869,29 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     }
 
     if (isLastAttempt) {
+      // Refund: токены списываются на финализации ДО фактической отправки
+      // результата юзеру. Если отправка/буфер-фетч упали (провайдер 404'ит
+      // outputUrl, S3 файл потерян, sendAudio Telegram'а отбит) — у юзера
+      // списано, а аудио он не получил. Возвращаем `tokensSpent`. Если
+      // deduct ещё не случался (submit/poll упал до Stage 2) — `tokensSpent`
+      // будет null/0 → no-op.
+      const dbJobNow = await db.generationJob
+        .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
+        .catch(() => null);
+      const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+
       await db.generationJob.update({
         where: { id: dbJobId },
         data: { status: "failed", error: String(err) },
       });
+
+      if (tokensSpent > 0) {
+        await refundTokens(BigInt(userIdStr), tokensSpent, modelId, "ai_audio_undelivered").catch(
+          (refundErr) =>
+            logger.error({ refundErr, dbJobId, tokensSpent }, "Audio failed: refund attempt threw"),
+        );
+        logger.warn({ dbJobId, tokensSpent }, "Audio failed after deduct: tokens refunded to user");
+      }
 
       const errMsg = err instanceof Error ? err.message : String(err);
 

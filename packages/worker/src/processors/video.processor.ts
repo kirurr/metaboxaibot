@@ -12,6 +12,7 @@ import { createVideoAdapter } from "@metabox/api/ai/video";
 import { ElevenLabsAdapter, CartesiaAdapter } from "@metabox/api/ai/audio";
 import {
   deductTokens,
+  refundTokens,
   calculateCost,
   computeVideoTokens,
   translatePromptIfNeeded,
@@ -65,6 +66,7 @@ import { userAvatarService } from "@metabox/api/services/user-avatar";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
 import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
 import { deferIfRateLimitOverload } from "../utils/defer-rate-limit.js";
+import { withRetry } from "../utils/with-retry.js";
 import { UserFacingError } from "@metabox/shared";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
@@ -574,13 +576,19 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       let actualHeight: number | null = null;
       let actualFps: number | null = null;
       try {
-        const buf = pollAdapter?.fetchBuffer
-          ? await pollAdapter.fetchBuffer(videoResult.url)
-          : await fetch(videoResult.url).then((r) =>
-              r.ok
-                ? r.arrayBuffer().then(Buffer.from)
-                : Promise.reject(new Error(`HTTP ${r.status}`)),
-            );
+        // 3 попытки с экспоненциальным backoff'ом — провайдер-CDN'ы
+        // (e.g. evolink files) иногда блипуют 404/5xx, разовые сетевые
+        // проблемы покрываются inner-retry без burning'а BullMQ attempt.
+        const resultUrl = videoResult.url;
+        const buf = await withRetry("video.fetchBuffer", 3, async () =>
+          pollAdapter?.fetchBuffer
+            ? pollAdapter.fetchBuffer(resultUrl)
+            : await fetch(resultUrl).then((r) =>
+                r.ok
+                  ? r.arrayBuffer().then(Buffer.from)
+                  : Promise.reject(new Error(`HTTP ${r.status}`)),
+              ),
+        );
         videoBuffer = buf;
         const info = parseMp4Info(buf);
         actualDuration = info.duration;
@@ -588,7 +596,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         actualHeight = info.height;
         actualFps = info.fps;
       } catch {
-        // non-fatal
+        // non-fatal — продолжаем без буфера. Stage 3 (`resolveTelegramVideoBuffer`)
+        // ещё раз попробует скачать с retry'ами уже для отправки в Telegram.
       }
 
       s3Key = videoBuffer
@@ -778,16 +787,23 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       // file it will actually receive.
       const info = parseMp4Info(videoBuf);
       const jpegThumb = await generateVideoJpegThumbnail(videoBuf);
-      await telegram.sendVideo(telegramChatId, new InputFile(videoBuf, "video.mp4"), {
-        caption,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup,
-        supports_streaming: true,
-        ...(info.width ? { width: info.width } : {}),
-        ...(info.height ? { height: info.height } : {}),
-        ...(info.duration ? { duration: Math.round(info.duration) } : {}),
-        ...(jpegThumb ? { thumbnail: new InputFile(jpegThumb, "thumb.jpg") } : {}),
-      });
+      // 2 попытки — sendVideo (multipart upload в Telegram) на разовых
+      // network blip'ах редко, но падает. Single retry даёт безопасный
+      // второй шанс без сильного риска double-send (грамми падает до
+      // получения подтверждения, поэтому retry безопасен на тех же байтах).
+      // На permanent-ошибках (Bad Request) второй вызов падает быстро.
+      await withRetry("video.sendVideo", 2, () =>
+        telegram.sendVideo(telegramChatId, new InputFile(videoBuf, "video.mp4"), {
+          caption,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+          supports_streaming: true,
+          ...(info.width ? { width: info.width } : {}),
+          ...(info.height ? { height: info.height } : {}),
+          ...(info.duration ? { duration: Math.round(info.duration) } : {}),
+          ...(jpegThumb ? { thumbnail: new InputFile(jpegThumb, "thumb.jpg") } : {}),
+        }),
+      );
     }
 
     logger.info({ dbJobId }, "Video job completed");
@@ -1048,10 +1064,29 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     }
 
     if (isLastAttempt) {
+      // Refund: токены списываются на Stage 2 ДО фактической отправки
+      // результата юзеру. Если отправка/буфер-фетч упали (например, провайдер
+      // 404'ит outputUrl, S3 файл потерян, sendVideo Telegram'а отбит) — у
+      // юзера списано, а видео он не увидел. Возвращаем ровно `tokensSpent`
+      // сохранённый на job'е. Если deduct ещё не случался (submit/poll
+      // упал до Stage 2) — `tokensSpent` будет null/0 и refund no-op.
+      const dbJobNow = await db.generationJob
+        .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
+        .catch(() => null);
+      const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+
       await db.generationJob.update({
         where: { id: dbJobId },
         data: { status: "failed", error: String(err) },
       });
+
+      if (tokensSpent > 0) {
+        await refundTokens(BigInt(userIdStr), tokensSpent, modelId, "ai_video_undelivered").catch(
+          (refundErr) =>
+            logger.error({ refundErr, dbJobId, tokensSpent }, "Video failed: refund attempt threw"),
+        );
+        logger.warn({ dbJobId, tokensSpent }, "Video failed after deduct: tokens refunded to user");
+      }
 
       await notifyTechError(err, {
         jobId: dbJobId,
@@ -1088,7 +1123,12 @@ async function resolveTelegramVideoBuffer(
   // fails intermittently when Telegram servers can't reach the provider.
   if (cachedBuffer) return cachedBuffer;
   const url = s3Key ? ((await getFileUrl(s3Key).catch(() => null)) ?? providerUrl) : providerUrl;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch video for Telegram: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  // 3 попытки с экспоненциальным backoff'ом — на разовых 404/timeout'ах
+  // и других transient-сбоях CDN'а провайдера или S3 даём ещё шанс прежде
+  // чем отдать ошибку наверх и сжечь BullMQ attempt'ы.
+  return withRetry("video.fetchForTelegram", 3, async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch video for Telegram: ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  });
 }
