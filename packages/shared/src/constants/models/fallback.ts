@@ -2,8 +2,9 @@ import type { AIModel } from "../../types/ai.js";
 import { FALLBACK_DESIGN_MODELS } from "./design.models.js";
 import { FALLBACK_VIDEO_MODELS } from "./video.models.js";
 import { FALLBACK_LLM_MODELS } from "./gpt.models.js";
+import { FALLBACK_AUDIO_MODELS } from "./audio.models.js";
 
-export type FallbackSection = "design" | "video" | "llm";
+export type FallbackSection = "design" | "video" | "llm" | "audio";
 
 /**
  * Возвращает упорядоченный список fallback-кандидатов для primary modelId
@@ -20,7 +21,9 @@ export function getFallbackCandidates(primaryModelId: string, section: FallbackS
       ? FALLBACK_DESIGN_MODELS
       : section === "video"
         ? FALLBACK_VIDEO_MODELS
-        : FALLBACK_LLM_MODELS;
+        : section === "llm"
+          ? FALLBACK_LLM_MODELS
+          : FALLBACK_AUDIO_MODELS;
   return pool.filter((m) => m.id === primaryModelId);
 }
 

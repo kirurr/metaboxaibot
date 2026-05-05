@@ -28,7 +28,6 @@ const COOLDOWN_MS: Record<string, number> = {
   replicate: 60_000,
   elevenlabs: 60_000,
   cartesia: 60_000,
-  suno: 60_000,
   did: 60_000,
 };
 const DEFAULT_COOLDOWN_MS = 60_000;
