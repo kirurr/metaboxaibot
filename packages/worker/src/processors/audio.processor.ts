@@ -5,6 +5,7 @@ import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
 import { db } from "@metabox/api/db";
 import { createAudioAdapter } from "@metabox/api/ai/audio";
+import type { AudioResult } from "@metabox/api/ai/audio";
 import { deductTokens, calculateCost, translatePromptIfNeeded } from "@metabox/api/services";
 import type { DeductResult } from "@metabox/api/services";
 import { buildS3Key, uploadBuffer, uploadFromUrl, getFileUrl } from "@metabox/api/services/s3";
@@ -46,24 +47,62 @@ const INITIAL_POLL_INTERVAL_MS = 5000;
 
 const telegram = new Api(config.bot.token);
 
-async function sendAudio(
+/**
+ * Шлёт треки одной media-group'ой (если их 2+, иначе одиночным sendAudio),
+ * затем — caption отдельным сообщением. Используется на финале audio-job'а.
+ *
+ * Если есть URL'ы без буферов — параллельно их скачиваем. Треки, которые
+ * скачать не удалось, пропускаются (остальные доходят). Если caption пустой,
+ * текстовое сообщение не отправляется.
+ */
+async function sendAudioBatch(
   chatId: number,
-  result: { buffer?: Buffer; url?: string; ext: string; contentType: string },
+  tracks: Array<{ buffer?: Buffer; url?: string; ext: string; contentType: string }>,
   caption: string,
 ): Promise<void> {
-  let buf = result.buffer;
-  if (!buf && result.url) {
-    const res = await fetch(result.url);
-    if (!res.ok) throw new Error(`Failed to fetch audio from provider: ${res.status}`);
-    buf = Buffer.from(await res.arrayBuffer());
+  const ready = (
+    await Promise.all(
+      tracks.map(async (t, i) => {
+        let buf = t.buffer;
+        if (!buf && t.url) {
+          try {
+            const res = await fetch(t.url);
+            if (!res.ok) {
+              logger.warn(
+                { status: res.status, trackIndex: i },
+                "sendAudioBatch: track fetch returned non-OK",
+              );
+              return null;
+            }
+            buf = Buffer.from(await res.arrayBuffer());
+          } catch (err) {
+            logger.warn({ err, trackIndex: i }, "sendAudioBatch: track fetch threw");
+            return null;
+          }
+        }
+        return buf ? { buf, ext: t.ext } : null;
+      }),
+    )
+  ).filter((x): x is { buf: Buffer; ext: string } => !!x);
+
+  if (ready.length === 1) {
+    await telegram.sendAudio(chatId, new InputFile(ready[0].buf, `audio.${ready[0].ext}`));
+  } else if (ready.length >= 2) {
+    // Telegram лимит media-group: 2-10 элементов. Suno возвращает 2, в лимит
+    // мы не упрёмся, но slice(0, 10) защитит на будущее.
+    const media = ready.slice(0, 10).map((r, i) => ({
+      type: "audio" as const,
+      media: new InputFile(r.buf, `audio_${i + 1}.${r.ext}`),
+    }));
+    await telegram.sendMediaGroup(chatId, media);
   }
-  if (buf) {
-    await telegram.sendAudio(chatId, new InputFile(buf, `audio.${result.ext}`), {
-      caption,
-      parse_mode: "HTML",
-    });
-  } else {
-    throw new Error("Audio result has neither buffer nor URL");
+  // ready.length === 0: ни один трек не скачался — caption всё равно отправим,
+  // юзер увидит хотя бы текст с информацией о генерации.
+
+  if (caption) {
+    await telegram
+      .sendMessage(chatId, caption, { parse_mode: "HTML" })
+      .catch((err) => logger.warn({ err, chatId }, "sendAudioBatch: caption send failed"));
   }
 }
 
@@ -118,7 +157,10 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         providerKeyId: true,
         status: true,
         inputData: true,
-        outputs: { orderBy: { index: "asc" as const }, take: 1 },
+        // Берём все outputs (а не только первый) — нужно для multi-track Suno
+        // на resume mid-finalize: иначе при recovery второй трек не пере-
+        // отправили бы юзеру.
+        outputs: { orderBy: { index: "asc" as const } },
       },
     });
 
@@ -148,11 +190,10 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       }
     };
 
-    let audioResult: { buffer?: Buffer; url?: string; ext: string; contentType: string } | null =
-      null;
-    let s3Key: string | null = null;
+    let audioResult: AudioResult | null = null;
     let deductResult: DeductResult | undefined;
-    const existingOutput = existingJob?.outputs?.[0];
+    const existingOutputs = existingJob?.outputs ?? [];
+    const existingOutput = existingOutputs[0];
 
     if (existingOutput) {
       // Crash-recovery fast path. Atomic transition: only one runner wins.
@@ -170,14 +211,27 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         { dbJobId },
         "Resumed mid-finalize generation: re-sending result to user (tokens NOT deducted — cost context lost)",
       );
-      const ext = existingOutput.s3Key?.split(".").pop() ?? "mp3";
-      const resolvedUrl = existingOutput.s3Key
-        ? ((await getFileUrl(existingOutput.s3Key).catch(() => null)) ??
-          existingOutput.outputUrl ??
-          undefined)
-        : (existingOutput.outputUrl ?? undefined);
-      audioResult = { url: resolvedUrl, ext, contentType: `audio/${ext}` };
-      s3Key = existingOutput.s3Key ?? null;
+
+      // Резолвим все сохранённые outputs (для Suno их может быть >1).
+      // Первый кладём в основной audioResult, остальные — в `extras` так что
+      // дальнейшая логика рассылки one-pass обработает все.
+      const buildResultFromOutput = async (
+        output: (typeof existingOutputs)[number],
+      ): Promise<{ url?: string; ext: string; contentType: string }> => {
+        const ext = output.s3Key?.split(".").pop() ?? "mp3";
+        const resolvedUrl = output.s3Key
+          ? ((await getFileUrl(output.s3Key).catch(() => null)) ?? output.outputUrl ?? undefined)
+          : (output.outputUrl ?? undefined);
+        return { url: resolvedUrl, ext, contentType: `audio/${ext}` };
+      };
+      const primary = await buildResultFromOutput(existingOutput);
+      const restResolved = await Promise.all(
+        existingOutputs.slice(1).map((o) => buildResultFromOutput(o)),
+      );
+      audioResult = {
+        ...primary,
+        ...(restResolved.length > 0 ? { extras: restResolved } : {}),
+      };
     } else if (stage === "generate") {
       // ── Stage 1: submit (or sync-generate) ────────────────────────────
       await db.generationJob.update({
@@ -500,23 +554,53 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     }
 
     // ── Stage 3: upload + deduct (when not already persisted) ───────────
-    if (!existingOutput) {
-      const audioKey = buildS3Key("audio", userIdStr, dbJobId, audioResult.ext ?? "mp3");
-      s3Key = await (
-        audioResult.buffer
-          ? uploadBuffer(audioKey, audioResult.buffer, `audio/${audioResult.ext ?? "mpeg"}`)
-          : audioResult.url
-            ? uploadFromUrl(audioKey, audioResult.url, `audio/${audioResult.ext ?? "mpeg"}`)
-            : Promise.resolve(null)
-      ).catch(() => null);
+    // Suno за один запрос может вернуть несколько треков — `audioResult.extras`
+    // содержит дополнительные дорожки. Объединяем primary + extras в единый
+    // список и сохраняем/шлём каждую как отдельный output.
+    const tracks: Array<Omit<AudioResult, "extras">> = [
+      {
+        buffer: audioResult.buffer,
+        url: audioResult.url,
+        ext: audioResult.ext,
+        contentType: audioResult.contentType,
+      },
+      ...(audioResult.extras ?? []),
+    ];
 
+    if (!existingOutput) {
+      // Параллельный upload всех треков. Index 0 → исходный dbJobId как key
+      // (back-compat с одно-output моделями); index >0 → суффикс _N.
+      const uploaded = await Promise.all(
+        tracks.map(async (track, i) => {
+          const ext = track.ext ?? "mp3";
+          const ct = `audio/${ext === "mp3" ? "mpeg" : ext}`;
+          const suffix = i === 0 ? dbJobId : `${dbJobId}_${i + 1}`;
+          const key = buildS3Key("audio", userIdStr, suffix, ext);
+          const uploadedKey = await (
+            track.buffer
+              ? uploadBuffer(key, track.buffer, ct)
+              : track.url
+                ? uploadFromUrl(key, track.url, ct)
+                : Promise.resolve(null)
+          ).catch(() => null);
+          return { track, s3Key: uploadedKey };
+        }),
+      );
+
+      // Index 0 пишем первым — это race-detector. Если уже есть запись с
+      // (jobId, 0), значит другой runner уже финализирует → бейлим без
+      // double-send / double-deduct.
       try {
         await db.generationJobOutput.create({
-          data: { jobId: dbJobId, index: 0, outputUrl: audioResult.url ?? null, s3Key },
+          data: {
+            jobId: dbJobId,
+            index: 0,
+            outputUrl: uploaded[0].track.url ?? null,
+            s3Key: uploaded[0].s3Key,
+          },
         });
       } catch (err) {
         if (isUniqueViolation(err)) {
-          // Stalled-redelivery race: another runner wrote outputs first. Bail.
           logger.info(
             { dbJobId },
             "Audio finalize: duplicate output detected — another runner is finalizing",
@@ -525,6 +609,25 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         }
         throw err;
       }
+
+      // Дополнительные треки. Уникальный конфликт на index>0 = тот же другой
+      // runner — пропускаем; прочие ошибки пробрасываем.
+      for (let i = 1; i < uploaded.length; i++) {
+        try {
+          await db.generationJobOutput.create({
+            data: {
+              jobId: dbJobId,
+              index: i,
+              outputUrl: uploaded[i].track.url ?? null,
+              s3Key: uploaded[i].s3Key,
+            },
+          });
+        } catch (err) {
+          if (isUniqueViolation(err)) continue;
+          throw err;
+        }
+      }
+
       // Atomic transition: only one runner wins. Loser bails to avoid
       // double-deduct + duplicate user-send (stalled-redelivery race).
       const updated = await db.generationJob.updateMany({
@@ -562,7 +665,14 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       subscriptionBalance: deductResult?.subscriptionTokenBalance,
       tokenBalance: deductResult?.tokenBalance,
     });
-    await sendAudio(telegramChatId, audioResult, audioCaption);
+
+    // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
+    // caption — отдельным сообщением сразу после.
+    try {
+      await sendAudioBatch(telegramChatId, tracks, audioCaption);
+    } catch (sendErr) {
+      logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
+    }
 
     logger.info({ dbJobId }, "Audio job completed");
   } catch (err) {

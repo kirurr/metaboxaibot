@@ -18,6 +18,13 @@ export interface AudioResult {
   ext: string;
   /** MIME type: 'audio/mpeg' | 'audio/wav' | 'audio/ogg' */
   contentType: string;
+  /**
+   * Optional: дополнительные треки, сгенерированные тем же запросом.
+   * Suno за один запрос возвращает 2 трека — первый кладём в основной
+   * `AudioResult`, остальные в `extras`. Worker сохраняет каждый как отдельный
+   * `GenerationJobOutput` и шлёт пользователю отдельным сообщением.
+   */
+  extras?: Array<Omit<AudioResult, "extras">>;
 }
 
 /**

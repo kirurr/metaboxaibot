@@ -33,7 +33,7 @@ function parseRatio(value: string): { w: number; h: number } | null {
   return { w: Number(m[1]), h: Number(m[2]) };
 }
 
-function AspectRatioPreview({ value }: { value: string }) {
+function AspectRatioPreview({ value, label }: { value: string; label: string }) {
   const MAX_W = 110;
   const MAX_H = 84;
   const isAuto = value === "auto";
@@ -61,7 +61,7 @@ function AspectRatioPreview({ value }: { value: string }) {
           <div className="ar-wheel__preview-rect" style={{ width: w, height: h }} />
         )}
       </div>
-      <div className="ar-wheel__preview-label">{isAuto ? "auto" : value}</div>
+      <div className="ar-wheel__preview-label">{isAuto ? "auto" : label}</div>
     </div>
   );
 }
@@ -166,7 +166,10 @@ export function AspectRatioWheel({ options, value, onChange }: AspectRatioWheelP
 
   return (
     <div className="ar-wheel">
-      <AspectRatioPreview value={options[activeIndex]?.value ?? value} />
+      <AspectRatioPreview
+        value={options[activeIndex]?.value ?? value}
+        label={options[activeIndex]?.label ?? value}
+      />
       <div
         ref={scrollRef}
         className="ar-wheel__scroller"

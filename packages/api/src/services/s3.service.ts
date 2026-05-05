@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "@metabox/shared";
@@ -104,6 +105,33 @@ export function sectionMeta(section: string): { ext: string; contentType: string
   if (section === "audio") return { ext: "mp3", contentType: "audio/mpeg" };
   if (section === "video") return { ext: "mp4", contentType: "video/mp4" };
   return { ext: "jpg", contentType: "image/jpeg" };
+}
+
+/**
+ * Лёгкая проверка существования объекта в bucket'е через HeadObject.
+ * Использовать при сабмите медиа-input'ов в провайдер: если файл удалили
+ * (юзер дропнул генерацию из галереи, lifecycle-policy bucket'а и т.п.) —
+ * провайдер пойдёт по presigned URL и получит 404, тратя время и кредиты.
+ * Возвращаем `false` на 404/NoSuchKey, `true` на 200, и `null` если S3 не
+ * сконфигурен или возникла иная ошибка (тогда вызывающий код предпочтёт
+ * не блокировать сабмит — fail-open semantics).
+ */
+export async function objectExists(key: string): Promise<boolean | null> {
+  const client = makeClient();
+  if (!client) {
+    return null;
+  }
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: config.s3.bucket!, Key: key }));
+    return true;
+  } catch (err) {
+    const status =
+      (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode ?? null;
+    const name = (err as { name?: string })?.name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return false;
+    logger.warn({ err, key, status }, "objectExists: HEAD failed unexpectedly");
+    return null;
+  }
 }
 
 /**
@@ -503,6 +531,72 @@ export async function deleteFile(key: string): Promise<boolean> {
   }
 }
 
+/**
+ * Fetched image bytes plus an optional public/presigned URL pointing at the
+ * same bytes in S3. `url` is null when the bucket is not configured or the
+ * upload failed — callers must be prepared to fall back (e.g. inline base64).
+ */
+export interface MaterializedImageInput {
+  /** Public or presigned URL when the upload succeeded; null when caller must fall back. */
+  url: string | null;
+  /** Raw bytes of the source image. Always present — buffered once. */
+  buffer: Buffer;
+  /** Resolved image content type (`image/jpeg` if the source response did not provide one). */
+  contentType: string;
+}
+
+/**
+ * Materialise an arbitrary image URL (typically a short-lived Telegram file
+ * URL) into a stable S3 URL suitable for AI providers that cannot fetch from
+ * `api.telegram.org` directly. Designed for one-shot inputs whose lifetime
+ * does not need to outlive the generation: callers are expected to clean up
+ * via an S3 lifecycle rule on the chosen `keyPrefix` (e.g. delete after 2
+ * days), not via explicit deletion.
+ *
+ * The source URL is fetched exactly once. The resulting buffer is returned
+ * to the caller alongside the URL so a base64 fallback path does not need
+ * to refetch when S3 is unavailable.
+ *
+ * Throws only on the initial fetch failure (no point falling back if we
+ * cannot read the source). S3 upload failures are logged and surfaced as
+ * `url = null` so the caller can pick its own fallback strategy.
+ */
+export async function materializeImageInput(
+  srcUrl: string,
+  opts: { keyPrefix: string; userId: string | bigint; jobId: string },
+): Promise<MaterializedImageInput> {
+  const res = await fetch(srcUrl);
+  if (!res.ok) {
+    throw new Error(`materializeImageInput: failed to fetch source: ${res.status}`);
+  }
+  const rawType = res.headers.get("content-type") ?? "";
+  const contentType = rawType.startsWith("image/") ? rawType.split(";")[0]!.trim() : "image/jpeg";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (!buffer.byteLength) {
+    throw new Error(`materializeImageInput: source returned empty body: ${srcUrl}`);
+  }
+
+  const ext =
+    contentType
+      .slice("image/".length)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "") || "jpg";
+  const normalizedPrefix = opts.keyPrefix.replace(/\/+$/, "");
+  const key = `${normalizedPrefix}/${opts.userId}/${opts.jobId}.${ext}`;
+
+  let url: string | null = null;
+  try {
+    const uploaded = await uploadBuffer(key, buffer, contentType);
+    if (uploaded) {
+      url = await getFileUrl(uploaded);
+    }
+  } catch (err) {
+    logger.warn({ err, key }, "materializeImageInput: S3 upload failed, falling back to inline");
+  }
+
+  return { url, buffer, contentType };
+}
+
 export const s3Service = {
   buildS3Key,
   buildThumbnailKey,
@@ -513,4 +607,5 @@ export const s3Service = {
   deleteFile,
   generateThumbnail,
   generateVideoThumbnail,
+  materializeImageInput,
 };

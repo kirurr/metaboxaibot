@@ -259,6 +259,8 @@ export default {
       "❌ The image is too small ({actualW}×{actualH} px). Minimum size is {minW}×{minH} px.",
     mediaSlotImageTooLarge:
       "❌ The image is too large ({actualW}×{actualH} px). Maximum size is {maxW}×{maxH} px.",
+    mediaSlotAspectRatioOutOfRange:
+      "❌ Image aspect ratio ({actualW}×{actualH}) is outside the allowed range {minRatio}–{maxRatio}.",
     mediaSlotReadMetadataFailed: "❌ Failed to read file metadata. Check the format and try again.",
     kieVideoDurationOutOfRange: "❌ Video duration must be between {min} and {max} seconds.",
     kieImageTooSmall:
@@ -305,6 +307,8 @@ export default {
       "❌ {modelName}: generation did not finish within 24 hours and was cancelled. Please try again.",
     modelTemporarilyUnavailable:
       "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you.",
+    chatInvalidImage:
+      "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",
     soulMissingAvatar:
       "⚠️ To generate with Higgsfield Soul, select your character in the Management menu.",
@@ -385,6 +389,8 @@ export default {
     runwayInvalidAsset:
       "❌ The image is not suitable for video generation. Please check the dimensions, format, and try a different photo.",
     runwayRejected: "❌ Runway rejected your request. Please check your settings and try again.",
+    runwayImageTooLarge:
+      "❌ The image is too large ({size} MB) for Runway. Please send a photo under {limit} MB or compress it.",
     // Replicate
     replicateOom:
       "❌ Input data is too large for this model. Please try reducing the image size or text length.",
@@ -586,7 +592,9 @@ export default {
     mediaPreviewAudioMulti: "🎵 These audios will be used as «{label}»",
     mediaPreviewFileSingle: "📎 File will be used as «{label}»",
     mediaPreviewFileMulti: "📎 {count} {noun} will be used as «{label}»",
-    mediaPreviewFileSupplement: "📎 + {count} more {noun}",
+    mediaPreviewMixedPhoto: "🖼 These images and {fileCount} {fileNoun} will be used as «{label}»",
+    mediaPreviewMixedVideo: "🎥 These videos and {fileCount} {fileNoun} will be used as «{label}»",
+    mediaPreviewMixedAudio: "🎵 These audios and {fileCount} {fileNoun} will be used as «{label}»",
     mediaFileNounOne: "file",
     mediaFileNounFew: "files",
     mediaFileNounMany: "files",

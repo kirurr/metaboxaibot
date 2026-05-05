@@ -129,6 +129,11 @@ export class KieSunoAdapter implements AudioAdapter {
       );
     }
 
+    // callBackUrl у kie обязателен.
+    const callBackUrl = config.api.publicUrl
+      ? `${config.api.publicUrl}/suno-callback`
+      : `https://google.com`;
+
     const body: Record<string, unknown> = customMode
       ? {
           customMode: true,
@@ -146,6 +151,7 @@ export class KieSunoAdapter implements AudioAdapter {
           model,
           prompt: input.prompt,
         };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
 
     const resp = await fetchWithLog(
       `${KIE_BASE}/api/v1/generate`,
@@ -204,7 +210,6 @@ export class KieSunoAdapter implements AudioAdapter {
     const body = (await resp.json()) as SunoPollResponse;
     const taskData = body.data;
     const status = taskData?.status;
-    const track = taskData?.response?.sunoData?.[0];
 
     // Terminal error statuses
     if (
@@ -221,12 +226,25 @@ export class KieSunoAdapter implements AudioAdapter {
     // intermediate (текст готов, аудио ещё нет), не terminal.
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
-    // Берём только финальный audioUrl. streamAudioUrl — HLS/chunked endpoint,
-    // его нельзя отдавать как mp3 в Telegram sendAudio (битый файл / зависший
-    // fetch / короткий TTL). На FIRST_SUCCESS audioUrl первого трека уже
-    // должен быть готов; если ещё нет — продолжаем поллить до SUCCESS.
-    if (!track?.audioUrl) return null;
+    // Берём только финальные audioUrl'ы — streamAudioUrl это HLS/chunked
+    // endpoint, его нельзя отдавать как mp3 в Telegram sendAudio. На
+    // FIRST_SUCCESS audioUrl первого трека уже готов; если ещё нет —
+    // продолжаем поллить до SUCCESS.
+    //
+    // Suno возвращает 2 трека за запрос. Все валидные кладём: первый в
+    // основной result, остальные в `extras` (worker сохранит каждый как
+    // отдельный output и пришлёт юзеру отдельным сообщением).
+    const audioUrls = (taskData?.response?.sunoData ?? [])
+      .map((tr) => tr.audioUrl)
+      .filter((u): u is string => !!u);
+    if (audioUrls.length === 0) return null;
 
-    return { url: track.audioUrl, ext: "mp3", contentType: "audio/mpeg" };
+    const [primaryUrl, ...restUrls] = audioUrls;
+    return {
+      url: primaryUrl,
+      ext: "mp3",
+      contentType: "audio/mpeg",
+      extras: restUrls.map((url) => ({ url, ext: "mp3", contentType: "audio/mpeg" })),
+    };
   }
 }

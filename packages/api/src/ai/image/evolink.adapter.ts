@@ -27,6 +27,36 @@ const MAX_REF_IMAGES: Record<string, number> = {
   "gpt-image-2": 16,
 };
 
+/**
+ * Извлекает реальный image-формат из URL'а провайдера. Provider-hosted URL'ы
+ * обычно заканчиваются на `.png`/`.jpg`/`.webp` — берём это, чтобы не сохранять
+ * PNG-файл как `.jpg` (юзер потом скачивает «оригинал» с неправильным расш.).
+ */
+const KNOWN_IMAGE_EXTS: ReadonlyArray<string> = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
+const EXT_TO_CONTENT_TYPE: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+};
+function parseImageMime(url: string): { ext: string; contentType: string } {
+  try {
+    const path = new URL(url).pathname;
+    const m = path.match(/\.([a-zA-Z0-9]+)$/);
+    if (m) {
+      const ext = m[1].toLowerCase();
+      if (KNOWN_IMAGE_EXTS.includes(ext)) {
+        return { ext: ext === "jpeg" ? "jpg" : ext, contentType: EXT_TO_CONTENT_TYPE[ext] };
+      }
+    }
+  } catch {
+    // not a parseable URL
+  }
+  return { ext: "png", contentType: "image/png" };
+}
+
 interface EvolinkSubmitResponse {
   id?: string;
   status?: string;
@@ -214,10 +244,14 @@ export class EvolinkImageAdapter implements ImageAdapter {
     const urls = data.results;
     if (!urls?.length) throw new Error("Evolink: no image URLs in completed task");
 
-    return urls.map((url, i) => ({
-      url,
-      filename: `${this.modelId}-${i}.png`,
-    }));
+    return urls.map((url, i) => {
+      const { ext, contentType } = parseImageMime(url);
+      return {
+        url,
+        filename: `${this.modelId}-${i}.${ext}`,
+        contentType,
+      };
+    });
   }
 
   /**

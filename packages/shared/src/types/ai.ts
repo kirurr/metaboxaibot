@@ -117,6 +117,16 @@ export interface MediaInputConstraints {
   minHeight?: number;
   /** Maximum image/video height in pixels (inclusive). */
   maxHeight?: number;
+  /**
+   * Minimum aspect ratio (width / height). E.g. `0.4` = крайний портрет 1:2.5.
+   * Изображения уже́ этого лимита отбраковываются.
+   */
+  minAspectRatio?: number;
+  /**
+   * Maximum aspect ratio (width / height). E.g. `2.5` = крайний landscape 2.5:1.
+   * Изображения шире этого лимита отбраковываются.
+   */
+  maxAspectRatio?: number;
 }
 
 export interface MediaInputSlot {

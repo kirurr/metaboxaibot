@@ -111,7 +111,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     provider: "cartesia",
     costUsdPerRequest: 0,
     // Cartesia sonic-3: $0.065/1K chars (примерно). Округлено для калькуляции.
-    costUsdPerKChar: 0.065,
+    costUsdPerKChar: 0.05,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: false,

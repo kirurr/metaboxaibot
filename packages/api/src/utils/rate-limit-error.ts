@@ -157,6 +157,35 @@ export function isFiveXxError(err: unknown): boolean {
   return typeof status === "number" && status >= 500 && status < 600;
 }
 
+/**
+ * Распознаёт «битое/неподдерживаемое изображение в инпуте» — провайдер
+ * 400'ит до начала генерации с конкретным текстом. Это perm-error: ретраить
+ * и переключать fallback-провайдера бессмысленно, нужно сразу показать юзеру
+ * понятное сообщение.
+ *
+ * Покрытие:
+ *  - OpenAI (chat completions / responses): «does not represent a valid image»
+ *  - OpenAI: «Invalid image» / «Could not process image»
+ *  - Anthropic: «could not process the image» / «Invalid image»
+ *  - Generic: «unsupported image format» / «supported image formats»
+ */
+const INVALID_IMAGE_PATTERNS: RegExp[] = [
+  /does not represent a valid image/i,
+  /supported image formats/i,
+  /could not process (the )?image/i,
+  /\binvalid image\b/i,
+  /unsupported image (format|type)/i,
+];
+
+export function isInvalidImageError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as { status?: number; statusCode?: number; message?: unknown };
+  const status = e.status ?? e.statusCode;
+  if (typeof status === "number" && status !== 400) return false;
+  const msg = typeof e.message === "string" ? e.message : String(err);
+  return INVALID_IMAGE_PATTERNS.some((p) => p.test(msg));
+}
+
 /** Node net + undici error codes для обрывов соединения / DNS / таймаутов. */
 const TRANSIENT_NETWORK_CODES = new Set<string>([
   "UND_ERR_SOCKET",

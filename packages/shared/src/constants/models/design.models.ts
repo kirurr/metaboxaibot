@@ -876,8 +876,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
       {
         key: "size",
         label: "Размер",
-        description:
-          "1024×1024 — квадрат, 1536×1024 — горизонталь, 1024×1536 — вертикаль. Влияет на цену.",
+        description: "1024×1024 (1:1), 1536×1024 (16:9), 1024×1536 (9:16). Влияет на цену.",
         type: "select",
         options: [
           { value: "1024x1024", label: "1024 × 1024" },

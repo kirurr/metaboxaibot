@@ -1,4 +1,6 @@
-import type { AudioAdapter } from "./base.adapter.js";
+import type { AudioAdapter, AudioResult, AudioInput } from "./base.adapter.js";
+
+export type { AudioAdapter, AudioResult, AudioInput };
 import { OpenAiTtsAdapter } from "./openai-tts.adapter.js";
 import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
 import { CartesiaAdapter } from "./cartesia.adapter.js";
