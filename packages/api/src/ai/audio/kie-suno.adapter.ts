@@ -129,6 +129,11 @@ export class KieSunoAdapter implements AudioAdapter {
       );
     }
 
+    // callBackUrl у kie обязателен.
+    const callBackUrl = config.api.publicUrl
+      ? `${config.api.publicUrl}/suno-callback`
+      : `https://google.com`;
+
     const body: Record<string, unknown> = customMode
       ? {
           customMode: true,
@@ -146,6 +151,7 @@ export class KieSunoAdapter implements AudioAdapter {
           model,
           prompt: input.prompt,
         };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
 
     const resp = await fetchWithLog(
       `${KIE_BASE}/api/v1/generate`,
