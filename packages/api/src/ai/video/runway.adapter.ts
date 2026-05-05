@@ -52,8 +52,6 @@ export class RunwayAdapter implements VideoAdapter {
   }
 
   validateRequest(input: VideoInput): VideoValidationError | null {
-    const imgUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
-    if (!imgUrl) return { key: "runwayRequiresImage" };
     const limit = 1000;
     if (input.prompt && input.prompt.length > limit) {
       return { key: "promptTooLong", params: { limit } };
@@ -63,17 +61,15 @@ export class RunwayAdapter implements VideoAdapter {
 
   async submit(input: VideoInput): Promise<string> {
     const imageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
-    if (!imageUrl) throw new Error("Runway: imageUrl missing (validation bypassed)");
-
-    const { promptImage, sourceSizeBytes } = await this.resolvePromptImage(imageUrl, input.userId);
-
     const ms = input.modelSettings ?? {};
+
+    // Общая часть body — одинакова для t2v и i2v. promptImage добавляется
+    // только в i2v-ветке.
     const body: Record<string, unknown> = {
       promptText: input.prompt,
       model: "gen4.5",
       ratio: input.aspectRatio ?? "1280:720",
       duration: input.duration ?? 5,
-      promptImage,
     };
     if (ms.seed != null) body.seed = ms.seed;
     if (
@@ -90,8 +86,20 @@ export class RunwayAdapter implements VideoAdapter {
       };
     }
 
+    // Без референса → text_to_video; с референсом → image_to_video.
+    let endpoint: string;
+    let sourceSizeBytes = 0;
+    if (imageUrl) {
+      const resolved = await this.resolvePromptImage(imageUrl, input.userId);
+      body.promptImage = resolved.promptImage;
+      sourceSizeBytes = resolved.sourceSizeBytes;
+      endpoint = `${RUNWAY_API}/image_to_video`;
+    } else {
+      endpoint = `${RUNWAY_API}/text_to_video`;
+    }
+
     const res = await fetchWithLog(
-      `${RUNWAY_API}/image_to_video`,
+      endpoint,
       {
         method: "POST",
         headers: this.headers(),
@@ -104,10 +112,9 @@ export class RunwayAdapter implements VideoAdapter {
       const text = await res.text();
       // 413 escaping past our own size guard means the inline data URL is
       // the culprit — surface as a precondition error so the user can retry
-      // with a smaller file instead of burning BullMQ retries. We always
-      // know `sourceSizeBytes` here because the only path that produces a
-      // body big enough to 413 is the base64 fallback.
-      if (res.status === 413) {
+      // with a smaller file instead of burning BullMQ retries. Только для
+      // i2v-пути: t2v body такого размера никогда не достигнет.
+      if (res.status === 413 && sourceSizeBytes > 0) {
         const sizeMb = (sourceSizeBytes / (1024 * 1024)).toFixed(1);
         const limitMb = Math.floor(RUNWAY_BASE64_LIMIT_BYTES / (1024 * 1024));
         throw new UserFacingError(`Runway rejected promptImage: 413 Request Entity Too Large`, {

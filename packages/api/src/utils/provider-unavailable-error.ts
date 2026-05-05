@@ -4,6 +4,8 @@
  * response message. Примеры:
  *  - KIE 422 "Service is currently unavailable due to high demand. Please try
  *    again later. (E003)"
+ *  - KIE 422 "Models task execute failed." — terminal сбой выполнения задачи
+ *    на конкретной модели (часто транзиентный backend-issue).
  *  - Evolink poll "unknown_error: Task processing failed. Please try again
  *    later or contact technical support."
  *
@@ -22,16 +24,16 @@
  *  - Если fallback'а нет, fall-through сработает на rate-limit defer цикл
  *    (5×60s) → существующее поведение сохранено для legacy моделей.
  *
- * "task processing failed" в RATE_LIMIT_PATTERNS НЕ дублируется — это не
- * rate-limit, и без fallback'а defer-loop бесполезен (провайдер уже упал на
- * этой задаче, retry даст тот же результат). Без fallback'а ошибка сразу
- * пойдёт user-facing failure path.
+ * "task processing failed" / "task execute failed" в RATE_LIMIT_PATTERNS
+ * НЕ дублируется — это не rate-limit, и без fallback'а defer-loop бесполезен
+ * (провайдер уже упал на этой задаче, retry даст тот же результат). Без
+ * fallback'а ошибка сразу пойдёт user-facing failure path.
  */
 export function isProviderTemporaryUnavailable(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as { message?: string };
   const msg = typeof e.message === "string" ? e.message : "";
-  return /high demand|service is (currently )?unavailable|service unavailable|task processing failed/i.test(
+  return /high demand|service is (currently )?unavailable|service unavailable|task (processing|execute) failed/i.test(
     msg,
   );
 }

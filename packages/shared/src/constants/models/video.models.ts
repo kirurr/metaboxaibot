@@ -1378,7 +1378,9 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
-    mediaInputs: [{ ...MI_FIRST_FRAME, required: true }],
+    // first_frame опциональный: с ним → POST /v1/image_to_video; без него →
+    // POST /v1/text_to_video (адаптер выбирает endpoint автоматически).
+    mediaInputs: [MI_FIRST_FRAME],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
