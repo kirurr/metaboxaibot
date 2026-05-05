@@ -8,6 +8,8 @@
  *    на конкретной модели (часто транзиентный backend-issue).
  *  - Evolink poll "unknown_error: Task processing failed. Please try again
  *    later or contact technical support."
+ *  - Evolink 503 "service_error Service busy. Allocating resources, please
+ *    retry later." — узел провайдера перегружен.
  *
  * Семантически отличается от rate-limit:
  *  - rate-limit = "ты слишком часто" → defer на cooldown'е, retry с тем же
@@ -17,23 +19,24 @@
  *    Рациональная реакция — переключиться на fallback провайдера (другую
  *    модель), если зарегистрирован.
  *
- * "high demand" / "service unavailable" паттерны ТАКЖЕ присутствуют в
- * `RATE_LIMIT_PATTERNS` — это намеренно:
+ * "high demand" / "service unavailable" / "service busy" паттерны ТАКЖЕ
+ * присутствуют (или должны присутствовать) в `RATE_LIMIT_PATTERNS` — это
+ * намеренно:
  *  - Если у модели есть fallback-кандидат, processor поймает через
  *    `isProviderTemporaryUnavailable` ПЕРВЫМ и переключится на fallback.
  *  - Если fallback'а нет, fall-through сработает на rate-limit defer цикл
  *    (5×60s) → существующее поведение сохранено для legacy моделей.
  *
- * "task processing failed" / "task execute failed" в RATE_LIMIT_PATTERNS
- * НЕ дублируется — это не rate-limit, и без fallback'а defer-loop бесполезен
- * (провайдер уже упал на этой задаче, retry даст тот же результат). Без
- * fallback'а ошибка сразу пойдёт user-facing failure path.
+ * "task processing failed" / "task execute failed" / "allocating resources"
+ * в RATE_LIMIT_PATTERNS НЕ дублируется — это не rate-limit, и без fallback'а
+ * defer-loop бесполезен (провайдер уже упал на этой задаче, retry даст тот
+ * же результат). Без fallback'а ошибка сразу пойдёт user-facing failure path.
  */
 export function isProviderTemporaryUnavailable(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as { message?: string };
   const msg = typeof e.message === "string" ? e.message : "";
-  return /high demand|service is (currently )?unavailable|service unavailable|task (processing|execute) failed/i.test(
+  return /high demand|service is (currently )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed/i.test(
     msg,
   );
 }
