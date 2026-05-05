@@ -183,12 +183,21 @@ export class ApipassSunoAdapter implements AudioAdapter {
     // Not ready yet
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
-    const track = taskData?.response?.sunoData?.[0];
-    if (!track) return null;
+    // Suno возвращает 2 трека за один запрос. Собираем все валидные URL'ы;
+    // первый кладём в основной AudioResult, остальные — в `extras` (worker
+    // сохранит каждый как отдельный output и пришлёт юзеру отдельным
+    // сообщением).
+    const tracks = (taskData?.response?.sunoData ?? [])
+      .map((tr) => tr.streamAudioUrl ?? tr.audioUrl)
+      .filter((u): u is string => !!u);
+    if (tracks.length === 0) return null;
 
-    const url = track.streamAudioUrl ?? track.audioUrl;
-    if (!url) return null;
-
-    return { url, ext: "mp3", contentType: "audio/mpeg" };
+    const [primaryUrl, ...restUrls] = tracks;
+    return {
+      url: primaryUrl,
+      ext: "mp3",
+      contentType: "audio/mpeg",
+      extras: restUrls.map((url) => ({ url, ext: "mp3", contentType: "audio/mpeg" })),
+    };
   }
 }
