@@ -47,10 +47,30 @@ export class GeminiAdapter extends BaseLLMAdapter {
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
     input = this.truncateInput(input);
-    const history: Content[] = (input.history ?? []).map((m: MessageRecord) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    // History: re-attach images (если в attachments[] есть image/* с
+    // presigned url'ом) как inlineData parts. Documents в Gemini не
+    // прокидываем на history — текстовый контент уже инлайнится в content
+    // через documentTextExtractFallback на стороне chat.service.
+    const history: Content[] = await Promise.all(
+      (input.history ?? []).map(async (m: MessageRecord) => {
+        const histImages = (m.attachments ?? []).filter(
+          (a) => a.mimeType.startsWith("image/") && !!a.url,
+        );
+        const imageParts: Part[] = await Promise.all(
+          histImages.map(async (img) => ({
+            inlineData: {
+              mimeType: img.mimeType,
+              data: await fetchImageAsBase64(img.url!),
+            },
+          })),
+        );
+        const parts: Part[] = [...imageParts, ...(m.content ? [{ text: m.content }] : [])];
+        return {
+          role: m.role === "assistant" ? "model" : "user",
+          parts: parts.length > 0 ? parts : [{ text: m.content }],
+        };
+      }),
+    );
 
     // Gemini 3 Pro семейство требует thinking mode (budget > 0). Если юзер
     // сохранил `thinking_budget: 0` (legacy default из старого слайдера) или

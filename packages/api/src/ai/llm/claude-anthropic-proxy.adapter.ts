@@ -219,11 +219,26 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
   private buildMessages(input: LLMInput): ProxyMessage[] {
     // Документы (PDF) сюда не приходят — chat.service инлайнит их текст
     // в input.prompt через documentTextExtractFallback. Образуем только
-    // image-блоки (URL).
-    const history: ProxyMessage[] = (input.history ?? []).map((m: MessageRecord) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // image-блоки. Изображения из истории (image/* attachments с presigned
+    // url'ами) тоже re-attach'им как image-блоки на каждый turn.
+    const history: ProxyMessage[] = (input.history ?? []).map((m: MessageRecord) => {
+      const histImages = (m.attachments ?? []).filter(
+        (a) => a.mimeType.startsWith("image/") && !!a.url,
+      );
+      if (histImages.length === 0) return { role: m.role, content: m.content };
+      return {
+        role: m.role,
+        content: [
+          ...histImages.map(
+            (img): ProxyContentBlock => ({
+              type: "image",
+              source: { type: "url", url: img.url! },
+            }),
+          ),
+          ...(m.content ? [{ type: "text" as const, text: m.content }] : []),
+        ],
+      };
+    });
 
     const urls = input.imageUrls?.length ? input.imageUrls : input.imageUrl ? [input.imageUrl] : [];
 
