@@ -86,16 +86,13 @@ function buildRefineFamilyOrModelKeyboard(
   return kb;
 }
 
-/** Подпись для кнопки члена семьи: версия+вариант, либо одно из, либо имя модели. */
-function familyMemberLabel(
-  member: { modelId: string; versionLabel?: string; variantLabel?: string },
-  lang: string,
-): string {
-  if (member.versionLabel && member.variantLabel) {
-    return `${member.versionLabel} ${member.variantLabel}`;
-  }
-  if (member.variantLabel) return member.variantLabel;
-  if (member.versionLabel) return member.versionLabel;
+/**
+ * Подпись для кнопки члена семьи — берём `model.name` (с учётом локали через
+ * `resolveModelDisplay`). В name уже зашита эмодзи + версия + вариант
+ * («🍌 Nano Banana 2», «🎥 Kling 3.0 Pro»), это понятнее голых меток
+ * versionLabel/variantLabel вроде «v3 Standard» без бренда.
+ */
+function familyMemberLabel(member: { modelId: string }, lang: string): string {
   const model = AI_MODELS[member.modelId];
   return model ? resolveModelDisplay(member.modelId, lang, model).name : member.modelId;
 }
