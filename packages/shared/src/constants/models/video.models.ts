@@ -1339,7 +1339,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
       {
         key: "aspect_ratio",
         label: "Соотношение сторон",
-        description: "Portrait — 720×1280 (9:16), Landscape — 1280×720 (16:9).",
+        description: "Portrait — вертикальное видео 720×1280, Landscape — горизонтальное 1280×720.",
         type: "select",
         options: [
           { value: "portrait", label: "Portrait (9:16)" },
