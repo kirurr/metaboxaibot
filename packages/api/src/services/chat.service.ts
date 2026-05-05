@@ -190,7 +190,6 @@ export const chatService = {
     const allDocs = documentAttachments ?? [];
     const textClassDocs = allDocs.filter((d) => isTextClassMime(d.mimeType));
     const nativeClassDocs = allDocs.filter((d) => d.mimeType === "application/pdf");
-    const hasDocs = allDocs.length > 0;
 
     // Gate: native-class PDFs on a model with neither flag — reject before any DB writes.
     // Text-class documents are always accepted (they work on any model via inline extract).
@@ -355,16 +354,38 @@ export const chatService = {
     }
 
     // Save user message — keep the ID so we can mark it failed on error.
-    // Store BOTH mediaUrl (legacy image) and attachments (documents) as
-    // available. We persist the ORIGINAL user content (not effectivePrompt)
-    // so UI still shows what the user typed; the extracted-text prefix exists
-    // only in-flight for text-fallback models.
+    // Store BOTH mediaUrl (legacy single-image для UI/галереи) и attachments[]
+    // (документы + ВСЕ изображения с s3Key). Прежде сохраняли только первое
+    // изображение в mediaUrl — на следующих turn'ах модель не видела остальные.
+    // Теперь все S3-keyed изображения пишем в attachments как entries с
+    // `mimeType: image/...`; augmentHistoryMessage пресайнит URL'ы и
+    // адаптеры эмиттят image-blocks для history-сообщений.
+    //
+    // We persist the ORIGINAL user content (not effectivePrompt) so UI still
+    // shows what the user typed; the extracted-text prefix exists only
+    // in-flight for text-fallback models.
     const firstS3Key = imageS3Keys?.[0];
     const firstImageUrl = imageUrl ?? imageUrls?.[0];
     const savedMediaUrl = firstS3Key ?? firstImageUrl;
+    const imageAttachments: StoredAttachment[] = (imageS3Keys ?? []).map((s3Key, i) => {
+      const ext = s3Key.split(".").pop()?.toLowerCase();
+      const mimeType =
+        ext === "png"
+          ? "image/png"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "gif"
+              ? "image/gif"
+              : "image/jpeg";
+      return { s3Key, mimeType, name: `image_${i + 1}` };
+    });
+    const combinedAttachments: StoredAttachment[] = [
+      ...(attachmentsToSave ?? []),
+      ...imageAttachments,
+    ];
     const userMessage = await dialogService.saveMessage(dialogId, "user", content, {
       ...(savedMediaUrl ? { mediaUrl: savedMediaUrl, mediaType: "image" } : {}),
-      ...(hasDocs && attachmentsToSave ? { attachments: attachmentsToSave } : {}),
+      ...(combinedAttachments.length > 0 ? { attachments: combinedAttachments } : {}),
     });
     logger.debug(
       { dialogId, docs: documentAttachments?.length ?? 0, modelId: dialog.modelId },
@@ -707,6 +728,9 @@ interface HistoryMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Legacy single-image storage (до миграции на attachments[]). Bridge'им. */
+  mediaUrl?: string | null;
+  mediaType?: string | null;
   attachments?: StoredAttachment[];
 }
 
@@ -722,10 +746,30 @@ async function augmentHistoryMessage(
   openaiKeyId?: string | null,
 ): Promise<MessageRecord> {
   const atts = m.attachments ?? [];
-  if (atts.length === 0) return { id: m.id, role: m.role, content: m.content };
-
   const textDocs = atts.filter((a) => isTextClassMime(a.mimeType));
   const nativeDocs = atts.filter((a) => a.mimeType === "application/pdf");
+  const imageAtts = atts.filter((a) => a.mimeType.startsWith("image/"));
+
+  // Backward-compat: старые сообщения хранили одно изображение в mediaUrl.
+  // Если в attachments[] нет image-entry, но mediaUrl содержит s3Key — добавим
+  // его как одно image-attachment.
+  const hasLegacyImage =
+    imageAtts.length === 0 &&
+    !!m.mediaUrl &&
+    m.mediaType === "image" &&
+    !m.mediaUrl.startsWith("http");
+  const legacyImage: StoredAttachment | null = hasLegacyImage
+    ? {
+        s3Key: m.mediaUrl!,
+        mimeType: extToImageMime(m.mediaUrl!),
+        name: "image",
+      }
+    : null;
+  const allImages = legacyImage ? [legacyImage, ...imageAtts] : imageAtts;
+
+  if (atts.length === 0 && !legacyImage) {
+    return { id: m.id, role: m.role, content: m.content };
+  }
 
   const blocks: string[] = [];
   for (const d of textDocs) {
@@ -753,12 +797,29 @@ async function augmentHistoryMessage(
     );
   }
 
+  // Presign image attachments — все vision-адаптеры читают url с history-турн'а.
+  const presignedImages: MessageAttachment[] = [];
+  for (const a of allImages) {
+    const url = await getFileUrl(a.s3Key).catch(() => null);
+    if (url) presignedImages.push({ ...a, url });
+  }
+
+  const finalAttachments: MessageAttachment[] = [...(presignedNative ?? []), ...presignedImages];
+
   return {
     id: m.id,
     role: m.role,
     content: augmentedContent,
-    ...(presignedNative?.length ? { attachments: presignedNative } : {}),
+    ...(finalAttachments.length > 0 ? { attachments: finalAttachments } : {}),
   };
+}
+
+function extToImageMime(s3KeyOrName: string): string {
+  const ext = s3KeyOrName.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  return "image/jpeg";
 }
 
 /**

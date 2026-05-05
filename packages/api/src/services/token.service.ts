@@ -72,6 +72,46 @@ export async function deductTokens(
 }
 
 /**
+ * Возвращает токены пользователю — обратная операция к `deductTokens`.
+ * Используется когда генерация была списана, но результат не доставлен
+ * (например, файл провайдера 404'ит на финальной отправке в Telegram —
+ * ничего ценного юзер не получил).
+ *
+ * Стратегия зачисления зеркальна списанию: subscriptionTokens возвращаем
+ * в первую очередь (decrement шёл сначала с них), regular — остаток.
+ * Распределение определяется по `subscriptionTokenBalance` в момент
+ * списания, но мы не храним splits — поэтому пишем всё в `tokenBalance`
+ * как «безопасный» минимум: пусть лучше у юзера окажется чуть больше
+ * regular-токенов, чем мы запутаемся в попытках восстановить subscription
+ * lifetime. Транзакция помечается `type=credit` / `reason=ai_refund`.
+ */
+export async function refundTokens(
+  userId: bigint,
+  amount: number,
+  modelId: string,
+  reason: string = "ai_refund",
+  dialogId?: string,
+): Promise<void> {
+  if (amount <= 0) return;
+  await db.$transaction([
+    db.user.update({
+      where: { id: userId },
+      data: { tokenBalance: { increment: amount } },
+    }),
+    db.tokenTransaction.create({
+      data: {
+        userId,
+        amount,
+        type: "credit",
+        reason,
+        modelId,
+        dialogId: dialogId ?? null,
+      },
+    }),
+  ]);
+}
+
+/**
  * Throw NO_SUBSCRIPTION if the user has no active subscription,
  * or INSUFFICIENT_TOKENS if combined balance is below required amount.
  */

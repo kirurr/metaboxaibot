@@ -96,14 +96,26 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   }
 
   private buildMessages(input: LLMInput): Anthropic.MessageParam[] {
-    // Historical messages may carry attachments (PDFs) that need to be
-    // re-sent as `document` blocks on every request. User explicitly chose
-    // "resend every time" over "only current message" for quality.
+    // Historical messages may carry attachments (PDFs / images) that need to
+    // be re-sent on every request. Изображения шлём как image-блоки, PDF —
+    // как document-блоки. User explicitly chose "resend every time" over
+    // "only current message" for quality.
     const history: Anthropic.MessageParam[] = (input.history ?? []).map((m: MessageRecord) => {
-      const docs = (m.attachments ?? []).filter((a) => !!a.url);
-      if (docs.length === 0) return { role: m.role, content: m.content };
+      const atts = (m.attachments ?? []).filter((a) => !!a.url);
+      const images = atts.filter((a) => a.mimeType.startsWith("image/"));
+      const docs = atts.filter((a) => !a.mimeType.startsWith("image/"));
+      if (images.length === 0 && docs.length === 0) {
+        return { role: m.role, content: m.content };
+      }
 
       const blocks: Anthropic.ContentBlockParam[] = [
+        ...images.map(
+          (img) =>
+            ({
+              type: "image" as const,
+              source: { type: "url" as const, url: img.url! },
+            }) as Anthropic.ContentBlockParam,
+        ),
         ...docs.map(
           (d) =>
             ({

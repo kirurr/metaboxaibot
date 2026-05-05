@@ -1378,14 +1378,16 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
-    mediaInputs: [{ ...MI_FIRST_FRAME, required: true }],
+    // first_frame опциональный: с ним → POST /v1/image_to_video; без него →
+    // POST /v1/text_to_video (адаптер выбирает endpoint автоматически).
+    mediaInputs: [MI_FIRST_FRAME],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"],
-    supportedDurations: [5, 8, 10],
+    durationRange: { min: 2, max: 10 },
     settings: [
       mkAspectRatio(["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"], {
         "1280:720": "16:9",
@@ -1395,7 +1397,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
         "960:960": "1:1",
         "1584:672": "21:9",
       }),
-      mkDurationSelect([5, 8, 10]),
+      mkDurationSlider(2, 10),
       {
         key: "seed",
         label: "Seed",
@@ -1407,42 +1409,42 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
         default: null,
         advanced: true,
       },
-      {
-        key: "camera_horizontal",
-        label: "Движение камеры: лево/право",
-        description:
-          "Панорамирование камеры по горизонтали: отрицательные значения — влево, положительные — вправо.",
-        type: "slider",
-        min: -10,
-        max: 10,
-        step: 0.5,
-        default: 0,
-        advanced: true,
-      },
-      {
-        key: "camera_vertical",
-        label: "Движение камеры: вверх/вниз",
-        description:
-          "Панорамирование камеры по вертикали: отрицательные значения — вниз, положительные — вверх.",
-        type: "slider",
-        min: -10,
-        max: 10,
-        step: 0.5,
-        default: 0,
-        advanced: true,
-      },
-      {
-        key: "camera_zoom",
-        label: "Зум камеры",
-        description:
-          "Приближение или удаление камеры: положительные значения — наезд, отрицательные — отъезд.",
-        type: "slider",
-        min: -10,
-        max: 10,
-        step: 0.5,
-        default: 0,
-        advanced: true,
-      },
+      // {
+      //   key: "camera_horizontal",
+      //   label: "Движение камеры: лево/право",
+      //   description:
+      //     "Панорамирование камеры по горизонтали: отрицательные значения — влево, положительные — вправо.",
+      //   type: "slider",
+      //   min: -10,
+      //   max: 10,
+      //   step: 0.5,
+      //   default: 0,
+      //   advanced: true,
+      // },
+      // {
+      //   key: "camera_vertical",
+      //   label: "Движение камеры: вверх/вниз",
+      //   description:
+      //     "Панорамирование камеры по вертикали: отрицательные значения — вниз, положительные — вверх.",
+      //   type: "slider",
+      //   min: -10,
+      //   max: 10,
+      //   step: 0.5,
+      //   default: 0,
+      //   advanced: true,
+      // },
+      // {
+      //   key: "camera_zoom",
+      //   label: "Зум камеры",
+      //   description:
+      //     "Приближение или удаление камеры: положительные значения — наезд, отрицательные — отъезд.",
+      //   type: "slider",
+      //   min: -10,
+      //   max: 10,
+      //   step: 0.5,
+      //   default: 0,
+      //   advanced: true,
+      // },
     ],
   },
   "luma-ray2": {

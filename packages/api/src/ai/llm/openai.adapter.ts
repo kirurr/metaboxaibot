@@ -161,10 +161,24 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     if (hasHistory) {
       const items: OpenAI.Responses.ResponseInput = [];
       for (const m of input.history!) {
-        const histDocs = (m.attachments ?? []).filter((a) => !!a.openaiFileId || !!a.url);
+        const histAtts = m.attachments ?? [];
+        // Изображения шлём через input_image (image_url из presigned S3),
+        // прочие документы — через input_file.
+        const histImages = histAtts.filter((a) => a.mimeType?.startsWith("image/") && !!a.url);
+        const histDocs = histAtts.filter(
+          (a) => !a.mimeType?.startsWith("image/") && (!!a.openaiFileId || !!a.url),
+        );
         if (m.role === "user") {
           const content: OpenAI.Responses.ResponseInputContent[] = [
             ...(m.content ? [{ type: "input_text" as const, text: m.content }] : []),
+            ...histImages.map(
+              (img) =>
+                ({
+                  type: "input_image" as const,
+                  image_url: img.url!,
+                  detail: "auto" as const,
+                }) as OpenAI.Responses.ResponseInputContent,
+            ),
             ...histDocs.map(
               (d) =>
                 ({

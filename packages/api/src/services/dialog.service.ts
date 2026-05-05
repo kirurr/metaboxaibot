@@ -207,6 +207,8 @@ export const dialogService = {
       id: string;
       role: "user" | "assistant";
       content: string;
+      mediaUrl: string | null;
+      mediaType: string | null;
       attachments?: StoredAttachment[];
     }>
   > {
@@ -214,12 +216,24 @@ export const dialogService = {
       where: { dialogId, failed: false },
       orderBy: { createdAt: "desc" },
       take: limit,
-      select: { id: true, role: true, content: true, attachments: true },
+      // mediaUrl/mediaType — legacy backward-compat поля для одиночного
+      // изображения. Новые сообщения пишут изображения в attachments[],
+      // augmentHistoryMessage'у нужны оба для bridge'а старых записей.
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        mediaUrl: true,
+        mediaType: true,
+        attachments: true,
+      },
     });
     return messages.reverse().map((m) => ({
       id: m.id,
       role: m.role as "user" | "assistant",
       content: m.content,
+      mediaUrl: m.mediaUrl,
+      mediaType: m.mediaType,
       attachments: Array.isArray(m.attachments)
         ? (m.attachments as unknown as StoredAttachment[])
         : undefined,

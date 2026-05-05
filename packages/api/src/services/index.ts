@@ -30,6 +30,7 @@ export { paymentService, expireSubscription, grantMetaboxSubscription } from "./
 export type { SaleUserInfo } from "./payment.service.js";
 export {
   deductTokens,
+  refundTokens,
   checkBalance,
   checkSubscription,
   checkPaidSubscription,

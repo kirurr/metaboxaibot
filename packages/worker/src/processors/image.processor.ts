@@ -15,6 +15,7 @@ import { createImageAdapter } from "@metabox/api/ai/image";
 import type { ImageResult } from "@metabox/api/ai/image";
 import {
   deductTokens,
+  refundTokens,
   calculateCost,
   usdToTokens,
   translatePromptIfNeeded,
@@ -31,6 +32,7 @@ import {
 } from "@metabox/api/services/s3";
 import { buildDownloadButton } from "@metabox/api/utils/download-token";
 import { isUniqueViolation } from "../utils/prisma-errors.js";
+import { withRetry } from "../utils/with-retry.js";
 import { InputFile } from "grammy";
 import { logger } from "../logger.js";
 import {
@@ -186,8 +188,15 @@ async function uploadImageToS3(
 
   let imageBuffer: Buffer | null = null;
   try {
-    const res = await fetch(url);
-    if (res.ok) imageBuffer = Buffer.from(await res.arrayBuffer());
+    // 3 попытки — провайдер-CDN'ы (fal/replicate/kie/evolink) иногда блипуют
+    // 404/5xx, разовые сетевые проблемы покрываются inner-retry без burning'а
+    // BullMQ attempt'а. На all-fail оставляем silent fallthrough — Stage 3
+    // (resolveTelegramSource) попробует ещё раз для отправки.
+    imageBuffer = await withRetry("image.fetchBuffer", 3, async () => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    });
   } catch (e) {
     logger.error({ reason: e }, "Could not fetch image buffer");
   }
@@ -1186,7 +1195,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         });
       }
 
-      await telegram.sendMediaGroup(telegramChatId, mediaGroup);
+      // 2 попытки — multipart upload в Telegram изредка падает на network
+      // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
+      await withRetry("image.sendMediaGroup", 2, () =>
+        telegram.sendMediaGroup(telegramChatId, mediaGroup),
+      );
 
       // Send a single message with refine + (orig|download) buttons for all outputs.
       // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
@@ -1313,17 +1326,23 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
     const singleCaption = buildCaption();
     if (isSvg) {
-      await telegram.sendDocument(telegramChatId, tgImageSource, {
-        caption: singleCaption,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup,
-      });
+      // 2 попытки — multipart upload в Telegram'е иногда падает на network
+      // blip'ах. Single retry — безопасный второй шанс.
+      await withRetry("image.sendDocument", 2, () =>
+        telegram.sendDocument(telegramChatId, tgImageSource, {
+          caption: singleCaption,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        }),
+      );
     } else {
-      await telegram.sendPhoto(telegramChatId, tgImageSource, {
-        caption: singleCaption,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup,
-      });
+      await withRetry("image.sendPhoto", 2, () =>
+        telegram.sendPhoto(telegramChatId, tgImageSource, {
+          caption: singleCaption,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        }),
+      );
     }
 
     // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
@@ -1589,10 +1608,28 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     if (isLastAttempt) {
+      // Refund: токены списываются на финализации ДО отправки результата юзеру.
+      // Если отправка/буфер-фетч упали (провайдер 404'ит outputUrl, S3 файл
+      // потерян, sendPhoto Telegram'а отбит) — у юзера списано, а изображения
+      // он не увидел. Возвращаем `tokensSpent`. Если deduct ещё не случался
+      // (submit/poll упал до Stage 2) — `tokensSpent` будет null/0 → no-op.
+      const dbJobNow = await db.generationJob
+        .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
+        .catch(() => null);
+      const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+
       await db.generationJob.update({
         where: { id: dbJobId },
         data: { status: "failed", error: String(err) },
       });
+
+      if (tokensSpent > 0) {
+        await refundTokens(BigInt(userIdStr), tokensSpent, modelId, "ai_image_undelivered").catch(
+          (refundErr) =>
+            logger.error({ refundErr, dbJobId, tokensSpent }, "Image failed: refund attempt threw"),
+        );
+        logger.warn({ dbJobId, tokensSpent }, "Image failed after deduct: tokens refunded to user");
+      }
 
       await notifyTechError(err, {
         jobId: dbJobId,
@@ -1640,19 +1677,24 @@ async function resolveTelegramSource(
         }
       }
       // HEAD not usable — GET the S3 copy directly instead of re-fetching
-      // the (possibly single-use / expired) provider URL.
-      const s3Res = await fetch(s3Url).catch(() => null);
-      if (s3Res?.ok) {
-        const buffer = Buffer.from(await s3Res.arrayBuffer());
-        if (buffer.byteLength > 0) {
-          return { kind: "buffer", buffer, byteSize: buffer.byteLength };
-        }
+      // the (possibly single-use / expired) provider URL. С retry'ями на
+      // разовые 5xx/network blip'ы — после fail-through уйдём на provider URL.
+      const buffer = await withRetry("image.fetchS3", 3, async () => {
+        const r = await fetch(s3Url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      }).catch(() => null);
+      if (buffer && buffer.byteLength > 0) {
+        return { kind: "buffer", buffer, byteSize: buffer.byteLength };
       }
     }
   }
-  const res = await fetch(providerUrl);
-  if (!res.ok) throw new Error(`Failed to fetch image from provider: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  // Provider URL fallback с retry'ями — последний шанс достать байты.
+  const buffer = await withRetry("image.fetchProvider", 3, async () => {
+    const r = await fetch(providerUrl);
+    if (!r.ok) throw new Error(`Failed to fetch image from provider: ${r.status}`);
+    return Buffer.from(await r.arrayBuffer());
+  });
   return { kind: "buffer", buffer, byteSize: buffer.byteLength };
 }
 

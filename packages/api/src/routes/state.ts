@@ -589,11 +589,18 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     const { userId } = request as AuthRequest;
     const { section, modelId } = request.body;
 
-    await userStateService.setModelForSection(
-      userId,
-      section as "design" | "audio" | "video",
-      modelId,
-    );
+    // Persist the chosen model. GPT хранится в отдельном поле `gptModelId` —
+    // у `setModelForSection` нет ветки для "gpt" (sectionModelField падает в
+    // no-op), поэтому раньше gpt-активация молча не сохраняла модель.
+    if (section === "gpt") {
+      await userStateService.setGptModel(userId, modelId);
+    } else {
+      await userStateService.setModelForSection(
+        userId,
+        section as "design" | "audio" | "video",
+        modelId,
+      );
+    }
 
     // Voice-clone activated through the management UI → drop any pending
     // HeyGen-return marker, otherwise a clone started here would silently
@@ -608,14 +615,19 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     // is routed to the newly-activated section (avoids a race with the async
     // notification send). sendModelActivatedNotification will only send the
     // optional section-switch keyboard message.
-    const newState =
-      section === "audio"
-        ? "AUDIO_ACTIVE"
-        : section === "design"
-          ? "DESIGN_ACTIVE"
-          : section === "video"
-            ? "VIDEO_ACTIVE"
-            : undefined;
+    //
+    // Для gpt: GPT_ACTIVE если у юзера есть активный диалог, иначе GPT_SECTION.
+    // Без этого state.state оставался прежним (IDLE / *_ACTIVE прошлой секции),
+    // и `bot.on('message')` падал в handleNoTool → юзер видел `noToolGpt`
+    // несмотря на свежее «модель активирована».
+    let newState: Parameters<typeof userStateService.setState>[1] | undefined;
+    if (section === "audio") newState = "AUDIO_ACTIVE";
+    else if (section === "design") newState = "DESIGN_ACTIVE";
+    else if (section === "video") newState = "VIDEO_ACTIVE";
+    else if (section === "gpt") {
+      const prev = await userStateService.get(userId);
+      newState = prev?.gptDialogId ? "GPT_ACTIVE" : "GPT_SECTION";
+    }
 
     // Always overwrite the FSM state, even when the section is unchanged.
     // Skipping the write on same-section leaks transient sub-states like
@@ -629,11 +641,7 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     if (newState) {
       const prev = await userStateService.get(userId);
       sectionSwitched = prev?.section !== section;
-      await userStateService.setState(
-        userId,
-        newState as Parameters<typeof userStateService.setState>[1],
-        section as Section,
-      );
+      await userStateService.setState(userId, newState, section as Section);
     }
 
     await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
