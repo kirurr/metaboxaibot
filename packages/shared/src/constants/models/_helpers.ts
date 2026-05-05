@@ -10,7 +10,7 @@ export function mkAspectRatio(
   return {
     key: "aspect_ratio",
     label: "Соотношение сторон",
-    description: "Форма итогового изображения: горизонталь, вертикаль или квадрат.",
+    description: "Пропорции кадра — соотношение ширины и высоты.",
     type: "select",
     options: ratios.map((r) => ({ value: r, label: labelMap?.[r] ?? r })),
     default: ratios[0],
