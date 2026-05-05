@@ -97,10 +97,18 @@ export async function handleSendOriginal(ctx: BotContext): Promise<void> {
   }
   const filename = `${output.id}.${ext}`;
 
-  const message = await ctx.replyWithDocument(new InputFile(buffer, filename)).catch((err) => {
-    logger.warn({ err, outputId: output.id }, "send-original: replyWithDocument failed");
-    return undefined;
-  });
+  // disable_content_type_detection=true — иначе Telegram распознаёт mp4/etc.
+  // и апгрейдит документ до inline-видеоплеера (play-кнопка, серверный
+  // thumbnail), что неотличимо от sendVideo и противоречит идее «отправить
+  // оригинал как файл без сжатия и превью».
+  const message = await ctx
+    .replyWithDocument(new InputFile(buffer, filename), {
+      disable_content_type_detection: true,
+    })
+    .catch((err) => {
+      logger.warn({ err, outputId: output.id }, "send-original: replyWithDocument failed");
+      return undefined;
+    });
   if (!message) {
     await releaseLock(lockKey);
     await ctx.reply(ctx.t.errors.sendOriginalFailed);
