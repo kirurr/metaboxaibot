@@ -516,7 +516,12 @@ export async function executeDesignPrompt(
     modelId,
     prompt,
     sourceImageUrl,
-    mediaInputs: hasMediaInputs ? await resolveMediaInputUrls(mediaInputs) : undefined,
+    // Cleanup: при детекте протухших ссылок (удалённый s3-output, Telegram
+    // file expired) `resolveMediaInputUrls` сразу выкинет их из user-state'а
+    // — следующий retry пользователь увидит слот без поломанной записи.
+    mediaInputs: hasMediaInputs
+      ? await resolveMediaInputUrls(mediaInputs, { userId: ctx.user.id, modelId })
+      : undefined,
     telegramChatId: chatId,
     dialogId,
     sendOriginalLabel: ctx.t.common.sendOriginal,

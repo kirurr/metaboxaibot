@@ -30,6 +30,37 @@ const GROK_T2I = "grok-imagine/text-to-image";
 const GROK_I2I = "grok-imagine/image-to-image";
 
 /**
+ * Распознанные форматы изображений. Используем extension из URL'а провайдера,
+ * чтобы корректно сохранить файл как `.png` (когда юзер выбрал PNG в настройках,
+ * а не дефолтный `.jpg`). По дефолту падаем на jpg — большинство провайдеров
+ * без явного output_format отдают именно его.
+ */
+const KNOWN_IMAGE_EXTS: ReadonlyArray<string> = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
+const EXT_TO_CONTENT_TYPE: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+};
+function parseImageMime(url: string): { ext: string; contentType: string } {
+  try {
+    const path = new URL(url).pathname;
+    const m = path.match(/\.([a-zA-Z0-9]+)$/);
+    if (m) {
+      const ext = m[1].toLowerCase();
+      if (KNOWN_IMAGE_EXTS.includes(ext)) {
+        return { ext: ext === "jpeg" ? "jpg" : ext, contentType: EXT_TO_CONTENT_TYPE[ext] };
+      }
+    }
+  } catch {
+    // not a parseable URL — fallthrough
+  }
+  return { ext: "jpg", contentType: "image/jpeg" };
+}
+
+/**
  * Nano Banana family: single endpoint per model that accepts optional
  * `image_input` array for i2i. The `nano-banana-edit` variant requires
  * images, but we expose pro/2 which gracefully handle both modes.
@@ -291,9 +322,13 @@ export class KieImageAdapter implements ImageAdapter {
     const urls = result.resultUrls;
     if (!urls?.length) throw new Error("KIE: no image URLs in resultJson");
 
-    return urls.map((url, i) => ({
-      url,
-      filename: `${this.modelId}-${i}.jpg`,
-    }));
+    return urls.map((url, i) => {
+      const { ext, contentType } = parseImageMime(url);
+      return {
+        url,
+        filename: `${this.modelId}-${i}.${ext}`,
+        contentType,
+      };
+    });
   }
 }

@@ -181,6 +181,7 @@ export interface Translations {
     mediaSlotFileTooLarge: string;
     mediaSlotImageTooSmall: string;
     mediaSlotImageTooLarge: string;
+    mediaSlotAspectRatioOutOfRange: string;
     mediaSlotReadMetadataFailed: string;
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
@@ -207,6 +208,7 @@ export interface Translations {
     generationStillRunning: string;
     generationTimedOut24h: string;
     modelTemporarilyUnavailable: string;
+    chatInvalidImage: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;
     soulAvatarNotReady: string;
@@ -431,7 +433,9 @@ export interface Translations {
     mediaPreviewAudioMulti: string;
     mediaPreviewFileSingle: string;
     mediaPreviewFileMulti: string;
-    mediaPreviewFileSupplement: string;
+    mediaPreviewMixedPhoto: string;
+    mediaPreviewMixedVideo: string;
+    mediaPreviewMixedAudio: string;
     mediaFileNounOne: string;
     mediaFileNounFew: string;
     mediaFileNounMany: string;

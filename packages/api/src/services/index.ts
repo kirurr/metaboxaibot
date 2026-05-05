@@ -42,6 +42,7 @@ export {
   s3Service,
   getFileUrl,
   uploadBuffer,
+  objectExists,
   measureImageMegapixels,
   probeImageMetadata,
 } from "./s3.service.js";

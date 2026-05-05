@@ -43,6 +43,7 @@ import { resolveKeyProvider, resolveKeyProviderForModel } from "../ai/key-provid
 import {
   classifyRateLimit,
   isFiveXxError,
+  isInvalidImageError,
   isTransientNetworkError,
 } from "../utils/rate-limit-error.js";
 
@@ -453,6 +454,19 @@ export const chatService = {
         }
         break; // success — выходим из retry loop'а
       } catch (err) {
+        // Permanent input error — провайдер 400'ит на битом/неподдерживаемом
+        // изображении в инпуте. Ретрай и fallback бесполезны (та же картинка
+        // упадёт у любого провайдера). Сразу UserFacingError, чтобы юзер
+        // увидел конкретную причину вместо generic «unexpected error».
+        if (isInvalidImageError(err)) {
+          await dialogService.markMessageFailed(userMessage.id);
+          throw new UserFacingError("Invalid image input", {
+            key: "chatInvalidImage",
+            section: "gpt",
+            cause: err,
+          });
+        }
+
         // Per-key metrics + throttle on 429-class errors. We only attribute when
         // the pool actually gave us a DB-tracked key (env-fallback yields keyId=null).
         const cls = classifyRateLimit(err, keyProvider);

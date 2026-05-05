@@ -258,6 +258,8 @@ export default {
       "❌ Изображение слишком маленькое ({actualW}×{actualH} пкс). Минимальный размер — {minW}×{minH} пкс.",
     mediaSlotImageTooLarge:
       "❌ Изображение слишком большое ({actualW}×{actualH} пкс). Максимальный размер — {maxW}×{maxH} пкс.",
+    mediaSlotAspectRatioOutOfRange:
+      "❌ Соотношение сторон изображения ({actualW}×{actualH}) выходит за пределы {minRatio}–{maxRatio}.",
     mediaSlotReadMetadataFailed:
       "❌ Не удалось прочитать параметры файла. Проверьте формат и попробуйте снова.",
     kieVideoDurationOutOfRange: "❌ Длительность видео должна быть от {min} до {max} секунд.",
@@ -304,6 +306,8 @@ export default {
       "❌ {modelName}: генерация не завершилась за 24 часа и была отменена. Попробуйте снова.",
     modelTemporarilyUnavailable:
       "❌ {modelName} решил передохнуть. Мы не разрешали, но он не спросил. Уже разбираемся. А пока в боте куча других нейросетей, которые рады вас видеть.",
+    chatInvalidImage:
+      "🖼 Не удалось обработать прикреплённое изображение — возможно, файл повреждён или в неподдерживаемом формате. Поддерживаются JPEG, PNG, GIF, WebP. Попробуйте ещё раз с другим файлом.",
     soulProviderUnavailable: "❌ Создание персонажа временно недоступно. Попробуйте позже.",
     soulMissingAvatar:
       "⚠️ Для генерации с Higgsfield Soul выберите своего персонажа в меню «Управление».",
@@ -584,7 +588,12 @@ export default {
     mediaPreviewAudioMulti: "🎵 Эти аудио будут использоваться как «{label}»",
     mediaPreviewFileSingle: "📎 Файл будет использоваться как «{label}»",
     mediaPreviewFileMulti: "📎 {count} {noun} будут использоваться как «{label}»",
-    mediaPreviewFileSupplement: "📎 + ещё {count} {noun}",
+    mediaPreviewMixedPhoto:
+      "🖼 Эти изображения и {fileCount} {fileNoun} будут использоваться как «{label}»",
+    mediaPreviewMixedVideo:
+      "🎥 Эти видео и {fileCount} {fileNoun} будут использоваться как «{label}»",
+    mediaPreviewMixedAudio:
+      "🎵 Эти аудио и {fileCount} {fileNoun} будут использоваться как «{label}»",
     mediaFileNounOne: "файл",
     mediaFileNounFew: "файла",
     mediaFileNounMany: "файлов",

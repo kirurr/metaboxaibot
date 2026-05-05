@@ -42,13 +42,27 @@ const MI_REF_ELEMENTS: MediaInputSlot[] = [1, 2, 3].map((i) => ({
   imagesOnly: true,
 }));
 
+/**
+ * KIE Kling требует aspect ratio изображения в диапазоне 1:2.5 – 2.5:1
+ * (w/h ∈ [0.4, 2.5]) — иначе submit падает на стороне провайдера 422
+ * "Image aspect ratio must be between 1:2.5 and 2.5:1". Валидируем на upload'е.
+ */
+const KLING_IMAGE_ASPECT = { minAspectRatio: 0.4, maxAspectRatio: 2.5 } as const;
+
 // KIE Kling принимает first/last frame одним массивом image_urls, поэтому
 // last_frame standalone не имеет смысла — кнопка появляется только после
 // загрузки first_frame.
 const KLING_MEDIA_INPUTS: MediaInputSlot[] = [
-  MI_FIRST_FRAME,
-  { ...MI_LAST_FRAME, revealAfter: "first_frame" },
-  ...MI_REF_ELEMENTS,
+  { ...MI_FIRST_FRAME, constraints: { ...MI_FIRST_FRAME.constraints, ...KLING_IMAGE_ASPECT } },
+  {
+    ...MI_LAST_FRAME,
+    revealAfter: "first_frame",
+    constraints: { ...MI_LAST_FRAME.constraints, ...KLING_IMAGE_ASPECT },
+  },
+  ...MI_REF_ELEMENTS.map((s) => ({
+    ...s,
+    constraints: { ...s.constraints, ...KLING_IMAGE_ASPECT },
+  })),
 ];
 
 /**
@@ -61,7 +75,8 @@ const MI_MOTION_IMAGE: MediaInputSlot = {
   mode: "first_frame",
   labelKey: "motionImage",
   required: true,
-  constraints: { minWidth: 300, minHeight: 300 },
+  // KIE: ≥300px по сторонам и aspect ratio 1:2.5 – 2.5:1.
+  constraints: { minWidth: 300, minHeight: 300, ...KLING_IMAGE_ASPECT },
 };
 /** Kling Motion: required reference video (video_url). Provider requires 3–30 s. */
 const MI_MOTION_VIDEO: MediaInputSlot = {

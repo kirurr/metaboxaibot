@@ -4,7 +4,7 @@ import { userStateService } from "@metabox/api/services";
 import { config, UserFacingError } from "@metabox/shared";
 import { InlineKeyboard, InputFile } from "grammy";
 import type { Context } from "grammy";
-import { getFileUrl } from "@metabox/api/services";
+import { getFileUrl, objectExists } from "@metabox/api/services";
 
 export type SlotMediaType = "image" | "video" | "audio";
 
@@ -91,6 +91,26 @@ export function validateMediaAgainstSlot(
         .replace("{actualH}", String(h))
         .replace("{maxW}", String(c.maxWidth ?? 0))
         .replace("{maxH}", String(c.maxHeight ?? 0));
+    }
+
+    // Aspect ratio (width / height). Validate только если хотя бы один лимит задан
+    // и обе стороны известны. Например, KIE Kling требует ratio ∈ [1:2.5, 2.5:1]
+    // (т.е. w/h ∈ [0.4, 2.5]) — иначе submit падает 422 на стороне провайдера.
+    if (h > 0 && (c.minAspectRatio !== undefined || c.maxAspectRatio !== undefined)) {
+      const ratio = w / h;
+      const belowMinR = c.minAspectRatio !== undefined && ratio < c.minAspectRatio;
+      const aboveMaxR = c.maxAspectRatio !== undefined && ratio > c.maxAspectRatio;
+      if (belowMinR || aboveMaxR) {
+        const fmtRatio = (r: number): string => {
+          if (r >= 1) return `${r.toFixed(1).replace(/\.0$/, "")}:1`;
+          return `1:${(1 / r).toFixed(1).replace(/\.0$/, "")}`;
+        };
+        return t.errors.mediaSlotAspectRatioOutOfRange
+          .replace("{actualW}", String(w))
+          .replace("{actualH}", String(h))
+          .replace("{minRatio}", c.minAspectRatio !== undefined ? fmtRatio(c.minAspectRatio) : "—")
+          .replace("{maxRatio}", c.maxAspectRatio !== undefined ? fmtRatio(c.maxAspectRatio) : "—");
+      }
     }
   }
 
@@ -499,41 +519,86 @@ export function debounceSlotReply(
 }
 
 /**
- * Resolves a single slot value to a fresh URL.
- *  - `tg:{kind}:{fileId}` → call Telegram getFile, build a fresh download URL
- *  - `http*`              → pass through
- *  - anything else        → treated as an S3 key, resolved via `getFileUrl`
+ * Резолвит одно сырое значение слота:
+ *  - `tg:{kind}:{fileId}` → fresh Telegram download URL
+ *  - `http*`              → pass-through
+ *  - иначе                → S3-ключ; HEAD-check + getFileUrl
  *
- * Throws `UserFacingError("mediaSlotExpired")` if a Telegram file_id can no
- * longer be downloaded (e.g. bot token rotated). This surfaces as a clear
- * message to the user instead of an opaque generation failure.
+ * Возвращает `{ kind: "url" }` при успехе и `{ kind: "stale" }` если ссылка
+ * больше не работает (Telegram file_id протух, S3-объект удалён). Caller
+ * (`resolveMediaInputUrls`) бросает UserFacingError и опционально чистит
+ * протухшие записи из persistent state'а.
  */
-async function resolveSlotValue(v: string): Promise<string> {
+type SlotResolveResult = { kind: "url"; url: string } | { kind: "stale" };
+
+async function resolveSlotValue(v: string): Promise<SlotResolveResult> {
   if (v.startsWith("tg:")) {
     const idx = v.indexOf(":", 3);
     const fileId = idx === -1 ? v.slice(3) : v.slice(idx + 1);
     try {
       const filePath = await tgGetFilePath(fileId);
-      return `https://api.telegram.org/file/bot${config.bot.token}/${filePath}`;
+      return {
+        kind: "url",
+        url: `https://api.telegram.org/file/bot${config.bot.token}/${filePath}`,
+      };
     } catch {
-      throw new UserFacingError("Media slot expired", { key: "mediaSlotExpired" });
+      return { kind: "stale" };
     }
   }
-  if (v.startsWith("http")) return v;
+  if (v.startsWith("http")) return { kind: "url", url: v };
+  // S3-ключ. HEAD'аем до подписи URL — иначе сабмитим в провайдер ссылку на
+  // удалённый объект, провайдер 404'ит мид-генерации, юзер видит generic
+  // «generationFailed». `null` от objectExists = S3 не сконфигурен или
+  // транзиентная ошибка HEAD'а → fail-open: продолжаем, пусть провайдер
+  // сам разберётся.
+  const exists = await objectExists(v);
+  if (exists === false) return { kind: "stale" };
   const url = await getFileUrl(v);
-  return url ?? v;
+  return { kind: "url", url: url ?? v };
 }
 
 /**
  * Resolves media input values right before generation so URLs are fresh.
  * See `resolveSlotValue` for per-value semantics.
+ *
+ * При обнаружении протухших ссылок (Telegram file expired / S3 object 404):
+ *  - если задан `cleanup: { userId, modelId }` — удаляем протухшие сырые
+ *    значения из `userState.mediaInputs[modelId]`. Следующий заход в этот же
+ *    слот юзер увидит чистым / без поломанной ссылки.
+ *  - в любом случае бросаем `UserFacingError("mediaSlotExpired")`, чтобы юзер
+ *    увидел понятное сообщение «загрузите файл повторно».
  */
 export async function resolveMediaInputUrls(
   inputs: Record<string, string[]>,
+  cleanup?: { userId: bigint; modelId: string },
 ): Promise<Record<string, string[]>> {
   const resolved: Record<string, string[]> = {};
-  for (const [key, values] of Object.entries(inputs)) {
-    resolved[key] = await Promise.all(values.map(resolveSlotValue));
+  const cleanRaw: Record<string, string[]> = {};
+  let hasStale = false;
+
+  for (const [slotKey, values] of Object.entries(inputs)) {
+    const out: string[] = [];
+    const remainingRaw: string[] = [];
+    for (const v of values) {
+      const r = await resolveSlotValue(v);
+      if (r.kind === "stale") {
+        hasStale = true;
+      } else {
+        out.push(r.url);
+        remainingRaw.push(v);
+      }
+    }
+    resolved[slotKey] = out;
+    if (remainingRaw.length > 0) cleanRaw[slotKey] = remainingRaw;
+  }
+
+  if (hasStale) {
+    if (cleanup) {
+      await userStateService
+        .setMediaInputsForModel(cleanup.userId, cleanup.modelId, cleanRaw)
+        .catch(() => void 0);
+    }
+    throw new UserFacingError("Media slot expired", { key: "mediaSlotExpired" });
   }
   return resolved;
 }
