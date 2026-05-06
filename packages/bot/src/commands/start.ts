@@ -359,12 +359,36 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     await userService.creditWelcomeBonus(ctx.user.id);
   }
 
-  // Welcome message in inferred language
-  const landingUrl = config.metabox.landingUrl;
+  // Welcome-сообщение (с дисклеймером и ссылками на документы) идёт отдельным
+  // сообщением, без кнопок — чтобы при смене языка не удалялся весь текст с
+  // юр. ссылками (handleLanguageChangeSelect делает deleteMessage на сообщении
+  // с picker'ом). Для RU-пользователей шлём bilingual (RU + EN) — аудитория
+  // двуязычная, приветствие показываем на двух языках. Для всех остальных
+  // (включая en и неподдерживаемые → fallback "en") — только в целевом языке.
   // Шаблон welcome содержит {landingUrl} многократно (по ссылке на каждый
   // документ) — нужен replaceAll, иначе остаются битые href.
-  const welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
+  const landingUrl = config.metabox.landingUrl;
+  let welcome: string;
+  if (inferredLang === "ru") {
+    // Разделитель из подчёркиваний — Telegram не поддерживает <hr>/markdown HR,
+    // визуальная черта только символами.
+    const divider = "________________________";
+    const ruWelcome = getT("ru").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    const enWelcome = getT("en").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    welcome = `${ruWelcome}\n\n${divider}\n\n${enWelcome}`;
+  } else {
+    welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
+  }
   await ctx.reply(welcome, { parse_mode: "HTML" });
+
+  // Отдельное сообщение с language picker'ом (langset_*) — чтобы пользователь
+  // мог сразу переключиться, если автодетект промахнулся. handleLanguageChangeSelect
+  // удалит ИМЕННО это сообщение, welcome с дисклеймером уцелеет.
+  const choosePrompt =
+    inferredLang === "ru"
+      ? `${getT("ru").menu.chooseLanguage}\n${getT("en").menu.chooseLanguage}`
+      : t.menu.chooseLanguage;
+  await ctx.reply(choosePrompt, { reply_markup: buildLanguageKeyboard("langset_") });
 
   // Inline button to open Profile in mini app
   const webappUrl = config.bot.webappUrl;
