@@ -265,6 +265,8 @@ export default {
     kieVideoDurationOutOfRange: "❌ Video duration must be between {min} and {max} seconds.",
     kieImageTooSmall:
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
+    kieImageAspectRatioOutOfRange:
+      "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     mediaSlotImagesOnly:
       "❌ This slot only accepts photos. Videos are not supported — please send a photo.",
     mediaSlotVideosOnly:
