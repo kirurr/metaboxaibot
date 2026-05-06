@@ -3,6 +3,7 @@ import { sequentialize } from "@grammyjs/runner";
 import type { BotContext } from "./types/context.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import { i18nMiddleware } from "./middlewares/i18n.middleware.js";
+import { messageCoalescingMiddleware } from "./middlewares/message-coalescing.middleware.js";
 import {
   handleStart,
   handleLanguageSelect,
@@ -405,6 +406,9 @@ export function createBot(token: string): Bot<BotContext> {
   // ── Telegram Stars payments ───────────────────────────────────────────────
   bot.on("pre_checkout_query", handlePreCheckoutQuery);
   bot.on("message:successful_payment", handleSuccessfulPayment);
+
+  // ── Coalesce auto-split long messages (Telegram iOS режет >4096 chars на куски) ──
+  bot.use(messageCoalescingMiddleware);
 
   // ── State-based message routing ───────────────────────────────────────────
   bot.on("message", async (ctx, next) => {
