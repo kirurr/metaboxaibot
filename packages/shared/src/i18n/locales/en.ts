@@ -267,6 +267,8 @@ export default {
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
     kieImageAspectRatioOutOfRange:
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    chatStreamInterrupted:
+      "❌ {modelName} started replying but lost the thread halfway. It happens — send your message again, it'll get its act together.",
     mediaSlotImagesOnly:
       "❌ This slot only accepts photos. Videos are not supported — please send a photo.",
     mediaSlotVideosOnly:
