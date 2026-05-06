@@ -141,8 +141,18 @@ async function streamGptResponse(
   imageUrls?: string[],
   imageS3Keys?: string[],
   documentAttachments?: StoredAttachment[],
+  promptMessageId?: number,
 ): Promise<void> {
-  let placeholder = await ctx.reply("⏳");
+  let placeholder = await ctx.reply("⏳", {
+    ...(promptMessageId
+      ? {
+          reply_parameters: {
+            message_id: promptMessageId,
+            allow_sending_without_reply: true,
+          },
+        }
+      : {}),
+  });
   let accumulated = "";
   let lastEdit = Date.now();
   // 429 на edit означает per-chat rate-limit. Пока wall-clock < editBlockedUntil
@@ -452,7 +462,11 @@ async function replyNoActiveDialog(ctx: BotContext): Promise<void> {
  * Executes a text prompt in the active GPT dialog.
  * Used by handleGptMessage (text) and the voice-prompt callback.
  */
-export async function executeGptPrompt(ctx: BotContext, text: string): Promise<void> {
+export async function executeGptPrompt(
+  ctx: BotContext,
+  text: string,
+  promptMessageId?: number,
+): Promise<void> {
   if (!ctx.user) return;
 
   const gptDialogId = (await userStateService.get(ctx.user.id))?.gptDialogId ?? null;
@@ -464,12 +478,21 @@ export async function executeGptPrompt(ctx: BotContext, text: string): Promise<v
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  await streamGptResponse(ctx, chatId, gptDialogId, text);
+  await streamGptResponse(
+    ctx,
+    chatId,
+    gptDialogId,
+    text,
+    undefined,
+    undefined,
+    undefined,
+    promptMessageId,
+  );
 }
 
 export async function handleGptMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
-  await executeGptPrompt(ctx, ctx.message.text);
+  await executeGptPrompt(ctx, ctx.message.text, ctx.message.message_id);
 }
 
 // ── Photo / document image in active GPT dialog ───────────────────────────────
@@ -540,6 +563,8 @@ export async function handleGptPhoto(ctx: BotContext): Promise<void> {
           prompt,
           existing.urls,
           existing.s3Keys,
+          undefined,
+          existing.ctx.message?.message_id,
         );
       }, 800);
     } else {
@@ -561,6 +586,8 @@ export async function handleGptPhoto(ctx: BotContext): Promise<void> {
             prompt,
             entry.urls,
             entry.s3Keys.length ? entry.s3Keys : undefined,
+            undefined,
+            ctx.message?.message_id,
           );
         }, 800),
       };
@@ -570,7 +597,16 @@ export async function handleGptPhoto(ctx: BotContext): Promise<void> {
     // Single photo — process immediately
     const { url, s3Key } = await uploadPhoto(tgUrl);
     const prompt = caption || ctx.t.gpt.photoDefaultPrompt;
-    await streamGptResponse(ctx, chatId, gptDialogId, prompt, [url], s3Key ? [s3Key] : undefined);
+    await streamGptResponse(
+      ctx,
+      chatId,
+      gptDialogId,
+      prompt,
+      [url],
+      s3Key ? [s3Key] : undefined,
+      undefined,
+      ctx.message?.message_id,
+    );
   }
 }
 
@@ -649,6 +685,7 @@ export async function handleGptDocument(ctx: BotContext): Promise<void> {
           undefined,
           undefined,
           existing.attachments,
+          existing.ctx.message?.message_id,
         );
       }, 800);
     } else {
@@ -670,6 +707,7 @@ export async function handleGptDocument(ctx: BotContext): Promise<void> {
             undefined,
             undefined,
             entry.attachments,
+            ctx.message?.message_id,
           );
         }, 800),
       };
@@ -677,7 +715,16 @@ export async function handleGptDocument(ctx: BotContext): Promise<void> {
     }
   } else {
     const prompt = caption || ctx.t.gpt.docDefaultPrompt;
-    await streamGptResponse(ctx, chatId, gptDialogId, prompt, undefined, undefined, [attachment]);
+    await streamGptResponse(
+      ctx,
+      chatId,
+      gptDialogId,
+      prompt,
+      undefined,
+      undefined,
+      [attachment],
+      ctx.message?.message_id,
+    );
   }
 }
 

@@ -256,9 +256,25 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     dialogId,
     aspectRatio,
     modelSettings,
+    promptMessageId,
   } = job.data;
 
   const stage = job.data.stage ?? "generate";
+
+  /**
+   * Делает результат генерации reply'ем на исходное сообщение пользователя
+   * (текст/голос/фото-с-caption), чтобы он понимал, какому запросу принадлежит
+   * результат. `allow_sending_without_reply: true` — на случай, если юзер
+   * удалил исходный промпт, чтобы не падать при отправке.
+   */
+  const replyToPrompt = promptMessageId
+    ? {
+        reply_parameters: {
+          message_id: promptMessageId,
+          allow_sending_without_reply: true,
+        },
+      }
+    : undefined;
 
   logger.info({ dbJobId, modelId, stage }, "Processing image job");
 
@@ -1222,7 +1238,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       // 2 попытки — multipart upload в Telegram изредка падает на network
       // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
       await withRetry("image.sendMediaGroup", 2, () =>
-        telegram.sendMediaGroup(telegramChatId, mediaGroup),
+        telegram.sendMediaGroup(telegramChatId, mediaGroup, replyToPrompt),
       );
 
       // Send a single message with refine + (orig|download) buttons for all outputs.
@@ -1358,6 +1374,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           caption: singleCaption,
           parse_mode: "HTML",
           reply_markup: replyMarkup,
+          ...replyToPrompt,
         }),
       );
     } else {
@@ -1366,6 +1383,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           caption: singleCaption,
           parse_mode: "HTML",
           reply_markup: replyMarkup,
+          ...replyToPrompt,
         }),
       );
     }

@@ -425,6 +425,7 @@ export async function executeDesignPrompt(
   ctx: BotContext,
   prompt: string,
   sourceMessageId?: string,
+  promptMessageId?: number,
 ): Promise<void> {
   if (!ctx.user) return;
   const chatId = ctx.chat?.id;
@@ -527,6 +528,7 @@ export async function executeDesignPrompt(
     sendOriginalLabel: ctx.t.common.sendOriginal,
     aspectRatio,
     sourceMessageId,
+    promptMessageId,
   };
   if (
     await gateLowIqMode({
@@ -565,7 +567,7 @@ export async function executeDesignPrompt(
 
 export async function handleDesignMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
-  await executeDesignPrompt(ctx, ctx.message.text);
+  await executeDesignPrompt(ctx, ctx.message.text, undefined, ctx.message.message_id);
 }
 
 export async function handleDesignVoice(ctx: BotContext): Promise<void> {
@@ -651,6 +653,7 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
   }
 
   const caption = ctx.message.caption?.trim();
+  const promptMessageId = ctx.message.message_id;
   const tgSlotValue = buildTgSlotValue(tgKind, fileId);
 
   // Lazily resolve the live download URL only when a path actually needs the
@@ -737,7 +740,7 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
       }
 
       if (caption) {
-        await executeDesignPrompt(ctx, caption);
+        await executeDesignPrompt(ctx, caption, undefined, promptMessageId);
       }
     });
     return;
@@ -813,7 +816,7 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
           (s) => s.required && !finalInputs[s.slotKey]?.length,
         );
         if (!missingRequired) {
-          await executeDesignPrompt(ctx, tracked.caption);
+          await executeDesignPrompt(ctx, tracked.caption, undefined, promptMessageId);
         }
       }
     });
@@ -881,6 +884,7 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
       dialogId,
       sendOriginalLabel: ctx.t.common.sendOriginal,
       aspectRatio,
+      promptMessageId,
     };
     if (
       await gateLowIqMode({

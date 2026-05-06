@@ -37,6 +37,8 @@ export interface SubmitImageParams {
   aspectRatio?: string;
   /** "{chatId}:{messageId}" of the inline button that triggered this job. Used for dedup. */
   sourceMessageId?: string;
+  /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
+  promptMessageId?: number;
 }
 
 export interface SubmitImageResult {
@@ -149,6 +151,7 @@ export const generationService = {
         aspectRatio: effectiveAspectRatio,
         modelSettings,
         ...(numImages > 1 ? { numImages } : {}),
+        ...(params.promptMessageId ? { promptMessageId: params.promptMessageId } : {}),
       },
       {
         jobId: job.id,
