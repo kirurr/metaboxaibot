@@ -379,16 +379,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
   } else {
     welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
   }
-  await ctx.reply(welcome, { parse_mode: "HTML" });
-
-  // Отдельное сообщение с language picker'ом (langset_*) — чтобы пользователь
-  // мог сразу переключиться, если автодетект промахнулся. handleLanguageChangeSelect
-  // удалит ИМЕННО это сообщение, welcome с дисклеймером уцелеет.
-  const choosePrompt =
-    inferredLang === "ru"
-      ? `${getT("ru").menu.chooseLanguage}\n${getT("en").menu.chooseLanguage}`
-      : t.menu.chooseLanguage;
-  await ctx.reply(choosePrompt, { reply_markup: buildLanguageKeyboard("langset_") });
+  await ctx.reply(welcome, { reply_markup: buildLanguageKeyboard("langset_"), parse_mode: "HTML" });
 
   // Inline button to open Profile in mini app
   const webappUrl = config.bot.webappUrl;
