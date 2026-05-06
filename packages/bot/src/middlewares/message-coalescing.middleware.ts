@@ -15,6 +15,13 @@ import { logger } from "../logger.js";
  *
  * Фильтр: только text и caption (photo/video/document с подписью). Voice / audio /
  * sticker не имеют 4096-чарового текста, фильтр их не цепляет естественно.
+ *
+ * ВАЖНО: middleware регистрируется ДО `sequentialize` в bot.ts. После
+ * sequentialize апдейты по чату обрабатываются последовательно — второй кусок
+ * висел бы в очереди до завершения первого, склейка никогда не происходила.
+ * До sequentialize апдейты parallel — coalesce успевает поймать оба и
+ * заресолвить первый при приходе второго. Поэтому используется `ctx.from.id`
+ * (auth ещё не сработал, ctx.user недоступен).
  */
 
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
@@ -22,6 +29,7 @@ const COALESCE_WINDOW_MS = 2500;
 
 interface CoalesceSlot {
   ctx: BotContext;
+  field: "text" | "caption";
   parts: string[];
   timer: ReturnType<typeof setTimeout>;
   resolve: () => void;
@@ -44,9 +52,8 @@ function flush(userId: bigint): void {
   clearTimeout(slot.timer);
 
   const merged = slot.parts.join("");
-  const got = getMessageText(slot.ctx);
-  if (got && slot.ctx.message) {
-    Object.assign(slot.ctx.message, { [got.field]: merged });
+  if (slot.ctx.message) {
+    Object.assign(slot.ctx.message, { [slot.field]: merged });
     logger.info(
       { userId: String(userId), parts: slot.parts.length, totalLength: merged.length },
       "message-coalescing: flushed merged prompt",
@@ -56,16 +63,22 @@ function flush(userId: bigint): void {
 }
 
 export const messageCoalescingMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
-  if (!ctx.user) return next();
+  if (!ctx.from?.id) return next();
   const got = getMessageText(ctx);
   if (!got) return next();
   const text = got.value;
   if (text.startsWith("/")) return next();
 
-  const userId = ctx.user.id;
+  const userId = BigInt(ctx.from.id);
   const existing = buffer.get(userId);
 
   if (existing) {
+    // Склеиваем только однородные сообщения (text↔text, caption↔caption).
+    // Иначе follow-up media (photo с caption после длинного text'а) был бы
+    // проглочен — мы вернули бы void без next() и теряли бы исходное фото.
+    if (got.field !== existing.field) {
+      return next();
+    }
     existing.parts.push(text);
     clearTimeout(existing.timer);
     if (text.length < TELEGRAM_MAX_MESSAGE_LENGTH) {
@@ -83,6 +96,7 @@ export const messageCoalescingMiddleware: MiddlewareFn<BotContext> = async (ctx,
   await new Promise<void>((resolve) => {
     const slot: CoalesceSlot = {
       ctx,
+      field: got.field,
       parts: [text],
       timer: setTimeout(() => flush(userId), COALESCE_WINDOW_MS),
       resolve,
