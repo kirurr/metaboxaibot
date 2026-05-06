@@ -86,9 +86,20 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     aspectRatio,
     duration,
     modelSettings,
+    promptMessageId,
   } = job.data;
 
   const stage = job.data.stage ?? "generate";
+
+  /** Reply parameters used when sending the result so the user can match it to the original prompt message. */
+  const replyToPrompt = promptMessageId
+    ? {
+        reply_parameters: {
+          message_id: promptMessageId,
+          allow_sending_without_reply: true,
+        },
+      }
+    : undefined;
 
   logger.info({ dbJobId, modelId, stage }, "Processing video job");
 
@@ -780,6 +791,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         {
           parse_mode: "HTML",
           ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+          ...replyToPrompt,
         },
       );
     } else {
@@ -802,6 +814,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           ...(info.height ? { height: info.height } : {}),
           ...(info.duration ? { duration: Math.round(info.duration) } : {}),
           ...(jpegThumb ? { thumbnail: new InputFile(jpegThumb, "thumb.jpg") } : {}),
+          ...replyToPrompt,
         }),
       );
     }

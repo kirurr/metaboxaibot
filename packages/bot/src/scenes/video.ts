@@ -87,6 +87,8 @@ function routeAvatarPhoto(
 interface AvatarVoiceEntry {
   uploadedKey: string | null;
   tgUrl: string;
+  /** message_id of the voice/audio message — so the result reply targets it. */
+  voiceMessageId?: number;
   expiresAt: number;
 }
 
@@ -579,6 +581,7 @@ export async function executeVideoPrompt(
   ctx: BotContext,
   prompt: string,
   sourceMessageId?: string,
+  promptMessageId?: number,
 ): Promise<void> {
   if (!ctx.user) return;
   const chatId = ctx.chat?.id;
@@ -690,6 +693,7 @@ export async function executeVideoPrompt(
     duration: modelSettings?.duration,
     extraModelSettings: driverUrl ? { driver_url: driverUrl } : undefined,
     sourceMessageId,
+    promptMessageId,
   };
 
   if (
@@ -767,7 +771,7 @@ export async function executeVideoPrompt(
 
 export async function handleVideoMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
-  await executeVideoPrompt(ctx, ctx.message.text);
+  await executeVideoPrompt(ctx, ctx.message.text, undefined, ctx.message.message_id);
 }
 
 // ── New video dialog ──────────────────────────────────────────────────────────
@@ -910,6 +914,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
   }
 
   const caption = ctx.message.caption?.trim();
+  const promptMessageId = ctx.message.message_id;
   const tgSlotValue = buildTgSlotValue(tgKind, fileId);
 
   // Lazily resolve the live download URL only for paths that need bytes now
@@ -1007,7 +1012,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       }
 
       if (caption) {
-        await executeVideoPrompt(ctx, caption);
+        await executeVideoPrompt(ctx, caption, undefined, promptMessageId);
       }
     });
     return;
@@ -1082,7 +1087,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption);
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
         }
       }
     });
@@ -1170,6 +1175,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       sendOriginalLabel: ctx.t.common.sendOriginal,
       aspectRatio: modelSettings?.aspectRatio,
       duration: modelSettings?.duration,
+      promptMessageId,
     };
 
     if (
@@ -1380,6 +1386,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
     const userId = ctx.user.id;
     const mediaGroupId = ctx.message?.media_group_id;
     const caption = ctx.message?.caption?.trim();
+    const promptMessageId = ctx.message?.message_id;
     const current = await userStateService.getMediaInputs(userId, modelId);
     const targetSlot = pickAutoSlot(activeModeSlots, current, "video");
     if (targetSlot) {
@@ -1437,7 +1444,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption);
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
         }
       }
     });
@@ -1655,7 +1662,11 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
 
   // Generate an ID and store voice data for both callback paths
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  storeAvatarVoice(userId, id, { uploadedKey, tgUrl });
+  storeAvatarVoice(userId, id, {
+    uploadedKey,
+    tgUrl,
+    voiceMessageId: ctx.message?.message_id,
+  });
 
   const kb = new InlineKeyboard()
     .text(ctx.t.voice.avatarChoiceUseAudio, `va:${id}`)
@@ -1742,6 +1753,7 @@ export async function handleVideoAvatarVoiceCallback(ctx: BotContext): Promise<v
     sendOriginalLabel: ctx.t.common.sendOriginal,
     aspectRatio: modelSettings?.aspectRatio,
     duration: modelSettings?.duration,
+    promptMessageId: entry.voiceMessageId,
   };
 
   if (
@@ -2011,7 +2023,7 @@ export async function handleVideoTranscribeCallback(ctx: BotContext): Promise<vo
     // Store and show transcription with "Use as prompt" button
     const { randomBytes } = await import("crypto");
     const vpId = randomBytes(6).toString("hex");
-    storeVoiceText(ctx.user!.id, vpId, text);
+    storeVoiceText(ctx.user!.id, vpId, text, entry.voiceMessageId);
 
     const { escapeMarkdownV2 } = await import("../utils/voice-transcribe.js");
     const header = escapeMarkdownV2(ctx.t.voice.transcriptionResult);

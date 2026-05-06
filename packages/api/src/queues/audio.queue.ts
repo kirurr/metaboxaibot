@@ -14,6 +14,8 @@ export interface AudioJobData {
   sourceAudioUrl?: string;
   /** Telegram chat id to notify when done */
   telegramChatId: number;
+  /** Telegram message_id of the user's prompt message (for reply threading on result). */
+  promptMessageId?: number;
   /** Per-model user settings (voice, speed, stability, etc.) */
   modelSettings?: Record<string, unknown>;
   /** Job pipeline stage. `"generate"` (default) submits; `"poll"` checks status. */
