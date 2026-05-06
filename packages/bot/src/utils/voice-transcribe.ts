@@ -12,6 +12,8 @@ const STORE_MAX = 500;
 
 interface StoreEntry {
   text: string;
+  /** message_id of the original voice/audio message — so the result reply targets it. */
+  voiceMessageId?: number;
   expiresAt: number;
 }
 
@@ -38,22 +40,31 @@ function pruneStore(): void {
   }
 }
 
-export function storeTranscription(userId: bigint, id: string, text: string): void {
+export function storeTranscription(
+  userId: bigint,
+  id: string,
+  text: string,
+  voiceMessageId?: number,
+): void {
   pruneStore();
   store.set(storeKey(userId, id), {
     text,
+    voiceMessageId,
     expiresAt: Date.now() + STORE_TTL_MS,
   });
 }
 
-export function getStoredTranscription(userId: bigint, id: string): string | null {
+export function getStoredTranscription(
+  userId: bigint,
+  id: string,
+): { text: string; voiceMessageId?: number } | null {
   const entry = store.get(storeKey(userId, id));
   if (!entry) return null;
   if (entry.expiresAt < Date.now()) {
     store.delete(storeKey(userId, id));
     return null;
   }
-  return entry.text;
+  return { text: entry.text, voiceMessageId: entry.voiceMessageId };
 }
 
 // ── MarkdownV2 escaping ─────────────────────────────────────────────────────
@@ -116,7 +127,7 @@ export async function transcribeAndReply(
     const id = randomId();
 
     // Store the transcribed text before sending (so the callback can find it immediately)
-    storeTranscription(ctx.user.id, id, text);
+    storeTranscription(ctx.user.id, id, text, ctx.message?.message_id);
 
     // Build MarkdownV2 message with expandable blockquote for easy copying
     const header = escapeMarkdownV2(ctx.t.voice.transcriptionResult);

@@ -149,13 +149,34 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
 
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
+      // KIE/evolink Claude-гейты иногда транслируют upstream 5xx как 4xx
+      // (видели 404 на тело `api_error: Internal server error...`), теряя
+      // транзиентный сигнал. Body несёт исходный Anthropic-style error type —
+      // он и есть источник истины. Нормализуем status, чтобы classifier
+      // в chat.service подхватил fallback flow.
+      let effectiveStatus = res.status;
+      // 429 не трогаем — classifyRateLimit ждёт ровно его для per-key throttle;
+      // override в 5xx переключил бы провайдера вместо корректного backoff'а.
+      if (res.status < 500 && res.status !== 429) {
+        try {
+          const parsed = JSON.parse(text) as { error?: { type?: string } };
+          const errType = parsed?.error?.type;
+          if (errType === "api_error" || errType === "overloaded_error") {
+            effectiveStatus = 503;
+          } else if (errType === "rate_limit_error") {
+            effectiveStatus = 429;
+          }
+        } catch {
+          /* body не JSON — оставляем оригинальный status */
+        }
+      }
       const err = new Error(
         `${this.proxyConfig.providerLabel} Claude failed: ${res.status} ${text}`,
       ) as Error & {
         status?: number;
         headers?: Record<string, string | string[]>;
       };
-      err.status = res.status;
+      err.status = effectiveStatus;
       // Преобразуем заголовки в форму, ожидаемую classifyRateLimit (нужен retry-after).
       const hdrs: Record<string, string | string[]> = {};
       res.headers.forEach((v, k) => {

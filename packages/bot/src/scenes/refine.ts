@@ -124,6 +124,20 @@ function buildRefineFamilyMembersKeyboard(
   return kb;
 }
 
+/**
+ * Refine status text — explains that the image is attached as a reference and
+ * the user should send a prompt describing what to refine. Used to override
+ * the generic readyForPrompt in refine-driven slot fills, so the user doesn't
+ * see "Send a prompt to start generation" with no hint that the previous
+ * image is now a reference.
+ */
+function buildRefineStatusText(ctx: BotContext, modelId: string): string {
+  const model = AI_MODELS[modelId];
+  const lang = ctx.user?.language ?? "en";
+  const name = model ? resolveModelDisplay(modelId, lang, model).name : modelId;
+  return ctx.t.mediaInput.refineReadyForPrompt.replace("{model}", name);
+}
+
 /** Save s3Key into a media input slot and send the updated status menu. */
 async function fillSlotAndSendStatus(
   ctx: BotContext,
@@ -134,10 +148,11 @@ async function fillSlotAndSendStatus(
 ): Promise<void> {
   if (!ctx.user) return;
   await userStateService.addMediaInput(ctx.user.id, modelId, slotKey, s3Key);
+  const statusText = buildRefineStatusText(ctx, modelId);
   if (section === "video") {
-    await sendVideoMediaInputStatus(ctx);
+    await sendVideoMediaInputStatus(ctx, { statusText });
   } else {
-    await sendDesignMediaInputStatus(ctx);
+    await sendDesignMediaInputStatus(ctx, { statusText });
   }
 }
 
@@ -248,7 +263,7 @@ export async function handleRefineChooseModel(ctx: BotContext): Promise<void> {
   const kb = new InlineKeyboard()
     .text(ctx.t.mediaInput.refineDesign, `ref_sec:d:${jobId}`)
     .text(ctx.t.mediaInput.refineVideo, `ref_sec:v:${jobId}`);
-  await ctx.editMessageText(ctx.t.mediaInput.refineNoSupport, { reply_markup: kb });
+  await ctx.editMessageText(ctx.t.mediaInput.refinePickSection, { reply_markup: kb });
 }
 
 // ── ref_sec:{d|v}:{jobId} — show families+singles for section ───────────────
@@ -352,10 +367,11 @@ export async function handleRefineModel(ctx: BotContext): Promise<void> {
       compatibleSlots[0].slotKey,
       job.s3Key,
     );
+    const statusText = buildRefineStatusText(ctx, modelId);
     if (section === "video") {
-      await sendVideoMediaInputStatus(ctx);
+      await sendVideoMediaInputStatus(ctx, { statusText });
     } else {
-      await sendDesignMediaInputStatus(ctx);
+      await sendDesignMediaInputStatus(ctx, { statusText });
     }
   } else {
     // Multiple compatible slots — ask which one

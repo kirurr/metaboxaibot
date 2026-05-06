@@ -14,6 +14,8 @@ export interface VideoJobData {
   mediaInputs?: Record<string, string[]>;
   /** Telegram chat id to notify when done */
   telegramChatId: number;
+  /** Telegram message_id of the user's prompt message (for reply threading on result). */
+  promptMessageId?: number;
   /** Pre-translated label for the "Send as file" button. */
   sendOriginalLabel?: string;
   /** Aspect ratio chosen by user, e.g. "16:9". */

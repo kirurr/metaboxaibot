@@ -40,6 +40,8 @@ export interface SubmitVideoParams {
   extraModelSettings?: Record<string, unknown>;
   /** "{chatId}:{messageId}" of the inline button that triggered this job. Used for dedup. */
   sourceMessageId?: string;
+  /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
+  promptMessageId?: number;
 }
 
 export interface SubmitVideoResult {
@@ -149,6 +151,7 @@ export const videoGenerationService = {
         aspectRatio: effectiveAspectRatio,
         duration: effectiveDuration,
         modelSettings,
+        ...(params.promptMessageId ? { promptMessageId: params.promptMessageId } : {}),
       },
       {
         jobId: job.id,

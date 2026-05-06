@@ -265,6 +265,10 @@ export default {
     kieVideoDurationOutOfRange: "❌ Video duration must be between {min} and {max} seconds.",
     kieImageTooSmall:
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
+    kieImageAspectRatioOutOfRange:
+      "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    chatStreamInterrupted:
+      "❌ {modelName} started replying but lost the thread halfway. It happens — send your message again, it'll get its act together. No tokens were charged for this request.",
     mediaSlotImagesOnly:
       "❌ This slot only accepts photos. Videos are not supported — please send a photo.",
     mediaSlotVideosOnly:
@@ -573,6 +577,9 @@ export default {
     refineDesign: "🎨 Design",
     refineVideo: "🎥 Video",
     refineSaved: "✅ Image loaded into «{slot}».",
+    refineReadyForPrompt:
+      "🖼 Your image is attached as a reference to {model}.\n✍️ Send text or a 🎤 voice message — what to refine.",
+    refinePickSection: "Choose a section to refine in:",
   },
   confirmGeneration: {
     message:

@@ -1,4 +1,9 @@
-import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
+import type {
+  VideoAdapter,
+  VideoInput,
+  VideoResult,
+  VideoValidationError,
+} from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -125,6 +130,30 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
     };
+  }
+
+  /**
+   * Per-model prompt length limit (in characters). Returns `null` for models
+   * without a known evolink-side limit — those skip prompt-length validation.
+   *
+   * Seedance 2.0 (standard и fast) на стороне Evolink режет промпт по 2000
+   * токенов. Эмпирический ratio из 400 ошибки: ~2.32 chars/token (русско-
+   * английский смешанный). 4500 символов даёт маржу до ~1940 токенов и
+   * предотвращает списание баланса за заведомо проигранную попытку.
+   */
+  private get promptMaxLength(): number | null {
+    if (this.modelId === "seedance-2" || this.modelId === "seedance-2-fast") {
+      return 4500;
+    }
+    return null;
+  }
+
+  validateRequest(input: VideoInput): VideoValidationError | null {
+    const limit = this.promptMaxLength;
+    if (limit !== null && input.prompt && input.prompt.length > limit) {
+      return { key: "promptTooLong", params: { limit } };
+    }
+    return null;
   }
 
   async submit(input: VideoInput): Promise<string> {

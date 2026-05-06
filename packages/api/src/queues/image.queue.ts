@@ -14,6 +14,12 @@ export interface ImageJobData {
   mediaInputs?: Record<string, string[]>;
   /** Telegram chat id to notify when done */
   telegramChatId: number;
+  /**
+   * Telegram message_id of the user's prompt message. When set, the worker
+   * sends the result as a reply to this message so the user can match
+   * which request produced which result. Best-effort (allow_sending_without_reply).
+   */
+  promptMessageId?: number;
   /** Dialog.id for saving messages and enabling img2img context. */
   dialogId?: string;
   /** Pre-translated label for the "Send as file" button. */

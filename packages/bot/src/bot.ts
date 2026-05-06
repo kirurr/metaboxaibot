@@ -3,6 +3,7 @@ import { sequentialize } from "@grammyjs/runner";
 import type { BotContext } from "./types/context.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import { i18nMiddleware } from "./middlewares/i18n.middleware.js";
+import { messageCoalescingMiddleware } from "./middlewares/message-coalescing.middleware.js";
 import {
   handleStart,
   handleLanguageMenu,
@@ -93,6 +94,12 @@ export function createBot(token: string): Bot<BotContext> {
     token,
     config.bot.testEnvironment ? { client: { environment: "test" } } : undefined,
   );
+
+  // ── Coalesce auto-split long messages — должен идти ДО sequentialize.
+  //    После sequentialize апдейты ждут друг друга по чату; второй кусок
+  //    split'а застрянет в очереди и склейка не произойдёт. До sequentialize
+  //    апдейты параллельны, coalesce ловит оба чанка одновременно.
+  bot.use(messageCoalescingMiddleware);
 
   // ── Sequentialize updates per chat (must be the very first middleware so
   //    every downstream handler — auth, i18n, scenes, addMediaInput etc. — is
