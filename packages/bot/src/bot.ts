@@ -97,6 +97,12 @@ export function createBot(token: string): Bot<BotContext> {
     config.bot.testEnvironment ? { client: { environment: "test" } } : undefined,
   );
 
+  // ── Coalesce auto-split long messages — должен идти ДО sequentialize.
+  //    После sequentialize апдейты ждут друг друга по чату; второй кусок
+  //    split'а застрянет в очереди и склейка не произойдёт. До sequentialize
+  //    апдейты параллельны, coalesce ловит оба чанка одновременно.
+  bot.use(messageCoalescingMiddleware);
+
   // ── Sequentialize updates per chat (must be the very first middleware so
   //    every downstream handler — auth, i18n, scenes, addMediaInput etc. — is
   //    serialized per chat). Without this, two photos from a media group race
@@ -406,9 +412,6 @@ export function createBot(token: string): Bot<BotContext> {
   // ── Telegram Stars payments ───────────────────────────────────────────────
   bot.on("pre_checkout_query", handlePreCheckoutQuery);
   bot.on("message:successful_payment", handleSuccessfulPayment);
-
-  // ── Coalesce auto-split long messages (Telegram iOS режет >4096 chars на куски) ──
-  bot.use(messageCoalescingMiddleware);
 
   // ── State-based message routing ───────────────────────────────────────────
   bot.on("message", async (ctx, next) => {
