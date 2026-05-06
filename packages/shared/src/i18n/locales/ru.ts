@@ -575,6 +575,8 @@ export default {
     refineDesign: "🎨 Дизайн",
     refineVideo: "🎥 Видео",
     refineSaved: "✅ Изображение загружено в «{slot}».",
+    refineReadyForPrompt:
+      "🖼 Ваше изображение прикреплено как референс к {model}.\n✍️ Отправьте текст или 🎤 голосовое — что нужно доработать.",
   },
   confirmGeneration: {
     message:

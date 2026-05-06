@@ -417,6 +417,7 @@ export interface Translations {
     refineDesign: string;
     refineVideo: string;
     refineSaved: string;
+    refineReadyForPrompt: string;
   };
   confirmGeneration: {
     message: string;
