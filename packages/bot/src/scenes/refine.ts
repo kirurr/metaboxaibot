@@ -263,7 +263,7 @@ export async function handleRefineChooseModel(ctx: BotContext): Promise<void> {
   const kb = new InlineKeyboard()
     .text(ctx.t.mediaInput.refineDesign, `ref_sec:d:${jobId}`)
     .text(ctx.t.mediaInput.refineVideo, `ref_sec:v:${jobId}`);
-  await ctx.editMessageText(ctx.t.mediaInput.refineNoSupport, { reply_markup: kb });
+  await ctx.editMessageText(ctx.t.mediaInput.refinePickSection, { reply_markup: kb });
 }
 
 // ── ref_sec:{d|v}:{jobId} — show families+singles for section ───────────────

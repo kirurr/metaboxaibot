@@ -418,6 +418,7 @@ export interface Translations {
     refineVideo: string;
     refineSaved: string;
     refineReadyForPrompt: string;
+    refinePickSection: string;
   };
   confirmGeneration: {
     message: string;
