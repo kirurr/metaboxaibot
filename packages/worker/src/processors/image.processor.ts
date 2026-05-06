@@ -1491,7 +1491,19 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         );
         const nextCandidate = fallbackCandidatesNow.find((m) => !alreadyAttempted.has(m.provider));
 
-        if (nextCandidate) {
+        if (!nextCandidate) {
+          logger.warn(
+            {
+              dbJobId,
+              modelId,
+              currentEff,
+              attempted: Array.from(alreadyAttempted),
+              registeredFallbacks: fallbackCandidatesNow.map((m) => m.provider),
+              errMessage: err instanceof Error ? err.message : String(err),
+            },
+            "Image poll: provider temporary unavailable — fallback skipped (no eligible candidate)",
+          );
+        } else {
           logger.warn(
             { dbJobId, modelId, currentEff, next: nextCandidate.provider },
             "Image poll: provider temporary unavailable — re-enqueuing on fallback",
@@ -1604,7 +1616,19 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         );
         const nextCandidate = fallbackCandidatesNow.find((m) => !alreadyAttempted.has(m.provider));
 
-        if (nextCandidate) {
+        if (!nextCandidate) {
+          logger.warn(
+            {
+              dbJobId,
+              modelId,
+              currentEff,
+              attempted: Array.from(alreadyAttempted),
+              registeredFallbacks: fallbackCandidatesNow.map((m) => m.provider),
+              errMessage: err instanceof Error ? err.message : String(err),
+            },
+            "Image poll: KIE 5xx terminal — fallback skipped (no eligible candidate)",
+          );
+        } else {
           logger.warn(
             { dbJobId, modelId, currentEff, next: nextCandidate.provider },
             "Image poll: KIE 5xx terminal — re-enqueuing on fallback",
@@ -1652,6 +1676,43 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     if (isLastAttempt) {
+      // Diagnostics: если fallback не сработал на последней попытке, фиксируем
+      // явную причину (mirror'ит video processor). Помогает понять, почему
+      // job упал в "generic generation failed" вместо переключения провайдера.
+      if (stage !== "poll") {
+        logger.warn(
+          { dbJobId, modelId, stage, errMessage: err instanceof Error ? err.message : String(err) },
+          "Image fallback skipped: not poll stage (submit-stage failures handled by submitWithFallback)",
+        );
+      } else if (!modelMeta) {
+        logger.warn(
+          { dbJobId, modelId },
+          "Image fallback skipped: modelMeta missing (model not in AI_MODELS)",
+        );
+      } else if (!isKieFiveXxError(err) && !isProviderTemporaryUnavailable(err)) {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            provider: modelMeta.provider,
+            registeredFallbacks: fallbackCandidates.map((m) => m.provider),
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Image fallback skipped: error type not eligible (need KIE 5xx or provider-unavailable)",
+        );
+      } else if (fallbackCandidates.length === 0) {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            provider: modelMeta.provider,
+            mediaInputs: job.data.mediaInputs ? Object.keys(job.data.mediaInputs) : [],
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Image fallback skipped: no compatible candidates (filtered by isFallbackCompatible)",
+        );
+      }
+
       // Refund: токены списываются на финализации ДО отправки результата юзеру.
       // Если отправка/буфер-фетч упали (провайдер 404'ит outputUrl, S3 файл
       // потерян, sendPhoto Telegram'а отбит) — у юзера списано, а изображения

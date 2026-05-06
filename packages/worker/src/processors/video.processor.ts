@@ -947,6 +947,18 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           1000,
           token,
         );
+      } else {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            currentEff,
+            attempted: Array.from(alreadyAttempted),
+            registeredFallbacks: fallbackCandidates.map((m) => m.provider),
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Video poll: provider temporary unavailable — fallback skipped (no eligible candidate)",
+        );
       }
     }
 
@@ -1073,10 +1085,61 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           1000,
           token,
         );
+      } else {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            currentEff,
+            attempted: Array.from(alreadyAttempted),
+            registeredFallbacks: fallbackCandidates.map((m) => m.provider),
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Video poll: KIE 5xx terminal — fallback skipped (no eligible candidate)",
+        );
       }
     }
 
     if (isLastAttempt) {
+      // Diagnostics: если fallback не сработал на последней попытке, фиксируем
+      // явную причину — иначе виден только generic "Job error" alert. Помогает
+      // быстро понять "почему не падёт на fallback?": нет совместимых
+      // кандидатов / тип ошибки не подходит / не poll-stage.
+      if (stage !== "poll") {
+        logger.warn(
+          { dbJobId, modelId, stage, errMessage: err instanceof Error ? err.message : String(err) },
+          "Video fallback skipped: not poll stage (submit-stage failures handled by submitWithFallback)",
+        );
+      } else if (!modelMeta) {
+        logger.warn(
+          { dbJobId, modelId },
+          "Video fallback skipped: modelMeta missing (model not in AI_MODELS)",
+        );
+      } else if (!isKieFiveXxError(err) && !isProviderTemporaryUnavailable(err)) {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            provider: modelMeta.provider,
+            registeredFallbacks: fallbackCandidates.map((m) => m.provider),
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Video fallback skipped: error type not eligible (need KIE 5xx or provider-unavailable)",
+        );
+      } else if (fallbackCandidates.length === 0) {
+        logger.warn(
+          {
+            dbJobId,
+            modelId,
+            provider: modelMeta.provider,
+            mediaInputs: mediaInputs ? Object.keys(mediaInputs) : [],
+            requestedDuration,
+            errMessage: err instanceof Error ? err.message : String(err),
+          },
+          "Video fallback skipped: no compatible candidates (filtered by isFallbackCompatible — duration/required-slots/capacity)",
+        );
+      }
+
       // Refund: токены списываются на Stage 2 ДО фактической отправки
       // результата юзеру. Если отправка/буфер-фетч упали (например, провайдер
       // 404'ит outputUrl, S3 файл потерян, sendVideo Telegram'а отбит) — у
