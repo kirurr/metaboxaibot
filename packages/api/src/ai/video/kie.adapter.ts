@@ -328,6 +328,15 @@ export class KieVideoAdapter implements VideoAdapter {
           params: { min: dimMatch[1] },
         });
       }
+      const arMatch = /image aspect ratio must be between (\S+) and (\S+)/i.exec(msg);
+      if (arMatch) {
+        const min = arMatch[1].replace(/[.,;]+$/, "");
+        const max = arMatch[2].replace(/[.,;]+$/, "");
+        throw new UserFacingError(`KIE: ${msg}`, {
+          key: "kieImageAspectRatioOutOfRange",
+          params: { min, max },
+        });
+      }
       throw new Error(`KIE submit failed: ${data.code} — ${data.msg}`);
     }
     return data.data.taskId;
