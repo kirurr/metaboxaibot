@@ -4,17 +4,24 @@ import { logger } from "../logger.js";
 
 /**
  * Telegram iOS-клиент при вводе/вставке текста длиннее 4096 символов автоматически
- * режет его на куски ровно по 4096 чарам и шлёт несколькими подряд сообщениями.
- * Бот видит каждое как отдельный prompt — теряет смысл длинного запроса. Этот
- * middleware склеивает такие куски обратно в один ctx.message.text/caption.
+ * режет его на куски и шлёт несколькими подряд сообщениями. Бот видит каждое
+ * как отдельный prompt — теряет смысл длинного запроса. Этот middleware
+ * склеивает такие куски обратно в один ctx.message.text/caption.
  *
- * Триггер: первое сообщение длиной ровно 4096 символов от юзера → создаём slot,
- * держим middleware-pipeline открытым до 2.5с. Любые text/caption от того же
- * юзера в окне аппендим в slot. Как только пришёл кусок < 4096 (последний) или
- * истёк timer — флашим: мутируем text/caption первого ctx и отпускаем next().
+ * Триггер: первое сообщение длиной ≥ COALESCE_TRIGGER_LENGTH (3000 — порог
+ * "подозрительно длинное, может быть split"). Точно по 4096 завязываться
+ * нельзя: некоторые клиенты режут по последнему пробелу перед лимитом, длина
+ * первого куска получается чуть меньше. 3000 — баланс между покрытием
+ * реальных split'ов и редкими false-positive'ами на честных длинных
+ * сообщениях.
  *
- * Фильтр: только text и caption (photo/video/document с подписью). Voice / audio /
- * sticker не имеют 4096-чарового текста, фильтр их не цепляет естественно.
+ * Окно: 3.5с с запасом на сетевые задержки доставки второго куска у юзеров
+ * со слабым каналом. Любой text/caption от того же юзера в окне аппендим в
+ * slot. Как только пришёл кусок ниже порога (последний) или истёк timer —
+ * флашим: мутируем text/caption первого ctx и отпускаем next().
+ *
+ * Фильтр: только text и caption (photo/video/document с подписью). Voice /
+ * audio / sticker не имеют длинного текста, фильтр их не цепляет естественно.
  *
  * ВАЖНО: middleware регистрируется ДО `sequentialize` в bot.ts. После
  * sequentialize апдейты по чату обрабатываются последовательно — второй кусок
@@ -24,8 +31,9 @@ import { logger } from "../logger.js";
  * (auth ещё не сработал, ctx.user недоступен).
  */
 
+const COALESCE_TRIGGER_LENGTH = 3000;
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
-const COALESCE_WINDOW_MS = 2500;
+const COALESCE_WINDOW_MS = 3500;
 
 interface CoalesceSlot {
   ctx: BotContext;
@@ -81,6 +89,9 @@ export const messageCoalescingMiddleware: MiddlewareFn<BotContext> = async (ctx,
     }
     existing.parts.push(text);
     clearTimeout(existing.timer);
+    // Continuation < лимита Telegram'а = это последний кусок (Telegram режет
+    // только при достижении лимита, конечный остаток всегда меньше). Флашим
+    // мгновенно. Иначе — middle-chunk, ждём ещё.
     if (text.length < TELEGRAM_MAX_MESSAGE_LENGTH) {
       flush(userId);
     } else {
@@ -89,7 +100,7 @@ export const messageCoalescingMiddleware: MiddlewareFn<BotContext> = async (ctx,
     return;
   }
 
-  if (text.length < TELEGRAM_MAX_MESSAGE_LENGTH) {
+  if (text.length < COALESCE_TRIGGER_LENGTH) {
     return next();
   }
 
