@@ -396,9 +396,14 @@ export const MODEL_TRANSLATIONS_EN: Record<string, ModelTranslation> = {
       "Alibaba video model with high movement quality and 1080p support. Supports image-to-video (with optional last frame and driving audio) and video continuation modes. Without media — text-to-video.",
   },
   "grok-imagine": {
-    name: "🔮 Grok Imagine",
+    name: "🔮 Grok Imagine (text → video)",
     description:
-      "xAI (Grok) video model. Text-to-video and image-to-video with 6–30 second clips. Supports up to 7 input images — reference them in the prompt via @image1, @image2, etc.",
+      "xAI (Grok) video model, text-to-video mode. No reference images — generation by text prompt only.",
+  },
+  "grok-imagine-r2v": {
+    name: "🔮 Grok Imagine (photo → video)",
+    description:
+      "xAI (Grok) video model, reference-to-video mode. Accepts up to 7 reference images — refer to them in the prompt via @image1, @image2, etc.",
   },
   "grok-imagine-image": {
     name: "🔮 Grok Imagine",

@@ -185,6 +185,19 @@ export const MODEL_FAMILIES: Record<string, ModelFamily> = {
     ],
   },
 
+  "grok-imagine": {
+    id: "grok-imagine",
+    name: "🔮 Grok Imagine",
+    section: "video",
+    description:
+      "Видеомодель от xAI (Grok). Два режима: text-to-video — генерация по текстовому промпту; reference-to-video — генерация по референсным изображениям.",
+    defaultModelId: "grok-imagine",
+    members: [
+      { modelId: "grok-imagine", variantLabel: "текст → видео" },
+      { modelId: "grok-imagine-r2v", variantLabel: "фото → видео" },
+    ],
+  },
+
   minimax: {
     id: "minimax",
     name: "🎞️ Hailuo 2.3",
