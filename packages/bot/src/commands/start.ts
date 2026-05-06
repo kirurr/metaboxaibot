@@ -476,9 +476,6 @@ export async function handleLanguageChangeSelect(ctx: BotContext): Promise<void>
   const updatedUser = await userService.setLanguage(ctx.user.id, lang);
   const t = getT(lang);
 
-  // Remove the inline picker message to keep chat clean.
-  await ctx.deleteMessage().catch(() => void 0);
-
   await ctx.reply(t.menu.languageChanged, {
     reply_markup: buildMainMenuKeyboard(t, ctx.user.id),
   });
