@@ -37,6 +37,7 @@ import {
 import {
   handleVideoModelSelect,
   handleVideoFamilySelect,
+  handleVideoExtendEntry,
   handleVideoMessage,
   handleVideoPhoto,
   handleVideoVideo,
@@ -275,6 +276,7 @@ export function createBot(token: string): Bot<BotContext> {
   // ── Video model selection callback ───────────────────────────────────────
   bot.callbackQuery(/^video_model_/, handleVideoModelSelect);
   bot.callbackQuery(/^video_family_/, handleVideoFamilySelect);
+  bot.callbackQuery(/^video_extend_/, handleVideoExtendEntry);
 
   // ── Mode picker callback (video + design) ────────────────────────────────
   bot.callbackQuery(/^mode:/, handleModeSet);

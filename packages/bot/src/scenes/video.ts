@@ -128,6 +128,9 @@ export function buildVideoModelKeyboard(savedModelId?: string | null): InlineKey
   const addedFamilies = new Set<string>();
 
   for (const m of allModels) {
+    // Скрытые модели (e.g. grok-imagine-extend) активируются только через
+    // спец-кнопки (типа «Продлить»), в карусели их показывать не нужно.
+    if (m.hiddenFromCarousel) continue;
     const familyId = MODEL_TO_FAMILY[m.id];
     if (familyId) {
       if (addedFamilies.has(familyId)) continue;
@@ -2037,4 +2040,55 @@ export async function handleVideoTranscribeCallback(ctx: BotContext): Promise<vo
     await ctx.api.deleteMessage(chatId, pendingMsg.message_id).catch(() => void 0);
     await ctx.reply(ctx.t.voice.failed);
   }
+}
+
+// ── Grok Imagine: Extend video flow ─────────────────────────────────────────
+
+/**
+ * Кнопка «Продлить» под результатом Grok-видео. Callback data:
+ * `video_extend_{outputId}`.
+ *
+ * Активирует скрытую модель `grok-imagine-extend`, прикрепляет исходное видео
+ * в slot `source_video` (хранится как сырой s3-ключ — бот при submit'е резолвит
+ * через `resolveMediaInputUrls` → presigned URL для FAL).
+ *
+ * После активации юзер просто шлёт текстовый промпт — стандартный
+ * `executeVideoPrompt` flow возьмёт `videoModelId="grok-imagine-extend"`,
+ * сгенерит extension через FAL endpoint `xai/grok-imagine-video/extend-video`.
+ *
+ * НЕ показывается под результатом самого extend'а (там output >15s типично,
+ * FAL не примет повторно как input).
+ */
+export async function handleVideoExtendEntry(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  const outputId = (ctx.callbackQuery?.data ?? "").replace("video_extend_", "");
+  await ctx.answerCallbackQuery();
+
+  const output = await generationService.getOutputById(outputId);
+  if (!output?.s3Key) {
+    await ctx.reply(ctx.t.video.extendNotAvailable);
+    return;
+  }
+
+  // Защита от попыток продлить не-Grok видео (теоретически кнопка не должна
+  // отображаться под другими моделями, но защищаемся на случай старых
+  // callback-данных в чате).
+  if (output.modelId !== "grok-imagine" && output.modelId !== "grok-imagine-r2v") {
+    await ctx.reply(ctx.t.video.extendNotAvailable);
+    return;
+  }
+
+  const EXTEND_MODEL_ID = "grok-imagine-extend";
+  // Сбрасываем активный upload-slot (вдруг юзер был mid-upload в другую
+  // модель), затем переключаем state на extend-режим.
+  clearActiveSlot(ctx.user.id);
+  await userStateService.setState(ctx.user.id, "VIDEO_ACTIVE", "video");
+  await userStateService.setModelForSection(ctx.user.id, "video", EXTEND_MODEL_ID);
+  // Очищаем все слоты у extend-модели и кладём ровно один — source_video с
+  // s3-ключом исходного результата. resolveMediaInputUrls на submit'е
+  // подпишет URL для FAL.
+  await userStateService.clearMediaInputs(ctx.user.id, EXTEND_MODEL_ID);
+  await userStateService.addMediaInput(ctx.user.id, EXTEND_MODEL_ID, "source_video", output.s3Key);
+
+  await ctx.reply(ctx.t.video.extendActivated);
 }
