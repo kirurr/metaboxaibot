@@ -150,6 +150,25 @@ const REASONING_EFFORT_GPT55: ModelSettingDef = {
 };
 
 /**
+ * Reasoning effort for gpt-5-nano — позиционируется как лёгкая модель,
+ * default `low` оставляет больше бюджета видимому ответу. Без явного
+ * выбора OpenAI применил бы `medium`, что на маленьком max_output_tokens
+ * приводило к пустым ответам (reasoning съедал весь бюджет).
+ */
+const REASONING_EFFORT_GPT5_NANO: ModelSettingDef = {
+  key: "reasoning_effort",
+  label: "Глубина рассуждений",
+  description: "Низкая — мгновенно, Средняя — баланс, Высокая — точнее на сложных задачах.",
+  type: "select",
+  options: [
+    { value: "low", label: "Низкая" },
+    { value: "medium", label: "Средняя" },
+    { value: "high", label: "Высокая" },
+  ],
+  default: "low",
+};
+
+/**
  * Reasoning effort for gpt-5-pro — only "high" is supported.
  */
 const REASONING_EFFORT_GPT5_PRO: ModelSettingDef = {
@@ -366,7 +385,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
     isAsync: false,
     contextStrategy: "provider_chain",
     contextMaxMessages: 0,
-    settings: [VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
+    settings: [REASONING_EFFORT_GPT5_NANO, VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
   },
   "o4-mini": {
     id: "o4-mini",

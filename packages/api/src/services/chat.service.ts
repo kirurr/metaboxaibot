@@ -204,6 +204,17 @@ export const chatService = {
 
     const ms = await userStateService.getEffectiveDialogSettings(userId, dialogId, dialog.modelId);
 
+    // `getEffectiveDialogSettings` возвращает только то что юзер явно сохранил
+    // — модельные `default`'ы из `AI_MODELS[id].settings[]` остаются хинтом для
+    // UI и до сервера не доезжают. Для ключей где это критично (reasoning_effort
+    // на gpt-5-nano: без явного `low` OpenAI применяет свой `medium`, который
+    // на узком max_output_tokens вызывает пустые ответы) подмешиваем default
+    // здесь. Юзер сохранивший своё значение не пострадает — оно уже в `ms`.
+    if (ms.reasoning_effort === undefined && model?.settings) {
+      const def = model.settings.find((s) => s.key === "reasoning_effort")?.default;
+      if (def !== undefined) ms.reasoning_effort = def;
+    }
+
     const extractCache: ExtractCache = new Map();
 
     // Check balance > 0 cause we dont know how much outputTokens will be generated
@@ -668,6 +679,34 @@ export const chatService = {
     if (acquiredKeyId) void recordSuccess(acquiredKeyId);
 
     const responseText = stripThinkingBlocks(chunks.join(""));
+
+    // Провайдер дошёл до конца стрима без визуального текста (gpt-5 reasoning
+    // съел max_output_tokens, пустой response.completed, refusal без content
+    // и т.п.). Раньше пустая строка молча сохранялась в БД, токены списывались
+    // — юзер видел пропавшее сообщение. Теперь маркируем user-message как
+    // failed и поднимаем UserFacingError; assistant-сообщение не сохраняем,
+    // токены не списываем (стоимость reasoning-токенов оплачиваем мы, юзер
+    // не виноват в пустом ответе).
+    if (responseText.length === 0) {
+      logger.warn(
+        {
+          dialogId,
+          modelId: dialog.modelId,
+          inputTokens: inputTokensUsed,
+          outputTokens: outputTokensUsed,
+          providerUsdCost,
+          chunkCount: chunks.length,
+        },
+        "chat.sendMessageStream: provider returned empty response",
+      );
+      await dialogService.markMessageFailed(userMessage.id);
+      throw new UserFacingError("Provider returned empty response", {
+        key: "modelTemporarilyUnavailable",
+        section: "gpt",
+        params: { modelName: model?.name ?? dialog.modelId },
+        notifyOps: true,
+      });
+    }
 
     // ── Token usage logging ─────────────────────────────────────────────
     // Provider возвращает usage не всегда (некоторые SSE-стримы или non-stream
