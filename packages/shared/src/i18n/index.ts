@@ -158,6 +158,8 @@ export interface Translations {
     extendPrompt: string;
     extendActivated: string;
     extendNotAvailable: string;
+    grokSiblingHintT2v: string;
+    grokSiblingHintR2v: string;
     hintVideoDefault: string;
     avatarCreationCancelled: string;
     avatarCreationStarted: string;

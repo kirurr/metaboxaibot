@@ -233,9 +233,20 @@ export async function activateVideoModel(
       is_persistent: true,
     };
 
+    // Бот-only хинт про sibling-режим у grok-imagine family. В webapp этот
+    // хинт лишний (там вариант выбирается прямо в карточке через picker),
+    // поэтому в model.description его не держим — добавляем здесь только для
+    // бот-активации.
+    const grokSiblingHint =
+      modelId === "grok-imagine"
+        ? `\n\n${ctx.t.video.grokSiblingHintT2v}`
+        : modelId === "grok-imagine-r2v"
+          ? `\n\n${ctx.t.video.grokSiblingHintR2v}`
+          : "";
+
     // Description goes first; attach the persistent section reply keyboard here
     // (если она нужна), inline для кнопок модели уезжает на хинт-сообщение.
-    await ctx.reply(`${modelName}\n\n${modelDesc}\n\n${costLine}`, {
+    await ctx.reply(`${modelName}\n\n${modelDesc}\n\n${costLine}${grokSiblingHint}`, {
       reply_markup: sectionReplyMarkup,
     });
 
@@ -2072,8 +2083,11 @@ export async function handleVideoExtendEntry(ctx: BotContext): Promise<void> {
 
   // Защита от попыток продлить не-Grok видео (теоретически кнопка не должна
   // отображаться под другими моделями, но защищаемся на случай старых
-  // callback-данных в чате).
-  if (output.modelId !== "grok-imagine" && output.modelId !== "grok-imagine-r2v") {
+  // callback-данных в чате). `grok-imagine-extend` тоже разрешён —
+  // итеративное продление пока output укладывается в FAL-лимит 2-15s
+  // (длину чекает воркер при прикреплении кнопки).
+  const allowedSourceModels = new Set(["grok-imagine", "grok-imagine-r2v", "grok-imagine-extend"]);
+  if (!allowedSourceModels.has(output.modelId)) {
     await ctx.reply(ctx.t.video.extendNotAvailable);
     return;
   }

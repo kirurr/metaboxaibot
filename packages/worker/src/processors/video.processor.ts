@@ -186,6 +186,10 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       null;
     let deductResult: DeductResult | undefined;
     let pollAdapter: ReturnType<typeof createVideoAdapter> | null = null;
+    // Lifted на функциональный scope чтобы был доступен в Stage 3 (рендер
+    // inline-кнопок) — там используется для решения «можно ли продлить»
+    // (FAL extend требует source длиной 2-15s).
+    let actualDuration: number | null = null;
 
     if (existingJob?.outputs?.length) {
       // Crash-recovery fast path. Atomic transition: only one runner wins.
@@ -582,7 +586,6 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       // videoResult present → finalize inline.
       const { ext, contentType } = sectionMeta("video");
 
-      let actualDuration: number | null = null;
       let actualWidth: number | null = null;
       let actualHeight: number | null = null;
       let actualFps: number | null = null;
@@ -768,11 +771,24 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         ? [{ text: sendOriginalLabel, callback_data: `orig_${outputId}` }]
         : null;
 
-    // «Продлить» — только для primary Grok-моделей (`grok-imagine`,
-    // `grok-imagine-r2v`). НЕ для `grok-imagine-extend` — output extend'а
-    // уже включает оригинал и часто >15s, FAL не примет его как input.
-    const isGrokExtendable = modelId === "grok-imagine" || modelId === "grok-imagine-r2v";
-    const extendRow: InlineKeyboardButton[] | null = isGrokExtendable
+    // «Продлить» — для всех Grok-видео (primary t2v/r2v + результат самого
+    // extend'а), при условии что output укладывается в FAL-лимит на источник
+    // (2-15s). Это даёт итеративное продление: 6s оригинал → 12s → 18s
+    // (последний уже > 15s, кнопка не появится). Если actualDuration не
+    // удалось распарсить — кнопку прячем (fail-safe: лучше не показать
+    // легитимный extend, чем показать нерабочий и получить FAL-ошибку).
+    const FAL_EXTEND_INPUT_MAX_S = 15;
+    const FAL_EXTEND_INPUT_MIN_S = 2;
+    const isGrokModel =
+      modelId === "grok-imagine" ||
+      modelId === "grok-imagine-r2v" ||
+      modelId === "grok-imagine-extend";
+    const canBeExtended =
+      isGrokModel &&
+      actualDuration !== null &&
+      actualDuration >= FAL_EXTEND_INPUT_MIN_S &&
+      actualDuration <= FAL_EXTEND_INPUT_MAX_S;
+    const extendRow: InlineKeyboardButton[] | null = canBeExtended
       ? [{ text: t.video.extendButton, callback_data: `video_extend_${outputId}` }]
       : null;
 
