@@ -38,5 +38,13 @@ ALTER TABLE "users" ADD CONSTRAINT "users_referredById_fkey"
 -- 3. Добавляем FK на GenerationJob (был только индекс userId, без relation).
 --    После удаления юзера cascade прибьёт все его джобы; до этого orphans
 --    оставались бесконечно.
+--
+-- ВАЖНО: до этого FK не было, поэтому в БД могли накопиться orphan-записи
+-- (generation_jobs.userId, для которых нет соответствующего users.id —
+-- например, после прежних ручных удалений или старых багов). ADD CONSTRAINT
+-- упадёт на таких строках с FK violation. Зачищаем их явно перед ADD.
+DELETE FROM "generation_jobs"
+WHERE "userId" NOT IN (SELECT "id" FROM "users");
+
 ALTER TABLE "generation_jobs" ADD CONSTRAINT "generation_jobs_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
