@@ -195,12 +195,7 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
           <HeyGenVoicePicker voiceId={String(values["voice_id"] ?? "")} onChange={onChange} />
         )}
         {def.type === "did-voice-picker" && (
-          <DIDVoicePicker
-            voiceId={String(values["voice_id"] ?? "")}
-            voiceUrl={String(values["voice_url"] ?? "")}
-            voiceS3Key={String(values["voice_s3key"] ?? "")}
-            onChange={onChange}
-          />
+          <DIDVoicePicker voiceId={String(values["voice_id"] ?? "")} onChange={onChange} />
         )}
         {def.type === "elevenlabs-voice-picker" && (
           <ElevenLabsVoicePicker voiceId={String(values["voice_id"] ?? "")} onChange={onChange} />

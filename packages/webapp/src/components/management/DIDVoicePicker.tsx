@@ -6,8 +6,6 @@ import { VoiceList, type VoiceListItem } from "./VoiceList.js";
 
 interface DIDVoicePickerProps {
   voiceId: string;
-  voiceUrl: string;
-  voiceS3Key: string;
   onChange: (key: string, value: unknown) => void;
 }
 
