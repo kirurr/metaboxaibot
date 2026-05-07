@@ -583,6 +583,18 @@ export const chatService = {
           // message. Raw stack trace юзеру бесполезен; оригинал кладём в cause,
           // notifyTechError развернёт его в alert'е.
           if (isTransient) {
+            // Mid-stream обрыв: часть ответа уже доехала до юзера, fallback к
+            // другому провайдеру невозможен (был бы шизофренический склейк).
+            // Отдельный ключ — иначе юзер видит «временно недоступен» сразу
+            // после того как модель уже отвечала.
+            if (haveChunks) {
+              throw new UserFacingError(`Stream interrupted on ${keyProvider}`, {
+                key: "chatStreamInterrupted",
+                params: { modelName: model?.name ?? dialog.modelId },
+                notifyOps: true,
+                cause: err,
+              });
+            }
             throw new UserFacingError(`${transientReason} on ${keyProvider}`, {
               key: "modelTemporarilyUnavailable",
               section: "gpt",

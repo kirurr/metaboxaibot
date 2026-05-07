@@ -15,7 +15,6 @@ export type Language =
   | "he";
 
 export type BotState =
-  | "AWAITING_LANGUAGE"
   | "IDLE"
   | "MAIN_MENU"
   | "GPT_SECTION"

@@ -265,6 +265,10 @@ export default {
     kieVideoDurationOutOfRange: "❌ Длительность видео должна быть от {min} до {max} секунд.",
     kieImageTooSmall:
       "❌ Изображение слишком маленькое — обе стороны должны быть не менее {min} пикселей. Загрузите фото с более высоким разрешением.",
+    kieImageAspectRatioOutOfRange:
+      "❌ Соотношение сторон изображения должно быть от {min} до {max}. Загрузите другое фото.",
+    chatStreamInterrupted:
+      "❌ {modelName} начал отвечать, но потерял мысль на полпути. Бывает! Отправьте запрос ещё раз — он соберётся. Токены за этот запрос не списаны.",
     mediaSlotImagesOnly:
       "❌ Этот слот принимает только фотографии. Видео не поддерживается — отправьте фото.",
     mediaSlotVideosOnly:
@@ -571,6 +575,9 @@ export default {
     refineDesign: "🎨 Дизайн",
     refineVideo: "🎥 Видео",
     refineSaved: "✅ Изображение загружено в «{slot}».",
+    refineReadyForPrompt:
+      "🖼 Ваше изображение прикреплено как референс к {model}.\n✍️ Отправьте текст или 🎤 голосовое — что нужно доработать.",
+    refinePickSection: "Выберите раздел для доработки:",
   },
   confirmGeneration: {
     message:

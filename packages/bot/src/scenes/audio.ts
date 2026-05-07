@@ -234,7 +234,11 @@ export async function handleVoiceCloneUpload(ctx: BotContext): Promise<void> {
  * Executes a text prompt in the active audio session.
  * Used by handleAudioMessage (text) and the voice-prompt callback.
  */
-export async function executeAudioPrompt(ctx: BotContext, prompt: string): Promise<void> {
+export async function executeAudioPrompt(
+  ctx: BotContext,
+  prompt: string,
+  promptMessageId?: number,
+): Promise<void> {
   if (!ctx.user) return;
   const chatId = ctx.chat?.id;
   if (!chatId) return;
@@ -247,6 +251,7 @@ export async function executeAudioPrompt(ctx: BotContext, prompt: string): Promi
     modelId,
     prompt,
     telegramChatId: chatId,
+    promptMessageId,
   };
   if (
     await gateLowIqMode({
@@ -281,7 +286,7 @@ export async function executeAudioPrompt(ctx: BotContext, prompt: string): Promi
 
 export async function handleAudioMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
-  await executeAudioPrompt(ctx, ctx.message.text);
+  await executeAudioPrompt(ctx, ctx.message.text, ctx.message.message_id);
 }
 
 export async function handleAudioVoice(ctx: BotContext): Promise<void> {

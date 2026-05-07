@@ -34,26 +34,27 @@ export async function handleVoicePromptCallback(ctx: BotContext): Promise<void> 
 
   await ctx.answerCallbackQuery();
 
-  const text = getStoredTranscription(ctx.user.id, id);
-  if (!text) {
+  const stored = getStoredTranscription(ctx.user.id, id);
+  if (!stored) {
     await ctx.reply(ctx.t.voice.expired);
     return;
   }
+  const { text, voiceMessageId } = stored;
 
   logger.debug({ section, textLength: text.length }, "voicePromptCallback: executing prompt");
 
   switch (section) {
     case "gpt":
-      await executeGptPrompt(ctx, text);
+      await executeGptPrompt(ctx, text, voiceMessageId);
       break;
     case "design":
-      await executeDesignPrompt(ctx, text);
+      await executeDesignPrompt(ctx, text, undefined, voiceMessageId);
       break;
     case "video":
-      await executeVideoPrompt(ctx, text);
+      await executeVideoPrompt(ctx, text, undefined, voiceMessageId);
       break;
     case "audio":
-      await executeAudioPrompt(ctx, text);
+      await executeAudioPrompt(ctx, text, voiceMessageId);
       break;
     default:
       logger.warn({ section }, "voicePromptCallback: unknown section");

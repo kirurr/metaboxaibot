@@ -171,10 +171,6 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       }
       await ctx.reply(msg);
     }
-    const state = await userStateService.get(ctx.user.id);
-    if (state) {
-      return;
-    }
   } else if (param?.startsWith("linkweb_") && ctx.user) {
     // ── ai.metabox.global → Bot: привязка web-аккаунта ───────────────────────
     // Юзер залогинен на ai.metabox.global, нажал «Привязать Telegram»,
@@ -214,8 +210,6 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       logger.error({ err, state }, "[start linkweb] failed");
       await ctx.reply("❌ Не удалось привязать аккаунт. Попробуйте ещё раз.");
     }
-    const state2 = await userStateService.get(ctx.user.id);
-    if (state2) return;
   } else if (param?.startsWith("ref_") && ctx.user && ctx.user.referredById) {
     // ── Referral deep link ─────────────────────────────────────────────────────
     // User already has a referrer — notify with mentor name
@@ -295,99 +289,97 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     }
   }
 
-  if (ctx.user) {
-    await userStateService.setState(ctx.user.id, "AWAITING_LANGUAGE");
+  if (!ctx.user) return;
 
-    // Register stub account on Metabox (or link existing)
-    if (config.metabox?.apiUrl) {
-      (async () => {
-        try {
-          // Re-read user from DB to get updated referredById (set in ref_ handler above)
-          const freshUser = await db.user.findUnique({
-            where: { id: ctx.user!.id },
-            select: { referredById: true, firstName: true, lastName: true, username: true },
-          });
-          const { registerBotUser } = await import("@metabox/api/services");
-          const result = await registerBotUser({
-            telegramId: ctx.user!.id,
-            firstName: freshUser?.firstName ?? ctx.user!.firstName,
-            lastName: freshUser?.lastName ?? ctx.user!.lastName,
-            username: freshUser?.username ?? ctx.user!.username,
-            referrerTelegramId: freshUser?.referredById ?? ctx.user!.referredById,
-            referrerUserId: resolvedReferrerUserId ?? undefined,
-          });
-          if (result?.ok) {
-            if (!result.isStub) {
-              // Real account found — auto-link
-              await db.user.update({
-                where: { id: ctx.user!.id },
-                data: {
-                  metaboxUserId: result.userId,
-                  metaboxReferralCode: result.referralCode,
-                },
-              });
-              // Notify user about auto-linking
-              const mentorInfo = result.mentor
-                ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
-                : "";
-              await ctx
-                .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
-                .catch(() => {});
-
-              // Sync subscription + pending token grants from Metabox
-              void syncMetaboxGrants(ctx.user!.id).catch((err) => {
-                logger.error({ err }, "[start registerBotUser] grant sync failed");
-              });
-            } else {
-              // Stub account — store referralCode but NOT metaboxUserId
-              await db.user.update({
-                where: { id: ctx.user!.id },
-                data: { metaboxReferralCode: result.referralCode },
-              });
-            }
-          }
-        } catch (registerErr) {
-          logger.error({ err: registerErr }, "[start] registerBotUser failed");
-        }
-      })();
-    }
-  }
-  const landingUrl = config.metabox.landingUrl;
-  // Шаблон welcome содержит {landingUrl} многократно (по ссылке на каждый
-  // документ) — нужен replaceAll, иначе остаются битые href.
-  // Разделитель из подчёркиваний — Telegram не поддерживает <hr>/markdown HR,
-  // визуальная черта только символами.
-  const divider = "________________________";
-  const welcomeBilingual = `${getT("ru").start.welcome.replaceAll("{landingUrl}", landingUrl)}\n\n${divider}\n\n${getT("en").start.welcome.replaceAll("{landingUrl}", landingUrl)}`;
-  await ctx.reply(welcomeBilingual, {
-    reply_markup: buildLanguageKeyboard(),
-    parse_mode: "HTML",
-  });
-}
-
-/**
- * Callback handler for language selection buttons (data: lang_<code>).
- * Sets language, credits welcome bonus for new users, sends welcome messages.
- */
-export async function handleLanguageSelect(ctx: BotContext): Promise<void> {
-  const data = ctx.callbackQuery?.data ?? "";
-  const lang = data.replace("lang_", "") as Language;
-
-  if (!SUPPORTED_LANGUAGES.includes(lang) || !ctx.user) {
-    await ctx.answerCallbackQuery();
-    return;
-  }
-
-  await ctx.answerCallbackQuery();
-
+  // Авто-определяем язык из Telegram-клиента (`from.language_code`) и сразу
+  // сохраняем его в БД. Никакого AWAITING_LANGUAGE — пользователь должен
+  // мочь работать с ботом сразу после /start. Сменить язык можно через
+  // кнопку «Язык» в главном меню.
+  const inferredLang = inferTelegramLanguage(ctx);
   const isNew = ctx.user.isNew;
-  const updatedUser = await userService.setLanguage(ctx.user.id, lang);
+  const updatedUser = await userService.setLanguage(ctx.user.id, inferredLang);
   await userStateService.setState(ctx.user.id, "IDLE");
-  const t = getT(lang);
+  const t = getT(inferredLang);
+
+  // Register stub account on Metabox (or link existing) — fire-and-forget
+  if (config.metabox?.apiUrl) {
+    (async () => {
+      try {
+        // Re-read user from DB to get updated referredById (set in ref_ handler above)
+        const freshUser = await db.user.findUnique({
+          where: { id: ctx.user!.id },
+          select: { referredById: true, firstName: true, lastName: true, username: true },
+        });
+        const { registerBotUser } = await import("@metabox/api/services");
+        const result = await registerBotUser({
+          telegramId: ctx.user!.id,
+          firstName: freshUser?.firstName ?? ctx.user!.firstName,
+          lastName: freshUser?.lastName ?? ctx.user!.lastName,
+          username: freshUser?.username ?? ctx.user!.username,
+          referrerTelegramId: freshUser?.referredById ?? ctx.user!.referredById,
+          referrerUserId: resolvedReferrerUserId ?? undefined,
+        });
+        if (result?.ok) {
+          if (!result.isStub) {
+            // Real account found — auto-link
+            await db.user.update({
+              where: { id: ctx.user!.id },
+              data: {
+                metaboxUserId: result.userId,
+                metaboxReferralCode: result.referralCode,
+              },
+            });
+            // Notify user about auto-linking
+            const mentorInfo = result.mentor
+              ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
+              : "";
+            await ctx
+              .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
+              .catch(() => {});
+
+            // Sync subscription + pending token grants from Metabox
+            void syncMetaboxGrants(ctx.user!.id).catch((err) => {
+              logger.error({ err }, "[start registerBotUser] grant sync failed");
+            });
+          } else {
+            // Stub account — store referralCode but NOT metaboxUserId
+            await db.user.update({
+              where: { id: ctx.user!.id },
+              data: { metaboxReferralCode: result.referralCode },
+            });
+          }
+        }
+      } catch (registerErr) {
+        logger.error({ err: registerErr }, "[start] registerBotUser failed");
+      }
+    })();
+  }
 
   if (isNew) {
     await userService.creditWelcomeBonus(ctx.user.id);
   }
+
+  // Welcome-сообщение (с дисклеймером и ссылками на документы) идёт отдельным
+  // сообщением, без кнопок — чтобы при смене языка не удалялся весь текст с
+  // юр. ссылками (handleLanguageChangeSelect делает deleteMessage на сообщении
+  // с picker'ом). Для RU-пользователей шлём bilingual (RU + EN) — аудитория
+  // двуязычная, приветствие показываем на двух языках. Для всех остальных
+  // (включая en и неподдерживаемые → fallback "en") — только в целевом языке.
+  // Шаблон welcome содержит {landingUrl} многократно (по ссылке на каждый
+  // документ) — нужен replaceAll, иначе остаются битые href.
+  const landingUrl = config.metabox.landingUrl;
+  let welcome: string;
+  if (inferredLang === "ru") {
+    // Разделитель из подчёркиваний — Telegram не поддерживает <hr>/markdown HR,
+    // визуальная черта только символами.
+    const divider = "________________________";
+    const ruWelcome = getT("ru").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    const enWelcome = getT("en").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    welcome = `${ruWelcome}\n\n${divider}\n\n${enWelcome}`;
+  } else {
+    welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
+  }
+  await ctx.reply(welcome, { reply_markup: buildLanguageKeyboard("langset_"), parse_mode: "HTML" });
 
   // Inline button to open Profile in mini app
   const webappUrl = config.bot.webappUrl;
@@ -412,9 +404,11 @@ export async function handleLanguageSelect(ctx: BotContext): Promise<void> {
       reply_markup: onboardingKb,
     });
   } else {
-    // Returning users get the main menu immediately
+    // Returning users get the main menu immediately. buildMainMenuKeyboard
+    // ставит persistent reply-keyboard со свежими wtoken'ами — старые
+    // протухшие webApp-URL'ы заменяются.
     await ctx.reply(t.start.mainMenuTitle, {
-      reply_markup: buildMainMenuKeyboard(t, ctx.user?.id),
+      reply_markup: buildMainMenuKeyboard(t, ctx.user.id),
     });
   }
 
@@ -426,6 +420,17 @@ export async function handleLanguageSelect(ctx: BotContext): Promise<void> {
   }
 
   ctx.user = { ...updatedUser, isNew: false };
+}
+
+/**
+ * Достаём язык из Telegram-клиента (`from.language_code`, IETF tag).
+ * Нормализуем по первой части до дефиса (`pt-br` → `pt`) и матчим
+ * на `SUPPORTED_LANGUAGES`. Если язык не поддерживается или поле пустое —
+ * fallback `"en"`.
+ */
+function inferTelegramLanguage(ctx: BotContext): Language {
+  const raw = ctx.from?.language_code?.toLowerCase().split("-")[0] ?? "";
+  return (SUPPORTED_LANGUAGES as readonly string[]).includes(raw) ? (raw as Language) : "en";
 }
 
 /**
@@ -470,9 +475,6 @@ export async function handleLanguageChangeSelect(ctx: BotContext): Promise<void>
 
   const updatedUser = await userService.setLanguage(ctx.user.id, lang);
   const t = getT(lang);
-
-  // Remove the inline picker message to keep chat clean.
-  await ctx.deleteMessage().catch(() => void 0);
 
   await ctx.reply(t.menu.languageChanged, {
     reply_markup: buildMainMenuKeyboard(t, ctx.user.id),

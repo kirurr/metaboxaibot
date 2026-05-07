@@ -286,31 +286,17 @@ export interface FallbackNotificationContext {
   userId?: string;
 }
 
-const FALLBACK_ALERT_TTL_MS = 5 * 60 * 1000;
-
 /**
- * Алерт в технический tg-канал о факте fallback'а. Дедуплицируется через
- * Redis SETNX (TTL 5 мин) по ключу `alert:fallback:<primary>:<fallback>` —
- * первый fallback за окно отправляется, последующие в том же окне пишутся
- * только в лог.
+ * Алерт в технический tg-канал о факте fallback'а.
  *
- * Для случая `fallbackProvider === null` (все кандидаты упали) — отдельный
- * ключ `alert:fallback:<primary>:NONE`.
+ * Раньше был дедуп через Redis SETNX (TTL 5 мин), но он скрывал реальную
+ * частоту fallback'ов и мешал диагностике (один сбойный провайдер мог
+ * генерировать сотни fallback'ов за окно, и все они уходили только в лог).
+ * Теперь алерт идёт на каждый fallback — пусть шумно, зато честно.
  */
 export async function notifyFallback(ctx: FallbackNotificationContext): Promise<void> {
   const chatId = config.alerts.chatId;
   if (!chatId) return;
-
-  const fbLabel = ctx.fallbackProvider ?? "NONE";
-  // Включаем modelId в ключ — иначе разные модели одного провайдера маскируют
-  // алерты друг друга (flux-2 fal→kie за минуту до seedream-5 fal→kie скрыл бы
-  // второй алерт).
-  const dedupeKey = `alert:fallback:${ctx.modelId}:${ctx.primaryProvider}:${fbLabel}`;
-  const redis = getRedis();
-  const setResult = await redis
-    .set(dedupeKey, ctx.reason, "PX", FALLBACK_ALERT_TTL_MS, "NX")
-    .catch(() => null);
-  if (setResult !== "OK") return; // дубликат за окно — не шлём
 
   const threadId = config.alerts.threadId;
   const allFailed = ctx.fallbackProvider === null;

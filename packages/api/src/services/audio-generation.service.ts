@@ -22,6 +22,8 @@ export interface SubmitAudioParams {
   voiceId?: string;
   sourceAudioUrl?: string;
   telegramChatId: number;
+  /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
+  promptMessageId?: number;
 }
 
 export interface SubmitAudioResult {
@@ -72,6 +74,7 @@ export const audioGenerationService = {
         sourceAudioUrl,
         telegramChatId,
         modelSettings,
+        ...(params.promptMessageId ? { promptMessageId: params.promptMessageId } : {}),
       },
       {
         jobId: job.id,

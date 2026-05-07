@@ -3,14 +3,13 @@ import { sequentialize } from "@grammyjs/runner";
 import type { BotContext } from "./types/context.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import { i18nMiddleware } from "./middlewares/i18n.middleware.js";
+import { messageCoalescingMiddleware } from "./middlewares/message-coalescing.middleware.js";
 import {
   handleStart,
-  handleLanguageSelect,
   handleLanguageMenu,
   handleLanguageChangeSelect,
   handleOnboardingOk,
 } from "./commands/start.js";
-import { buildLanguageKeyboard } from "./keyboards/language.keyboard.js";
 import { handleMenu, handleGpt, handleDesign, handleAudio, handleVideo } from "./commands/menu.js";
 import { handleNoTool } from "./handlers/no-tool.handler.js";
 import {
@@ -95,6 +94,12 @@ export function createBot(token: string): Bot<BotContext> {
     token,
     config.bot.testEnvironment ? { client: { environment: "test" } } : undefined,
   );
+
+  // ── Coalesce auto-split long messages — должен идти ДО sequentialize.
+  //    После sequentialize апдейты ждут друг друга по чату; второй кусок
+  //    split'а застрянет в очереди и склейка не произойдёт. До sequentialize
+  //    апдейты параллельны, coalesce ловит оба чанка одновременно.
+  bot.use(messageCoalescingMiddleware);
 
   // ── Sequentialize updates per chat (must be the very first middleware so
   //    every downstream handler — auth, i18n, scenes, addMediaInput etc. — is
@@ -203,32 +208,6 @@ export function createBot(token: string): Bot<BotContext> {
     if (!ctx.chat || ctx.chat.type === "private") return next();
   });
 
-  // ── Language selection gate ──────────────────────────────────────────────
-  // While a user is in AWAITING_LANGUAGE state, block everything except
-  // /start command and lang_* callback queries. Reply with a bilingual prompt.
-  bot.use(async (ctx, next) => {
-    if (!ctx.user) return next();
-
-    // Always allow /start to (re)initialise the flow.
-    if (ctx.message?.text?.startsWith("/start")) return next();
-    // Always allow language selection callback itself.
-    if (ctx.callbackQuery?.data?.startsWith("lang_")) return next();
-
-    const state = await userStateService.get(ctx.user.id);
-    if (state?.state !== "AWAITING_LANGUAGE") return next();
-
-    // Blocked — prompt bilingually and re-show the keyboard.
-    const ru = getT("ru");
-    const en = getT("en");
-    const prompt = `${ru.start.selectLanguagePrompt}\n${en.start.selectLanguagePrompt}`;
-    if (ctx.callbackQuery) {
-      await ctx.answerCallbackQuery().catch(() => void 0);
-    }
-    if (ctx.chat) {
-      await ctx.reply(prompt, { reply_markup: buildLanguageKeyboard() }).catch(() => void 0);
-    }
-  });
-
   // ── Commands ─────────────────────────────────────────────────────────────
   bot.command("start", handleStart);
   bot.command("menu", handleMenu);
@@ -243,9 +222,7 @@ export function createBot(token: string): Bot<BotContext> {
   bot.command("audio", handleAudio);
   bot.command("video", handleVideo);
 
-  // ── Language selection callback ───────────────────────────────────────────
-  bot.callbackQuery(/^lang_/, handleLanguageSelect);
-  // In-menu language change (keeps current state, no welcome/balance) ────────
+  // ── In-menu language change (keeps current state, no welcome/balance) ────
   bot.callbackQuery(/^langset_/, handleLanguageChangeSelect);
 
   // ── Onboarding "Got it" callback ──────────────────────────────────────────

@@ -1,4 +1,9 @@
-import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
+import type {
+  VideoAdapter,
+  VideoInput,
+  VideoResult,
+  VideoValidationError,
+} from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -125,6 +130,30 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
     };
+  }
+
+  /**
+   * Per-model prompt length limit (in characters). Returns `null` for models
+   * without a known evolink-side limit — those skip prompt-length validation.
+   *
+   * Seedance 2.0 (standard и fast) на стороне Evolink режет промпт по 2000
+   * токенов. Эмпирический ratio из 400 ошибки: ~2.32 chars/token (русско-
+   * английский смешанный). 4500 символов даёт маржу до ~1940 токенов и
+   * предотвращает списание баланса за заведомо проигранную попытку.
+   */
+  private get promptMaxLength(): number | null {
+    if (this.modelId === "seedance-2" || this.modelId === "seedance-2-fast") {
+      return 4500;
+    }
+    return null;
+  }
+
+  validateRequest(input: VideoInput): VideoValidationError | null {
+    const limit = this.promptMaxLength;
+    if (limit !== null && input.prompt && input.prompt.length > limit) {
+      return { key: "promptTooLong", params: { limit } };
+    }
+    return null;
   }
 
   async submit(input: VideoInput): Promise<string> {
@@ -262,9 +291,28 @@ export class EvolinkVideoAdapter implements VideoAdapter {
     const imageEnd = mi.last_frame?.[0];
     const refImages = flattenRefElementsFirstOnly(mi);
     const elementPositions = buildEvolinkElementPositions(mi);
-    const remappedPrompt = input.prompt
+    let remappedPrompt = input.prompt
       ? translatePromptRefs(input.prompt, { dialect: "evolink", elementPositions })
       : undefined;
+
+    // Evolink reject'ит `image_end` (он же "end_frame") когда total image count > 2:
+    //   "end_frame is not supported when image count exceeds 2 (current: 3 images)"
+    // Total = (image_start ? 1 : 0) + (image_end ? 1 : 0) + image_urls.length.
+    // При fallback'е с KIE на kling-o3 у задачи могут быть одновременно
+    // first_frame + last_frame + ref_element_* — суммарно 3+ кадров.
+    // Workaround: last_frame не передаём как `image_end`, а добавляем его в
+    // `image_urls` и инструктируем модель завершить видео последним кадром
+    // через текстовый суффикс к промпту. Инструкцию шлём по-английски —
+    // надёжнее для kling, не зависит от языка пользовательского промпта.
+    const totalImages = (imageStart ? 1 : 0) + (imageEnd ? 1 : 0) + refImages.length;
+    let useImageEndField = !!imageEnd;
+    let effectiveRefImages = refImages;
+    if (imageEnd && totalImages > 2) {
+      useImageEndField = false;
+      effectiveRefImages = [...refImages, imageEnd];
+      const suffix = "End the video with the last reference image as the final frame.";
+      remappedPrompt = remappedPrompt ? `${remappedPrompt}\n\n${suffix}` : suffix;
+    }
 
     const aspectRatio = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio;
     const rawDuration = ms.duration ?? input.duration ?? 5;
@@ -280,8 +328,8 @@ export class EvolinkVideoAdapter implements VideoAdapter {
     };
     if (remappedPrompt) body.prompt = remappedPrompt.slice(0, 2500);
     if (imageStart) body.image_start = imageStart;
-    if (imageEnd) body.image_end = imageEnd;
-    if (refImages.length > 0) body.image_urls = refImages;
+    if (useImageEndField && imageEnd) body.image_end = imageEnd;
+    if (effectiveRefImages.length > 0) body.image_urls = effectiveRefImages;
     if (aspectRatio && aspectRatio !== "auto") body.aspect_ratio = aspectRatio;
     if (mapping.quality) body.quality = mapping.quality;
     return body;

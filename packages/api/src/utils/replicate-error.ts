@@ -7,7 +7,7 @@
  */
 
 /** Codes that indicate a user-correctable problem. */
-const USER_FACING_CODES = new Set(["E006", "E1001", "E9243", "E9825"]);
+const USER_FACING_CODES = new Set(["E005", "E006", "E1001", "E9243", "E9825"]);
 
 export class ReplicatePredictionError extends Error {
   constructor(
@@ -36,6 +36,12 @@ const USER_FACING_TEXT_PATTERNS: { pattern: RegExp; code: string }[] = [
   { pattern: /\bcontent (policy|moderation|filter)/i, code: "E006" },
   { pattern: /\bsafety (filter|policy)/i, code: "E006" },
   { pattern: /try (running it )?again with a different prompt/i, code: "E006" },
+  // Multimodal модели (Gemini-based image, и т.п.) при отказе генерировать
+  // картинку возвращают текстовый output вместо image — Replicate-обвязка
+  // в адаптере падает с "No image content found in response". Самый частый
+  // root cause — silent refusal по content policy либо модель сочла промпт
+  // непригодным. Мапим на E006 → юзеру говорим «измените промпт или фото».
+  { pattern: /no image content found in response/i, code: "E006" },
 ];
 
 /**
@@ -75,6 +81,9 @@ export function getReplicateUserMessage(
 ): string {
   const e = t.errors;
   switch (err.code) {
+    // E005 — Sora и др. video-модели на Replicate: "The input or output was
+    // flagged as sensitive". Семантика та же, что и E006 (content policy).
+    case "E005":
     case "E006":
       return e.replicateContentPolicy;
     case "E1001":

@@ -65,7 +65,16 @@ async function sendAudioBatch(
   chatId: number,
   tracks: Array<{ buffer?: Buffer; url?: string; ext: string; contentType: string }>,
   caption: string,
+  promptMessageId?: number,
 ): Promise<void> {
+  const replyToPrompt = promptMessageId
+    ? {
+        reply_parameters: {
+          message_id: promptMessageId,
+          allow_sending_without_reply: true,
+        },
+      }
+    : undefined;
   const ready = (
     await Promise.all(
       tracks.map(async (t, i) => {
@@ -94,7 +103,11 @@ async function sendAudioBatch(
   // blip'ах. Single retry — безопасный второй шанс без double-send'а.
   if (ready.length === 1) {
     await withRetry("audio.sendAudio", 2, () =>
-      telegram.sendAudio(chatId, new InputFile(ready[0].buf, `audio.${ready[0].ext}`)),
+      telegram.sendAudio(
+        chatId,
+        new InputFile(ready[0].buf, `audio.${ready[0].ext}`),
+        replyToPrompt,
+      ),
     );
   } else if (ready.length >= 2) {
     // Telegram лимит media-group: 2-10 элементов. Suno возвращает 2, в лимит
@@ -103,14 +116,16 @@ async function sendAudioBatch(
       type: "audio" as const,
       media: new InputFile(r.buf, `audio_${i + 1}.${r.ext}`),
     }));
-    await withRetry("audio.sendMediaGroup", 2, () => telegram.sendMediaGroup(chatId, media));
+    await withRetry("audio.sendMediaGroup", 2, () =>
+      telegram.sendMediaGroup(chatId, media, replyToPrompt),
+    );
   }
   // ready.length === 0: ни один трек не скачался — caption всё равно отправим,
   // юзер увидит хотя бы текст с информацией о генерации.
 
   if (caption) {
     await telegram
-      .sendMessage(chatId, caption, { parse_mode: "HTML" })
+      .sendMessage(chatId, caption, { parse_mode: "HTML", ...replyToPrompt })
       .catch((err) => logger.warn({ err, chatId }, "sendAudioBatch: caption send failed"));
   }
 }
@@ -125,6 +140,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     sourceAudioUrl,
     telegramChatId,
     modelSettings,
+    promptMessageId,
   } = job.data;
 
   const stage = job.data.stage ?? "generate";
@@ -678,7 +694,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
     // caption — отдельным сообщением сразу после.
     try {
-      await sendAudioBatch(telegramChatId, tracks, audioCaption);
+      await sendAudioBatch(telegramChatId, tracks, audioCaption, promptMessageId);
     } catch (sendErr) {
       logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
     }
