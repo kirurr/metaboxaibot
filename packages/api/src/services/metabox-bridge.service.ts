@@ -255,21 +255,27 @@ export interface RecordSaleResult {
 }
 
 /**
- * Перенос остатков (токены + опционально локальная подписка) на metabox-аккаунт
- * перед удалением юзера в боте. Эндпоинт `/credit-from-bot-deletion` пока
- * НЕ реализован на стороне metabox — функция спокойно бросит `MetaboxApiError(404)`,
- * caller это ловит и помечает запись `pendingMetaboxTransfer=true` в `DeletedUser`.
- * После выкатки эндпоинта на сайте поведение сразу станет happy-path без
- * изменений в коде бота.
+ * Перенос остатков (purchased + subscription токены + опционально локальная
+ * подписка) на metabox-аккаунт перед удалением юзера в боте.
+ *
+ * `purchasedTokens` идёт в `User.pendingBotTokens` (купленные/welcome/etc),
+ * `subscriptionTokens` — в `User.pendingBotSubscriptionTokens` (остаток
+ * подписочных). При повторной привязке нового TG к этому metabox-аккаунту
+ * новый бот получит их через стандартный sync-flow.
  *
  * `subscription` передаётся ТОЛЬКО если у юзера была локальная подписка с
- * `metaboxSubscriptionId === null` (не пришла из metabox — например Trial). Если
- * подписка изначально с metabox — она там уже есть, переносить не нужно.
+ * `metaboxSubscriptionId === null` (не пришла из metabox — например Trial).
+ * Если подписка изначально с metabox — она там уже есть, переносить не нужно.
+ *
+ * Идемпотентность: на metabox-стороне дедупликация по `externalRef =
+ * bot-deletion:tg-{telegramId}` — повторный запрос (ретрай) без побочных
+ * эффектов вернёт `{ ok: true, idempotent: true }`.
  */
 export async function transferOnDeletion(params: {
   metaboxUserId: string;
   telegramId: bigint;
-  tokens: number;
+  purchasedTokens: number;
+  subscriptionTokens: number;
   subscription?: {
     planName: string;
     period: string;
@@ -277,8 +283,8 @@ export async function transferOnDeletion(params: {
     endDate: string;
     startDate: string;
   };
-}): Promise<{ ok: true }> {
-  return post<{ ok: true }>("/credit-from-bot-deletion", {
+}): Promise<{ ok: true; idempotent?: boolean }> {
+  return post<{ ok: true; idempotent?: boolean }>("/credit-from-bot-deletion", {
     ...params,
     telegramId: params.telegramId.toString(),
   });

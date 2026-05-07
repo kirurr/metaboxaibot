@@ -183,9 +183,8 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
   }
 
   // ── 1. Перенос остатков на metabox (best-effort) ────────────────────────
-  const tokenBalance = Number(user.tokenBalance);
-  const subBalance = Number(user.subscriptionTokenBalance);
-  const totalTokens = tokenBalance + subBalance;
+  const purchasedTokens = Number(user.tokenBalance);
+  const subscriptionTokens = Number(user.subscriptionTokenBalance);
   const localSub = user.localSubscription;
   const subToTransfer =
     localSub && localSub.metaboxSubscriptionId === null
@@ -200,21 +199,24 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
 
   let pendingMetaboxTransfer = false;
   let transferError: string | null = null;
-  const shouldTransfer = !!user.metaboxUserId && (totalTokens > 0 || !!subToTransfer);
+  const shouldTransfer =
+    !!user.metaboxUserId && (purchasedTokens > 0 || subscriptionTokens > 0 || !!subToTransfer);
 
   if (shouldTransfer) {
     try {
       await metaboxTransfer({
         metaboxUserId: user.metaboxUserId!,
         telegramId: user.id,
-        tokens: totalTokens,
+        purchasedTokens,
+        subscriptionTokens,
         subscription: subToTransfer,
       });
       logger.info(
         {
           userId: userId.toString(),
           metaboxUserId: user.metaboxUserId,
-          tokens: totalTokens,
+          purchasedTokens,
+          subscriptionTokens,
           hasSubscription: !!subToTransfer,
         },
         "[account-deletion] metabox transfer ok",
