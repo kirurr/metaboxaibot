@@ -323,6 +323,8 @@ export default {
       "❌ {modelName}: generation did not finish within 24 hours and was cancelled. Please try again.",
     modelTemporarilyUnavailable:
       "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you.",
+    modelReasoningCapExhausted:
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth» or raise «Max response length».",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",

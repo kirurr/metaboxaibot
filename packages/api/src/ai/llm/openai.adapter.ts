@@ -10,30 +10,6 @@ import { logCall } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
 
 /**
- * Запас токенов под chain-of-thought для reasoning-моделей. Прибавляется к
- * пользовательскому "max output length" чтобы reasoning не съедал бюджет
- * видимого ответа. Числа консервативные — OpenAI всё равно биллит по факту,
- * `max_output_tokens` лишь верхняя граница.
- */
-function reasoningReserve(effort: string | undefined): number {
-  switch (effort) {
-    case "none":
-      return 0;
-    case "minimal":
-      return 1_024;
-    case "low":
-      return 4_096;
-    case "high":
-      return 32_000;
-    case "xhigh":
-      return 50_000;
-    case "medium":
-    default:
-      return 16_000;
-  }
-}
-
-/**
  * OpenAI Responses API adapter (provider_chain strategy).
  * Uses previous_response_id to chain responses — no history transfer needed.
  */
@@ -70,18 +46,6 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     // o-series (o1, o3, o4-mini…) and all gpt-5 variants are reasoning models
     // and do not support the temperature parameter.
     const isReasoning = /^o\d|^gpt-5/.test(this.model);
-
-    // Responses API: `max_output_tokens` — это общий бюджет на reasoning +
-    // visible output. UI-слайдер "Макс. длина ответа" семантически про
-    // visible output, поэтому для reasoning-моделей добавляем резерв под
-    // chain-of-thought: иначе medium-effort может съесть все 2048 токенов
-    // на reasoning, response закроется как `incomplete (max_output_tokens)`,
-    // юзер увидит пустой ответ. Биллинг не меняется — OpenAI считает по факту.
-    const maxOutputTokens =
-      isReasoning && input.maxTokens !== undefined
-        ? input.maxTokens + reasoningReserve(input.reasoningEffort)
-        : input.maxTokens;
-
     return {
       ...(input.previousResponseId ? { previous_response_id: input.previousResponseId } : {}),
       ...(input.systemPrompt ? { instructions: input.systemPrompt } : {}),
@@ -89,7 +53,13 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       ...(!isReasoning && input.temperature !== undefined
         ? { temperature: input.temperature }
         : {}),
-      ...(maxOutputTokens !== undefined ? { max_output_tokens: maxOutputTokens } : {}),
+      // `max_output_tokens` — единственный кап в Responses API; для reasoning-
+      // моделей он считает reasoning + visible output вместе. Передаём ровно
+      // то, что выбрал юзер: слайдер "Макс. длина ответа" — жёсткий потолок.
+      // Если reasoning не уложится → response.incomplete → empty-guard в
+      // chat.service покажет юзеру понятную ошибку (а не «незаметно» обойдёт
+      // лимит за счёт скрытого резерва).
+      ...(input.maxTokens !== undefined ? { max_output_tokens: input.maxTokens } : {}),
       ...(input.reasoningEffort ? { reasoning: { effort: input.reasoningEffort } } : {}),
       ...(input.verbosity ? { text: { verbosity: input.verbosity } } : {}),
     };
@@ -143,6 +113,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     let cachedInputTokensUsed: number | undefined;
     let outputTokensUsed: number | undefined;
     let reasoningTokensUsed: number | undefined;
+    let incompleteReason: string | undefined;
     let sawTerminalEvent = false;
     let deltaCount = 0;
 
@@ -170,6 +141,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         sawTerminalEvent = true;
         captureUsage(event.response);
         const reason = event.response.incomplete_details?.reason;
+        incompleteReason = reason ?? undefined;
         logger.warn(
           {
             modelId: this.model,
@@ -225,7 +197,13 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       );
     }
 
-    return { newResponseId, inputTokensUsed, cachedInputTokensUsed, outputTokensUsed };
+    return {
+      newResponseId,
+      inputTokensUsed,
+      cachedInputTokensUsed,
+      outputTokensUsed,
+      incompleteReason,
+    };
   }
 
   private buildInput(input: LLMInput): string | OpenAI.Responses.ResponseInput {
