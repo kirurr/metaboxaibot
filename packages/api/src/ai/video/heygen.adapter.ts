@@ -79,9 +79,8 @@ const SUPPORTED_ASPECT_RATIOS = new Set(["16:9", "9:16"]);
  *  5. default avatarId from config    → type "avatar"
  *
  * Voice source priority:
- *  1. mediaInputs.voice_audio[0]            → audio_asset_id (lip-sync, preferred)
- *  2. modelSettings.voice_url / voice_s3key → audio_asset_id (lip-sync, deprecated)
- *  3. modelSettings.voice_id + prompt        → script + voice_id (TTS)
+ *  1. mediaInputs.voice_audio[0]      → audio_asset_id (lip-sync)
+ *  2. modelSettings.voice_id + prompt → script + voice_id (TTS)
  */
 export class HeyGenAdapter implements VideoAdapter {
   readonly modelId = "heygen";
@@ -241,20 +240,6 @@ export class HeyGenAdapter implements VideoAdapter {
     return assetId;
   }
 
-  /** Resolve URL: try fresh presigned URL from S3 first, then fall back to stored URL. */
-  private static async freshUrl(
-    s3KeySetting: unknown,
-    urlSetting: unknown,
-  ): Promise<string | undefined> {
-    const s3Key = s3KeySetting as string | undefined;
-    const url = urlSetting as string | undefined;
-    if (s3Key) {
-      const fresh = await getFileUrl(s3Key).catch(() => null);
-      if (fresh) return fresh;
-    }
-    return url || undefined;
-  }
-
   validateRequest(input: VideoInput, ctx?: VideoValidationContext): VideoValidationError | null {
     const ms = input.modelSettings ?? {};
     const hasAvatar =
@@ -265,10 +250,7 @@ export class HeyGenAdapter implements VideoAdapter {
     if (!hasAvatar) return { key: "heygenNeedsAvatar" };
 
     const explicitVoiceId = (ms.voice_id as string | undefined)?.trim();
-    const hasVoiceAsset =
-      !!input.mediaInputs?.voice_audio?.[0] ||
-      !!(ms.voice_s3key as string | undefined)?.trim() ||
-      !!(ms.voice_url as string | undefined)?.trim();
+    const hasVoiceAsset = !!input.mediaInputs?.voice_audio?.[0];
     if (!explicitVoiceId && !hasVoiceAsset && !ctx?.hasVoiceFile) {
       return { key: "heygenNeedsVoice" };
     }
@@ -276,14 +258,7 @@ export class HeyGenAdapter implements VideoAdapter {
   }
 
   async submit(input: VideoInput): Promise<string> {
-    // Prefer mediaInputs.voice_audio (new path); fall back to deprecated
-    // modelSettings.voice_s3key/voice_url for in-flight jobs queued before migration.
-    const voiceUrl =
-      input.mediaInputs?.voice_audio?.[0] ??
-      (await HeyGenAdapter.freshUrl(
-        input.modelSettings?.voice_s3key,
-        input.modelSettings?.voice_url,
-      ));
+    const voiceUrl = input.mediaInputs?.voice_audio?.[0];
     const voiceId = (input.modelSettings?.voice_id as string | undefined) ?? "en-US-JennyNeural";
     const bgColor = (input.modelSettings?.background_color as string | undefined) ?? "#FFFFFF";
     const aspectRatioRaw = input.aspectRatio ?? "16:9";

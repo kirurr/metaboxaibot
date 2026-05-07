@@ -1,6 +1,5 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config } from "@metabox/shared";
-import { getFileUrl } from "../../services/s3.service.js";
 import { fetchWithLog } from "../../utils/fetch.js";
 
 const DID_API = "https://api.d-id.com";
@@ -52,15 +51,7 @@ export class DIDAdapter implements VideoAdapter {
         : 0.7;
     // const driverUrl = input.modelSettings?.driver_url as string | undefined;
 
-    const voiceFromSlot = input.mediaInputs?.voice_audio?.[0];
-    const voiceS3Key = voiceFromSlot
-      ? undefined
-      : (input.modelSettings?.voice_s3key as string | undefined);
-    const voiceUrlStored = voiceFromSlot ?? (input.modelSettings?.voice_url as string | undefined);
-    let voiceUrl: string | undefined = voiceUrlStored || undefined;
-    if (voiceS3Key) {
-      voiceUrl = (await getFileUrl(voiceS3Key).catch(() => null)) ?? voiceUrl;
-    }
+    const voiceUrl = input.mediaInputs?.voice_audio?.[0];
     const voiceId = (input.modelSettings?.voice_id as string | undefined) || "en-US-JennyNeural";
     const voiceProvider =
       (input.modelSettings?.voice_provider as string | undefined) || "microsoft";

@@ -186,6 +186,10 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       null;
     let deductResult: DeductResult | undefined;
     let pollAdapter: ReturnType<typeof createVideoAdapter> | null = null;
+    // Lifted на функциональный scope чтобы был доступен в Stage 3 (рендер
+    // inline-кнопок) — там используется для решения «можно ли продлить»
+    // (FAL extend требует source длиной 2-15s).
+    let actualDuration: number | null = null;
 
     if (existingJob?.outputs?.length) {
       // Crash-recovery fast path. Atomic transition: only one runner wins.
@@ -275,8 +279,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         // принимает Cartesia/EL voice_id'ы (вернёт 400 "Invalid voice_id"). Поэтому
         // если модель — HeyGen и юзер выбрал клонированный голос, заранее
         // генерируем TTS через провайдера голоса (Cartesia или legacy EL),
-        // аплоадим в S3 и передаём адаптеру `voice_url`/`voice_s3key` — HeyGen.submit
-        // увидит их вместо voice_id и пойдёт через audio_asset_id flow (lip-sync).
+        // аплоадим в S3 и кладём presigned URL в `mediaInputs.voice_audio` —
+        // HeyGen.submit подхватит его и пойдёт через audio_asset_id flow (lip-sync).
         let effectiveModelSettings = modelSettings;
         let effectiveMediaInputs = mediaInputs;
         const requestedVoice = (modelSettings?.voice_id as string | undefined)?.trim();
@@ -354,22 +358,14 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
                 }
 
                 const voiceUrl = await getFileUrl(voiceS3Key).catch(() => null);
-                if (voiceUrl) {
-                  // Resolved S3 → fresh URL: write to the new mediaInputs slot.
-                  effectiveMediaInputs = {
-                    ...(effectiveMediaInputs ?? {}),
-                    voice_audio: [voiceUrl],
-                  };
-                  effectiveModelSettings = { ...modelSettings, voice_id: undefined };
-                } else {
-                  // S3 resolution failed (rare). Fall back to the legacy modelSettings
-                  // path so the adapter can attempt freshUrl() on its own.
-                  effectiveModelSettings = {
-                    ...modelSettings,
-                    voice_id: undefined,
-                    voice_s3key: voiceS3Key,
-                  };
+                if (!voiceUrl) {
+                  throw new Error("Failed to resolve fresh URL for pre-TTS audio");
                 }
+                effectiveMediaInputs = {
+                  ...(effectiveMediaInputs ?? {}),
+                  voice_audio: [voiceUrl],
+                };
+                effectiveModelSettings = { ...modelSettings, voice_id: undefined };
               } else {
                 effectiveModelSettings = { ...modelSettings, voice_id: resolved.voiceId };
               }
@@ -582,7 +578,6 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       // videoResult present → finalize inline.
       const { ext, contentType } = sectionMeta("video");
 
-      let actualDuration: number | null = null;
       let actualWidth: number | null = null;
       let actualHeight: number | null = null;
       let actualFps: number | null = null;
@@ -767,11 +762,33 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       : sendOriginalLabel
         ? [{ text: sendOriginalLabel, callback_data: `orig_${outputId}` }]
         : null;
-    const replyMarkup = actionRow ? { inline_keyboard: [actionRow] } : undefined;
+
+    // «Продлить» — для всех Grok-видео (primary t2v/r2v + результат самого
+    // extend'а), при условии что output укладывается в FAL-лимит на источник
+    // (2-15s). Это даёт итеративное продление: 6s оригинал → 12s → 18s
+    // (последний уже > 15s, кнопка не появится). Если actualDuration не
+    // удалось распарсить — кнопку прячем (fail-safe: лучше не показать
+    // легитимный extend, чем показать нерабочий и получить FAL-ошибку).
+    const FAL_EXTEND_INPUT_MAX_S = 15;
+    const FAL_EXTEND_INPUT_MIN_S = 2;
+    const isGrokModel =
+      modelId === "grok-imagine" ||
+      modelId === "grok-imagine-r2v" ||
+      modelId === "grok-imagine-extend";
+    const canBeExtended =
+      isGrokModel &&
+      actualDuration !== null &&
+      actualDuration >= FAL_EXTEND_INPUT_MIN_S &&
+      actualDuration <= FAL_EXTEND_INPUT_MAX_S;
+    const extendRow: InlineKeyboardButton[] | null = canBeExtended
+      ? [{ text: t.video.extendButton, callback_data: `video_extend_${outputId}` }]
+      : null;
+
+    const replyRows = [actionRow, extendRow].filter(Boolean) as InlineKeyboardButton[][];
+    const replyMarkup = replyRows.length ? { inline_keyboard: replyRows } : undefined;
 
     const model = AI_MODELS[modelId];
     const hasAudioDriver =
-      !!(modelSettings?.voice_s3key || modelSettings?.voice_url) ||
       !!mediaInputs?.voice_audio?.length ||
       !!mediaInputs?.driving_audio?.length ||
       !!mediaInputs?.reference_audios?.length;

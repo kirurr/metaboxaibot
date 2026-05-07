@@ -7,6 +7,7 @@ import {
 } from "./base.adapter.js";
 import { config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { logger } from "../../logger.js";
 
 /**
  * OpenAI Responses API adapter (provider_chain strategy).
@@ -52,6 +53,12 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       ...(!isReasoning && input.temperature !== undefined
         ? { temperature: input.temperature }
         : {}),
+      // `max_output_tokens` — единственный кап в Responses API; для reasoning-
+      // моделей он считает reasoning + visible output вместе. Передаём ровно
+      // то, что выбрал юзер: слайдер "Макс. длина ответа" — жёсткий потолок.
+      // Если reasoning не уложится → response.incomplete → empty-guard в
+      // chat.service покажет юзеру понятную ошибку (а не «незаметно» обойдёт
+      // лимит за счёт скрытого резерва).
       ...(input.maxTokens !== undefined ? { max_output_tokens: input.maxTokens } : {}),
       ...(input.reasoningEffort ? { reasoning: { effort: input.reasoningEffort } } : {}),
       ...(input.verbosity ? { text: { verbosity: input.verbosity } } : {}),
@@ -102,32 +109,101 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     });
 
     let newResponseId: string | undefined;
-    let inputTokensUsed = 0;
-    let cachedInputTokensUsed = 0;
-    let outputTokensUsed = 0;
+    let inputTokensUsed: number | undefined;
+    let cachedInputTokensUsed: number | undefined;
+    let outputTokensUsed: number | undefined;
+    let reasoningTokensUsed: number | undefined;
+    let incompleteReason: string | undefined;
+    let sawTerminalEvent = false;
+    let deltaCount = 0;
+
+    const captureUsage = (response: OpenAI.Responses.Response): void => {
+      newResponseId = response.id;
+      const usage = response.usage;
+      if (!usage) return;
+      inputTokensUsed = usage.input_tokens;
+      cachedInputTokensUsed =
+        (usage as { input_tokens_details?: { cached_tokens?: number } }).input_tokens_details
+          ?.cached_tokens ?? 0;
+      outputTokensUsed = usage.output_tokens;
+      reasoningTokensUsed = (usage as { output_tokens_details?: { reasoning_tokens?: number } })
+        .output_tokens_details?.reasoning_tokens;
+    };
 
     for await (const event of stream) {
       if (event.type === "response.output_text.delta") {
+        deltaCount++;
         yield event.delta;
       } else if (event.type === "response.completed") {
-        newResponseId = event.response.id;
-        const usage = event.response.usage;
-        if (usage) {
-          inputTokensUsed = usage.input_tokens;
-          // OpenAI Responses API exposes prompt-cache hits via
-          // input_tokens_details.cached_tokens — billed at the model's
-          // cachedInputCostUsdPerMToken (set in shared/constants/models)
-          // when the provider has a discounted rate. Falls through to the
-          // regular input rate when the field is unset on the model.
-          cachedInputTokensUsed =
-            (usage as { input_tokens_details?: { cached_tokens?: number } }).input_tokens_details
-              ?.cached_tokens ?? 0;
-          outputTokensUsed = usage.output_tokens;
-        }
+        sawTerminalEvent = true;
+        captureUsage(event.response);
+      } else if (event.type === "response.incomplete") {
+        sawTerminalEvent = true;
+        captureUsage(event.response);
+        const reason = event.response.incomplete_details?.reason;
+        incompleteReason = reason ?? undefined;
+        logger.warn(
+          {
+            modelId: this.model,
+            responseId: event.response.id,
+            incompleteReason: reason,
+            inputTokens: inputTokensUsed,
+            outputTokens: outputTokensUsed,
+            reasoningTokens: reasoningTokensUsed,
+            visibleDeltas: deltaCount,
+          },
+          `openai.chatStream: response incomplete (reason=${reason ?? "unknown"})`,
+        );
+      } else if (event.type === "response.failed") {
+        sawTerminalEvent = true;
+        captureUsage(event.response);
+        const error = event.response.error;
+        logger.error(
+          {
+            modelId: this.model,
+            responseId: event.response.id,
+            errorCode: error?.code,
+            errorMessage: error?.message,
+            visibleDeltas: deltaCount,
+          },
+          `openai.chatStream: response failed (${error?.code ?? "unknown"})`,
+        );
+      } else if (event.type === "error") {
+        const errEvent = event as {
+          code?: string | null;
+          message?: string;
+          param?: string | null;
+        };
+        logger.error(
+          {
+            modelId: this.model,
+            errorCode: errEvent.code,
+            errorMessage: errEvent.message,
+            errorParam: errEvent.param,
+            visibleDeltas: deltaCount,
+          },
+          `openai.chatStream: stream error event (${errEvent.code ?? "unknown"})`,
+        );
       }
     }
 
-    return { newResponseId, inputTokensUsed, cachedInputTokensUsed, outputTokensUsed };
+    if (!sawTerminalEvent) {
+      logger.warn(
+        {
+          modelId: this.model,
+          visibleDeltas: deltaCount,
+        },
+        "openai.chatStream: stream ended without terminal event",
+      );
+    }
+
+    return {
+      newResponseId,
+      inputTokensUsed,
+      cachedInputTokensUsed,
+      outputTokensUsed,
+      incompleteReason,
+    };
   }
 
   private buildInput(input: LLMInput): string | OpenAI.Responses.ResponseInput {

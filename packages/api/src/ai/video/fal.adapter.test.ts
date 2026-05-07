@@ -213,8 +213,8 @@ describe("FalVideoAdapter — Grok Imagine endpoint dispatch", () => {
     expect(input.reference_image_urls).toBeUndefined();
   });
 
-  test("grok-imagine: ref_images → reference-to-video с reference_image_urls", async () => {
-    const adapter = new FalVideoAdapter("grok-imagine", "test-key");
+  test("grok-imagine-r2v: ref_images → reference-to-video с reference_image_urls", async () => {
+    const adapter = new FalVideoAdapter("grok-imagine-r2v", "test-key");
     await adapter.submit(
       baseInput({ mediaInputs: { ref_images: ["https://a.png", "https://b.png"] } }),
     );
@@ -223,15 +223,15 @@ describe("FalVideoAdapter — Grok Imagine endpoint dispatch", () => {
     expect(input.reference_image_urls).toEqual(["https://a.png", "https://b.png"]);
   });
 
-  test("grok-imagine: cap reference_image_urls = 7", async () => {
-    const adapter = new FalVideoAdapter("grok-imagine", "test-key");
+  test("grok-imagine-r2v: cap reference_image_urls = 7", async () => {
+    const adapter = new FalVideoAdapter("grok-imagine-r2v", "test-key");
     const tenImgs = Array.from({ length: 10 }, (_, i) => `https://i${i}.png`);
     await adapter.submit(baseInput({ mediaInputs: { ref_images: tenImgs } }));
     expect((lastSubmit().input.reference_image_urls as string[]).length).toBe(7);
   });
 
-  test("grok-imagine: prompt @image1 → @Image1 remap", async () => {
-    const adapter = new FalVideoAdapter("grok-imagine", "test-key");
+  test("grok-imagine-r2v: prompt @image1 → @Image1 remap", async () => {
+    const adapter = new FalVideoAdapter("grok-imagine-r2v", "test-key");
     await adapter.submit({
       prompt: "@image1 in a meadow with @image2",
       mediaInputs: { ref_images: ["https://a.png", "https://b.png"] },
@@ -248,14 +248,23 @@ describe("FalVideoAdapter — Grok Imagine endpoint dispatch", () => {
     expect(lastSubmit().input.duration).toBe(15);
   });
 
-  test("grok-imagine: duration r2v cap 1-10 (с ref_images)", async () => {
-    const adapter = new FalVideoAdapter("grok-imagine", "test-key");
+  test("grok-imagine-r2v: duration cap 1-10", async () => {
+    const adapter = new FalVideoAdapter("grok-imagine-r2v", "test-key");
     await adapter.submit({
       prompt: "test",
       mediaInputs: { ref_images: ["https://a.png"] },
       modelSettings: { duration: 30 },
     });
     expect(lastSubmit().input.duration).toBe(10);
+  });
+
+  test("grok-imagine: ref_images игнорируются (modelId-based dispatch, not runtime media)", async () => {
+    const adapter = new FalVideoAdapter("grok-imagine", "test-key");
+    await adapter.submit(baseInput({ mediaInputs: { ref_images: ["https://a.png"] } }));
+    const { endpoint, input } = lastSubmit();
+    // Должен пойти на t2v endpoint, не на r2v — несмотря на наличие ref_images.
+    expect(endpoint).toBe("xai/grok-imagine-video/text-to-video");
+    expect(input.reference_image_urls).toBeUndefined();
   });
 
   test("grok-imagine: resolution передаётся как есть", async () => {

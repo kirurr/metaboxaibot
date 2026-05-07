@@ -31,12 +31,37 @@ interface KieTaskResponse {
   };
 }
 
-/** Grok Imagine: separate t2v/i2v endpoints. */
+/**
+ * Grok Imagine: separate t2v/i2v endpoints.
+ *
+ * Two visible models in catalog (см. video.models.ts):
+ *   - `grok-imagine`     — text-to-video only, durationRange 6-15s
+ *   - `grok-imagine-r2v` — reference-to-video only, durationRange 6-10s
+ *
+ * Каждый запись маппится на свою пару endpoint'ов; адаптер выбирает t2v vs
+ * i2v по runtime mediaInputs (для grok-imagine — всегда t2v, ref_images
+ * там просто нет; для grok-imagine-r2v — всегда i2v, ref_images required).
+ */
 const GROK_MODEL_MAP: Record<string, { t2v: string; i2v: string }> = {
   "grok-imagine": {
     t2v: "grok-imagine/text-to-video",
     i2v: "grok-imagine/image-to-video",
   },
+  "grok-imagine-r2v": {
+    t2v: "grok-imagine/text-to-video",
+    i2v: "grok-imagine/image-to-video",
+  },
+};
+
+/**
+ * Жёсткие лимиты длительности у xAI по режимам. Используется для defensive
+ * clamp'а: даже если пользовательский state содержит старое значение
+ * больше нового лимита (после миграции с monolithic grok-imagine), мы не
+ * отправляем его провайдеру — клампим до max.
+ */
+const GROK_MAX_DURATION_BY_MODEL: Record<string, number> = {
+  "grok-imagine": 15,
+  "grok-imagine-r2v": 10,
 };
 
 /** Seedance 2.0: single model name for all scenarios. */
@@ -273,15 +298,35 @@ export class KieVideoAdapter implements VideoAdapter {
       const grokMapping = GROK_MODEL_MAP[this.modelId];
       if (!grokMapping) throw new Error(`KIE: unknown model ${this.modelId}`);
 
+      // Endpoint выбирается ИСКЛЮЧИТЕЛЬНО по modelId (после разделения primary
+      // на 2 модели):
+      //   - `grok-imagine`     → всегда t2v, ref_images игнорируются (защита
+      //     от legacy-state у юзеров, которые до разделения сохранили
+      //     ref_images под этим modelId; UI слота больше не показывает).
+      //   - `grok-imagine-r2v` → всегда i2v, требует ref_images (required-slot
+      //     валидация на стороне бота уже отсеяла пустой случай; адаптер
+      //     просто шлёт что есть).
+      const isI2V = this.modelId === "grok-imagine-r2v";
+      model = isI2V ? grokMapping.i2v : grokMapping.t2v;
       const refImages = mi.ref_images ?? [];
       const legacyImage = input.imageUrl;
-      const imageUrls = refImages.length > 0 ? refImages : legacyImage ? [legacyImage] : [];
-      const isI2V = imageUrls.length > 0;
-      model = isI2V ? grokMapping.i2v : grokMapping.t2v;
+      const imageUrls = isI2V
+        ? refImages.length > 0
+          ? refImages
+          : legacyImage
+            ? [legacyImage]
+            : []
+        : [];
 
       const aspectRatio = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? "16:9";
       inputPayload.aspect_ratio = aspectRatio;
-      inputPayload.duration = (ms.duration as number | undefined) ?? input.duration ?? 6;
+      // Defensive clamp: даже если в state'е лежит старое значение (например,
+      // 25s от monolithic grok-imagine до разделения), не превышаем фактический
+      // лимит провайдера для текущей модели.
+      const rawDuration = (ms.duration as number | undefined) ?? input.duration ?? 6;
+      const maxAllowed = GROK_MAX_DURATION_BY_MODEL[this.modelId];
+      inputPayload.duration =
+        maxAllowed !== undefined ? Math.min(maxAllowed, rawDuration) : rawDuration;
       inputPayload.resolution = (ms.resolution as string | undefined) ?? "480p";
       inputPayload.mode = (ms.mode as string | undefined) ?? "normal";
       inputPayload.nsfw_checker = ms.nsfw_checker !== undefined ? ms.nsfw_checker : false;

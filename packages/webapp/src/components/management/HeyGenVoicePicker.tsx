@@ -59,8 +59,6 @@ export function HeyGenVoicePicker({ voiceId, onChange }: HeyGenVoicePickerProps)
   const selectOfficial = (item: VoiceListItem) => {
     onChange("voice_id", item.id);
     onChange("voice_provider", "heygen");
-    onChange("voice_url", "");
-    onChange("voice_s3key", "");
   };
 
   const selectCloned = (item: VoiceListItem) => {
@@ -73,8 +71,6 @@ export function HeyGenVoicePicker({ voiceId, onChange }: HeyGenVoicePickerProps)
     // elevenlabs для legacy. Бот по этому полю выбирает TTS-адаптер.
     onChange("voice_id", voice.id);
     onChange("voice_provider", voice.provider);
-    onChange("voice_url", "");
-    onChange("voice_s3key", "");
   };
 
   const languages = [

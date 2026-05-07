@@ -128,6 +128,9 @@ export function buildVideoModelKeyboard(savedModelId?: string | null): InlineKey
   const addedFamilies = new Set<string>();
 
   for (const m of allModels) {
+    // Скрытые модели (e.g. grok-imagine-extend) активируются только через
+    // спец-кнопки (типа «Продлить»), в карусели их показывать не нужно.
+    if (m.hiddenFromCarousel) continue;
     const familyId = MODEL_TO_FAMILY[m.id];
     if (familyId) {
       if (addedFamilies.has(familyId)) continue;
@@ -230,9 +233,20 @@ export async function activateVideoModel(
       is_persistent: true,
     };
 
+    // Бот-only хинт про sibling-режим у grok-imagine family. В webapp этот
+    // хинт лишний (там вариант выбирается прямо в карточке через picker),
+    // поэтому в model.description его не держим — добавляем здесь только для
+    // бот-активации.
+    const grokSiblingHint =
+      modelId === "grok-imagine"
+        ? `\n\n${ctx.t.video.grokSiblingHintT2v}`
+        : modelId === "grok-imagine-r2v"
+          ? `\n\n${ctx.t.video.grokSiblingHintR2v}`
+          : "";
+
     // Description goes first; attach the persistent section reply keyboard here
     // (если она нужна), inline для кнопок модели уезжает на хинт-сообщение.
-    await ctx.reply(`${modelName}\n\n${modelDesc}\n\n${costLine}`, {
+    await ctx.reply(`${modelName}\n\n${modelDesc}\n\n${costLine}${grokSiblingHint}`, {
       reply_markup: sectionReplyMarkup,
     });
 
@@ -256,6 +270,15 @@ export async function activateVideoModel(
         case "higgsfield":
         case "higgsfield-preview":
           hint = ctx.t.video.hintHiggsfield;
+          break;
+        // У grok-imagine t2v нет media-input слотов — generic hint про
+        // «🖼 Чтобы добавить изображения... используйте кнопки слотов ниже»
+        // вводит в заблуждение (никаких слотов в этой модели нет).
+        // grok-imagine-r2v и grok-imagine-extend имеют слоты (ref_images /
+        // source_video) — для них generic hint валиден.
+        case "grok-imagine":
+          hint = ctx.t.video.hintVideoTextOnly;
+          break;
       }
       await ctx.reply(appendVoiceHint ? `${hint}\n\n${ctx.t.voice.inputHint}` : hint, {
         reply_markup: inlineKb,
@@ -1717,10 +1740,7 @@ export async function handleVideoAvatarVoiceCallback(ctx: BotContext): Promise<v
       imageUrl: scratchpadImageUrl,
       aspectRatio: modelSettings?.aspectRatio,
       duration: modelSettings?.duration,
-      modelSettings: {
-        ...fullModelSettings,
-        ...(entry.uploadedKey ? { voice_s3key: entry.uploadedKey } : { voice_url: entry.tgUrl }),
-      },
+      modelSettings: fullModelSettings,
       userId,
     },
     { hasVoiceFile: true },
@@ -2037,4 +2057,58 @@ export async function handleVideoTranscribeCallback(ctx: BotContext): Promise<vo
     await ctx.api.deleteMessage(chatId, pendingMsg.message_id).catch(() => void 0);
     await ctx.reply(ctx.t.voice.failed);
   }
+}
+
+// ── Grok Imagine: Extend video flow ─────────────────────────────────────────
+
+/**
+ * Кнопка «Продлить» под результатом Grok-видео. Callback data:
+ * `video_extend_{outputId}`.
+ *
+ * Активирует скрытую модель `grok-imagine-extend`, прикрепляет исходное видео
+ * в slot `source_video` (хранится как сырой s3-ключ — бот при submit'е резолвит
+ * через `resolveMediaInputUrls` → presigned URL для FAL).
+ *
+ * После активации юзер просто шлёт текстовый промпт — стандартный
+ * `executeVideoPrompt` flow возьмёт `videoModelId="grok-imagine-extend"`,
+ * сгенерит extension через FAL endpoint `xai/grok-imagine-video/extend-video`.
+ *
+ * НЕ показывается под результатом самого extend'а (там output >15s типично,
+ * FAL не примет повторно как input).
+ */
+export async function handleVideoExtendEntry(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  const outputId = (ctx.callbackQuery?.data ?? "").replace("video_extend_", "");
+  await ctx.answerCallbackQuery();
+
+  const output = await generationService.getOutputById(outputId);
+  if (!output?.s3Key) {
+    await ctx.reply(ctx.t.video.extendNotAvailable);
+    return;
+  }
+
+  // Защита от попыток продлить не-Grok видео (теоретически кнопка не должна
+  // отображаться под другими моделями, но защищаемся на случай старых
+  // callback-данных в чате). `grok-imagine-extend` тоже разрешён —
+  // итеративное продление пока output укладывается в FAL-лимит 2-15s
+  // (длину чекает воркер при прикреплении кнопки).
+  const allowedSourceModels = new Set(["grok-imagine", "grok-imagine-r2v", "grok-imagine-extend"]);
+  if (!allowedSourceModels.has(output.modelId)) {
+    await ctx.reply(ctx.t.video.extendNotAvailable);
+    return;
+  }
+
+  const EXTEND_MODEL_ID = "grok-imagine-extend";
+  // Сбрасываем активный upload-slot (вдруг юзер был mid-upload в другую
+  // модель), затем переключаем state на extend-режим.
+  clearActiveSlot(ctx.user.id);
+  await userStateService.setState(ctx.user.id, "VIDEO_ACTIVE", "video");
+  await userStateService.setModelForSection(ctx.user.id, "video", EXTEND_MODEL_ID);
+  // Очищаем все слоты у extend-модели и кладём ровно один — source_video с
+  // s3-ключом исходного результата. resolveMediaInputUrls на submit'е
+  // подпишет URL для FAL.
+  await userStateService.clearMediaInputs(ctx.user.id, EXTEND_MODEL_ID);
+  await userStateService.addMediaInput(ctx.user.id, EXTEND_MODEL_ID, "source_video", output.s3Key);
+
+  await ctx.reply(ctx.t.video.extendActivated);
 }

@@ -50,6 +50,24 @@ import {
 export { ContextOverflowError } from "../ai/llm/truncate.js";
 
 /**
+ * Минимальный `max_tokens` для каждого уровня `reasoning_effort` на gpt-5/
+ * o-series. Меньше — заведомо пустой ответ: reasoning не уложится в общий
+ * `max_output_tokens` (Responses API считает reasoning + visible вместе).
+ *
+ * Числа лояльные: блокируем только явно несовместимые комбо (high+маленький
+ * лимит). На промежуточных значениях даём шанс — если всё-таки не уложится,
+ * runtime-guard в конце потока поймает с тем же сообщением.
+ */
+const REASONING_MIN_MAX_TOKENS: Record<string, number> = {
+  none: 0,
+  minimal: 0,
+  low: 0,
+  medium: 0,
+  high: 768,
+  xhigh: 1536,
+};
+
+/**
  * Per-request memoiser for `extractTextFromS3Cached` calls. Eliminates the
  * N+1 pattern when the same s3Key appears in multiple history messages
  * (e.g. a CSV re-attached every turn). Lives only for the duration of one
@@ -203,6 +221,34 @@ export const chatService = {
     }
 
     const ms = await userStateService.getEffectiveDialogSettings(userId, dialogId, dialog.modelId);
+
+    // `getEffectiveDialogSettings` возвращает только то что юзер явно сохранил
+    // — модельные `default`'ы из `AI_MODELS[id].settings[]` остаются хинтом для
+    // UI и до сервера не доезжают. Для ключей где это критично (reasoning_effort
+    // на gpt-5-nano: без явного `low` OpenAI применяет свой `medium`, который
+    // на узком max_output_tokens вызывает пустые ответы) подмешиваем default
+    // здесь. Юзер сохранивший своё значение не пострадает — оно уже в `ms`.
+    if (ms.reasoning_effort === undefined && model?.settings) {
+      const def = model.settings.find((s) => s.key === "reasoning_effort")?.default;
+      if (def !== undefined) ms.reasoning_effort = def;
+    }
+
+    // Pre-валидация: для reasoning-моделей `max_output_tokens` в Responses API
+    // считает reasoning + visible вместе. Если юзер выбрал тесные настройки
+    // (high effort + маленький max_tokens), reasoning гарантированно съест весь
+    // бюджет → пустой ответ. Лучше отклонить запрос ДО списания токенов и до
+    // вызова OpenAI с понятной подсказкой что поправить.
+    if (
+      typeof ms.reasoning_effort === "string" &&
+      typeof ms.max_tokens === "number" &&
+      ms.max_tokens < REASONING_MIN_MAX_TOKENS[ms.reasoning_effort]
+    ) {
+      throw new UserFacingError("Reasoning effort incompatible with max_tokens", {
+        key: "modelReasoningCapExhausted",
+        section: "gpt",
+        params: { modelName: model?.name ?? dialog.modelId },
+      });
+    }
 
     const extractCache: ExtractCache = new Map();
 
@@ -402,6 +448,7 @@ export const chatService = {
     let cachedInputTokensUsed: number | undefined;
     let outputTokensUsed: number | undefined;
     let providerUsdCost: number | undefined;
+    let incompleteReason: string | undefined;
 
     const runStream = async function* (
       this: void,
@@ -426,6 +473,7 @@ export const chatService = {
           cachedInputTokensUsed = result?.cachedInputTokensUsed;
           outputTokensUsed = result?.outputTokensUsed;
           providerUsdCost = result?.providerUsdCost;
+          incompleteReason = result?.incompleteReason;
           return;
         }
         chunks.push(next.value);
@@ -668,6 +716,42 @@ export const chatService = {
     if (acquiredKeyId) void recordSuccess(acquiredKeyId);
 
     const responseText = stripThinkingBlocks(chunks.join(""));
+
+    // Провайдер дошёл до конца стрима без визуального текста (gpt-5 reasoning
+    // съел max_output_tokens, пустой response.completed, refusal без content
+    // и т.п.). Раньше пустая строка молча сохранялась в БД, токены списывались
+    // — юзер видел пропавшее сообщение. Теперь маркируем user-message как
+    // failed и поднимаем UserFacingError; assistant-сообщение не сохраняем,
+    // токены не списываем (стоимость reasoning-токенов оплачиваем мы, юзер
+    // не виноват в пустом ответе).
+    if (responseText.length === 0) {
+      logger.warn(
+        {
+          dialogId,
+          modelId: dialog.modelId,
+          inputTokens: inputTokensUsed,
+          outputTokens: outputTokensUsed,
+          providerUsdCost,
+          chunkCount: chunks.length,
+          incompleteReason,
+        },
+        "chat.sendMessageStream: provider returned empty response",
+      );
+      await dialogService.markMessageFailed(userMessage.id);
+      // `max_output_tokens` означает что reasoning + visible не уложились в
+      // выбранный юзером лимит — даём адресную подсказку (понизить effort или
+      // поднять лимит). Прочие случаи (content_filter, отсутствие terminal
+      // event и т.п.) — фирменный generic.
+      const isUserConfigIssue = incompleteReason === "max_output_tokens";
+      throw new UserFacingError("Provider returned empty response", {
+        key: isUserConfigIssue ? "modelReasoningCapExhausted" : "modelTemporarilyUnavailable",
+        section: "gpt",
+        params: { modelName: model?.name ?? dialog.modelId },
+        // Юзер сам выбрал несовместимые настройки — это не инцидент для ops;
+        // прочие пустоты (content_filter / network) — да, нотифицируем.
+        notifyOps: !isUserConfigIssue,
+      });
+    }
 
     // ── Token usage logging ─────────────────────────────────────────────
     // Provider возвращает usage не всегда (некоторые SSE-стримы или non-stream

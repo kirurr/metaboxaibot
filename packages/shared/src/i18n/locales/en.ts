@@ -211,10 +211,22 @@ export default {
     soulCancelled: "❌ Character creation cancelled.",
     soulCancelButton: "❌ Cancel creation",
     soulMinPhotos: "⚠️ At least {min} photos are required to create a character. Uploaded: {n}.",
+    extendButton: "🔁 Extend",
+    extendPrompt:
+      "🔁 Video extension\n\nDescribe in text what should happen next — the bot will generate a 6-second extension (configurable in ⚙ Management).",
+    extendActivated:
+      "🔁 Ready to extend. The source video is attached as a reference. Send a text prompt — what should happen next.",
+    extendNotAvailable:
+      "❌ Extension is not available for this video. The «Extend» button works only for original Grok videos (text→video / photo→video).",
+    grokSiblingHintT2v:
+      "💡 There is also a photo → video mode (generation from reference images) — switch via ⚙ Management.",
+    grokSiblingHintR2v:
+      "💡 There is also a text → video mode (generation without reference images) — switch via ⚙ Management.",
     imageIgnoredUnsupported:
       "⚠️ This model does not support image input — your photo will be ignored.",
     hintVideoDefault:
       "✉️ Send a text prompt to generate a video.\n🖼 To add images (first/last frame, reference etc.) — use the slot buttons below.",
+    hintVideoTextOnly: "✉️ Send a text prompt to generate a video.",
     videoPhotoSaved: "📸 Photo saved for use in next generation.",
     videoDriverSaved: "🎬 Driver video saved for use in next generation.",
     videoVoiceSaved: "🎙 Voice sample saved. Choose how to use it:",
@@ -311,6 +323,8 @@ export default {
       "❌ {modelName}: generation did not finish within 24 hours and was cancelled. Please try again.",
     modelTemporarilyUnavailable:
       "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you.",
+    modelReasoningCapExhausted:
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth» or raise «Max response length».",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",
@@ -507,6 +521,7 @@ export default {
     referenceImages: "Reference Images",
     referenceVideos: "Reference Videos",
     referenceAudios: "Reference Audios",
+    sourceVideo: "Source Video",
     referenceImagesHint:
       "Reference images for video generation:\n• Up to 9 images\n• JPEG, PNG, or WebP, up to 30 MB each\n• Total files across all modalities must not exceed 12\n\nReference them in the prompt as @Image1, @Image2, etc.\n\nSend photos one at a time.",
     referenceVideosHint:

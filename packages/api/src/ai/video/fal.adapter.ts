@@ -52,6 +52,7 @@ function isKlingO3(modelId: string): boolean {
 
 const FAL_GROK_IMAGINE_T2V_ENDPOINT = "xai/grok-imagine-video/text-to-video";
 const FAL_GROK_IMAGINE_R2V_ENDPOINT = "xai/grok-imagine-video/reference-to-video";
+const FAL_GROK_IMAGINE_EXTEND_ENDPOINT = "xai/grok-imagine-video/extend-video";
 
 /** Separator used to pack endpoint+requestId into a single opaque string. */
 const SEP = "||";
@@ -122,14 +123,17 @@ export class FalVideoAdapter implements VideoAdapter {
 
     // ── Grok Imagine (xai/grok-imagine-video) ────────────────────────────────
     // Два endpoint'а:
-    //   - text-to-video:      нет media → prompt only, duration 1-15s, resolution default 720p
-    //   - reference-to-video: есть ref_images (≥1) → +reference_image_urls, duration 1-10s
-    // Endpoint выбирается по runtime mediaInputs. isFallbackCompatible на уровне
-    // FALLBACK_VIDEO_MODELS отсекает несовместимые комбинации (две отдельные
-    // записи: t2v entry без mediaInputs, r2v entry с ref_images required).
-    if (this.modelId === "grok-imagine") {
-      const refImages = input.mediaInputs?.ref_images ?? [];
-      const isR2V = refImages.length > 0;
+    //   - text-to-video:      prompt only, duration 1-15s, resolution default 720p
+    //   - reference-to-video: prompt + reference_image_urls, duration 1-10s
+    //
+    // Endpoint выбирается ИСКЛЮЧИТЕЛЬНО по modelId (после разделения primary
+    // на 2 модели):
+    //   - `grok-imagine`     → всегда t2v, ref_images игнорируются (защита от
+    //     legacy-state у юзеров, которые до разделения сохранили ref_images
+    //     под этим modelId; UI слот больше не показывает).
+    //   - `grok-imagine-r2v` → всегда r2v.
+    if (this.modelId === "grok-imagine" || this.modelId === "grok-imagine-r2v") {
+      const isR2V = this.modelId === "grok-imagine-r2v";
       const endpoint = isR2V ? FAL_GROK_IMAGINE_R2V_ENDPOINT : FAL_GROK_IMAGINE_T2V_ENDPOINT;
 
       const grokBody: Record<string, unknown> = {
@@ -137,6 +141,7 @@ export class FalVideoAdapter implements VideoAdapter {
       };
 
       if (isR2V) {
+        const refImages = input.mediaInputs?.ref_images ?? [];
         grokBody.reference_image_urls = refImages.slice(0, 7);
       }
 
@@ -154,6 +159,36 @@ export class FalVideoAdapter implements VideoAdapter {
       logCall(endpoint, "submit", grokBody);
       const { request_id } = await fal.queue.submit(endpoint, { input: grokBody });
       return `${endpoint}${SEP}${request_id}`;
+    }
+
+    // ── Grok Imagine Extend (xai/grok-imagine-video/extend-video) ────────────
+    // Активируется только через кнопку «Продлить» под результатом Grok-видео.
+    // Источник видео лежит в slot source_video. Output FAL = original +
+    // extension склеенные. Лимиты: source 2-15s, extension 2-10s, prompt
+    // ≤4096 символов. Output resolution / aspect_ratio наследуются от source.
+    if (this.modelId === "grok-imagine-extend") {
+      const sourceVideos = input.mediaInputs?.source_video ?? [];
+      const videoUrl = sourceVideos[0];
+      if (!videoUrl) {
+        throw new Error("FAL grok-imagine-extend: source_video slot is required");
+      }
+      // Fallback на 6 (durationRange.min, совпадает с FAL endpoint default).
+      // Cost preview тоже использует durationRange.min — расхождения «показали
+      // $X — списали $Y» нет. Clamp 6-10: модель в каталоге не разрешает
+      // ниже 6 (короткие extension'ы у FAL нестабильны), но защищаемся
+      // на уровне адаптера на случай старого state'а.
+      const rawDuration = (ms.duration as number | undefined) ?? input.duration ?? 6;
+      const duration = Math.max(6, Math.min(10, Math.round(Number(rawDuration) || 6)));
+      const extendBody: Record<string, unknown> = {
+        prompt: (input.prompt ?? "").slice(0, 4096),
+        video_url: videoUrl,
+        duration,
+      };
+      logCall(FAL_GROK_IMAGINE_EXTEND_ENDPOINT, "submit", extendBody);
+      const { request_id } = await fal.queue.submit(FAL_GROK_IMAGINE_EXTEND_ENDPOINT, {
+        input: extendBody,
+      });
+      return `${FAL_GROK_IMAGINE_EXTEND_ENDPOINT}${SEP}${request_id}`;
     }
 
     // ── Kling-O3 (kling / kling-pro) ─────────────────────────────────────────

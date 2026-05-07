@@ -100,6 +100,13 @@ export interface StreamResult {
    * directly from provider-specific usage fields (e.g. citation/search tokens).
    */
   providerUsdCost?: number;
+  /**
+   * Set when provider закрыл response как `incomplete` — позволяет вызывающему
+   * выбрать осмысленное сообщение пользователю (напр. для reason
+   * `max_output_tokens` подсказать понизить effort или увеличить лимит).
+   * OpenAI Responses API: `'max_output_tokens' | 'content_filter'`.
+   */
+  incompleteReason?: string;
 }
 
 export interface LLMAdapter {
