@@ -1091,7 +1091,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     id: "grok-imagine",
     name: "🔮 Grok Imagine (текст → видео)",
     description:
-      "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту.",
+      "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту. Есть также режим «фото → видео» (генерация по референсным изображениям) — переключиться можно в «⚙ Управление» → выбор варианта модели.",
     section: "video",
     provider: "kie",
     familyId: "grok-imagine",
@@ -1149,7 +1149,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     id: "grok-imagine-r2v",
     name: "🔮 Grok Imagine (фото → видео)",
     description:
-      "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д.",
+      "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д. Есть также режим «текст → видео» (генерация без референсных изображений) — переключиться можно в «⚙ Управление» → выбор варианта модели.",
     section: "video",
     provider: "kie",
     familyId: "grok-imagine",
