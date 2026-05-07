@@ -161,12 +161,13 @@ const MI_REF_AUDIOS: MediaInputSlot = {
   exclusiveGroup: "refs",
 };
 
-/** Grok Imagine i2v: up to 7 reference images, referenced via @image1..@image7 in prompt. */
-const MI_GROK_IMAGINE_REFS: MediaInputSlot = {
+/** Grok Imagine r2v: до 7 reference-картинок, ссылаются в промпте через @image1..@image7. Required — модель без картинок не имеет смысла. */
+const MI_GROK_IMAGINE_REFS_REQUIRED: MediaInputSlot = {
   slotKey: "ref_images",
   mode: "reference_image",
   labelKey: "referenceImages",
   maxImages: 7,
+  required: true,
 };
 
 // ── Mode definitions per model ────────────────────────────────────────────
@@ -1079,13 +1080,22 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
       },
     ],
   },
+  // ── Grok Imagine: разделено на text-to-video и reference-to-video ──────────
+  // Раньше была одна модель `grok-imagine` с durationRange 6-30, но реальные
+  // лимиты xAI отличаются по режимам: t2v поддерживает до 15s, r2v — до 10s.
+  // Юзеры выставляли длительность больше реального лимита и получали 5xx от
+  // KIE. Разделили на 2 видимых в UI модели, durationRange у каждой —
+  // фактический лимит провайдера. Идентификатор `grok-imagine` сохранён за
+  // t2v чтобы не сломать сохранённый `videoModelId` у существующих юзеров.
   "grok-imagine": {
     id: "grok-imagine",
-    name: "🔮 Grok Imagine",
+    name: "🔮 Grok Imagine (текст → видео)",
     description:
-      "Видеомодель от xAI (Grok). Text-to-video и image-to-video с длительностью 6–30 секунд. Поддержка до 7 входных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д.",
+      "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту.",
     section: "video",
     provider: "kie",
+    familyId: "grok-imagine",
+    variantLabel: "текст → видео",
     // Resolution-based: 480p $0.008/s, 720p $0.015/s
     costUsdPerRequest: 0,
     costUsdPerSecond: 0.008,
@@ -1098,19 +1108,18 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
-    supportsImages: true,
-    mediaInputs: [MI_GROK_IMAGINE_REFS],
-    promptRefs: { images: { max: 7 } },
+    supportsImages: false,
+    mediaInputs: [],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["2:3", "3:2", "1:1", "16:9", "9:16"],
-    durationRange: { min: 6, max: 30 },
+    durationRange: { min: 6, max: 15 },
     settings: [
       mkAspectRatio(["16:9", "9:16", "1:1", "2:3", "3:2"]),
-      mkDurationSlider(6, 30),
+      mkDurationSlider(6, 15),
       {
         key: "resolution",
         label: "Разрешение видео",
@@ -1134,14 +1143,64 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
         ],
         default: "normal",
       },
-      // {
-      //   key: "nsfw_checker",
-      //   label: "Фильтр контента",
-      //   description:
-      //     "Включить фильтрацию контента провайдером. При отключении результаты возвращаются напрямую от модели без дополнительной проверки.",
-      //   type: "toggle",
-      //   default: false,
-      // },
+    ],
+  },
+  "grok-imagine-r2v": {
+    id: "grok-imagine-r2v",
+    name: "🔮 Grok Imagine (фото → видео)",
+    description:
+      "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д.",
+    section: "video",
+    provider: "kie",
+    familyId: "grok-imagine",
+    variantLabel: "фото → видео",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.008,
+    costVariants: {
+      settingKey: "resolution",
+      map: {
+        "480p": { costUsdPerSecond: 0.008 },
+        "720p": { costUsdPerSecond: 0.015 },
+      },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    mediaInputs: [MI_GROK_IMAGINE_REFS_REQUIRED],
+    promptRefs: { images: { max: 7 } },
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["2:3", "3:2", "1:1", "16:9", "9:16"],
+    durationRange: { min: 6, max: 10 },
+    settings: [
+      mkAspectRatio(["16:9", "9:16", "1:1", "2:3", "3:2"]),
+      mkDurationSlider(6, 10),
+      {
+        key: "resolution",
+        label: "Разрешение видео",
+        description: "480p — быстрее и дешевле, 720p — более чёткое видео. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "480p", label: "480p" },
+          { value: "720p", label: "720p" },
+        ],
+        default: "480p",
+      },
+      {
+        key: "mode",
+        label: "Режим генерации",
+        description:
+          "Fun — более креативная и игривая интерпретация, Normal — сбалансированный подход.",
+        type: "select",
+        options: [
+          { value: "fun", label: "Fun" },
+          { value: "normal", label: "Normal" },
+        ],
+        default: "normal",
+      },
     ],
   },
   veo: {
@@ -2072,30 +2131,22 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
       { key: "generate_audio", label: "Генерировать аудио", type: "toggle", default: true },
     ],
   },
-  // ── Grok Imagine via FAL — две отдельные fallback записи ────────────────────
-  // У FAL отдельные endpoint'ы с разными ограничениями: t2v принимает только
-  // prompt (duration 1-15s), r2v требует prompt + reference_image_urls
-  // (duration 1-10s). Чтобы isFallbackCompatible корректно дифференцировал
-  // совместимость по media и duration, мы регистрируем ДВЕ fallback записи:
-  //
-  //   t2v entry: mediaInputs=[] (нет слотов) → подходит только для t2v запросов.
-  //              durationRange 6-15.
-  //   r2v entry: mediaInputs=[ref_images required] → подходит только когда
-  //              user заполнил ref_images. durationRange 6-10.
+  // ── Grok Imagine via FAL — fallback'и для двух разделённых primary моделей ──
+  // Primary разделён на 2 модели:
+  //   - `grok-imagine`     (KIE t2v, durationRange 6-15)  → FAL fallback t2v ниже
+  //   - `grok-imagine-r2v` (KIE r2v, durationRange 6-10) → FAL fallback r2v ниже
   //
   // Pricing (общий для обоих endpoint'ов): 480p $0.05/s, 720p $0.07/s.
   // Per-image input fee $0.002 не учитываем (1-5% от total; biling при
-  // fallback'е по primary KIE цене всё равно).
+  // fallback'е идёт по primary KIE цене всё равно).
   //
   // Prompt syntax: KIE использует @image1 (lowercase), FAL — @Image1.
-  // FalVideoAdapter сам делает remap.
-  //
-  // FalVideoAdapter в submit() выбирает endpoint по input.mediaInputs.ref_images:
-  //   нет → text-to-video, есть → reference-to-video.
+  // FalVideoAdapter сам делает remap. Endpoint в адаптере выбирается по
+  // modelId (если "*-r2v") или по наличию ref_images (для legacy).
   {
     id: "grok-imagine",
-    name: "Grok Imagine (fal t2v fallback)",
-    description: "Fallback на FAL text-to-video при недоступности KIE (без ref_images).",
+    name: "Grok Imagine t2v (fal fallback)",
+    description: "Fallback на FAL text-to-video при недоступности KIE.",
     section: "video",
     provider: "fal",
     costUsdPerRequest: 0,
@@ -2138,9 +2189,12 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     ],
   },
   {
-    id: "grok-imagine",
-    name: "Grok Imagine (fal r2v fallback)",
-    description: "Fallback на FAL reference-to-video при недоступности KIE (с ref_images).",
+    // Primary `grok-imagine-r2v` (KIE r2v) → fallback FAL r2v. Раньше id был
+    // "grok-imagine" (когда primary был monolithic), после разделения primary
+    // r2v живёт под `grok-imagine-r2v` — id fallback'а должен совпадать.
+    id: "grok-imagine-r2v",
+    name: "Grok Imagine r2v (fal fallback)",
+    description: "Fallback на FAL reference-to-video при недоступности KIE.",
     section: "video",
     provider: "fal",
     costUsdPerRequest: 0,
@@ -2171,7 +2225,6 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["2:3", "3:2", "1:1", "16:9", "9:16"],
-    // FAL r2v: 1-10s. Intersection с primary (6-30): 6..10.
     durationRange: { min: 6, max: 10 },
     settings: [
       mkAspectRatio(["16:9", "9:16", "1:1", "2:3", "3:2"]),
