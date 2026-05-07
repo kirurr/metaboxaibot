@@ -449,7 +449,18 @@ export function createBot(token: string): Bot<BotContext> {
     ) {
       return;
     }
-    logger.error({ err, update: err.ctx.update }, "Unhandled bot error");
+    // pino's default `err` serializer рекурсивно сериализует все поля BotError.
+    // `err.ctx` содержит весь BotContext, включая `t` — огромный словарь локалей
+    // (~300+ строк), который засоряет лог. Временно прячем `t` на время лога
+    // и восстанавливаем сразу после — pino stringify'ит синхронно, так что
+    // race с reply ниже невозможен.
+    const savedT = err.ctx.t;
+    (err.ctx as { t?: unknown }).t = undefined;
+    try {
+      logger.error({ err, update: err.ctx.update }, "Unhandled bot error");
+    } finally {
+      (err.ctx as { t?: unknown }).t = savedT;
+    }
     const t = err.ctx.t ?? getT("en");
     err.ctx.reply(t.errors.unexpected).catch(() => void 0);
   });

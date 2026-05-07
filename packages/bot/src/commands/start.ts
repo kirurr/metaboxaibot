@@ -438,7 +438,10 @@ function inferTelegramLanguage(ctx: BotContext): Language {
  * Removes the onboarding message and shows the main menu with reply keyboard.
  */
 export async function handleOnboardingOk(ctx: BotContext): Promise<void> {
-  await ctx.answerCallbackQuery();
+  // answerCallbackQuery может бросить 400 "query is too old", если юзер тапнул
+  // кнопку через >15 минут после получения onboarding-сообщения — Telegram уже
+  // выкинул callback-query из своего state'а. Безвредно, swallow'им.
+  await ctx.answerCallbackQuery().catch(() => void 0);
   await ctx.deleteMessage().catch(() => void 0);
 
   const t = ctx.t;
