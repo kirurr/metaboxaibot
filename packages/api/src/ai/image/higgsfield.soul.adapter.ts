@@ -135,7 +135,16 @@ export class HiggsFieldSoulImageAdapter implements ImageAdapter {
     const data = (await res.json()) as PollResponse;
     logger.info({ data }, "Higgsfield Soul poll response");
 
-    if (data.status === "failed" || data.status === "nsfw" || data.status === "canceled") {
+    if (data.status === "nsfw") {
+      // Higgsfield content-policy блок (NSFW input или output). User-facing —
+      // юзеру нужно изменить промпт/фото. notifyOps=false: не нужно спамить
+      // тех-канал на каждый отказ модерации.
+      throw new UserFacingError(
+        `Higgsfield Soul generation rejected (nsfw): ${JSON.stringify(data)}`,
+        { key: "contentPolicyViolation", notifyOps: false },
+      );
+    }
+    if (data.status === "failed" || data.status === "canceled") {
       throw new Error(`Higgsfield Soul generation ${data.status}: ${JSON.stringify(data)}`);
     }
     if (data.status !== "completed") return null;

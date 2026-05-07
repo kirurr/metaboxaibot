@@ -71,6 +71,11 @@ import {
   handleAudioVoice,
   handleVoiceCloneUpload,
 } from "./scenes/audio.js";
+import {
+  handleDeleteCodeInput,
+  handleDeleteConfirm,
+  handleDeleteCancel,
+} from "./scenes/account-delete.js";
 import { handleSendOriginal } from "./handlers/send-original.handler.js";
 import { getActiveSlot } from "./utils/media-input-state.js";
 import { handleVoicePromptCallback } from "./handlers/voice-prompt.handler.js";
@@ -300,6 +305,10 @@ export function createBot(token: string): Bot<BotContext> {
     if (section === "video") return handleVideo(ctx);
   });
 
+  // ── Account deletion callbacks ────────────────────────────────────────────
+  bot.callbackQuery("account_delete:confirm", handleDeleteConfirm);
+  bot.callbackQuery("account_delete:cancel", handleDeleteCancel);
+
   // ── Voice transcription prompt callback ──────────────────────────────────
   bot.callbackQuery(/^vp:/, handleVoicePromptCallback);
   // ── Video avatar voice choice callbacks ─────────────────────────────────
@@ -390,6 +399,9 @@ export function createBot(token: string): Bot<BotContext> {
     if (!ctx.user) return next();
 
     const state = await userStateService.get(ctx.user.id);
+    if (state?.state === "AWAITING_DELETE_CONFIRMATION") {
+      return handleDeleteCodeInput(ctx);
+    }
     if (state?.state === "GPT_ACTIVE" || state?.state === "GPT_SECTION") {
       if (ctx.message?.photo) return handleGptPhoto(ctx);
       if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleGptPhoto(ctx);

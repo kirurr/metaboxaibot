@@ -60,6 +60,15 @@ const translations = {
     "account.statusUser": "User",
     "account.mentor": "MENTOR",
     "account.referralCode": "REFERRAL CODE",
+    "account.deleteAccount": "Delete account",
+    "account.deleteAccountTitle": "Delete your account?",
+    "account.deleteAccountText":
+      "This action is irreversible. All your generations, dialogs, avatars, voices and history will be permanently erased.\n\nAre you sure you want to delete your account?",
+    "account.deleteAccountConfirm": "Delete",
+    "account.deleteCheckBotTitle": "Confirm in bot chat",
+    "account.deleteCheckBotText":
+      "We sent a confirmation code to your bot chat. Open the bot, send the code, and confirm deletion there.",
+    "account.deleteCheckBotClose": "Got it",
 
     // Banner
     "banner.welcome.title": "Welcome to Metabox",
@@ -584,6 +593,15 @@ const translations = {
     "account.statusUser": "Пользователь",
     "account.mentor": "НАСТАВНИК",
     "account.referralCode": "РЕФЕРАЛЬНЫЙ КОД",
+    "account.deleteAccount": "Удалить аккаунт",
+    "account.deleteAccountTitle": "Удалить аккаунт?",
+    "account.deleteAccountText":
+      "Это действие необратимо. Все ваши генерации, диалоги, аватары, голоса и история будут удалены безвозвратно.\n\nВы точно хотите удалить аккаунт?",
+    "account.deleteAccountConfirm": "Удалить",
+    "account.deleteCheckBotTitle": "Подтвердите в чате бота",
+    "account.deleteCheckBotText":
+      "Мы отправили код подтверждения в чат бота. Вернитесь в чат, отправьте код и подтвердите удаление там.",
+    "account.deleteCheckBotClose": "Понятно",
 
     // Banner
     "banner.welcome.title": "Добро пожаловать",

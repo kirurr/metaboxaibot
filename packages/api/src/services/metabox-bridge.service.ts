@@ -254,6 +254,36 @@ export interface RecordSaleResult {
   orderId?: string;
 }
 
+/**
+ * Перенос остатков (токены + опционально локальная подписка) на metabox-аккаунт
+ * перед удалением юзера в боте. Эндпоинт `/credit-from-bot-deletion` пока
+ * НЕ реализован на стороне metabox — функция спокойно бросит `MetaboxApiError(404)`,
+ * caller это ловит и помечает запись `pendingMetaboxTransfer=true` в `DeletedUser`.
+ * После выкатки эндпоинта на сайте поведение сразу станет happy-path без
+ * изменений в коде бота.
+ *
+ * `subscription` передаётся ТОЛЬКО если у юзера была локальная подписка с
+ * `metaboxSubscriptionId === null` (не пришла из metabox — например Trial). Если
+ * подписка изначально с metabox — она там уже есть, переносить не нужно.
+ */
+export async function transferOnDeletion(params: {
+  metaboxUserId: string;
+  telegramId: bigint;
+  tokens: number;
+  subscription?: {
+    planName: string;
+    period: string;
+    tokensGranted: number;
+    endDate: string;
+    startDate: string;
+  };
+}): Promise<{ ok: true }> {
+  return post<{ ok: true }>("/credit-from-bot-deletion", {
+    ...params,
+    telegramId: params.telegramId.toString(),
+  });
+}
+
 /** Notify Metabox of a purchase made inside the bot (for MLM bonus calculation + order tracking). */
 export async function recordSale(params: {
   telegramId: bigint;

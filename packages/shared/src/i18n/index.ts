@@ -476,6 +476,24 @@ export interface Translations {
     submit: string;
     error: string;
   };
+  accountDelete: {
+    /** Шлётся юзеру в чат после нажатия "Подтвердить" в mini-app. Содержит `{code}`. */
+    codeMessage: string;
+    cancelButton: string;
+    /** Сообщение когда пользователь ввёл правильный код — переходим к финальному confirm. */
+    codeAccepted: string;
+    finalConfirmButton: string;
+    finalCancelButton: string;
+    /** Юзер ввёл неверный код — показываем сколько осталось попыток. Содержит `{left}`. */
+    codeWrong: string;
+    codeExpired: string;
+    tooManyAttempts: string;
+    cancelled: string;
+    /** Финальное сообщение после успешного удаления. */
+    success: string;
+    /** Если на финальном confirm нет verified-флага в Redis (юзер не вводил код). */
+    needCodeFirst: string;
+  };
   /**
    * Шутливые вариации текста "модель временно недоступна" для random-pick'а.
    * Содержат `{modelName}` и (опционально) `{alternatives}` — последний раскрывается
