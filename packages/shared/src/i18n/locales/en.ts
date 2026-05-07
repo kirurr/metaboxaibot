@@ -218,6 +218,10 @@ export default {
       "🔁 Ready to extend. The source video is attached as a reference. Send a text prompt — what should happen next.",
     extendNotAvailable:
       "❌ Extension is not available for this video. The «Extend» button works only for original Grok videos (text→video / photo→video).",
+    grokSiblingHintT2v:
+      "💡 There is also a photo → video mode (generation from reference images) — switch via ⚙ Management.",
+    grokSiblingHintR2v:
+      "💡 There is also a text → video mode (generation without reference images) — switch via ⚙ Management.",
     imageIgnoredUnsupported:
       "⚠️ This model does not support image input — your photo will be ignored.",
     hintVideoDefault:
