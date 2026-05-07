@@ -254,6 +254,8 @@ export default {
     noSubscription: "❌ An active subscription is required to use the bot.",
     noSubscriptionForPurchase: "❌ Token packages are only available with an active subscription.",
     userBlocked: "❌ Your account has been blocked. Contact support.",
+    notRegistered:
+      "👋 To start using the bot, send the /start command or follow a friend's referral link.",
     fileTooLargeForTelegram:
       "The file is too large to send via Telegram. If you are on mobile, we recommend opening the download link in a browser.",
     fileTooLargeForBotApi:

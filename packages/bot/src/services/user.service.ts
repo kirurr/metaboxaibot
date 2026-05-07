@@ -20,6 +20,25 @@ function mapUser(user: User): UserDto {
 }
 
 export const userService = {
+  async findById(id: bigint): Promise<UserDto | null> {
+    const user = await db.user.findUnique({ where: { id } });
+    return user ? mapUser(user) : null;
+  },
+
+  async updateProfile(
+    id: bigint,
+    params: { username?: string; firstName?: string; lastName?: string },
+  ): Promise<void> {
+    await db.user.update({
+      where: { id },
+      data: {
+        username: params.username,
+        firstName: params.firstName,
+        lastName: params.lastName,
+      },
+    });
+  },
+
   async upsert(params: {
     id: bigint;
     username?: string;

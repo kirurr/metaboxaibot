@@ -489,6 +489,10 @@ const translations = {
     // Auth errors
     "auth.tokenExpired": "Link expired. Press the «Profile» button in the bot menu again.",
     "auth.openFromTelegram": "Please open this app from Telegram",
+    "auth.notRegisteredTitle": "Open the bot first",
+    "auth.notRegisteredText":
+      "To use the mini-app, send the /start command to the bot or follow a friend's referral link.",
+    "auth.openBot": "Open bot",
 
     // Picker shared UI
     "picker.search": "Search…",
@@ -1017,6 +1021,10 @@ const translations = {
     "auth.tokenExpired":
       "Ссылка устарела. Заново откройте главное меню и нажмите кнопку «Профиль».",
     "auth.openFromTelegram": "Пожалуйста, откройте приложение через Telegram",
+    "auth.notRegisteredTitle": "Сначала откройте бота",
+    "auth.notRegisteredText":
+      "Чтобы пользоваться мини-приложением, отправьте боту команду /start или перейдите по реферальной ссылке от друга.",
+    "auth.openBot": "Открыть бота",
 
     // Picker shared UI
     "picker.search": "Поиск…",

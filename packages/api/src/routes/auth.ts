@@ -21,7 +21,11 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) return reply.code(404).send({ error: "User not found — open the bot first" });
+    if (!user) {
+      return reply
+        .code(404)
+        .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
+    }
     if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
 
     return {
@@ -51,7 +55,11 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) return reply.code(404).send({ error: "User not found — open the bot first" });
+    if (!user) {
+      return reply
+        .code(404)
+        .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
+    }
     if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
 
     return {

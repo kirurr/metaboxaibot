@@ -178,6 +178,8 @@ export interface Translations {
     noSubscription: string;
     noSubscriptionForPurchase: string;
     userBlocked: string;
+    /** Пользователь не зарегистрирован (нет в `users` БД) — должен запустить /start. */
+    notRegistered: string;
     sendOriginalFailed: string;
     fileTooLargeForTelegram: string;
     fileTooLargeForBotApi: string;

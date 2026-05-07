@@ -64,7 +64,7 @@ function AppContent() {
     setLinkMetaboxReason(reason);
     setPage("linkMetabox");
   };
-  const { ready, error, warning } = useTelegramInit();
+  const { ready, error, errorCode, warning } = useTelegramInit();
   const { t } = useI18n();
 
   useEffect(() => {
@@ -115,6 +115,33 @@ function AppContent() {
   };
 
   if (error) {
+    // USER_NOT_FOUND — юзер открыл mini-app до регистрации в боте (или после
+    // удаления аккаунта). Блокируем UI, объясняем что нужно нажать /start
+    // в боте, и даём deep-link на бота.
+    if (errorCode === "USER_NOT_FOUND") {
+      const botUsername = import.meta.env.VITE_BOT_USERNAME as string | undefined;
+      const botUrl = botUsername ? `https://t.me/${botUsername}?start=fromminiapp` : null;
+      const openBot = () => {
+        if (!botUrl) return;
+        const tg = (
+          window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (u: string) => void } } }
+        ).Telegram?.WebApp;
+        if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
+        else window.open(botUrl, "_blank");
+      };
+      return (
+        <div className="splash">
+          <div className="splash__icon">👋</div>
+          <div className="splash__title">{t("auth.notRegisteredTitle")}</div>
+          <div className="splash__text">{t("auth.notRegisteredText")}</div>
+          {botUrl && (
+            <button className="btn btn--primary splash__cta" onClick={openBot}>
+              {t("auth.openBot")}
+            </button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="splash">
         <div className="splash__icon">⚠️</div>

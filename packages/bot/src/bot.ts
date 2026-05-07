@@ -214,6 +214,30 @@ export function createBot(token: string): Bot<BotContext> {
     if (!ctx.chat || ctx.chat.type === "private") return next();
   });
 
+  // ── Registration gate ────────────────────────────────────────────────────
+  // authMiddleware теперь не создаёт юзера автоматически — `ctx.user` будет
+  // undefined, если юзер ещё не запускал бота или удалил аккаунт. Любое
+  // сообщение от такого пользователя (кроме самого `/start`) получает
+  // bilingual reminder: «нажмите /start или используйте реферальную ссылку».
+  bot.use(async (ctx, next) => {
+    if (ctx.user) return next();
+    // /start — единственный путь регистрации (handleStart сам делает upsert).
+    if (ctx.message?.text?.startsWith("/start")) return next();
+    // Telegram Stars / successful_payment — не блокируем (теоретический edge case).
+    if (ctx.preCheckoutQuery || ctx.message?.successful_payment) return next();
+
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery().catch(() => void 0);
+    }
+    if (ctx.chat) {
+      const ru = getT("ru");
+      const en = getT("en");
+      await ctx
+        .reply(`${ru.errors.notRegistered}\n\n${en.errors.notRegistered}`)
+        .catch(() => void 0);
+    }
+  });
+
   // ── Commands ─────────────────────────────────────────────────────────────
   bot.command("start", handleStart);
   bot.command("menu", handleMenu);
