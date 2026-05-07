@@ -19,7 +19,7 @@ export const AVATAR_MODELS = new Set(["heygen", "d-id"]);
  * Если модель — avatar (heygen/d-id) и юзер выбрал клонированный голос (Cartesia
  * или legacy ElevenLabs), синтезируем промпт через TTS соответствующего провайдера,
  * аплоадим в S3, списываем TTS-токены и возвращаем S3 key. Адаптер видеомодели
- * подхватит voice_s3key и пойдёт через audio_asset_id flow.
+ * подхватит файл из mediaInputs.voice_audio и пойдёт через audio_asset_id flow.
  *
  * Returns null когда pre-TTS не нужен (raw audio override / non-cloned voice /
  * провайдер `voice_id` не совпадает с UserVoice).
@@ -36,7 +36,6 @@ export async function preGenerateELTts(
 ): Promise<string | null> {
   if (!AVATAR_MODELS.has(modelId)) return null;
   if (rawVoiceOverride) return null; // raw audio takes priority
-  if (videoModelSettings.voice_s3key as string | undefined) return null; // legacy guard
 
   const requestedVoice = videoModelSettings.voice_id as string | undefined;
   const voiceProvider = videoModelSettings.voice_provider as string | undefined;
@@ -147,8 +146,8 @@ async function runTts(
 /**
  * Wraps `preGenerateELTts` for the video submit pipeline. If the model is an
  * avatar model with an EL voice and no audio override yet, generates EL TTS
- * and returns a new SubmitVideoParams with `voice_s3key` injected. Otherwise
- * returns the params unchanged.
+ * and returns a new SubmitVideoParams with the synthesized audio injected into
+ * `mediaInputs.voice_audio`. Otherwise returns the params unchanged.
  *
  * Used both by the confirm-off path (bot scenes) and the confirm-on path
  * (`handleLowIqStart` → `runReplaySubmit`) so EL TTS only runs after the
@@ -157,12 +156,9 @@ async function runTts(
 export async function ensureELTtsForVideo(
   submitParams: SubmitVideoParams,
 ): Promise<SubmitVideoParams> {
-  const { userId, modelId, prompt, mediaInputs, extraModelSettings } = submitParams;
+  const { userId, modelId, prompt, mediaInputs } = submitParams;
   if (!AVATAR_MODELS.has(modelId)) return submitParams;
-  // Skip if voice is already provided via either channel (new mediaInputs or legacy).
   if (mediaInputs?.voice_audio?.[0]) return submitParams;
-  const existingVoiceS3Key = (extraModelSettings?.voice_s3key as string | undefined)?.trim();
-  if (existingVoiceS3Key) return submitParams;
 
   const allSettings = await userStateService.getModelSettings(userId);
   const fullModelSettings = allSettings[modelId] ?? {};

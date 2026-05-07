@@ -1452,8 +1452,6 @@ function GalleryCard({
 
 /** Picker companion fields — internal IDs/URLs without a user-visible meaning. */
 const ALWAYS_HIDDEN_SETTING_KEYS = new Set([
-  "voice_url",
-  "voice_s3key",
   "voice_provider",
   "talking_photo_id",
   // Defensive: hide legacy avatar one-shot keys still present in some users'

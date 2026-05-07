@@ -1740,10 +1740,7 @@ export async function handleVideoAvatarVoiceCallback(ctx: BotContext): Promise<v
       imageUrl: scratchpadImageUrl,
       aspectRatio: modelSettings?.aspectRatio,
       duration: modelSettings?.duration,
-      modelSettings: {
-        ...fullModelSettings,
-        ...(entry.uploadedKey ? { voice_s3key: entry.uploadedKey } : { voice_url: entry.tgUrl }),
-      },
+      modelSettings: fullModelSettings,
       userId,
     },
     { hasVoiceFile: true },
