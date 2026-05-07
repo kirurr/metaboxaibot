@@ -48,6 +48,7 @@ import {
   getActiveModelSlots,
   findMissingRequiredSlot,
 } from "../utils/media-input-state.js";
+import { consumeMediaHint, refreshMediaHint } from "../utils/media-hint.js";
 
 // ── Model selection keyboard ──────────────────────────────────────────────────
 
@@ -175,6 +176,10 @@ export async function activateDesignModel(
     if (modes && !options.suppressKeyboard) {
       await sendDesignModePicker(ctx, modelId, modes);
     }
+
+    if (!options.suppressKeyboard) {
+      await refreshMediaHint(ctx, "design", modelId);
+    }
   } else {
     await ctx.reply(`${ctx.t.design.modelActivated}\n\n${ctx.t.voice.inputHint}`);
   }
@@ -254,6 +259,7 @@ export async function sendDesignMediaInputStatus(
   } else {
     await ctx.reply(body, { reply_markup: kb });
   }
+  await refreshMediaHint(ctx, "design", modelId);
 }
 
 // ── Media input slot callback (mi:design:{slotKey}) ─────────────────────────
@@ -498,6 +504,7 @@ export async function executeDesignPrompt(
 
   // Clear media inputs for this model (consumed on generation start)
   if (hasMediaInputs) await userStateService.clearMediaInputs(ctx.user.id, modelId);
+  await consumeMediaHint(ctx, "design");
 
   // Resolve reference image (one-shot, legacy path)
   const refMessageId = state?.designRefMessageId ?? null;
@@ -721,6 +728,7 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
       : activeSlot.slotKey;
 
     debounceSlotReply(userId, mediaGroupId, async () => {
+      await consumeMediaHint(ctx, "design");
       const freshInputs = await userStateService.getMediaInputs(userId, slotModelId);
       const freshCount = freshInputs[activeSlot.slotKey]?.length ?? 0;
 

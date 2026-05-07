@@ -63,6 +63,7 @@ import {
   debounceSoulReply,
 } from "../utils/soul-photo-buffer.js";
 import { acquireLock, releaseLock } from "../utils/dedup.js";
+import { consumeMediaHint, refreshMediaHint } from "../utils/media-hint.js";
 
 /**
  * Для AVATAR_MODELS one-shot фото из чата живёт в `mediaInputs.avatar_photo[0]`,
@@ -292,6 +293,10 @@ export async function activateVideoModel(
     if (modes && !options.suppressKeyboard) {
       await sendVideoModePicker(ctx, modelId, modes);
     }
+
+    if (!options.suppressKeyboard) {
+      await refreshMediaHint(ctx, "video", modelId);
+    }
   } else {
     await ctx.reply(ctx.t.video.modelActivated);
   }
@@ -369,6 +374,7 @@ export async function sendVideoMediaInputStatus(
   } else {
     await ctx.reply(body, { reply_markup: kb });
   }
+  await refreshMediaHint(ctx, "video", modelId);
 }
 
 // ── Media input slot callback (mi:video:{slotKey}) ──────────────────────────
@@ -677,6 +683,7 @@ export async function executeVideoPrompt(
 
   // Clear media inputs for this model (consumed on generation start)
   if (hasMediaInputs) await userStateService.clearMediaInputs(ctx.user.id, modelId);
+  await consumeMediaHint(ctx, "video");
 
   // For D-ID/HeyGen: pick up any previously saved reference photo (one-shot, legacy path)
   const scratchpadImageUrl =
@@ -1016,6 +1023,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       : activeSlot.slotKey;
 
     debounceSlotReply(userId, mediaGroupId, async () => {
+      await consumeMediaHint(ctx, "video");
       const freshInputs = await userStateService.getMediaInputs(userId, slotModelId);
       const freshCount = freshInputs[activeSlot.slotKey]?.length ?? 0;
 
@@ -1350,6 +1358,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
       await userStateService.clearMediaInputSlot(userId, slotModelId, activeSlot.slotKey);
       await userStateService.addMediaInput(userId, slotModelId, activeSlot.slotKey, tgSlotValue);
       debounceSlotReply(userId, mediaGroupId, async () => {
+        await consumeMediaHint(ctx, "video");
         clearActiveSlot(userId);
         await sendVideoMediaInputStatus(ctx);
       });
@@ -1359,6 +1368,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
       await userStateService.clearMediaInputSlot(userId, slotModelId, activeSlot.slotKey);
       await userStateService.addMediaInput(userId, slotModelId, activeSlot.slotKey, tgSlotValue);
       debounceSlotReply(userId, mediaGroupId, async () => {
+        await consumeMediaHint(ctx, "video");
         clearActiveSlot(userId);
         await sendVideoMediaInputStatus(ctx);
       });
@@ -1378,6 +1388,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
         isFull,
       );
       debounceSlotReply(userId, mediaGroupId, async () => {
+        await consumeMediaHint(ctx, "video");
         const freshInputs = await userStateService.getMediaInputs(userId, slotModelId);
         const freshCount = freshInputs[activeSlot.slotKey]?.length ?? 0;
         if (freshCount >= activeSlot.maxImages) {
@@ -1630,6 +1641,7 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
         await userStateService.clearMediaInputSlot(userId, slotModelId, activeSlot.slotKey);
         await userStateService.addMediaInput(userId, slotModelId, activeSlot.slotKey, tgSlotValue);
         clearActiveSlot(userId);
+        await consumeMediaHint(ctx, "video");
         await sendVideoMediaInputStatus(ctx);
         return;
       }
@@ -1645,6 +1657,7 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
         tgSlotValue,
         isFull,
       );
+      await consumeMediaHint(ctx, "video");
       const updatedCount = Math.min(existing.length + 1, activeSlot.maxImages);
       if (updatedCount >= activeSlot.maxImages) {
         clearActiveSlot(userId);
