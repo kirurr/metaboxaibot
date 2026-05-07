@@ -154,6 +154,10 @@ export interface Translations {
     soulCancelButton: string;
     soulMinPhotos: string;
     imageIgnoredUnsupported: string;
+    extendButton: string;
+    extendPrompt: string;
+    extendActivated: string;
+    extendNotAvailable: string;
     hintVideoDefault: string;
     avatarCreationCancelled: string;
     avatarCreationStarted: string;
@@ -361,6 +365,7 @@ export interface Translations {
     referenceImages: string;
     referenceVideos: string;
     referenceAudios: string;
+    sourceVideo: string;
     referenceImagesHint: string;
     referenceVideosHint: string;
     referenceAudiosHint: string;

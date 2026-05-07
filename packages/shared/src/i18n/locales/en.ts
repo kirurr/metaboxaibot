@@ -211,6 +211,13 @@ export default {
     soulCancelled: "❌ Character creation cancelled.",
     soulCancelButton: "❌ Cancel creation",
     soulMinPhotos: "⚠️ At least {min} photos are required to create a character. Uploaded: {n}.",
+    extendButton: "🔁 Extend",
+    extendPrompt:
+      "🔁 Video extension\n\nDescribe in text what should happen next — the bot will generate a 6-second extension (configurable in ⚙ Management).",
+    extendActivated:
+      "🔁 Ready to extend. The source video is attached as a reference. Send a text prompt — what should happen next.",
+    extendNotAvailable:
+      "❌ Extension is not available for this video. The «Extend» button works only for original Grok videos (text→video / photo→video).",
     imageIgnoredUnsupported:
       "⚠️ This model does not support image input — your photo will be ignored.",
     hintVideoDefault:
@@ -507,6 +514,7 @@ export default {
     referenceImages: "Reference Images",
     referenceVideos: "Reference Videos",
     referenceAudios: "Reference Audios",
+    sourceVideo: "Source Video",
     referenceImagesHint:
       "Reference images for video generation:\n• Up to 9 images\n• JPEG, PNG, or WebP, up to 30 MB each\n• Total files across all modalities must not exceed 12\n\nReference them in the prompt as @Image1, @Image2, etc.\n\nSend photos one at a time.",
     referenceVideosHint:

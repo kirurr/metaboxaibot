@@ -170,6 +170,19 @@ const MI_GROK_IMAGINE_REFS_REQUIRED: MediaInputSlot = {
   required: true,
 };
 
+/**
+ * Grok Imagine extend: исходное видео для продления. Required — без него
+ * запрос не валиден. FAL принимает MP4 H.264/H.265/AV1 длиной 2–15s.
+ * Заполняется автоматически при тапе на кнопку «Продлить» под результатом.
+ */
+const MI_GROK_EXTEND_SOURCE_VIDEO: MediaInputSlot = {
+  slotKey: "source_video",
+  mode: "reference_video",
+  labelKey: "sourceVideo",
+  maxImages: 1,
+  required: true,
+};
+
 // ── Mode definitions per model ────────────────────────────────────────────
 //
 // A model with `modes` always shows a mode picker after activation. Slots are
@@ -1091,7 +1104,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     id: "grok-imagine",
     name: "🔮 Grok Imagine (текст → видео)",
     description:
-      "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту.",
+      "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту. Есть также режим «фото → видео» (генерация по референсным изображениям) — переключиться можно в «⚙ Управление» → выбор варианта модели.",
     section: "video",
     provider: "kie",
     familyId: "grok-imagine",
@@ -1149,7 +1162,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     id: "grok-imagine-r2v",
     name: "🔮 Grok Imagine (фото → видео)",
     description:
-      "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д.",
+      "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д. Есть также режим «текст → видео» (генерация без референсных изображений) — переключиться можно в «⚙ Управление» → выбор варианта модели.",
     section: "video",
     provider: "kie",
     familyId: "grok-imagine",
@@ -1202,6 +1215,45 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
         default: "normal",
       },
     ],
+  },
+  // ── Grok Imagine Extend (скрытая модель) ─────────────────────────────────────
+  // Активируется только через кнопку «🔁 Продлить» под результатом Grok-видео.
+  // FAL endpoint `xai/grok-imagine-video/extend-video`: prompt + video_url +
+  // duration. Output = original + extension склеенные. Источник видео
+  // прикрепляется в slot source_video автоматически.
+  //
+  // Один уровень глубины: после extend output > 15s часто, и FAL не примет
+  // его как input для повторного extend (limit 2-15s). Поэтому кнопку
+  // «Продлить» под результатом extend'а НЕ показываем.
+  //
+  // Pricing: FAL extend pricing — $0.06/s flat (между r2v $0.05 и t2v $0.07).
+  "grok-imagine-extend": {
+    id: "grok-imagine-extend",
+    name: "🔁 Grok Imagine — продление",
+    description:
+      "Продление существующего Grok-видео. Активируется только через кнопку «🔁 Продлить» под результатом.",
+    section: "video",
+    provider: "fal",
+    hiddenFromCarousel: true,
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.06,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: false,
+    mediaInputs: [MI_GROK_EXTEND_SOURCE_VIDEO],
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: [],
+    // FAL spec формально допускает 2-10s, но на коротких extension'ах (2-5s)
+    // провайдер часто возвращает ошибки/невалидный output — сужаем диапазон
+    // до 6-10s, что совпадает с FAL endpoint default = 6 и даёт стабильный
+    // результат. Cost preview, slider и адаптер используют эту же min для
+    // дефолта, чтобы не было расхождения «показали $X — списали $Y».
+    durationRange: { min: 6, max: 10 },
+    settings: [mkDurationSlider(6, 10)],
   },
   veo: {
     id: "veo",

@@ -398,12 +398,12 @@ export const MODEL_TRANSLATIONS_EN: Record<string, ModelTranslation> = {
   "grok-imagine": {
     name: "🔮 Grok Imagine (text → video)",
     description:
-      "xAI (Grok) video model, text-to-video mode. No reference images — generation by text prompt only.",
+      "xAI (Grok) video model, text-to-video mode. No reference images — generation by text prompt only. There is also a photo → video mode (generation from reference images) — switch via ⚙ Management → variant picker.",
   },
   "grok-imagine-r2v": {
     name: "🔮 Grok Imagine (photo → video)",
     description:
-      "xAI (Grok) video model, reference-to-video mode. Accepts up to 7 reference images — refer to them in the prompt via @image1, @image2, etc.",
+      "xAI (Grok) video model, reference-to-video mode. Accepts up to 7 reference images — refer to them in the prompt via @image1, @image2, etc. There is also a text → video mode (generation without reference images) — switch via ⚙ Management → variant picker.",
   },
   "grok-imagine-image": {
     name: "🔮 Grok Imagine",

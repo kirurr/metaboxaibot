@@ -307,6 +307,13 @@ export interface AIModel {
   promptOptionalRequiresMedia?: boolean;
   isAsync: boolean; // требует очереди (для image/video/audio)
   /**
+   * Скрыть модель из общей карусели выбора моделей (бот + webapp). Используется
+   * для моделей, доступных только через специальные сценарии — например,
+   * `grok-imagine-extend` активируется только по кнопке «Продлить» под
+   * результатом, в обычной карусели её показывать не нужно.
+   */
+  hiddenFromCarousel?: boolean;
+  /**
    * Сколько изображений модель отдаёт за один API-call (native batch). Если 1 (или
    * не задано) — модель — single-only и может получить virtual batch через
    * `maxVirtualBatch`. Если >1 — провайдер сам поддерживает batch (KIE

@@ -767,7 +767,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       : sendOriginalLabel
         ? [{ text: sendOriginalLabel, callback_data: `orig_${outputId}` }]
         : null;
-    const replyMarkup = actionRow ? { inline_keyboard: [actionRow] } : undefined;
+
+    // «Продлить» — только для primary Grok-моделей (`grok-imagine`,
+    // `grok-imagine-r2v`). НЕ для `grok-imagine-extend` — output extend'а
+    // уже включает оригинал и часто >15s, FAL не примет его как input.
+    const isGrokExtendable = modelId === "grok-imagine" || modelId === "grok-imagine-r2v";
+    const extendRow: InlineKeyboardButton[] | null = isGrokExtendable
+      ? [{ text: t.video.extendButton, callback_data: `video_extend_${outputId}` }]
+      : null;
+
+    const replyRows = [actionRow, extendRow].filter(Boolean) as InlineKeyboardButton[][];
+    const replyMarkup = replyRows.length ? { inline_keyboard: replyRows } : undefined;
 
     const model = AI_MODELS[modelId];
     const hasAudioDriver =
