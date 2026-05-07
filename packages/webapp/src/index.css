@@ -368,6 +368,29 @@ textarea::placeholder {
   font-size: 16px;
   font-weight: 500;
   font-family: var(--font-heading);
+  text-align: center;
+  padding: 0 32px;
+  line-height: 1.5;
+  max-width: 480px;
+}
+.splash__title {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-heading);
+  text-align: center;
+  padding: 0 24px;
+  margin-top: 4px;
+}
+.splash__cta {
+  /* override .btn { flex: 1 } — без этого в splash (flex-column на 100dvh)
+     кнопка раздувается на всю свободную высоту и превращается в гигантский pill. */
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 14px 28px;
+  margin-top: 12px;
 }
 @keyframes pulse {
   0%,

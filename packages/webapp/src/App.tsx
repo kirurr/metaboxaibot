@@ -11,6 +11,7 @@ import { DownloadRedirectPage } from "./pages/DownloadRedirectPage.js";
 import { I18nProvider, useI18n } from "./i18n.js";
 import { AiboxLogo } from "./components/AiboxLogo.js";
 import { api } from "./api/client.js";
+import { closeMiniApp } from "./utils/telegram.js";
 import type { Page, UserProfile } from "./types.js";
 
 function parseHash(): { page: Page; section?: string; action?: string } {
@@ -128,6 +129,9 @@ function AppContent() {
         ).Telegram?.WebApp;
         if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
         else window.open(botUrl, "_blank");
+        // Закрываем mini-app сразу после открытия чата с ботом — юзеру нечего
+        // делать в неавторизованной mini-app, всё взаимодействие теперь в боте.
+        closeMiniApp();
       };
       return (
         <div className="splash">
