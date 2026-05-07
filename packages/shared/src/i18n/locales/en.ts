@@ -646,6 +646,23 @@ export default {
     submit: "Continue",
     error: "Error. Please check your details and try again.",
   },
+  accountDelete: {
+    codeMessage:
+      "🗑 To confirm account deletion, send this code in chat: <code>{code}</code>\n\nThe code is valid for 5 minutes.",
+    cancelButton: "❌ Cancel",
+    codeAccepted:
+      "Code accepted. Please confirm account deletion — this action is irreversible. All your generations, dialogs and history will be erased.",
+    finalConfirmButton: "🗑 Delete account",
+    finalCancelButton: "Cancel",
+    codeWrong: "❌ Wrong code. Attempts left: {left}.",
+    codeExpired:
+      "⏱ The code has expired. If you still want to delete your account, try again from the mini-app.",
+    tooManyAttempts: "❌ Too many wrong attempts. Deletion cancelled. Please try again later.",
+    cancelled: "Account deletion cancelled.",
+    success:
+      "✅ Your account has been deleted. All data is erased. If you change your mind, please contact support.",
+    needCodeFirst: "Please enter the confirmation code from the message above first.",
+  },
   generationFailedVariants: [
     "❌ {modelName} is temporarily unavailable. We already know and we're fixing it. Don't get bored — we have 70+ other AI models, you'll surely find something you like.",
     "❌ {modelName} is in a bad mood right now. We know and we're fixing it. While it pulls itself together, try {alternatives} — they're in shape.",

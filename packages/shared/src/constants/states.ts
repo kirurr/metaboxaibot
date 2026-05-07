@@ -11,6 +11,7 @@ export const BOT_STATES = {
   AUDIO_ACTIVE: "AUDIO_ACTIVE",
   VIDEO_SECTION: "VIDEO_SECTION",
   VIDEO_ACTIVE: "VIDEO_ACTIVE",
+  AWAITING_DELETE_CONFIRMATION: "AWAITING_DELETE_CONFIRMATION",
 } as const satisfies Record<string, BotState>;
 
 export const SECTION_BY_STATE: Partial<Record<BotState, Section>> = {
