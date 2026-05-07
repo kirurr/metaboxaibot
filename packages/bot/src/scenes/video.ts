@@ -270,6 +270,15 @@ export async function activateVideoModel(
         case "higgsfield":
         case "higgsfield-preview":
           hint = ctx.t.video.hintHiggsfield;
+          break;
+        // У grok-imagine t2v нет media-input слотов — generic hint про
+        // «🖼 Чтобы добавить изображения... используйте кнопки слотов ниже»
+        // вводит в заблуждение (никаких слотов в этой модели нет).
+        // grok-imagine-r2v и grok-imagine-extend имеют слоты (ref_images /
+        // source_video) — для них generic hint валиден.
+        case "grok-imagine":
+          hint = ctx.t.video.hintVideoTextOnly;
+          break;
       }
       await ctx.reply(appendVoiceHint ? `${hint}\n\n${ctx.t.voice.inputHint}` : hint, {
         reply_markup: inlineKb,

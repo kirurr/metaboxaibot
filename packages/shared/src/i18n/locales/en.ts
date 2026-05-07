@@ -226,6 +226,7 @@ export default {
       "⚠️ This model does not support image input — your photo will be ignored.",
     hintVideoDefault:
       "✉️ Send a text prompt to generate a video.\n🖼 To add images (first/last frame, reference etc.) — use the slot buttons below.",
+    hintVideoTextOnly: "✉️ Send a text prompt to generate a video.",
     videoPhotoSaved: "📸 Photo saved for use in next generation.",
     videoDriverSaved: "🎬 Driver video saved for use in next generation.",
     videoVoiceSaved: "🎙 Voice sample saved. Choose how to use it:",

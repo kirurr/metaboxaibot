@@ -160,6 +160,7 @@ export interface Translations {
     extendNotAvailable: string;
     grokSiblingHintT2v: string;
     grokSiblingHintR2v: string;
+    hintVideoTextOnly: string;
     hintVideoDefault: string;
     avatarCreationCancelled: string;
     avatarCreationStarted: string;
