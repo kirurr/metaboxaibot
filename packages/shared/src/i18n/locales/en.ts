@@ -578,6 +578,7 @@ export default {
     remove: "Remove",
     optional: "(optional)",
     required: "(required)",
+    referencesNotLoaded: "💡 No references uploaded yet",
     doneUploading: "Done ✓",
     readyForPrompt: "✅ Ready! Send a text prompt to start generation.",
     readyForPromptOptional:

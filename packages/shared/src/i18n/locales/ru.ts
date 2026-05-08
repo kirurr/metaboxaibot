@@ -576,6 +576,7 @@ export default {
     remove: "Удалить",
     optional: "(необязательно)",
     required: "(обязательно)",
+    referencesNotLoaded: "💡 Референсы пока не добавлены",
     doneUploading: "Готово ✓",
     readyForPrompt: "✅ Готово! Отправьте текстовый промпт для начала генерации.",
     readyForPromptOptional:

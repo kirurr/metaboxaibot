@@ -88,6 +88,7 @@ export { resolveVoiceForTTS } from "./user-voice.service.js";
 export type { ResolvedVoice } from "./user-voice.service.js";
 export { translatePromptIfNeeded, looksEnglish } from "./prompt-translate.service.js";
 export { describeImageForPrompt } from "./image-describe.service.js";
+export { mediaHintService } from "./media-hint.service.js";
 
 // ── Web (ai.metabox.global) ─────────────────────────────────────────────
 export { consumeLinkTelegramState, markLinkTelegramLinked } from "./web-session.service.js";
