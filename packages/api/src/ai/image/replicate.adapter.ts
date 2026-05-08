@@ -1,6 +1,7 @@
 import Replicate from "replicate";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config } from "@metabox/shared";
+import { logger } from "../../logger.js";
 import { logCall } from "../../utils/fetch.js";
 import { parseReplicatePredictionFailure } from "../../utils/replicate-error.js";
 import { resolveImageMimeType } from "../../utils/mime-detect.js";
@@ -112,7 +113,15 @@ export class ReplicateAdapter implements ImageAdapter {
     // DB may still hold 0 from before the schema min was raised to 0.1 — substitute
     // on the way out so existing saved settings stop crashing.
     if (ms.prompt_strength !== undefined && imageUrl) {
-      msExtras.prompt_strength = ms.prompt_strength === 0 ? 0.1 : ms.prompt_strength;
+      if (ms.prompt_strength === 0) {
+        logger.warn(
+          { modelId: this.modelId },
+          "Replicate adapter: clamped legacy prompt_strength=0 to 0.1 (would crash provider)",
+        );
+        msExtras.prompt_strength = 0.1;
+      } else {
+        msExtras.prompt_strength = ms.prompt_strength;
+      }
     }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
     if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
