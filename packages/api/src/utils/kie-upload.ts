@@ -23,8 +23,18 @@ interface KieFileUploadResponse {
  *
  * Used to make S3 presigned URLs / Telegram file URLs accessible to KIE's
  * generation endpoints (which cannot reach private/expiring URLs).
+ *
+ * Опциональный `fileName` (обязательно с extension'ом) — пробрасывается в KIE,
+ * чтобы downloadUrl содержал понятное расширение. Без этого KIE кладёт файл
+ * под randomly-generated именем, а downstream-модели (nano-banana-2 и др.)
+ * валидируют тип по URL extension'у и отбрасывают extensionless ссылки с
+ * `"File type not supported"`.
  */
-export async function uploadFileUrl(apiKey: string, fileUrl: string): Promise<string> {
+export async function uploadFileUrl(
+  apiKey: string,
+  fileUrl: string,
+  fileName?: string,
+): Promise<string> {
   const resp = await fetchWithLog(`${KIE_FILE_BASE}/api/file-url-upload`, {
     method: "POST",
     headers: {
@@ -34,6 +44,7 @@ export async function uploadFileUrl(apiKey: string, fileUrl: string): Promise<st
     body: JSON.stringify({
       fileUrl,
       uploadPath: "metabox/media",
+      ...(fileName ? { fileName } : {}),
     }),
   });
 
