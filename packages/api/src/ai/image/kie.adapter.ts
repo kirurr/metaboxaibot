@@ -88,6 +88,17 @@ export class KieImageAdapter implements ImageAdapter {
     const imageUrls = editImages.length > 0 ? editImages : input.imageUrl ? [input.imageUrl] : [];
 
     const nanoBananaModel = NANO_BANANA_MODEL_NAMES[this.modelId];
+    const isNanoBanana = this.modelId === "nano-banana-1" || !!nanoBananaModel;
+
+    // KIE OpenAPI spec для всей nano-banana семьи помечает `prompt` как
+    // единственное required-поле. Без него KIE отвечает 500 «This field is
+    // required» — юзер видит шутливое «модель отдыхает» и не понимает что
+    // ему написать промпт. Ловим up-front, экономим KIE-credit и roundtrip.
+    if (isNanoBanana && !input.prompt?.trim()) {
+      throw new UserFacingError("Prompt is required for nano-banana models", {
+        key: "promptRequired",
+      });
+    }
 
     let body: { model: string; input: Record<string, unknown> };
 

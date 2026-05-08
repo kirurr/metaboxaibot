@@ -283,6 +283,8 @@ export default {
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
+    promptRequired:
+      "❌ This model requires a text prompt — please describe what you want to generate and try again.",
     chatStreamInterrupted:
       "❌ {modelName} started replying but lost the thread halfway. It happens — send your message again, it'll get its act together. No tokens were charged for this request.",
     mediaSlotImagesOnly:

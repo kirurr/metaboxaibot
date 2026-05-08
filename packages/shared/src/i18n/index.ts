@@ -196,6 +196,7 @@ export interface Translations {
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
     imageTooLarge: string;
+    promptRequired: string;
     chatStreamInterrupted: string;
     mediaSlotImagesOnly: string;
     mediaSlotVideosOnly: string;
