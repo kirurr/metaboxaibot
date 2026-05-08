@@ -199,8 +199,31 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
 
   let pendingMetaboxTransfer = false;
   let transferError: string | null = null;
-  const shouldTransfer =
-    !!user.metaboxUserId && (purchasedTokens > 0 || subscriptionTokens > 0 || !!subToTransfer);
+  // Зовём endpoint ВСЕГДА, если у юзера привязан metabox — даже без остатка.
+  // На стороне metabox endpoint в любом случае ставит `aiBoxLinked = false`
+  // (бот удалён → связь разорвана). Если есть токены/подписка — заодно
+  // переносит их в pending-копилку.
+  const shouldTransfer = !!user.metaboxUserId;
+
+  // ── Backfill metabox-side referredById у бот-рефералов ──────────────────
+  // Сценарий рассинхрона: бот-юзер B был приглашён удаляемым юзером A.
+  // На момент /start у B на metabox A ещё не было → metabox.B.referredById=null,
+  // хотя bot.B.referredById = A.tgId. До этой правки — после удаления A
+  // bot-side cascade SetNull обнулял всё, и шанс восстановить связь терялся.
+  // Сейчас собираем metabox-id'ы рефералов у которых есть metabox-связь и
+  // отправляем endpoint'у — он идемпотентно проставит им referredById=A.metaboxUserId,
+  // если у них на metabox было null. Имеет смысл только для metabox-привязанных
+  // юзеров (для нелинкованных рефералов на metabox ничего нельзя сделать).
+  let referralMetaboxIds: string[] = [];
+  if (user.metaboxUserId) {
+    const linkedReferrals = await db.user.findMany({
+      where: { referredById: userId, metaboxUserId: { not: null } },
+      select: { metaboxUserId: true },
+    });
+    referralMetaboxIds = linkedReferrals
+      .map((r) => r.metaboxUserId)
+      .filter((id): id is string => !!id);
+  }
 
   if (shouldTransfer) {
     try {
@@ -210,6 +233,7 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
         purchasedTokens,
         subscriptionTokens,
         subscription: subToTransfer,
+        referralMetaboxIds: referralMetaboxIds.length > 0 ? referralMetaboxIds : undefined,
       });
       logger.info(
         {
@@ -218,6 +242,7 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
           purchasedTokens,
           subscriptionTokens,
           hasSubscription: !!subToTransfer,
+          referralBackfillCount: referralMetaboxIds.length,
         },
         "[account-deletion] metabox transfer ok",
       );
