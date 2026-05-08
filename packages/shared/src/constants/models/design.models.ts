@@ -1036,9 +1036,10 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
       {
         key: "prompt_strength",
         label: "Сила промпта (img2img)",
-        description: "Степень изменения при img2img. 1.0 = полная замена, 0 = оригинал.",
+        description:
+          "Степень изменения при img2img. 0.1 = минимальные изменения, 1.0 = полная замена.",
         type: "slider",
-        min: 0,
+        min: 0.1,
         max: 1,
         step: 0.05,
         default: 0.8,
@@ -1963,9 +1964,9 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
         key: "prompt_strength",
         label: "Сила промпта (img2img)",
         description:
-          "Степень изменения при img2img. 1.0 = полное изменение оригинала, 0 = без изменений.",
+          "Степень изменения при img2img. 0.1 = минимальные изменения, 1.0 = полная замена.",
         type: "slider",
-        min: 0,
+        min: 0.1,
         max: 1,
         step: 0.05,
         default: 0.85,

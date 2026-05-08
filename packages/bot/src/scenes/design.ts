@@ -497,6 +497,17 @@ export async function executeDesignPrompt(
     }
   }
 
+  // Pre-validate: text-only models reject when fed sourceImageUrl/mediaInputs at
+  // the provider (e.g. Replicate Imagen "Unexpected field 'image'"). Bounce here
+  // BEFORE clearing media-input/ref state so the user keeps their attached photo
+  // and can retry with a different model — without losing their upload.
+  if (model && !model.supportsImages && (hasMediaInputs || state?.designRefMessageId)) {
+    await ctx.reply(
+      ctx.t.errors.modelDoesNotSupportImages.replace("{modelName}", model.name ?? modelId),
+    );
+    return;
+  }
+
   // Snapshot raw state values for low-iq Cancel-restore (captured BEFORE the
   // existing clear/getAndClear calls so the user gets exactly what they had).
   const snapshotMediaInputs = hasMediaInputs ? { ...mediaInputs } : undefined;

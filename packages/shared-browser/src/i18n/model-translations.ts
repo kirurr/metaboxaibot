@@ -617,7 +617,8 @@ export const SETTING_TRANSLATIONS_EN: Record<string, SettingTranslation> = {
   },
   prompt_strength: {
     label: "Prompt strength (img2img)",
-    description: "Degree of modification in img2img. 1.0 = full change, 0 = no change.",
+    description:
+      "Degree of modification in img2img. 0.1 = minimal changes, 1.0 = full replacement.",
   },
   go_fast: {
     label: "Fast mode",

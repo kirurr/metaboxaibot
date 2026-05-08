@@ -422,6 +422,8 @@ export default {
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
+    modelDoesNotSupportImages:
+      "ℹ️ {modelName} works with text prompts only — it can't use a photo reference. Remove the photo and try again, or pick a model that supports image inputs.",
     // Fal
     falContentPolicy:
       "❌ Your request was rejected due to a content policy violation. Please modify your prompt and try again.",
