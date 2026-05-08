@@ -106,8 +106,14 @@ export class ReplicateAdapter implements ImageAdapter {
     if (ms.go_fast !== undefined) msExtras.go_fast = ms.go_fast;
     if (ms.output_format) msExtras.output_format = ms.output_format;
     if (ms.output_quality !== undefined) msExtras.output_quality = ms.output_quality;
-    // prompt_strength is img2img-only — skip for text-to-image to avoid API rejection
-    if (ms.prompt_strength !== undefined && imageUrl) msExtras.prompt_strength = ms.prompt_strength;
+    // prompt_strength is img2img-only — skip for text-to-image to avoid API rejection.
+    // Legacy guard: pre-fix UI allowed prompt_strength=0; Replicate computes effective
+    // steps as num_inference_steps × prompt_strength and rejects 0-step jobs (E1000).
+    // DB may still hold 0 from before the schema min was raised to 0.1 — substitute
+    // on the way out so existing saved settings stop crashing.
+    if (ms.prompt_strength !== undefined && imageUrl) {
+      msExtras.prompt_strength = ms.prompt_strength === 0 ? 0.1 : ms.prompt_strength;
+    }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
     if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
     if (ms.extra_lora_scale !== undefined) msExtras.extra_lora_scale = ms.extra_lora_scale;
