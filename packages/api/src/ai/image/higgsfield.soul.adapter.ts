@@ -104,7 +104,16 @@ export class HiggsFieldSoulImageAdapter implements ImageAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Higgsfield Soul submit failed: ${res.status} ${text}`);
+      const technicalMessage = `Higgsfield Soul submit failed: ${res.status} ${text}`;
+      // Higgsfield зашибает reference image по своим (недокументированным)
+      // dim/MB лимитам и шлёт `400 {"detail":"input_image_to_large"}`. Без
+      // классификации юзер видел шутливый «модель отдыхает» и не знал что
+      // надо уменьшить картинку. Парсим detail-флаг → адресный мессадж.
+      // Опечатка `to_large` (вместо `too_large`) — со стороны Higgsfield, не наша.
+      if (res.status === 400 && /input_image_to+_large/i.test(text)) {
+        throw new UserFacingError(technicalMessage, { key: "imageTooLarge" });
+      }
+      throw new Error(technicalMessage);
     }
 
     const data = (await res.json()) as SubmitResponse;

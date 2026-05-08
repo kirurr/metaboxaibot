@@ -119,6 +119,15 @@ export class EvolinkImageAdapter implements ImageAdapter {
     if (!evolinkModel) {
       throw new Error(`Evolink: unknown model ${this.modelId}`);
     }
+    // Зеркалит up-front проверку у KIE-адаптера. Без prompt'а evolink/KIE
+    // под капотом отвечает 500 «This field is required»; ловим заранее, чтобы
+    // юзер получил адресный мессадж и мы не жгли quota на гарантированный fail.
+    const isNanoBanana = this.modelId.startsWith("nano-banana-");
+    if (isNanoBanana && !input.prompt?.trim()) {
+      throw new UserFacingError("Prompt is required for nano-banana models", {
+        key: "promptRequired",
+      });
+    }
     const ms = input.modelSettings ?? {};
     const mi = input.mediaInputs ?? {};
     const editImages = mi.edit ?? [];

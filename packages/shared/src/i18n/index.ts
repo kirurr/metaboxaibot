@@ -195,6 +195,8 @@ export interface Translations {
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
+    imageTooLarge: string;
+    promptRequired: string;
     chatStreamInterrupted: string;
     mediaSlotImagesOnly: string;
     mediaSlotVideosOnly: string;

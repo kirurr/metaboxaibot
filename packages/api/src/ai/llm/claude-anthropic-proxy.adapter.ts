@@ -189,6 +189,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let cachedInputTokens = 0;
+    let incompleteReason: string | undefined;
 
     // Stream parser: SSE events delimited by "\n\n"; each event has
     // `event: <name>\ndata: <json>` lines (Anthropic-compatible).
@@ -223,6 +224,15 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           } else if (t === "message_delta") {
             const u = evt.data.usage;
             if (u) outputTokens = u.output_tokens ?? outputTokens;
+            // stop_reason → incompleteReason: позволяет chat.service показать
+            // адресный мессадж юзеру (modelReasoningCapExhausted vs generic
+            // modelTemporarilyUnavailable) когда стрим завершился без visible
+            // text. Anthropic шлёт `max_tokens` когда reasoning + text не
+            // уложились в max_output_tokens; `refusal` — content moderation
+            // зарубила ответ ещё до первого text-блока. См. также openai.adapter.
+            const stopReason = evt.data.delta?.stop_reason;
+            if (stopReason === "max_tokens") incompleteReason = "max_output_tokens";
+            else if (stopReason === "refusal") incompleteReason = "content_filter";
           }
         }
       }
@@ -234,6 +244,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       inputTokensUsed: inputTokens,
       outputTokensUsed: outputTokens,
       ...(cachedInputTokens > 0 ? { cachedInputTokensUsed: cachedInputTokens } : {}),
+      ...(incompleteReason ? { incompleteReason } : {}),
     };
   }
 
@@ -289,7 +300,7 @@ interface SseUsage {
 }
 interface SseData {
   type: string;
-  delta?: { type?: string; text?: string };
+  delta?: { type?: string; text?: string; stop_reason?: string };
   message?: { usage?: SseUsage };
   usage?: SseUsage;
 }

@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
-import { uploadFileUrl } from "../../utils/kie-upload.js";
+import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 
 const KIE_BASE = "https://api.kie.ai";
@@ -29,51 +28,6 @@ interface KieTaskResponse {
 /** Grok Imagine: separate t2i / i2i endpoints. */
 const GROK_T2I = "grok-imagine/text-to-image";
 const GROK_I2I = "grok-imagine/image-to-image";
-
-/**
- * Распознанные форматы изображений. Используем extension из URL'а провайдера,
- * чтобы корректно сохранить файл как `.png` (когда юзер выбрал PNG в настройках,
- * а не дефолтный `.jpg`). По дефолту падаем на jpg — большинство провайдеров
- * без явного output_format отдают именно его.
- */
-const KNOWN_IMAGE_EXTS: ReadonlyArray<string> = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
-const EXT_TO_CONTENT_TYPE: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  gif: "image/gif",
-  svg: "image/svg+xml",
-};
-function parseImageMime(url: string): { ext: string; contentType: string } {
-  try {
-    const path = new URL(url).pathname;
-    const m = path.match(/\.([a-zA-Z0-9]+)$/);
-    if (m) {
-      const ext = m[1].toLowerCase();
-      if (KNOWN_IMAGE_EXTS.includes(ext)) {
-        return { ext: ext === "jpeg" ? "jpg" : ext, contentType: EXT_TO_CONTENT_TYPE[ext] };
-      }
-    }
-  } catch {
-    // not a parseable URL — fallthrough
-  }
-  return { ext: "jpg", contentType: "image/jpeg" };
-}
-
-/**
- * KIE требует у `fileName` extension, иначе сохраняет файл с
- * randomly-generated именем без расширения, и downstream-модели валидируют
- * тип по URL extension'у. См. uploadFileUrl jsdoc.
- *
- * UUID, не `Date.now()+idx`: KIE-доке «identical filenames overwriting old
- * files» — два параллельных submit'а в одну миллисекунду перезатёрли бы
- * друг друга, и юзер A мог бы получить картинку юзера B.
- */
-function buildKieUploadName(url: string): string {
-  const { ext } = parseImageMime(url);
-  return `metabox-${randomUUID()}.${ext}`;
-}
 
 /**
  * Nano Banana family: single endpoint per model that accepts optional
@@ -134,6 +88,17 @@ export class KieImageAdapter implements ImageAdapter {
     const imageUrls = editImages.length > 0 ? editImages : input.imageUrl ? [input.imageUrl] : [];
 
     const nanoBananaModel = NANO_BANANA_MODEL_NAMES[this.modelId];
+    const isNanoBanana = this.modelId === "nano-banana-1" || !!nanoBananaModel;
+
+    // KIE OpenAPI spec для всей nano-banana семьи помечает `prompt` как
+    // единственное required-поле. Без него KIE отвечает 500 «This field is
+    // required» — юзер видит шутливое «модель отдыхает» и не понимает что
+    // ему написать промпт. Ловим up-front, экономим KIE-credit и roundtrip.
+    if (isNanoBanana && !input.prompt?.trim()) {
+      throw new UserFacingError("Prompt is required for nano-banana models", {
+        key: "promptRequired",
+      });
+    }
 
     let body: { model: string; input: Record<string, unknown> };
 
@@ -313,7 +278,7 @@ export class KieImageAdapter implements ImageAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
           failMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE
