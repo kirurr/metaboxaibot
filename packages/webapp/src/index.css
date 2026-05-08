@@ -3681,6 +3681,30 @@ textarea::placeholder {
   transition: background 0.15s;
 }
 
+/* Кнопка «Удалить аккаунт» — наследует визуал от .voice-picker__create-btn
+   (transparent + dashed border), но красная вместо акцентной — мягкое предупреждение
+   вместо громкого btn--danger. Сама модалка подтверждения (с явным предупреждением
+   и btn--danger «Удалить») выступает finalным гейтом. */
+.account-delete-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1.5px dashed var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.account-delete-btn:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+.account-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .voice-picker__create-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
