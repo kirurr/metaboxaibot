@@ -240,7 +240,7 @@ export class KieVeoAdapter implements VideoAdapter {
       const isCopyright = /copyright/i.test(errorMessage);
       const isPolicy =
         isUserInputIssue ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|flagged|unsafe/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|flagged|unsafe|(prompt|request|input|content) (was |is )?rejected/i.test(
           errorMessage,
         );
       const hasCyrillic = /[Ѐ-ӿ]/.test(errorMessage);
