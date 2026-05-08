@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
@@ -58,6 +59,20 @@ function parseImageMime(url: string): { ext: string; contentType: string } {
     // not a parseable URL — fallthrough
   }
   return { ext: "jpg", contentType: "image/jpeg" };
+}
+
+/**
+ * KIE требует у `fileName` extension, иначе сохраняет файл с
+ * randomly-generated именем без расширения, и downstream-модели валидируют
+ * тип по URL extension'у. См. uploadFileUrl jsdoc.
+ *
+ * UUID, не `Date.now()+idx`: KIE-доке «identical filenames overwriting old
+ * files» — два параллельных submit'а в одну миллисекунду перезатёрли бы
+ * друг друга, и юзер A мог бы получить картинку юзера B.
+ */
+function buildKieUploadName(url: string): string {
+  const { ext } = parseImageMime(url);
+  return `metabox-${randomUUID()}.${ext}`;
 }
 
 /**
@@ -137,7 +152,9 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         const uploaded = await Promise.all(
-          imageUrls.slice(0, 10).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, 10)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.image_urls = uploaded;
       }
@@ -166,7 +183,9 @@ export class KieImageAdapter implements ImageAdapter {
       if (imageUrls.length > 0) {
         const maxImages = this.modelId === "nano-banana-2" ? 14 : 8;
         const uploaded = await Promise.all(
-          imageUrls.slice(0, maxImages).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, maxImages)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.image_input = uploaded;
       }
@@ -194,7 +213,9 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         const uploaded = await Promise.all(
-          imageUrls.slice(0, 16).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, 16)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.input_urls = uploaded;
       }
@@ -216,7 +237,7 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         inputPayload.image_urls = await Promise.all(
-          imageUrls.map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
       }
 
@@ -242,7 +263,22 @@ export class KieImageAdapter implements ImageAdapter {
 
     const data = (await resp.json()) as KieSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
-      throw new Error(`KIE image submit failed: ${data.code} — ${data.msg}`);
+      const msg = data.msg ?? "";
+      // Defensive net: nano-banana-2 (и схожие KIE-модели) валидируют тип
+      // input-картинки по URL extension'у. Передача `fileName` в uploadFileUrl
+      // должна это закрывать, но если в input всё-таки приходит
+      // реально-неподдерживаемый формат (HEIC/AVIF и т.п.) — показываем юзеру
+      // понятный мессадж со списком поддерживаемых форматов вместо generic
+      // «generationFailed». notifyOps + dedup: триггер означает, что
+      // fileName-fix что-то пропустил — алёртим оператора, но не спамим.
+      if (/file type not supported|invalid image format|unsupported image format/i.test(msg)) {
+        throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
+          key: "chatInvalidImage",
+          notifyOps: true,
+          opsAlertDedupKey: `kie-image-unsupported-format-${this.modelId}`,
+        });
+      }
+      throw new Error(`KIE image submit failed: ${data.code} — ${msg}`);
     }
     return data.data.taskId;
   }
