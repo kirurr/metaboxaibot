@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { getImageQueue } from "../queues/image.queue.js";
 import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
+import { logger } from "../logger.js";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
 
@@ -97,6 +98,26 @@ export const generationService = {
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
+    // Defense-in-depth: scenes already strip image inputs for text-only models
+    // and inform the user. If something still slips through (e.g. confirm-
+    // generation replay path that bypasses the scene check), strip them here
+    // and proceed with text-only generation. Provider would otherwise reject
+    // (e.g. Replicate Imagen "Unexpected field 'image'"). Warn-log so ops can
+    // see how often this fallback fires and whether an entry point is missing.
+    const hasImageInput =
+      Boolean(sourceImageUrl) ||
+      Object.values(params.mediaInputs ?? {}).some((arr) => arr.length > 0);
+    let effectiveSourceImageUrl = sourceImageUrl;
+    let effectiveMediaInputs = params.mediaInputs;
+    if (hasImageInput && !model.supportsImages) {
+      logger.warn(
+        { userId: userId.toString(), modelId },
+        "submitImage: stripping image inputs for text-only model",
+      );
+      effectiveSourceImageUrl = undefined;
+      effectiveMediaInputs = undefined;
+    }
+
     const preview = await costPreviewService.previewImage(params);
     const modelSettings = preview.effectiveModelSettings;
     const effectiveAspectRatio = preview.effectiveAspectRatio;
@@ -113,7 +134,7 @@ export const generationService = {
         prompt,
         inputData: {
           ...(negativePrompt ? { negativePrompt } : {}),
-          ...(params.mediaInputs ? { mediaInputs: params.mediaInputs } : {}),
+          ...(effectiveMediaInputs ? { mediaInputs: effectiveMediaInputs } : {}),
           ...(() => {
             const historySettings = stripOneShotKeys(modelSettings as Record<string, unknown>);
             return Object.keys(historySettings).length > 0
@@ -143,8 +164,8 @@ export const generationService = {
         modelId,
         prompt,
         negativePrompt,
-        sourceImageUrl,
-        mediaInputs: params.mediaInputs,
+        sourceImageUrl: effectiveSourceImageUrl,
+        mediaInputs: effectiveMediaInputs,
         telegramChatId,
         dialogId,
         sendOriginalLabel,

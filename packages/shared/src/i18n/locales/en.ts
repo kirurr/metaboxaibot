@@ -422,6 +422,8 @@ export default {
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
+    modelDoesNotSupportImages:
+      "ℹ️ {modelName} works with text prompts only — it can't use a photo reference. The photo will be ignored.",
     // Fal
     falContentPolicy:
       "❌ Your request was rejected due to a content policy violation. Please modify your prompt and try again.",
@@ -578,6 +580,7 @@ export default {
     remove: "Remove",
     optional: "(optional)",
     required: "(required)",
+    referencesNotLoaded: "💡 No references uploaded yet",
     doneUploading: "Done ✓",
     readyForPrompt: "✅ Ready! Send a text prompt to start generation.",
     readyForPromptOptional:
