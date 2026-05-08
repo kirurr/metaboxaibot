@@ -497,15 +497,16 @@ export async function executeDesignPrompt(
     }
   }
 
-  // Pre-validate: text-only models reject when fed sourceImageUrl/mediaInputs at
-  // the provider (e.g. Replicate Imagen "Unexpected field 'image'"). Bounce here
-  // BEFORE clearing media-input/ref state so the user keeps their attached photo
-  // and can retry with a different model — without losing their upload.
-  if (model && !model.supportsImages && (hasMediaInputs || state?.designRefMessageId)) {
+  // Text-only model with previously-attached photo: inform the user once that
+  // we're running text-only (matches handleDesignPhoto's wording), then proceed
+  // without the photo. Photo state is preserved — when the user switches back
+  // to an image-capable model, their upload is still there.
+  const ignoreAttachedPhoto =
+    !!model && !model.supportsImages && (hasMediaInputs || !!state?.designRefMessageId);
+  if (ignoreAttachedPhoto) {
     await ctx.reply(
       ctx.t.errors.modelDoesNotSupportImages.replace("{modelName}", model.name ?? modelId),
     );
-    return;
   }
 
   // Snapshot raw state values for low-iq Cancel-restore (captured BEFORE the
@@ -513,14 +514,18 @@ export async function executeDesignPrompt(
   const snapshotMediaInputs = hasMediaInputs ? { ...mediaInputs } : undefined;
   const snapshotDesignRefMessageId = state?.designRefMessageId ?? undefined;
 
-  // Clear media inputs for this model (consumed on generation start)
-  if (hasMediaInputs) await userStateService.clearMediaInputs(ctx.user.id, modelId);
+  // Clear media inputs for this model (consumed on generation start) — but only
+  // when we'll actually use them. When ignored for a text-only model, keep them
+  // so a later switch back to an image-capable model finds the upload intact.
+  if (hasMediaInputs && !ignoreAttachedPhoto) {
+    await userStateService.clearMediaInputs(ctx.user.id, modelId);
+  }
   await consumeMediaHint(ctx, "design");
 
-  // Resolve reference image (one-shot, legacy path)
+  // Resolve reference image (one-shot, legacy path) — same gating as above.
   const refMessageId = state?.designRefMessageId ?? null;
   let sourceImageUrl: string | undefined;
-  if (refMessageId) {
+  if (refMessageId && !ignoreAttachedPhoto) {
     const msg = await dialogService.getMessageById(refMessageId);
     sourceImageUrl = msg?.mediaUrl ?? undefined;
     await userStateService.setDesignRefMessage(ctx.user.id, null);
@@ -538,9 +543,10 @@ export async function executeDesignPrompt(
     // Cleanup: при детекте протухших ссылок (удалённый s3-output, Telegram
     // file expired) `resolveMediaInputUrls` сразу выкинет их из user-state'а
     // — следующий retry пользователь увидит слот без поломанной записи.
-    mediaInputs: hasMediaInputs
-      ? await resolveMediaInputUrls(mediaInputs, { userId: ctx.user.id, modelId })
-      : undefined,
+    mediaInputs:
+      hasMediaInputs && !ignoreAttachedPhoto
+        ? await resolveMediaInputUrls(mediaInputs, { userId: ctx.user.id, modelId })
+        : undefined,
     telegramChatId: chatId,
     dialogId,
     sendOriginalLabel: ctx.t.common.sendOriginal,
@@ -624,7 +630,36 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
   const activeSlotForDedup = getActiveSlot(ctx.user.id);
   const isActiveSlotMode = activeSlotForDedup?.section === "design";
   const isAutoSlotMode = !isActiveSlotMode && activeModeSlots.length > 0;
+
   const mediaGroupId = ctx.message?.media_group_id;
+
+  // Text-only model + photo upload: don't save the photo (the user would
+  // otherwise see "📎 Фото задано как референс" with no way to remove it),
+  // inform that we're ignoring it, and if a caption is attached, run text-only
+  // generation from the caption. Active-slot uploads are exempt — those go to
+  // a specific slot's model (always image-supported by config), not the
+  // currently-selected design model. Album dedup via the existing buffer
+  // prevents firing N replies for an N-photo album.
+  if (!isActiveSlotMode && model && !model.supportsImages) {
+    if (mediaGroupId) {
+      const key = `${ctx.user.id}__${mediaGroupId}`;
+      if (designMediaGroupBuffer.get(key)?.processed) return;
+      const existing = designMediaGroupBuffer.get(key);
+      if (existing) clearTimeout(existing.timer);
+      designMediaGroupBuffer.set(key, {
+        processed: true,
+        timer: setTimeout(() => designMediaGroupBuffer.delete(key), 10_000),
+      });
+    }
+    await ctx.reply(
+      ctx.t.errors.modelDoesNotSupportImages.replace("{modelName}", model.name ?? modelId),
+    );
+    const captionText = ctx.message?.caption?.trim();
+    if (captionText) {
+      await executeDesignPrompt(ctx, captionText, undefined, ctx.message?.message_id);
+    }
+    return;
+  }
   if (mediaGroupId && !isActiveSlotMode && !isAutoSlotMode) {
     const key = `${ctx.user.id}__${mediaGroupId}`;
     const hasCaption = !!ctx.message?.caption?.trim();
