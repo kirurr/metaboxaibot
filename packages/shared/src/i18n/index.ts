@@ -281,6 +281,7 @@ export interface Translations {
     replicateFileTooLarge: string;
     replicateContentPolicy: string;
     promptNotEnglish: string;
+    modelDoesNotSupportImages: string;
     // Fal
     falContentPolicy: string;
     falNoMediaGenerated: string;
