@@ -11,6 +11,7 @@ import {
   deductTokens,
   refundTokens,
   calculateCost,
+  calculateProviderCostUsd,
   translatePromptIfNeeded,
 } from "@metabox/api/services";
 import type { DeductResult } from "@metabox/api/services";
@@ -676,7 +677,37 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           undefined,
           prompt.length,
         );
-        deductResult = await deductTokens(BigInt(userIdStr), internalCost, modelId);
+
+        // Audit-метаданные: фактический provider (через fallback state) и
+        // сырая USD-цена по нему БЕЗ pricing-коэффициентов.
+        const fbStateActual = readFallbackState();
+        const activeProvider = fbStateActual?.effectiveProvider ?? model.provider;
+        const activeModel =
+          activeProvider === model.provider
+            ? model
+            : (findModelByProvider(activeProvider) ?? model);
+        const actualCostUsd = calculateProviderCostUsd(
+          activeModel,
+          0,
+          0,
+          undefined,
+          undefined,
+          modelSettings,
+          undefined,
+          prompt.length,
+        );
+
+        deductResult = await deductTokens(
+          BigInt(userIdStr),
+          internalCost,
+          modelId,
+          undefined,
+          undefined,
+          {
+            actualProvider: activeProvider,
+            actualCostUsd,
+          },
+        );
         await db.generationJob.update({
           where: { id: dbJobId },
           data: { tokensSpent: internalCost },

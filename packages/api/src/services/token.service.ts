@@ -13,6 +13,17 @@ export interface DeductResult {
 }
 
 /**
+ * Опциональная audit-метаинформация для деаukция: фактический provider
+ * (отличается от model.provider при fallback'е) и сырая цена в USD по нему
+ * БЕЗ pricing-коэффициентов. Используется только для записи в transaction —
+ * на расчёт списания не влияет.
+ */
+export interface ActualUsageMeta {
+  actualProvider?: string;
+  actualCostUsd?: number;
+}
+
+/**
  * Deduct tokens for AI usage. Subscription tokens are spent first, then regular tokens.
  * Atomically updates balances and records the transaction. Returns post-deduction balances.
  */
@@ -22,6 +33,7 @@ export async function deductTokens(
   modelId: string,
   dialogId?: string,
   reason?: string,
+  actual?: ActualUsageMeta,
 ): Promise<DeductResult> {
   const user = await db.user.findUniqueOrThrow({
     where: { id: userId },
@@ -60,6 +72,8 @@ export async function deductTokens(
         reason: reason ?? "ai_usage",
         modelId,
         dialogId: dialogId ?? null,
+        ...(actual?.actualProvider ? { actualProvider: actual.actualProvider } : {}),
+        ...(actual?.actualCostUsd !== undefined ? { actualCostUsd: actual.actualCostUsd } : {}),
       },
     }),
   ]);
@@ -451,6 +465,52 @@ export function calculateCost(
     cachedInputTokens?: number;
   },
 ): number {
+  const usd = calculateProviderCostUsd(
+    model,
+    inputTokens,
+    outputTokens,
+    megapixels,
+    videoTokens,
+    modelSettings,
+    durationSeconds,
+    charCount,
+    extra,
+  );
+  // Применяем per-model multiplier (по умолчанию 1.0) на финальные токены.
+  // НЕ округляем — для LLM-моделей одно сообщение часто стоит долю токена
+  // (например, 0.05 ✦), и Math.ceil превращало бы это в 1 ✦ (×20 overcharge).
+  // Внутренние токены — Decimal в БД, fractional accepted в deductTokens.
+  return usdToTokens(usd) * getModelMultiplier(model.id);
+}
+
+/**
+ * Сырая цена запроса в USD по конкретной модели (provider-side стоимость) —
+ * БЕЗ pricing-коэффициентов (per-model multiplier, target margin). Это сумма
+ * `mediaUsd + inputImageUsd + addonUsd + llmUsd`, рассчитанная по тарифам
+ * именно `model`, что важно при fallback'е: сначала юзеру списывается цена
+ * по primary через `calculateCost(primaryModel)`, а в audit-поле
+ * `actualCostUsd` транзакции пишется результат `calculateProviderCostUsd(activeModel)`.
+ *
+ * Используется для аудита фактических расходов / маржи между primary-pricing
+ * (с коэффициентами) и actual-provider-cost (raw USD).
+ */
+export function calculateProviderCostUsd(
+  model: AIModel,
+  inputTokens = 0,
+  outputTokens = 0,
+  megapixels?: number,
+  videoTokens?: number,
+  modelSettings?: Record<string, unknown>,
+  durationSeconds?: number,
+  charCount?: number,
+  extra?: {
+    inputMegapixels?: number;
+    inputImagesMegapixels?: number[];
+    hasInputImage?: boolean;
+    hasVideoInputs?: boolean;
+    cachedInputTokens?: number;
+  },
+): number {
   const rates = resolveRates(model, inputTokens, modelSettings);
   const mediaOpts: MediaOpts = {
     megapixels,
@@ -467,11 +527,7 @@ export function calculateCost(
   const inputImageUsd = computeInputImageSurcharge(model, mediaOpts);
   const addonUsd = computeAddonUsd(model, modelSettings);
   const llmUsd = computeLlmUsd(rates, inputTokens, outputTokens, extra?.cachedInputTokens ?? 0);
-  // Применяем per-model multiplier (по умолчанию 1.0) на финальные токены.
-  // НЕ округляем — для LLM-моделей одно сообщение часто стоит долю токена
-  // (например, 0.05 ✦), и Math.ceil превращало бы это в 1 ✦ (×20 overcharge).
-  // Внутренние токены — Decimal в БД, fractional accepted в deductTokens.
-  return usdToTokens(mediaUsd + inputImageUsd + addonUsd + llmUsd) * getModelMultiplier(model.id);
+  return mediaUsd + inputImageUsd + addonUsd + llmUsd;
 }
 
 /** Convert a USD cost to internal tokens using the billing config. */

@@ -14,6 +14,7 @@ import {
   deductTokens,
   refundTokens,
   calculateCost,
+  calculateProviderCostUsd,
   computeVideoTokens,
   translatePromptIfNeeded,
   usdToTokens,
@@ -736,7 +737,55 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           );
         }
 
-        deductResult = await deductTokens(BigInt(userIdStr), internalCost, modelId);
+        // Audit-метаданные: фактический provider (через fallback state) и
+        // сырая USD-цена по нему. Для seedance-2 evolink с video inputs —
+        // используем computeSeedance2BillableUsd (точная формула провайдера);
+        // для остальных — calculateProviderCostUsd (стандартная модель).
+        const fbStateActual = readFallbackState();
+        const activeProvider = fbStateActual?.effectiveProvider ?? model.provider;
+        const activeModel =
+          activeProvider === model.provider
+            ? model
+            : (findModelByProvider(activeProvider) ?? model);
+        let actualCostUsd: number | undefined;
+        if (isSeedance2Evolink && hasVideoInputs && activeProvider === "evolink") {
+          const inputDurations = await Promise.all(
+            refVideos.map((u) => fetchClipDurationSec(u).catch(() => 0)),
+          );
+          const resolution = (modelSettings?.resolution as string | undefined) ?? "720p";
+          const usd = computeSeedance2BillableUsd({
+            modelId: modelId as "seedance-2" | "seedance-2-fast",
+            resolution,
+            outputDuration: effectiveDuration,
+            inputVideoDurations: inputDurations,
+          });
+          if (usd !== null) actualCostUsd = usd;
+        }
+        if (actualCostUsd === undefined) {
+          actualCostUsd = calculateProviderCostUsd(
+            activeModel,
+            0,
+            0,
+            undefined,
+            videoTokens,
+            modelSettings,
+            effectiveDuration,
+            undefined,
+            { hasVideoInputs },
+          );
+        }
+
+        deductResult = await deductTokens(
+          BigInt(userIdStr),
+          internalCost,
+          modelId,
+          undefined,
+          undefined,
+          {
+            actualProvider: activeProvider,
+            actualCostUsd,
+          },
+        );
         await db.generationJob.update({
           where: { id: dbJobId },
           data: { tokensSpent: internalCost },

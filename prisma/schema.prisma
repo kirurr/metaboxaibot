@@ -200,8 +200,23 @@ model TokenTransaction {
   description String? // Человекочитаемое описание (напр. "Подписка PRO (M3)")
 
   // Метаданные для разных типов
-  modelId  String? // при ai_usage
+  modelId  String? // при ai_usage — primary modelId (по нему считалась цена с коэффициентами)
   dialogId String? // при ai_usage
+
+  /**
+   * Фактически использованный провайдер (отличается от model.provider при
+   * fallback'е). Заполняется на ai_usage / autotranslate / describe_image
+   * и прочих debit'ах, связанных с провайдер-вызовом. null для не-AI
+   * транзакций и старых записей до миграции.
+   */
+  actualProvider String?
+  /**
+   * Оценка фактической цены запроса в USD на actualProvider — БЕЗ применения
+   * pricing-коэффициентов (per-model multiplier, target margin). Сырая
+   * provider-side стоимость (= mediaUsd + inputImageUsd + addonUsd + llmUsd
+   * по модели actualProvider'а). Для аудита фактических расходов / маржи.
+   */
+  actualCostUsd Decimal? @db.Decimal(12, 6)
 
   createdAt DateTime @default(now())
 

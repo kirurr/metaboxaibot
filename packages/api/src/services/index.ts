@@ -35,10 +35,11 @@ export {
   checkSubscription,
   checkPaidSubscription,
   calculateCost,
+  calculateProviderCostUsd,
   computeVideoTokens,
   usdToTokens,
 } from "./token.service.js";
-export type { DeductResult } from "./token.service.js";
+export type { DeductResult, ActualUsageMeta } from "./token.service.js";
 export {
   s3Service,
   getFileUrl,

@@ -1,6 +1,6 @@
 import { AI_MODELS } from "@metabox/shared";
 import { GeminiAdapter } from "../ai/llm/gemini.adapter.js";
-import { calculateCost, deductTokens } from "./token.service.js";
+import { calculateCost, calculateProviderCostUsd, deductTokens } from "./token.service.js";
 import { logger } from "../logger.js";
 
 const DESCRIBE_MODEL_ID = "gemini-2-flash";
@@ -53,7 +53,13 @@ export async function describeImageForPrompt(
 
   const cost = calculateCost(model, inputTokens, outputTokens);
   if (cost > 0) {
-    await deductTokens(userId, cost, forModel, undefined, "describe_image").catch((err) => {
+    // Audit: describe-image идёт через тот же модельный provider — fallback'а
+    // на этом hot-path нет, actualProvider = model.provider.
+    const actualCostUsd = calculateProviderCostUsd(model, inputTokens, outputTokens);
+    await deductTokens(userId, cost, forModel, undefined, "describe_image", {
+      actualProvider: model.provider,
+      actualCostUsd,
+    }).catch((err) => {
       logger.warn({ err, userId: userId.toString() }, "Failed to deduct describe-image cost");
     });
   }

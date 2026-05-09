@@ -232,6 +232,9 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
             "higgsfield_soul",
             undefined,
             "soul_creation",
+            // Soul creation — фиксированная цена без fallback'а; provider
+            // совпадает с modelId, актуальная USD-цена = SOUL_COST_USD.
+            { actualProvider: "higgsfield_soul", actualCostUsd: SOUL_COST_USD },
           );
 
           await telegram

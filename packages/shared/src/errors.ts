@@ -29,6 +29,20 @@ export class UserFacingError extends Error {
    * `modelTemporarilyUnavailable` подбирает альтернативные модели по секции.
    */
   public readonly section?: "gpt" | "design" | "video" | "audio";
+  /**
+   * Технический контекст для tech-alert'а: фактическая модель/провайдер на
+   * момент ошибки. Полезно когда логика runtime'а переключилась на fallback —
+   * dialog хранит primary-модель, но падёт на fallback'е, и в alert'е без
+   * этого поля видна была бы только primary. Если `fallbackUsed=true`,
+   * notify-tech.ts покажет в alert и primary, и fallback контекст.
+   */
+  public readonly tech?: {
+    activeModelId?: string;
+    activeProvider?: string;
+    primaryModelId?: string;
+    primaryProvider?: string;
+    fallbackUsed?: boolean;
+  };
 
   constructor(
     message: string,
@@ -38,6 +52,7 @@ export class UserFacingError extends Error {
       notifyOps?: boolean;
       opsAlertDedupKey?: string;
       section?: "gpt" | "design" | "video" | "audio";
+      tech?: UserFacingError["tech"];
       /**
        * Оригинальная ошибка, которую этот UserFacingError оборачивает.
        * Используется в notifyTechError — серилайзер развернёт цепочку
@@ -54,6 +69,7 @@ export class UserFacingError extends Error {
     this.notifyOps = options?.notifyOps;
     this.opsAlertDedupKey = options?.opsAlertDedupKey;
     this.section = options?.section;
+    this.tech = options?.tech;
   }
 }
 

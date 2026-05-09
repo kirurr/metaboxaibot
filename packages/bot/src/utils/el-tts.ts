@@ -2,6 +2,7 @@ import {
   userStateService,
   s3Service,
   calculateCost,
+  calculateProviderCostUsd,
   checkBalance,
   deductTokens,
   type SubmitVideoParams,
@@ -120,7 +121,21 @@ export async function preGenerateELTts(
       return null;
     }
 
-    await deductTokens(userId, ttsCost, ttsModelId);
+    // Audit: TTS hot-path использует фиксированную модель + provider; fallback'а нет.
+    const ttsActualCostUsd = calculateProviderCostUsd(
+      ttsModel,
+      0,
+      0,
+      undefined,
+      undefined,
+      ttsSettings,
+      undefined,
+      prompt.length,
+    );
+    await deductTokens(userId, ttsCost, ttsModelId, undefined, undefined, {
+      actualProvider: ttsModel.provider,
+      actualCostUsd: ttsActualCostUsd,
+    });
     return uploadedKey;
   }
 

@@ -5,7 +5,12 @@ import {
   OPENAI_ENV_KEY,
   type StoredAttachment,
 } from "./dialog.service.js";
-import { calculateCost, checkBalance, deductTokens } from "./token.service.js";
+import {
+  calculateCost,
+  calculateProviderCostUsd,
+  checkBalance,
+  deductTokens,
+} from "./token.service.js";
 import { estimateTokens as estimateStringTokens } from "./token-estimator.js";
 import { downloadBuffer } from "./s3.service.js";
 import {
@@ -619,6 +624,25 @@ export const chatService = {
           return true;
         };
 
+        // Helper: фактическая модель/провайдер на момент броска. Если был
+        // fallback — `activeAdapterModel` уже не равно primary, и tech-alert
+        // должен показать обе модели вместо одной только primary из dialog.
+        const buildTechMeta = (): UserFacingError["tech"] => {
+          const activeModelId =
+            typeof activeAdapterModel === "string" ? activeAdapterModel : activeAdapterModel.id;
+          const activeProvider =
+            typeof activeAdapterModel === "string"
+              ? (model?.provider ?? keyProvider)
+              : activeAdapterModel.provider;
+          return {
+            activeModelId,
+            activeProvider,
+            primaryModelId: dialog.modelId,
+            primaryProvider: model?.provider,
+            fallbackUsed: activeModelId !== dialog.modelId,
+          };
+        };
+
         if (!canKeyRetry) {
           // В пределах текущего провайдера попыток не осталось → пробуем
           // переключиться на fallback. Если получилось — outer loop рестартует
@@ -641,6 +665,7 @@ export const chatService = {
                 params: { modelName: model?.name ?? dialog.modelId },
                 notifyOps: true,
                 cause: err,
+                tech: buildTechMeta(),
               });
             }
             throw new UserFacingError(`${transientReason} on ${keyProvider}`, {
@@ -649,6 +674,7 @@ export const chatService = {
               params: { modelName: model?.name ?? dialog.modelId },
               notifyOps: true,
               cause: err,
+              tech: buildTechMeta(),
             });
           }
           throw err;
@@ -672,6 +698,7 @@ export const chatService = {
                 params: { modelName: model?.name ?? dialog.modelId },
                 notifyOps: true,
                 cause: err,
+                tech: buildTechMeta(),
               });
             }
             throw err;
@@ -819,8 +846,33 @@ export const chatService = {
     // Save assistant message
     await dialogService.saveMessage(dialogId, "assistant", responseText, { tokensUsed });
 
+    // Audit-метаданные: фактический provider (отличается от primary при
+    // fallback'е) и сырая цена в USD по нему. Считаем по `activeAdapterModel`
+    // если она в виде AIModel-объекта (т.е. был fallback), иначе — по primary
+    // `model`. Если usage нет от провайдера — actualCostUsd оставляем undefined
+    // (расчёт без токенов был бы неинформативен).
+    const activeModelObj = typeof activeAdapterModel === "string" ? model : activeAdapterModel;
+    const actualProvider = activeModelObj?.provider ?? keyProvider;
+    const actualCostUsd =
+      activeModelObj && inputTokensUsed !== undefined && outputTokensUsed !== undefined
+        ? calculateProviderCostUsd(
+            activeModelObj,
+            inputTokensUsed,
+            outputTokensUsed,
+            undefined,
+            undefined,
+            ms,
+            undefined,
+            undefined,
+            { cachedInputTokens: cachedInputTokensUsed },
+          )
+        : undefined;
+
     // Deduct tokens
-    await deductTokens(userId, tokensUsed, dialog.modelId, dialogId);
+    await deductTokens(userId, tokensUsed, dialog.modelId, dialogId, undefined, {
+      actualProvider,
+      actualCostUsd,
+    });
 
     return { text: responseText, tokensUsed };
   },
