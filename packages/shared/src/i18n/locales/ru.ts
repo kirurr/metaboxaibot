@@ -578,7 +578,7 @@ export default {
     imageSaved: "✅ {slot}: изображение {n}/{max} сохранено.",
     tooManyMedia:
       "<b>❌ Вы загрузили лишние файлы - они были пропущены.</b>\n\n{modelName} принимает максимум {totalMax} файлов, из них:\n{breakdown}. \n\nДля просмотра содержимого нажмите на соответсвующую кнопку ниже.",
-    imageSavedSingle: "✅ {slot} загружен.",
+    imageSavedSingle: "✅ Загружено: {slot}.",
     slotRequired: "⚠️ Обязательно: {slot}.",
     replace: "🔄 Заменить",
     remove: "Удалить",
