@@ -513,6 +513,21 @@ model PricingOverride {
 }
 
 // ─────────────────────────────────────────────
+// Учёт выдач welcome-бонуса.
+// Намеренно БЕЗ foreign key на User — запись должна пережить cascade-удаление
+// аккаунта (см. account-deletion.service.ts), иначе после deletion + повторного
+// /start юзер получит welcome-бонус заново. Ключ — telegramId, который
+// неизменен и не переиспользуется Telegram'ом.
+// ─────────────────────────────────────────────
+model WelcomeBonusReceipt {
+  telegramId BigInt   @id
+  amount     Decimal  @db.Decimal(12, 4)
+  creditedAt DateTime @default(now())
+
+  @@map("welcome_bonus_receipts")
+}
+
+// ─────────────────────────────────────────────
 // Архивные записи удалённых аккаунтов.
 // Юзер копируется сюда снапшотом перед каскадным удалением из `users`.
 // pendingMetaboxTransfer=true => перенос tokens/subscription на metabox-аккаунт

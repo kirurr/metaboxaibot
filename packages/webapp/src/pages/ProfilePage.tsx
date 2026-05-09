@@ -2070,7 +2070,7 @@ function AccountTab(props: { profile: UserProfile }) {
       {/* Danger zone — мягкая dashed-кнопка с красной обводкой (стилистика
           .voice-picker__create-btn). Реальное подтверждение в модалке ниже,
           которая уже содержит явное предупреждение и btn--danger «Удалить». */}
-      <div className="account-section" style={{ display: "none" }}>
+      <div className="account-section">
         <button className="account-delete-btn" onClick={() => setShowDeleteConfirm(true)}>
           {t("account.deleteAccount")}
         </button>
