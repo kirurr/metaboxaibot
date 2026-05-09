@@ -388,8 +388,11 @@ async function streamGptResponse(
       // Тех-канал получает alert только если UserFacingError просит об этом
       // (notifyOps=true) или несёт оригинальную ошибку через cause —
       // notifyTechError развернёт её через `caused by:` в alert'е.
+      // Шлём САМ UFE (а не err.cause): notify-tech читает из UFE поле `tech`
+      // (provider/модель на момент падения, флаг fallback'а), а сериализер всё
+      // равно идёт по cause-chain и выводит raw provider error.
       if (err.notifyOps || err.cause !== undefined) {
-        void notifyTechError(err.cause ?? err, {
+        void notifyTechError(err, {
           section: "gpt",
           dialogId,
           userId: String(ctx.user!.id),

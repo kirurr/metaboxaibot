@@ -17,6 +17,7 @@ import {
   deductTokens,
   refundTokens,
   calculateCost,
+  calculateProviderCostUsd,
   usdToTokens,
   translatePromptIfNeeded,
 } from "@metabox/api/services";
@@ -535,7 +536,41 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       // сообщение может стоить дробно; deductTokens принимает float.
       const internalCost = perImageInternalCost * chargeMultiplier;
 
-      deductResult = await deductTokens(BigInt(userIdStr), internalCost, modelId);
+      // Audit-метаданные: фактический provider и сырая USD-цена по нему. При
+      // fallback'е находим actual model среди кандидатов (тот же modelId, другой
+      // provider). actualCostUsd считаем по ней БЕЗ pricing-коэффициентов.
+      const activeProvider = usedFallback
+        ? (fbState?.effectiveProvider ?? model.provider)
+        : model.provider;
+      const activeModel =
+        activeProvider === model.provider
+          ? model
+          : (getFallbackCandidates(modelId, "design").find((m) => m.provider === activeProvider) ??
+            model);
+      const actualCostUsd =
+        calculateProviderCostUsd(
+          activeModel,
+          0,
+          0,
+          megapixels,
+          undefined,
+          modelSettings,
+          undefined,
+          undefined,
+          { hasInputImage, inputImagesMegapixels },
+        ) * chargeMultiplier;
+
+      deductResult = await deductTokens(
+        BigInt(userIdStr),
+        internalCost,
+        modelId,
+        undefined,
+        undefined,
+        {
+          actualProvider: activeProvider,
+          actualCostUsd,
+        },
+      );
       await db.generationJob.update({
         where: { id: dbJobId },
         data: { tokensSpent: internalCost },

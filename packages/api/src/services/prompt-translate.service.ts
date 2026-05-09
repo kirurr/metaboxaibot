@@ -1,6 +1,6 @@
 import OpenAI, { type ClientOptions as OpenAIClientOptions } from "openai";
 import { AI_MODELS } from "@metabox/shared";
-import { calculateCost, deductTokens } from "./token.service.js";
+import { calculateCost, calculateProviderCostUsd, deductTokens } from "./token.service.js";
 import { logger } from "../logger.js";
 import { acquireKey, recordSuccess, recordError, markRateLimited } from "./key-pool.service.js";
 import { isPoolExhaustedError } from "../utils/pool-exhausted-error.js";
@@ -96,7 +96,13 @@ export async function translatePromptIfNeeded(
     const outputTokens = response.usage?.output_tokens ?? 0;
     const cost = calculateCost(model, inputTokens, outputTokens);
     if (cost > 0) {
-      await deductTokens(userId, cost, forModel, undefined, "autotranslate").catch((err) => {
+      // Audit: автоперевод идёт через фиксированный TRANSLATE_MODEL_ID без
+      // fallback'а — actualProvider = model.provider, raw USD по нему.
+      const actualCostUsd = calculateProviderCostUsd(model, inputTokens, outputTokens);
+      await deductTokens(userId, cost, forModel, undefined, "autotranslate", {
+        actualProvider: model.provider,
+        actualCostUsd,
+      }).catch((err) => {
         logger.warn({ err, userId: userId.toString() }, "Failed to deduct translation cost");
       });
     }
