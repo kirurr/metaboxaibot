@@ -417,6 +417,69 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * POST /internal/set-referrer
+   * Called by Metabox admin when a user's mentor is changed on the site.
+   *
+   * Both mentee and new mentor are identified by Metabox User.id (UUID) —
+   * the stable cross-system identifier. Bot looks them up via the
+   * metaboxUserId column.
+   *
+   * Cases:
+   *  - mentee not found in bot (never linked TG)        → no-op, ok
+   *  - new mentor not found in bot (никогда не запускал) → referredById = null
+   *  - new mentor found                                  → referredById = mentor.id
+   *  - newMentorMetaboxUserId === null                   → referredById = null
+   *
+   * Сайт — единый источник истины для MLM/реферальной структуры. Локальный
+   * referredById в боте используется только для информационных целей (см.
+   * profile.ts fallback). Поэтому на стороне бота мы НЕ создаём stub'ов
+   * для несвязанных менторов — просто храним null, пока тот не запустит бота.
+   */
+  fastify.post("/set-referrer", async (request, reply) => {
+    const { metaboxUserId, newMentorMetaboxUserId } = request.body as {
+      metaboxUserId?: string;
+      newMentorMetaboxUserId?: string | null;
+    };
+
+    if (!metaboxUserId) {
+      return reply.code(400).send({ error: "metaboxUserId is required" });
+    }
+
+    const mentee = await db.user.findFirst({
+      where: { metaboxUserId },
+      select: { id: true },
+    });
+
+    if (!mentee) {
+      // User never started the bot — nothing to mirror.
+      return { ok: true, applied: false, reason: "mentee_not_in_bot" };
+    }
+
+    let newReferredById: bigint | null = null;
+    if (newMentorMetaboxUserId) {
+      const mentor = await db.user.findFirst({
+        where: { metaboxUserId: newMentorMetaboxUserId },
+        select: { id: true },
+      });
+      // Если ментора в боте нет — пишем null. Сайт всё равно видит верную
+      // структуру через свою БД, бот «дозаполнится» сам когда ментор начнёт
+      // использовать бота (сейчас этого никто не делает, и это by design).
+      newReferredById = mentor?.id ?? null;
+    }
+
+    await db.user.update({
+      where: { id: mentee.id },
+      data: { referredById: newReferredById },
+    });
+
+    return {
+      ok: true,
+      applied: true,
+      referredById: newReferredById?.toString() ?? null,
+    };
+  });
+
+  /**
    * POST /internal/unlink-metabox
    * Called by Metabox admin when an admin disconnects a user's Telegram account.
    * Clears metaboxUserId and metaboxReferralCode from the AI Box user record.

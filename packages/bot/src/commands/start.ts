@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import type { BotContext } from "../types/context.js";
 import { userService } from "../services/user.service.js";
+import { backfillBotReferrals } from "../services/referral-backfill.service.js";
 import { userStateService } from "@metabox/api/services";
 import { db } from "@metabox/api/db";
 import { buildLanguageKeyboard } from "../keyboards/language.keyboard.js";
@@ -377,6 +378,14 @@ export async function handleStart(ctx: BotContext): Promise<void> {
             // Sync subscription + pending token grants from Metabox
             void syncMetaboxGrants(ctx.user!.id).catch((err) => {
               logger.error({ err }, "[start registerBotUser] grant sync failed");
+            });
+
+            // Backfill referredById для прямых рефералов этого юзера в боте.
+            // Закрывает дыру: реферал мог зарегистрироваться в боте раньше
+            // наставника — тогда его referredById остался null, потому что
+            // строки наставника в db.user ещё не было. Идемпотентно.
+            void backfillBotReferrals(ctx.user!.id, result.userId).catch((err) => {
+              logger.error({ err }, "[start registerBotUser] referral backfill failed");
             });
           }
         }

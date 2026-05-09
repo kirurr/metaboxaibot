@@ -62,6 +62,7 @@ export {
   getAiBotCatalog,
   createSubscriptionInvoice,
   resolveReferralCode,
+  fetchDirectReferralsWithTelegram,
   registerBotUser,
   confirmMerge,
   MetaboxApiError,

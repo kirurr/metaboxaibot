@@ -548,6 +548,27 @@ export async function createAiBotInvoice(params: {
   });
 }
 
+/**
+ * Получить прямых рефералов пользователя из Metabox, у которых привязан
+ * Telegram. Используется при /start наставника для backfill'а локального
+ * `referredById` его рефералов, у которых он сейчас null (потому что
+ * на момент их регистрации наставник ещё не запускал бота).
+ *
+ * Возвращает пустой массив при сетевой ошибке — backfill best-effort.
+ */
+export async function fetchDirectReferralsWithTelegram(
+  metaboxUserId: string,
+): Promise<Array<{ metaboxUserId: string; telegramId: string }>> {
+  try {
+    const res = await get<{
+      referrals: Array<{ metaboxUserId: string; telegramId: string }>;
+    }>(`/internal/direct-referrals?metaboxUserId=${encodeURIComponent(metaboxUserId)}`);
+    return res.referrals ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Resolve a Metabox referralCode to a telegramId for bot referral linking. */
 export async function resolveReferralCode(
   code: string,
