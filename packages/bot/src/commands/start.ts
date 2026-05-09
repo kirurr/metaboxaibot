@@ -333,15 +333,40 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           referrerUserId: resolvedReferrerUserId ?? undefined,
         });
         if (result?.ok) {
-          if (!result.isStub) {
-            // Real account found — auto-link
-            await db.user.update({
-              where: { id: ctx.user!.id },
-              data: {
-                metaboxUserId: result.userId,
-                metaboxReferralCode: result.referralCode,
+          // Drift detection: если на metabox-стороне произошёл merge, наш
+          // закешированный `metaboxUserId` мог стать secondary'ем. registerBotUser
+          // ищет по telegramId, который после merge сидит на primary, поэтому
+          // `result.userId` = живой primary. Если он отличается от нашего
+          // кеша — обновляем + логируем для аудита.
+          const previousMetaboxUserId = ctx.user!.metaboxUserId;
+          const driftDetected =
+            !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
+
+          await db.user.update({
+            where: { id: ctx.user!.id },
+            data: {
+              metaboxReferralCode: result.referralCode,
+              // metaboxUserId пишем только для real-аккаунта (isStub=false),
+              // чтобы поле семантически означало «реально привязан к Metabox»,
+              // а не «есть stub». Если в кеше уже был userId, а сейчас вернулся
+              // stub — это inconsistency (frozen?), не перезаписываем, только лог.
+              ...(!result.isStub ? { metaboxUserId: result.userId } : {}),
+            },
+          });
+
+          if (driftDetected) {
+            logger.warn(
+              {
+                telegramId: ctx.user!.id.toString(),
+                from: previousMetaboxUserId,
+                to: result.userId,
+                isStub: result.isStub,
               },
-            });
+              "[start registerBotUser] metaboxUserId drift — local cache pointed to a different user",
+            );
+          }
+
+          if (!result.isStub) {
             // Notify user about auto-linking
             const mentorInfo = result.mentor
               ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
@@ -353,12 +378,6 @@ export async function handleStart(ctx: BotContext): Promise<void> {
             // Sync subscription + pending token grants from Metabox
             void syncMetaboxGrants(ctx.user!.id).catch((err) => {
               logger.error({ err }, "[start registerBotUser] grant sync failed");
-            });
-          } else {
-            // Stub account — store referralCode but NOT metaboxUserId
-            await db.user.update({
-              where: { id: ctx.user!.id },
-              data: { metaboxReferralCode: result.referralCode },
             });
           }
         }
