@@ -1497,16 +1497,12 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
-    supportedAspectRatios: ["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"],
+    supportedAspectRatios: ["1280:720", "720:1280"],
     durationRange: { min: 2, max: 10 },
     settings: [
-      mkAspectRatio(["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"], {
+      mkAspectRatio(["1280:720", "720:1280"], {
         "1280:720": "16:9",
         "720:1280": "9:16",
-        "1104:832": "4:3",
-        "832:1104": "3:4",
-        "960:960": "1:1",
-        "1584:672": "21:9",
       }),
       mkDurationSlider(2, 10),
       {
