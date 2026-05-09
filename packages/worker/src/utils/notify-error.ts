@@ -293,12 +293,16 @@ export interface FallbackNotificationContext {
  * частоту fallback'ов и мешал диагностике (один сбойный провайдер мог
  * генерировать сотни fallback'ов за окно, и все они уходили только в лог).
  * Теперь алерт идёт на каждый fallback — пусть шумно, зато честно.
+ *
+ * Канал: `fallbackAlerts.chatId` (FALLBACK_ALERT_CHAT_ID), с фоллбеком на
+ * общий `alerts.chatId`. Это позволяет направить шумные fallback'и в
+ * отдельный канал/тему, не засоряя основной on-call alert.
  */
 export async function notifyFallback(ctx: FallbackNotificationContext): Promise<void> {
-  const chatId = config.alerts.chatId;
+  const chatId = config.fallbackAlerts.chatId;
   if (!chatId) return;
 
-  const threadId = config.alerts.threadId;
+  const threadId = config.fallbackAlerts.threadId;
   const allFailed = ctx.fallbackProvider === null;
   const header = allFailed
     ? `❌ <b>Fallback FAILED</b> [${ctx.section}/${ctx.modelId}]`

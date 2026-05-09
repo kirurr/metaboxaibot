@@ -152,6 +152,24 @@ export const config = {
   },
 
   /**
+   * Fallback-уведомления (optional) — алерты о переключении image/video
+   * генерации с primary на fallback-провайдера (через notifyFallback).
+   * Отделены от alerts, чтобы on-call мог направить шумные fallback'и
+   * в отдельный канал/тему — критичные tech-ошибки и rate-limit'ы при этом
+   * остаются в основном alerts-канале.
+   *
+   * Фоллбек: если FALLBACK_ALERT_* не заданы, используется alerts.chatId.
+   * Установки с одним только ALERT_CHAT_ID работают как раньше.
+   *
+   * FALLBACK_ALERT_CHAT_ID — отдельный канал для fallback-алертов; default — alerts.chatId.
+   * FALLBACK_ALERT_THREAD_ID — message_thread_id; default — alerts.threadId.
+   */
+  fallbackAlerts: {
+    chatId: opt("FALLBACK_ALERT_CHAT_ID") ?? opt("ALERT_CHAT_ID"),
+    threadId: optInt("FALLBACK_ALERT_THREAD_ID", 0) || optInt("ALERT_THREAD_ID", 0) || undefined,
+  },
+
+  /**
    * Metabox site integration (optional — only needed for ecosystem linking).
    * METABOX_API_URL      — base URL of Metabox Next.js app, e.g. https://app.meta-box.ru
    * METABOX_INTERNAL_KEY — shared secret for X-Internal-Key header
