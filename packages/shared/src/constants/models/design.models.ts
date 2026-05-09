@@ -1982,7 +1982,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
         options: [
           { value: "png", label: "PNG" },
           { value: "webp", label: "WebP" },
-          { value: "jpeg", label: "JPEG" },
+          { value: "jpg", label: "JPEG" },
         ],
         default: "png",
         advanced: true,

@@ -105,7 +105,8 @@ export class ReplicateAdapter implements ImageAdapter {
     }
     if (ms.magic_prompt_option) msExtras.magic_prompt_option = ms.magic_prompt_option;
     if (ms.go_fast !== undefined) msExtras.go_fast = ms.go_fast;
-    if (ms.output_format) msExtras.output_format = ms.output_format;
+    if (ms.output_format)
+      msExtras.output_format = ms.output_format === "jpeg" ? "jpg" : ms.output_format;
     if (ms.output_quality !== undefined) msExtras.output_quality = ms.output_quality;
     // prompt_strength is img2img-only — skip for text-to-image to avoid API rejection.
     // Legacy guard: pre-fix UI allowed prompt_strength=0; Replicate computes effective
