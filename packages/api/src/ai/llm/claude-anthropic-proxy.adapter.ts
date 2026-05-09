@@ -159,12 +159,17 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       // override в 5xx переключил бы провайдера вместо корректного backoff'а.
       if (res.status < 500 && res.status !== 429) {
         try {
-          const parsed = JSON.parse(text) as { error?: { type?: string } };
+          const parsed = JSON.parse(text) as { error?: { type?: string; message?: string } };
           const errType = parsed?.error?.type;
+          const errMsg = parsed?.error?.message ?? "";
           if (errType === "api_error" || errType === "overloaded_error") {
             effectiveStatus = 503;
           } else if (errType === "rate_limit_error") {
             effectiveStatus = 429;
+          } else if (/no available service/i.test(errMsg)) {
+            // Evolink returns 400 invalid_request_error when its backend has no
+            // capacity for the model — semantically a 503, not a client error.
+            effectiveStatus = 503;
           }
         } catch {
           /* body не JSON — оставляем оригинальный status */
