@@ -339,8 +339,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           // `result.userId` = живой primary. Если он отличается от нашего
           // кеша — обновляем + логируем для аудита.
           const previousMetaboxUserId = ctx.user!.metaboxUserId;
-          const driftDetected =
-            !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
+          const driftDetected = !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
 
           await db.user.update({
             where: { id: ctx.user!.id },
