@@ -209,6 +209,25 @@ export class EvolinkVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
+      if (resp.status === 400) {
+        try {
+          const parsed = JSON.parse(txt) as { error?: { code?: string; message?: string } };
+          const code = parsed?.error?.code ?? "";
+          const msg = parsed?.error?.message ?? "";
+          if (code === "invalid_parameter" && /prompt too long/i.test(msg)) {
+            throw new UserFacingError(`Evolink prompt too long: ${msg}`, {
+              key: "aiClassifiedError",
+              params: {
+                messageRu: "Промпт слишком длинный — сократите текст и попробуйте снова.",
+                messageEn: "Prompt is too long — please shorten your text and try again.",
+              },
+              notifyOps: false,
+            });
+          }
+        } catch (e) {
+          if (e instanceof UserFacingError) throw e;
+        }
+      }
       const err = new Error(`Evolink video submit error ${resp.status}: ${txt}`) as Error & {
         status?: number;
       };

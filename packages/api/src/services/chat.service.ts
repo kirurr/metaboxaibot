@@ -541,6 +541,32 @@ export const chatService = {
           });
         }
 
+        // OpenAI 404 на previousResponseId — провайдер инвалидировал response
+        // кэш (billing suspension, принудительная очистка на их стороне). Ключ
+        // тот же, но response_id уже не существует. Ретраим с полной историей:
+        // для юзера прозрачно, continuity восстановится на следующем turn'е.
+        const httpStatus =
+          err instanceof Error && "status" in err ? (err as { status?: number }).status : undefined;
+        if (httpStatus === 404 && input.previousResponseId !== undefined && chunks.length === 0) {
+          const history = await dialogService.getHistory(dialogId, adapter.contextMaxMessages);
+          const augmented = await Promise.all(
+            history.map((m) =>
+              augmentHistoryMessage(
+                m,
+                model?.supportsDocuments === true,
+                extractCache,
+                acquired.keyId,
+              ),
+            ),
+          );
+          input = { ...input, history: augmented, previousResponseId: undefined };
+          logger.warn(
+            { dialogId, modelId: dialog.modelId },
+            "chat: OpenAI 404 on previousResponseId — retrying with full history",
+          );
+          continue;
+        }
+
         // Per-key metrics + throttle on 429-class errors. We only attribute when
         // the pool actually gave us a DB-tracked key (env-fallback yields keyId=null).
         const cls = classifyRateLimit(err, keyProvider);
@@ -782,16 +808,19 @@ export const chatService = {
           : isContentFilter
             ? "contentPolicyViolation"
             : "modelTemporarilyUnavailable";
-      throw new UserFacingError("Provider returned empty response", {
-        key: messageKey,
-        section: "gpt",
-        params: { modelName: model?.name ?? dialog.modelId },
-        notifyOps: !isContentFilter,
-        // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
-        // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
-        // первые 5 пробьются — этого хватит увидеть тренд.
-        opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
-      });
+      throw new UserFacingError(
+        `Provider returned empty response (reason: ${incompleteReason ?? "unknown"}, chunks: ${chunks.length}, outputTokens: ${outputTokensUsed ?? 0})`,
+        {
+          key: messageKey,
+          section: "gpt",
+          params: { modelName: model?.name ?? dialog.modelId },
+          notifyOps: !isContentFilter,
+          // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
+          // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
+          // первые 5 пробьются — этого хватит увидеть тренд.
+          opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
+        },
+      );
     }
 
     // ── Token usage logging ─────────────────────────────────────────────
