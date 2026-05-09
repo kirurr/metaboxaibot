@@ -755,16 +755,19 @@ export const chatService = {
           : isContentFilter
             ? "contentPolicyViolation"
             : "modelTemporarilyUnavailable";
-      throw new UserFacingError("Provider returned empty response", {
-        key: messageKey,
-        section: "gpt",
-        params: { modelName: model?.name ?? dialog.modelId },
-        notifyOps: !isContentFilter,
-        // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
-        // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
-        // первые 5 пробьются — этого хватит увидеть тренд.
-        opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
-      });
+      throw new UserFacingError(
+        `Provider returned empty response (reason: ${incompleteReason ?? "unknown"}, chunks: ${chunks.length}, outputTokens: ${outputTokensUsed ?? 0})`,
+        {
+          key: messageKey,
+          section: "gpt",
+          params: { modelName: model?.name ?? dialog.modelId },
+          notifyOps: !isContentFilter,
+          // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
+          // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
+          // первые 5 пробьются — этого хватит увидеть тренд.
+          opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
+        },
+      );
     }
 
     // ── Token usage logging ─────────────────────────────────────────────
