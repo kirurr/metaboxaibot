@@ -281,6 +281,10 @@ export default {
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
     kieImageAspectRatioOutOfRange:
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    imageTooLarge:
+      "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
+    promptRequired:
+      "❌ This model requires a text prompt — please describe what you want to generate and try again.",
     chatStreamInterrupted:
       "❌ {modelName} started replying but lost the thread halfway. It happens — send your message again, it'll get its act together. No tokens were charged for this request.",
     mediaSlotImagesOnly:
@@ -310,6 +314,8 @@ export default {
       "❌ The reference image dimensions {width}×{height} px exceed the Recraft img2img limit of {max} px per side.",
     recraftImg2imgResolutionTooLarge:
       "❌ The reference image resolution {width}×{height} ({mp} MP) exceeds the Recraft img2img limit of 16 MP.",
+    promptTooLong:
+      "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:

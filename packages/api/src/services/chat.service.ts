@@ -738,18 +738,32 @@ export const chatService = {
         "chat.sendMessageStream: provider returned empty response",
       );
       await dialogService.markMessageFailed(userMessage.id);
-      // `max_output_tokens` означает что reasoning + visible не уложились в
-      // выбранный юзером лимит — даём адресную подсказку (понизить effort или
-      // поднять лимит). Прочие случаи (content_filter, отсутствие terminal
-      // event и т.п.) — фирменный generic.
-      const isUserConfigIssue = incompleteReason === "max_output_tokens";
+      // Три ветки по incompleteReason:
+      //  - `max_output_tokens` — reasoning + visible не уложились в лимит,
+      //    даём адресную подсказку (понизить effort / поднять лимит). Алёртим
+      //    ops, чтобы видеть тренды (зашитый лимит давит юзеров) без походов в логи.
+      //  - `content_filter` — провайдер зарубил ответ по своим правилам
+      //    (Claude refusal, OpenAI moderation). Юзер видит тот же текст,
+      //    что у image/video. Ops НЕ алёртим: причина — пользовательский
+      //    контент, не наша инфра.
+      //  - всё остальное (network drop / silent end_turn / unknown) — generic
+      //    «временно недоступен», алёртим — причина непрозрачна.
+      const isContentFilter = incompleteReason === "content_filter";
+      const messageKey =
+        incompleteReason === "max_output_tokens"
+          ? "modelReasoningCapExhausted"
+          : isContentFilter
+            ? "contentPolicyViolation"
+            : "modelTemporarilyUnavailable";
       throw new UserFacingError("Provider returned empty response", {
-        key: isUserConfigIssue ? "modelReasoningCapExhausted" : "modelTemporarilyUnavailable",
+        key: messageKey,
         section: "gpt",
         params: { modelName: model?.name ?? dialog.modelId },
-        // Юзер сам выбрал несовместимые настройки — это не инцидент для ops;
-        // прочие пустоты (content_filter / network) — да, нотифицируем.
-        notifyOps: !isUserConfigIssue,
+        notifyOps: !isContentFilter,
+        // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
+        // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
+        // первые 5 пробьются — этого хватит увидеть тренд.
+        opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
       });
     }
 

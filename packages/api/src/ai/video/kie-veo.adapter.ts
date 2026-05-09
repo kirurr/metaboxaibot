@@ -6,7 +6,7 @@ import type {
 } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
-import { uploadFileUrl } from "../../utils/kie-upload.js";
+import { buildKieUploadName, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 
 const KIE_BASE = "https://api.kie.ai";
@@ -147,7 +147,9 @@ export class KieVeoAdapter implements VideoAdapter {
     // S3-presigned могут истекать или быть заблокированы по IP. Через KIE
     // file upload получаем стабильные URL'ы.
     const uploadedImageUrls = imageUrls.length
-      ? await Promise.all(imageUrls.map((url) => uploadFileUrl(this.apiKey, url)))
+      ? await Promise.all(
+          imageUrls.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
+        )
       : [];
 
     const aspectRatio = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? "16:9";
@@ -185,7 +187,22 @@ export class KieVeoAdapter implements VideoAdapter {
 
     const data = (await resp.json()) as KieVeoSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
-      throw new Error(`KIE veo submit failed: ${data.code} — ${data.msg}`);
+      const msg = data.msg ?? "";
+      // Defensive net: см. комментарий в kie.adapter.ts. Если despite
+      // fileName-fix провайдер всё равно вернул unsupported-format, юзер
+      // получает дружелюбный текст вместо generic generationFailed.
+      if (
+        /file type not supported|unsupported image format|invalid image format|only [^.]*image formats? are supported/i.test(
+          msg,
+        )
+      ) {
+        throw new UserFacingError(`KIE veo submit failed: ${data.code} — ${msg}`, {
+          key: "chatInvalidImage",
+          notifyOps: true,
+          opsAlertDedupKey: `kie-veo-unsupported-format-${this.modelId}`,
+        });
+      }
+      throw new Error(`KIE veo submit failed: ${data.code} — ${msg}`);
     }
     return data.data.taskId;
   }
@@ -223,7 +240,7 @@ export class KieVeoAdapter implements VideoAdapter {
       const isCopyright = /copyright/i.test(errorMessage);
       const isPolicy =
         isUserInputIssue ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|flagged|unsafe/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|flagged|unsafe|(prompt|request|input|content) (was |is )?rejected/i.test(
           errorMessage,
         );
       const hasCyrillic = /[Ѐ-ӿ]/.test(errorMessage);

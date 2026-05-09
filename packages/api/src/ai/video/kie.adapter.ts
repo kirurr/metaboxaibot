@@ -6,7 +6,7 @@ import type {
 } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
-import { uploadFileUrl } from "../../utils/kie-upload.js";
+import { buildKieUploadName, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
@@ -157,7 +157,7 @@ export class KieVideoAdapter implements VideoAdapter {
       if (!videoUrl) throw new Error("Kling MC: reference video is required");
 
       const [uploadedImage, uploadedVideo] = await Promise.all([
-        uploadFileUrl(this.apiKey, imageUrl),
+        uploadFileUrl(this.apiKey, imageUrl, buildKieUploadName(imageUrl)),
         uploadFileUrl(this.apiKey, videoUrl),
       ]);
       inputPayload.input_urls = [uploadedImage];
@@ -189,8 +189,12 @@ export class KieVideoAdapter implements VideoAdapter {
       }
 
       const imageUrls: string[] = [];
-      if (firstFrame) imageUrls.push(await uploadFileUrl(this.apiKey, firstFrame));
-      if (lastFrame) imageUrls.push(await uploadFileUrl(this.apiKey, lastFrame));
+      if (firstFrame)
+        imageUrls.push(
+          await uploadFileUrl(this.apiKey, firstFrame, buildKieUploadName(firstFrame)),
+        );
+      if (lastFrame)
+        imageUrls.push(await uploadFileUrl(this.apiKey, lastFrame, buildKieUploadName(lastFrame)));
 
       inputPayload.mode = klingMode;
       inputPayload.aspect_ratio =
@@ -223,7 +227,7 @@ export class KieVideoAdapter implements VideoAdapter {
         const urls = mi[`ref_element_${i}`] ?? [];
         if (urls.length === 0) continue;
         const uploaded = await Promise.all(
-          urls.slice(0, 4).map((url) => uploadFileUrl(this.apiKey, url)),
+          urls.slice(0, 4).map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         // Spec requires min 2 URLs — duplicate first image when only one is uploaded.
         const elementUrls = uploaded.length >= 2 ? uploaded : [uploaded[0]!, uploaded[0]!];
@@ -271,8 +275,18 @@ export class KieVideoAdapter implements VideoAdapter {
       // first_frame / last_frame
       const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
       const lastFrame = mi.last_frame?.[0];
-      if (firstFrame) inputPayload.first_frame_url = await uploadFileUrl(this.apiKey, firstFrame);
-      if (lastFrame) inputPayload.last_frame_url = await uploadFileUrl(this.apiKey, lastFrame);
+      if (firstFrame)
+        inputPayload.first_frame_url = await uploadFileUrl(
+          this.apiKey,
+          firstFrame,
+          buildKieUploadName(firstFrame),
+        );
+      if (lastFrame)
+        inputPayload.last_frame_url = await uploadFileUrl(
+          this.apiKey,
+          lastFrame,
+          buildKieUploadName(lastFrame),
+        );
 
       // Reference slots (multimodal reference-to-video)
       const refImages = mi.ref_images ?? [];
@@ -280,7 +294,9 @@ export class KieVideoAdapter implements VideoAdapter {
       const refAudios = mi.ref_audios ?? [];
       if (refImages.length) {
         inputPayload.reference_image_urls = await Promise.all(
-          refImages.slice(0, 9).map((url) => uploadFileUrl(this.apiKey, url)),
+          refImages
+            .slice(0, 9)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
       }
       if (refVideos.length) {
@@ -333,7 +349,9 @@ export class KieVideoAdapter implements VideoAdapter {
 
       if (isI2V) {
         const uploadedUrls = await Promise.all(
-          imageUrls.slice(0, 7).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, 7)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.image_urls = uploadedUrls;
       }
@@ -382,6 +400,24 @@ export class KieVideoAdapter implements VideoAdapter {
           params: { min, max },
         });
       }
+      // Defensive net: KIE video-моделям (kling и др.) валидируют тип
+      // input-картинки по URL extension'у. Передача `fileName` в uploadFileUrl
+      // должна это закрывать, но если в input всё-таки приходит реально-
+      // неподдерживаемый формат (HEIC/AVIF и т.п.) — показываем юзеру
+      // понятный мессадж со списком поддерживаемых форматов вместо generic
+      // «generationFailed». notifyOps + dedup: триггер означает, что
+      // fileName-fix что-то пропустил — алёртим оператора, но не спамим.
+      if (
+        /file type not supported|unsupported image format|invalid image format|only [^.]*image formats? are supported/i.test(
+          msg,
+        )
+      ) {
+        throw new UserFacingError(`KIE submit failed: ${data.code} — ${msg}`, {
+          key: "chatInvalidImage",
+          notifyOps: true,
+          opsAlertDedupKey: `kie-video-unsupported-format-${this.modelId}`,
+        });
+      }
       throw new Error(`KIE submit failed: ${data.code} — ${data.msg}`);
     }
     return data.data.taskId;
@@ -415,7 +451,7 @@ export class KieVideoAdapter implements VideoAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
           failMsg,
         );
       // Kling Motion: ошибки про невалидное reference-фото. Включают:
