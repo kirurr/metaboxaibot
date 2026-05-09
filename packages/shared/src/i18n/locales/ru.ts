@@ -314,6 +314,8 @@ export default {
       "❌ Размер референсного изображения {width}×{height} пкс превышает лимит Recraft img2img в {max} пкс по одной стороне.",
     recraftImg2imgResolutionTooLarge:
       "❌ Разрешение референсного изображения {width}×{height} ({mp} МП) превышает лимит Recraft img2img в 16 МП.",
+    promptTooLong:
+      "❌ Промпт слишком длинный — для этой модели максимум {limit} символов. Сократите текст и попробуйте снова.",
     gptImageModerationBlocked:
       "❌ Запрос отклонён системой безопасности. Нарушения: {violations}. Измените запрос и попробуйте снова.",
     audioSensitiveWord:

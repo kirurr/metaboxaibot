@@ -314,6 +314,8 @@ export default {
       "❌ The reference image dimensions {width}×{height} px exceed the Recraft img2img limit of {max} px per side.",
     recraftImg2imgResolutionTooLarge:
       "❌ The reference image resolution {width}×{height} ({mp} MP) exceeds the Recraft img2img limit of 16 MP.",
+    promptTooLong:
+      "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:
