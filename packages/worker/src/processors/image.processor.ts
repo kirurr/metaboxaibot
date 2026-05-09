@@ -760,6 +760,13 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 lastSubError = `5xx: ${message.slice(0, 200)}`;
                 continue; // → следующий кандидат (persistent 5xx триггерит fallback)
               }
+              if (isFiveXxError(err)) {
+                // Transient 5xx на ранней попытке — пробрасываем наверх: BullMQ
+                // ретраит, sub-job остаётся pending (без providerJobId) и будет
+                // переподан заново. Зеркалит поведение submitWithFallback.
+                if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
+                throw err;
+              }
               if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
               lastSubError = message.slice(0, 200);
               break;

@@ -132,6 +132,17 @@ export class RecraftAdapter implements ImageAdapter {
     const apiKey = this.apiKeyOverride ?? config.ai.recraft;
     if (!apiKey) throw new Error("RECRAFT_API_KEY not configured");
 
+    const PROMPT_LIMIT = 1000;
+    if (input.prompt && input.prompt.length > PROMPT_LIMIT) {
+      throw new UserFacingError(
+        `Recraft: prompt too long (${input.prompt.length} > ${PROMPT_LIMIT})`,
+        {
+          key: "promptTooLong",
+          params: { limit: PROMPT_LIMIT },
+        },
+      );
+    }
+
     const ms = input.modelSettings ?? {};
     const recraftModel = MODEL_MAP[this.modelId] ?? "recraftv4";
     const isVector = VECTOR_MODELS.has(this.modelId);

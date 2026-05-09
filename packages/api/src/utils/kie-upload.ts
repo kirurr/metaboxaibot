@@ -97,7 +97,11 @@ export async function uploadFileUrl(
 
   if (!resp.ok) {
     const txt = await resp.text();
-    throw new Error(`KIE file upload failed: ${resp.status} ${txt}`);
+    const err = new Error(`KIE file upload failed: ${resp.status} ${txt}`) as Error & {
+      status: number;
+    };
+    err.status = resp.status;
+    throw err;
   }
 
   const data = (await resp.json()) as KieFileUploadResponse;
