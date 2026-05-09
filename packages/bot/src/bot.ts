@@ -71,6 +71,11 @@ import {
   handleAudioVoice,
   handleVoiceCloneUpload,
 } from "./scenes/audio.js";
+import {
+  handleDeleteCodeInput,
+  handleDeleteConfirm,
+  handleDeleteCancel,
+} from "./scenes/account-delete.js";
 import { handleSendOriginal } from "./handlers/send-original.handler.js";
 import { getActiveSlot } from "./utils/media-input-state.js";
 import { handleVoicePromptCallback } from "./handlers/voice-prompt.handler.js";
@@ -209,6 +214,30 @@ export function createBot(token: string): Bot<BotContext> {
     if (!ctx.chat || ctx.chat.type === "private") return next();
   });
 
+  // ── Registration gate ────────────────────────────────────────────────────
+  // authMiddleware теперь не создаёт юзера автоматически — `ctx.user` будет
+  // undefined, если юзер ещё не запускал бота или удалил аккаунт. Любое
+  // сообщение от такого пользователя (кроме самого `/start`) получает
+  // bilingual reminder: «нажмите /start или используйте реферальную ссылку».
+  bot.use(async (ctx, next) => {
+    if (ctx.user) return next();
+    // /start — единственный путь регистрации (handleStart сам делает upsert).
+    if (ctx.message?.text?.startsWith("/start")) return next();
+    // Telegram Stars / successful_payment — не блокируем (теоретический edge case).
+    if (ctx.preCheckoutQuery || ctx.message?.successful_payment) return next();
+
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery().catch(() => void 0);
+    }
+    if (ctx.chat) {
+      const ru = getT("ru");
+      const en = getT("en");
+      await ctx
+        .reply(`${ru.errors.notRegistered}\n\n${en.errors.notRegistered}`)
+        .catch(() => void 0);
+    }
+  });
+
   // ── Commands ─────────────────────────────────────────────────────────────
   bot.command("start", handleStart);
   bot.command("menu", handleMenu);
@@ -300,6 +329,10 @@ export function createBot(token: string): Bot<BotContext> {
     if (section === "video") return handleVideo(ctx);
   });
 
+  // ── Account deletion callbacks ────────────────────────────────────────────
+  bot.callbackQuery("account_delete:confirm", handleDeleteConfirm);
+  bot.callbackQuery("account_delete:cancel", handleDeleteCancel);
+
   // ── Voice transcription prompt callback ──────────────────────────────────
   bot.callbackQuery(/^vp:/, handleVoicePromptCallback);
   // ── Video avatar voice choice callbacks ─────────────────────────────────
@@ -390,6 +423,9 @@ export function createBot(token: string): Bot<BotContext> {
     if (!ctx.user) return next();
 
     const state = await userStateService.get(ctx.user.id);
+    if (state?.state === "AWAITING_DELETE_CONFIRMATION") {
+      return handleDeleteCodeInput(ctx);
+    }
     if (state?.state === "GPT_ACTIVE" || state?.state === "GPT_SECTION") {
       if (ctx.message?.photo) return handleGptPhoto(ctx);
       if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleGptPhoto(ctx);

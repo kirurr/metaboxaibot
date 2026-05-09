@@ -178,6 +178,8 @@ export interface Translations {
     noSubscription: string;
     noSubscriptionForPurchase: string;
     userBlocked: string;
+    /** Пользователь не зарегистрирован (нет в `users` БД) — должен запустить /start. */
+    notRegistered: string;
     sendOriginalFailed: string;
     fileTooLargeForTelegram: string;
     fileTooLargeForBotApi: string;
@@ -193,6 +195,8 @@ export interface Translations {
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
+    imageTooLarge: string;
+    promptRequired: string;
     chatStreamInterrupted: string;
     mediaSlotImagesOnly: string;
     mediaSlotVideosOnly: string;
@@ -279,6 +283,7 @@ export interface Translations {
     replicateFileTooLarge: string;
     replicateContentPolicy: string;
     promptNotEnglish: string;
+    modelDoesNotSupportImages: string;
     // Fal
     falContentPolicy: string;
     falNoMediaGenerated: string;
@@ -411,6 +416,7 @@ export interface Translations {
     remove: string;
     optional: string;
     required: string;
+    referencesNotLoaded: string;
     doneUploading: string;
     readyForPrompt: string;
     readyForPromptOptional: string;
@@ -475,6 +481,24 @@ export interface Translations {
     password: string;
     submit: string;
     error: string;
+  };
+  accountDelete: {
+    /** Шлётся юзеру в чат после нажатия "Подтвердить" в mini-app. Содержит `{code}`. */
+    codeMessage: string;
+    cancelButton: string;
+    /** Сообщение когда пользователь ввёл правильный код — переходим к финальному confirm. */
+    codeAccepted: string;
+    finalConfirmButton: string;
+    finalCancelButton: string;
+    /** Юзер ввёл неверный код — показываем сколько осталось попыток. Содержит `{left}`. */
+    codeWrong: string;
+    codeExpired: string;
+    tooManyAttempts: string;
+    cancelled: string;
+    /** Финальное сообщение после успешного удаления. */
+    success: string;
+    /** Если на финальном confirm нет verified-флага в Redis (юзер не вводил код). */
+    needCodeFirst: string;
   };
   /**
    * Шутливые вариации текста "модель временно недоступна" для random-pick'а.

@@ -1,7 +1,7 @@
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
-import { uploadFileUrl } from "../../utils/kie-upload.js";
+import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 
 const KIE_BASE = "https://api.kie.ai";
@@ -28,37 +28,6 @@ interface KieTaskResponse {
 /** Grok Imagine: separate t2i / i2i endpoints. */
 const GROK_T2I = "grok-imagine/text-to-image";
 const GROK_I2I = "grok-imagine/image-to-image";
-
-/**
- * Распознанные форматы изображений. Используем extension из URL'а провайдера,
- * чтобы корректно сохранить файл как `.png` (когда юзер выбрал PNG в настройках,
- * а не дефолтный `.jpg`). По дефолту падаем на jpg — большинство провайдеров
- * без явного output_format отдают именно его.
- */
-const KNOWN_IMAGE_EXTS: ReadonlyArray<string> = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
-const EXT_TO_CONTENT_TYPE: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  gif: "image/gif",
-  svg: "image/svg+xml",
-};
-function parseImageMime(url: string): { ext: string; contentType: string } {
-  try {
-    const path = new URL(url).pathname;
-    const m = path.match(/\.([a-zA-Z0-9]+)$/);
-    if (m) {
-      const ext = m[1].toLowerCase();
-      if (KNOWN_IMAGE_EXTS.includes(ext)) {
-        return { ext: ext === "jpeg" ? "jpg" : ext, contentType: EXT_TO_CONTENT_TYPE[ext] };
-      }
-    }
-  } catch {
-    // not a parseable URL — fallthrough
-  }
-  return { ext: "jpg", contentType: "image/jpeg" };
-}
 
 /**
  * Nano Banana family: single endpoint per model that accepts optional
@@ -119,6 +88,17 @@ export class KieImageAdapter implements ImageAdapter {
     const imageUrls = editImages.length > 0 ? editImages : input.imageUrl ? [input.imageUrl] : [];
 
     const nanoBananaModel = NANO_BANANA_MODEL_NAMES[this.modelId];
+    const isNanoBanana = this.modelId === "nano-banana-1" || !!nanoBananaModel;
+
+    // KIE OpenAPI spec для всей nano-banana семьи помечает `prompt` как
+    // единственное required-поле. Без него KIE отвечает 500 «This field is
+    // required» — юзер видит шутливое «модель отдыхает» и не понимает что
+    // ему написать промпт. Ловим up-front, экономим KIE-credit и roundtrip.
+    if (isNanoBanana && !input.prompt?.trim()) {
+      throw new UserFacingError("Prompt is required for nano-banana models", {
+        key: "promptRequired",
+      });
+    }
 
     let body: { model: string; input: Record<string, unknown> };
 
@@ -137,7 +117,9 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         const uploaded = await Promise.all(
-          imageUrls.slice(0, 10).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, 10)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.image_urls = uploaded;
       }
@@ -166,7 +148,9 @@ export class KieImageAdapter implements ImageAdapter {
       if (imageUrls.length > 0) {
         const maxImages = this.modelId === "nano-banana-2" ? 14 : 8;
         const uploaded = await Promise.all(
-          imageUrls.slice(0, maxImages).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, maxImages)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.image_input = uploaded;
       }
@@ -194,7 +178,9 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         const uploaded = await Promise.all(
-          imageUrls.slice(0, 16).map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls
+            .slice(0, 16)
+            .map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         inputPayload.input_urls = uploaded;
       }
@@ -216,7 +202,7 @@ export class KieImageAdapter implements ImageAdapter {
 
       if (isI2I) {
         inputPayload.image_urls = await Promise.all(
-          imageUrls.map((url) => uploadFileUrl(this.apiKey, url)),
+          imageUrls.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
       }
 
@@ -242,7 +228,22 @@ export class KieImageAdapter implements ImageAdapter {
 
     const data = (await resp.json()) as KieSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
-      throw new Error(`KIE image submit failed: ${data.code} — ${data.msg}`);
+      const msg = data.msg ?? "";
+      // Defensive net: nano-banana-2 (и схожие KIE-модели) валидируют тип
+      // input-картинки по URL extension'у. Передача `fileName` в uploadFileUrl
+      // должна это закрывать, но если в input всё-таки приходит
+      // реально-неподдерживаемый формат (HEIC/AVIF и т.п.) — показываем юзеру
+      // понятный мессадж со списком поддерживаемых форматов вместо generic
+      // «generationFailed». notifyOps + dedup: триггер означает, что
+      // fileName-fix что-то пропустил — алёртим оператора, но не спамим.
+      if (/file type not supported|invalid image format|unsupported image format/i.test(msg)) {
+        throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
+          key: "chatInvalidImage",
+          notifyOps: true,
+          opsAlertDedupKey: `kie-image-unsupported-format-${this.modelId}`,
+        });
+      }
+      throw new Error(`KIE image submit failed: ${data.code} — ${msg}`);
     }
     return data.data.taskId;
   }
@@ -277,7 +278,7 @@ export class KieImageAdapter implements ImageAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
           failMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE

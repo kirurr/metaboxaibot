@@ -60,6 +60,15 @@ const translations = {
     "account.statusUser": "User",
     "account.mentor": "MENTOR",
     "account.referralCode": "REFERRAL CODE",
+    "account.deleteAccount": "Delete account",
+    "account.deleteAccountTitle": "Delete your account?",
+    "account.deleteAccountText":
+      "This action is irreversible. All your generations, dialogs, avatars, voices and history will be permanently erased.\n\nAre you sure you want to delete your account?",
+    "account.deleteAccountConfirm": "Delete",
+    "account.deleteCheckBotTitle": "Confirm in bot chat",
+    "account.deleteCheckBotText":
+      "We sent a confirmation code to your bot chat. Open the bot, send the code, and confirm deletion there.",
+    "account.deleteCheckBotClose": "Got it",
 
     // Banner
     "banner.welcome.title": "Welcome to Metabox",
@@ -480,6 +489,10 @@ const translations = {
     // Auth errors
     "auth.tokenExpired": "Link expired. Press the «Profile» button in the bot menu again.",
     "auth.openFromTelegram": "Please open this app from Telegram",
+    "auth.notRegisteredTitle": "Open the bot first",
+    "auth.notRegisteredText":
+      "To use the mini-app, send the /start command to the bot or follow a friend's referral link.",
+    "auth.openBot": "Open bot",
 
     // Picker shared UI
     "picker.search": "Search…",
@@ -584,6 +597,15 @@ const translations = {
     "account.statusUser": "Пользователь",
     "account.mentor": "НАСТАВНИК",
     "account.referralCode": "РЕФЕРАЛЬНЫЙ КОД",
+    "account.deleteAccount": "Удалить аккаунт",
+    "account.deleteAccountTitle": "Удалить аккаунт?",
+    "account.deleteAccountText":
+      "Это действие необратимо. Все ваши генерации, диалоги, аватары, голоса и история будут удалены безвозвратно.\n\nВы точно хотите удалить аккаунт?",
+    "account.deleteAccountConfirm": "Удалить",
+    "account.deleteCheckBotTitle": "Подтвердите в чате бота",
+    "account.deleteCheckBotText":
+      "Мы отправили код подтверждения в чат бота. Вернитесь в чат, отправьте код и подтвердите удаление там.",
+    "account.deleteCheckBotClose": "Понятно",
 
     // Banner
     "banner.welcome.title": "Добро пожаловать",
@@ -999,6 +1021,10 @@ const translations = {
     "auth.tokenExpired":
       "Ссылка устарела. Заново откройте главное меню и нажмите кнопку «Профиль».",
     "auth.openFromTelegram": "Пожалуйста, откройте приложение через Telegram",
+    "auth.notRegisteredTitle": "Сначала откройте бота",
+    "auth.notRegisteredText":
+      "Чтобы пользоваться мини-приложением, отправьте боту команду /start или перейдите по реферальной ссылке от друга.",
+    "auth.openBot": "Открыть бота",
 
     // Picker shared UI
     "picker.search": "Поиск…",

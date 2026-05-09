@@ -1924,6 +1924,22 @@ function AccountTab(props: { profile: UserProfile }) {
     props.profile.confirmBeforeGenerate,
   );
   const [showGenerationModeInfo, setShowGenerationModeInfo] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteInstruction, setShowDeleteInstruction] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      await api.account.initiateDelete();
+      setShowDeleteConfirm(false);
+      setShowDeleteInstruction(true);
+    } catch {
+      // оставляем confirm-модалку открытой; кнопки не блокируем — юзер может попробовать снова
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     api.profile
@@ -2050,6 +2066,65 @@ function AccountTab(props: { profile: UserProfile }) {
           <div className="account-value account-value--mono">{data.referralCode}</div>
         </div>
       )}
+
+      {/* Danger zone — мягкая dashed-кнопка с красной обводкой (стилистика
+          .voice-picker__create-btn). Реальное подтверждение в модалке ниже,
+          которая уже содержит явное предупреждение и btn--danger «Удалить». */}
+      <div className="account-section" style={{ display: "none" }}>
+        <button className="account-delete-btn" onClick={() => setShowDeleteConfirm(true)}>
+          {t("account.deleteAccount")}
+        </button>
+      </div>
+
+      {/* Confirm-модалка */}
+      {showDeleteConfirm &&
+        createPortal(
+          <div className="modal-overlay" onClick={() => !deleting && setShowDeleteConfirm(false)}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-title">{t("account.deleteAccountTitle")}</div>
+              <div className="modal-text" style={{ whiteSpace: "pre-line" }}>
+                {t("account.deleteAccountText")}
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn btn--secondary"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleting}
+                >
+                  {t("gallery.cancel")}
+                </button>
+                <button
+                  className="btn btn--danger"
+                  onClick={() => void handleDeleteAccount()}
+                  disabled={deleting}
+                >
+                  {deleting ? "…" : t("account.deleteAccountConfirm")}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Instruction-модалка после initiate */}
+      {showDeleteInstruction &&
+        createPortal(
+          <div className="modal-overlay" onClick={() => setShowDeleteInstruction(false)}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-title">{t("account.deleteCheckBotTitle")}</div>
+              <div className="modal-text">{t("account.deleteCheckBotText")}</div>
+              <div className="modal-actions">
+                <button
+                  className="btn btn--primary"
+                  onClick={() => setShowDeleteInstruction(false)}
+                >
+                  {t("account.deleteCheckBotClose")}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

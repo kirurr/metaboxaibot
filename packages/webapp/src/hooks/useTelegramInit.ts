@@ -12,6 +12,9 @@ type TelegramWebApp = {
 export interface TelegramInitState {
   ready: boolean;
   error: string | null;
+  /** Distinguishes "user record missing in DB" from generic auth errors —
+   *  фронт показывает специальный экран с CTA «Открыть бота», а не plain alert. */
+  errorCode: string | null;
   /** Non-fatal warning shown while still polling (loader stays visible). */
   warning: string | null;
   userId: string | null;
@@ -35,6 +38,7 @@ export function useTelegramInit(): TelegramInitState {
   const [state, setState] = useState<TelegramInitState>({
     ready: false,
     error: null,
+    errorCode: null,
     warning: null,
     userId: null,
     initDataRaw: null,
@@ -47,7 +51,14 @@ export function useTelegramInit(): TelegramInitState {
     getTgWebApp()?.disableVerticalSwipes?.();
 
     if (import.meta.env.DEV) {
-      setState({ ready: true, error: null, warning: null, userId: "dev", initDataRaw: null });
+      setState({
+        ready: true,
+        error: null,
+        errorCode: null,
+        warning: null,
+        userId: "dev",
+        initDataRaw: null,
+      });
       return;
     }
 
@@ -62,15 +73,17 @@ export function useTelegramInit(): TelegramInitState {
           setState({
             ready: true,
             error: null,
+            errorCode: null,
             warning: null,
             userId: user.id,
             initDataRaw: null,
           });
         })
-        .catch(() => {
+        .catch((err: Error & { code?: string }) => {
           setState({
             ready: false,
-            error: t("auth.tokenExpired"),
+            error: err.code === "USER_NOT_FOUND" ? err.message : t("auth.tokenExpired"),
+            errorCode: err.code ?? null,
             warning: null,
             userId: null,
             initDataRaw: null,
@@ -101,17 +114,19 @@ export function useTelegramInit(): TelegramInitState {
               setState({
                 ready: true,
                 error: null,
+                errorCode: null,
                 warning: null,
                 userId: user.id,
                 initDataRaw: raw,
               });
             }
           })
-          .catch((err: Error) => {
+          .catch((err: Error & { code?: string }) => {
             if (!cancelled) {
               setState({
                 ready: false,
                 error: err.message,
+                errorCode: err.code ?? null,
                 warning: null,
                 userId: null,
                 initDataRaw: raw,

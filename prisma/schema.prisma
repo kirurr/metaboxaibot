@@ -16,37 +16,38 @@ enum Role {
 // Пользователь
 // ─────────────────────────────────────────────
 model User {
-  id           BigInt   @id                    // Telegram user ID
-  username     String?
-  firstName    String?
-  lastName     String?
-  language     String   @default("en")
-  role         Role     @default(USER)
-  tokenBalance             Decimal  @default(0)    @db.Decimal(12, 4)
-  subscriptionTokenBalance Decimal  @default(0)    @db.Decimal(12, 4)
-  isNew        Boolean  @default(true)
-  isBlocked    Boolean  @default(false)
-  referredById BigInt?
-  metaboxUserId      String? // UUID пользователя в Metabox (после привязки)
-  metaboxReferralCode String? // Реферальный код Metabox (кешируется при привязке)
-  finishedOnboarding Boolean @default(false)
-  generationCount    Int     @default(0)
-  confirmBeforeGenerate Boolean @default(true)
+  id                       BigInt  @id // Telegram user ID
+  username                 String?
+  firstName                String?
+  lastName                 String?
+  language                 String  @default("en")
+  role                     Role    @default(USER)
+  tokenBalance             Decimal @default(0) @db.Decimal(12, 4)
+  subscriptionTokenBalance Decimal @default(0) @db.Decimal(12, 4)
+  isNew                    Boolean @default(true)
+  isBlocked                Boolean @default(false)
+  referredById             BigInt?
+  metaboxUserId            String? // UUID пользователя в Metabox (после привязки)
+  metaboxReferralCode      String? // Реферальный код Metabox (кешируется при привязке)
+  finishedOnboarding       Boolean @default(false)
+  generationCount          Int     @default(0)
+  confirmBeforeGenerate    Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  referredBy   User?              @relation("Referrals", fields: [referredById], references: [id])
-  referrals    User[]             @relation("Referrals")
-  dialogs      Dialog[]
-  transactions TokenTransaction[]
-  userState    UserState?
+  referredBy        User?              @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals         User[]             @relation("Referrals")
+  dialogs           Dialog[]
+  transactions      TokenTransaction[]
+  userState         UserState?
   uploads           UserUpload[]
   userAvatars       UserAvatar[]
   userVoices        UserVoice[]
   localSubscription LocalSubscription?
   galleryFolders    GalleryFolder[]
   pendingGeneration PendingGeneration?
+  generationJobs    GenerationJob[]
 
   @@map("users")
 }
@@ -59,10 +60,10 @@ model User {
 model PendingGeneration {
   id            String   @id @default(cuid())
   userId        BigInt   @unique
-  section       String   // image | video | audio
+  section       String // image | video | audio
   modelId       String
   prompt        String
-  payload       Json     // SubmitImage/Video/AudioParams для replay
+  payload       Json // SubmitImage/Video/AudioParams для replay
   estimatedCost Decimal  @db.Decimal(12, 4)
   chatId        BigInt
   messageId     BigInt
@@ -77,9 +78,9 @@ model PendingGeneration {
 
 // Состояние FSM бота для пользователя
 model UserState {
-  userId    BigInt  @id
-  state     String  @default("IDLE")          // IDLE | MAIN_MENU | GPT_SECTION | GPT_ACTIVE | ...
-  section   String? // gpt | design | audio | video
+  userId     BigInt  @id
+  state      String  @default("IDLE") // IDLE | MAIN_MENU | GPT_SECTION | GPT_ACTIVE | ...
+  section    String? // gpt | design | audio | video
   gptModelId String? // текущая выбранная GPT-модель
 
   // Активный диалог для каждого раздела (хранится независимо)
@@ -89,9 +90,9 @@ model UserState {
   videoDialogId  String?
 
   // Выбранная модель для каждого медиа-раздела (не зависит от диалога)
-  designModelId  String?
-  audioModelId   String?
-  videoModelId   String?
+  designModelId String?
+  audioModelId  String?
+  videoModelId  String?
 
   // Референс для img2img: Message.id выбранного изображения (one-shot, сбрасывается после использования)
   designRefMessageId String?
@@ -135,11 +136,11 @@ model UserState {
 // Диалоги
 // ─────────────────────────────────────────────
 model Dialog {
-  id       String  @id @default(cuid())
-  userId   BigInt
-  section  String  // gpt | design | audio | video
-  modelId  String  // gpt-4o | claude-sonnet | midjourney | kling | etc.
-  title    String?
+  id        String  @id @default(cuid())
+  userId    BigInt
+  section   String // gpt | design | audio | video
+  modelId   String // gpt-4o | claude-sonnet | midjourney | kling | etc.
+  title     String?
   isDeleted Boolean @default(false)
 
   // ── Стратегия хранения контекста ────────────────────────────────────────
@@ -170,11 +171,11 @@ model Dialog {
 model Message {
   id                String  @id @default(cuid())
   dialogId          String
-  role              String  // user | assistant
+  role              String // user | assistant
   content           String
   mediaUrl          String?
   mediaType         String? // image | video | audio
-  attachments       Json?   // [{ s3Key, mimeType, name, size }] — documents attached to the message
+  attachments       Json? // [{ s3Key, mimeType, name, size }] — documents attached to the message
   tokensUsed        Decimal @default(0) @db.Decimal(10, 4)
   providerMessageId String? // OpenAI Assistants: message_id (для управления историей)
   failed            Boolean @default(false) // true if the LLM request failed; excluded from history
@@ -191,11 +192,11 @@ model Message {
 // Токены
 // ─────────────────────────────────────────────
 model TokenTransaction {
-  id     String  @id @default(cuid())
-  userId BigInt
-  amount Decimal @db.Decimal(12, 4)           // положительное = пополнение, отрицательное = списание
-  type   String  // credit | debit
-  reason      String  // welcome_bonus | ai_usage | purchase | referral_bonus | admin | metabox_purchase
+  id          String  @id @default(cuid())
+  userId      BigInt
+  amount      Decimal @db.Decimal(12, 4) // положительное = пополнение, отрицательное = списание
+  type        String // credit | debit
+  reason      String // welcome_bonus | ai_usage | purchase | referral_bonus | admin | metabox_purchase
   description String? // Человекочитаемое описание (напр. "Подписка PRO (M3)")
 
   // Метаданные для разных типов
@@ -221,14 +222,14 @@ model GenerationJob {
   modelId  String
   status   String @default("pending") // pending | processing | done | failed
 
-  prompt    String
-  inputData Json?  // доп. параметры (размер, стиль и т.д.)
-  providerJobId    String? // external provider task ID — persisted after submit for poll resume on restart
-  providerKeyId    String? // ProviderKey.id выбранный на submit; null = был использован env-fallback
-  sourceMessageId  String? // "{chatId}:{messageId}" of the inline button that triggered this job
-  pollStartedAt    DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
-  tokensSpent      Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
-  error            String?
+  prompt          String
+  inputData       Json? // доп. параметры (размер, стиль и т.д.)
+  providerJobId   String? // external provider task ID — persisted after submit for poll resume on restart
+  providerKeyId   String? // ProviderKey.id выбранный на submit; null = был использован env-fallback
+  sourceMessageId String? // "{chatId}:{messageId}" of the inline button that triggered this job
+  pollStartedAt   DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
+  tokensSpent     Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
+  error           String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -236,6 +237,8 @@ model GenerationJob {
 
   outputs     GenerationJobOutput[]
   folderItems GalleryFolderItem[]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -264,12 +267,12 @@ model GenerationJobOutput {
 // Загрузки пользователей (голоса, аудио)
 // ─────────────────────────────────────────────
 model UserUpload {
-  id        String   @id @default(cuid())
-  userId    BigInt
-  type      String   // "voice" | "audio"
-  name      String
-  url       String   // публичный URL (S3 или Telegram)
-  s3Key     String?  // ключ в S3, если файл загружен
+  id     String  @id @default(cuid())
+  userId BigInt
+  type   String // "voice" | "audio"
+  name   String
+  url    String // публичный URL (S3 или Telegram)
+  s3Key  String? // ключ в S3, если файл загружен
 
   createdAt DateTime @default(now())
 
@@ -362,7 +365,7 @@ model LocalSubscription {
   id                    String   @id @default(cuid())
   userId                BigInt   @unique
   planName              String
-  period                String   // M1 | M3 | M6 | M12
+  period                String // M1 | M3 | M6 | M12
   tokensGranted         Int
   endDate               DateTime
   startDate             DateTime
@@ -389,7 +392,7 @@ model GalleryFolder {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  user  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   items GalleryFolderItem[]
 
   @@index([userId])
@@ -413,7 +416,7 @@ model GalleryFolderItem {
 // Курс обмена (USDT/RUB)
 // ─────────────────────────────────────────────
 model ExchangeRate {
-  pair      String   @id              // "USDT_RUB"
+  pair      String   @id // "USDT_RUB"
   rate      Decimal  @db.Decimal(12, 4)
   updatedAt DateTime @updatedAt
 
@@ -424,15 +427,15 @@ model ExchangeRate {
 // Прокси (для маршрутизации запросов к AI-провайдерам)
 // ─────────────────────────────────────────────
 model Proxy {
-  id        String  @id @default(cuid())
-  label     String  // человекочитаемое имя ("DE-1", "US-East")
-  protocol  String  // "http" | "https" | "socks5"
-  host      String
-  port      Int
+  id             String  @id @default(cuid())
+  label          String // человекочитаемое имя ("DE-1", "US-East")
+  protocol       String // "http" | "https" | "socks5"
+  host           String
+  port           Int
   username       String? // зашифрованный (AES-GCM ciphertext, base64) — может быть null
   passwordCipher String? // зашифрованный пароль
-  isActive  Boolean @default(true)
-  notes     String?
+  isActive       Boolean @default(true)
+  notes          String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -447,10 +450,10 @@ model Proxy {
 // ─────────────────────────────────────────────
 model ProviderKey {
   id        String  @id @default(cuid())
-  provider  String  // "openai" | "anthropic" | "google" | "fal" | ...
-  label     String  // "OpenAI Main", "OpenAI Backup #1"
-  keyCipher String  // AES-GCM ciphertext значения ключа (base64)
-  keyMask   String  // последние 4 символа для UI ("…1234")
+  provider  String // "openai" | "anthropic" | "google" | "fal" | ...
+  label     String // "OpenAI Main", "OpenAI Backup #1"
+  keyCipher String // AES-GCM ciphertext значения ключа (base64)
+  keyMask   String // последние 4 символа для UI ("…1234")
   proxyId   String?
   priority  Int     @default(0) // выше = приоритетнее (берётся первым)
   isActive  Boolean @default(true)
@@ -466,9 +469,9 @@ model ProviderKey {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  proxy        Proxy?        @relation(fields: [proxyId], references: [id], onDelete: SetNull)
-  userVoices   UserVoice[]
-  userAvatars  UserAvatar[]
+  proxy       Proxy?       @relation(fields: [proxyId], references: [id], onDelete: SetNull)
+  userVoices  UserVoice[]
+  userAvatars UserAvatar[]
 
   @@index([provider, isActive, priority])
   @@map("provider_keys")
@@ -494,3 +497,36 @@ model PricingOverride {
   @@map("pricing_overrides")
 }
 
+// ─────────────────────────────────────────────
+// Архивные записи удалённых аккаунтов.
+// Юзер копируется сюда снапшотом перед каскадным удалением из `users`.
+// pendingMetaboxTransfer=true => перенос tokens/subscription на metabox-аккаунт
+// не прошёл (404/network/etc) — снапшот localSubscriptionSnapshot хранит данные
+// для последующего ручного / cron-reconcile.
+// ─────────────────────────────────────────────
+model DeletedUser {
+  id                        String   @id @default(cuid())
+  // НЕ unique: один и тот же telegramId может удалиться несколько раз
+  // (юзер удалил аккаунт → /start создаёт новый → снова удаляет). Каждое
+  // удаление — отдельный snapshot для аудита и retry-reconcile.
+  telegramId                BigInt
+  username                  String?
+  firstName                 String?
+  lastName                  String?
+  language                  String
+  metaboxUserId             String?
+  metaboxReferralCode       String?
+  tokenBalance              Decimal  @db.Decimal(12, 4)
+  subscriptionTokenBalance  Decimal  @db.Decimal(12, 4)
+  hadLocalSubscription      Boolean  @default(false)
+  localSubscriptionSnapshot Json?
+  pendingMetaboxTransfer    Boolean  @default(false)
+  transferError             String?
+  originalCreatedAt         DateTime
+  deletedAt                 DateTime @default(now())
+
+  @@index([telegramId])
+  @@index([metaboxUserId])
+  @@index([pendingMetaboxTransfer])
+  @@map("deleted_users")
+}

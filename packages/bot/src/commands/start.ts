@@ -55,6 +55,19 @@ async function syncMetaboxGrants(userId: bigint): Promise<void> {
 export async function handleStart(ctx: BotContext): Promise<void> {
   const param = ctx.match as string | undefined;
 
+  // ── User registration ────────────────────────────────────────────────────
+  // authMiddleware больше не создаёт юзера автоматически (см. middleware doc),
+  // поэтому при первом /start (или после удаления аккаунта) `ctx.user` пуст.
+  // Создаём здесь — это единственная точка регистрации в боте.
+  if (ctx.from && !ctx.user) {
+    ctx.user = await userService.upsert({
+      id: BigInt(ctx.from.id),
+      username: ctx.from.username,
+      firstName: ctx.from.first_name,
+      lastName: ctx.from.last_name,
+    });
+  }
+
   // ── Metabox→Bot account linking ────────────────────────────────────────────
   if (param?.startsWith("link_") && ctx.user) {
     const token = param.slice("link_".length);

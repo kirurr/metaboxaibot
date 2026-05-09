@@ -435,6 +435,15 @@ export const api = {
       request<{ success: boolean }>(`/user-avatars/${id}`, { method: "DELETE" }),
   },
 
+  account: {
+    /**
+     * Запускает flow удаления аккаунта: api генерит код, шлёт его пользователю
+     * в чат бота, ставит state AWAITING_DELETE_CONFIRMATION. Дальнейшие шаги
+     * (ввод кода, финальный confirm) — внутри бота.
+     */
+    initiateDelete: () => request<{ ok: true }>("/account/delete-initiate", { method: "POST" }),
+  },
+
   modelSettings: {
     get: () => request<Record<string, Record<string, unknown>>>("/model-settings"),
     set: (modelId: string, settings: Record<string, unknown>, opts?: { replace?: boolean }) =>

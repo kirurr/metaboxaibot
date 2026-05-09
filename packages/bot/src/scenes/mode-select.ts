@@ -13,6 +13,7 @@ import {
   buildModePickerMenu,
   clearActiveSlot,
 } from "../utils/media-input-state.js";
+import { refreshMediaHint } from "../utils/media-hint.js";
 
 /**
  * Callback handler for `mode:<section>:<modelId>:<modeId>`. Persists the
@@ -70,6 +71,7 @@ export async function handleModeSet(ctx: BotContext): Promise<void> {
     if (webappUrl) kb.webApp(mgmtLabel, `${webappUrl}?page=management&section=${section}`);
     const text = ctx.t.modelModes.activatedTextOnly.replace("{mode}", modeLabel);
     await ctx.reply(text, { reply_markup: kb.inline_keyboard.length ? kb : undefined });
+    await refreshMediaHint(ctx, section, modelId);
     return;
   }
 
@@ -84,6 +86,7 @@ export async function handleModeSet(ctx: BotContext): Promise<void> {
   if (webappUrl) kb.webApp(mgmtLabel, `${webappUrl}?page=management&section=${section}`);
   const text = ctx.t.modelModes.activated.replace("{mode}", modeLabel);
   await ctx.reply(text, { reply_markup: kb.inline_keyboard.length ? kb : undefined });
+  await refreshMediaHint(ctx, section, modelId);
 }
 
 /**

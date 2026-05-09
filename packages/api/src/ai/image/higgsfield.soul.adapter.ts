@@ -104,7 +104,16 @@ export class HiggsFieldSoulImageAdapter implements ImageAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Higgsfield Soul submit failed: ${res.status} ${text}`);
+      const technicalMessage = `Higgsfield Soul submit failed: ${res.status} ${text}`;
+      // Higgsfield зашибает reference image по своим (недокументированным)
+      // dim/MB лимитам и шлёт `400 {"detail":"input_image_to_large"}`. Без
+      // классификации юзер видел шутливый «модель отдыхает» и не знал что
+      // надо уменьшить картинку. Парсим detail-флаг → адресный мессадж.
+      // Опечатка `to_large` (вместо `too_large`) — со стороны Higgsfield, не наша.
+      if (res.status === 400 && /input_image_to+_large/i.test(text)) {
+        throw new UserFacingError(technicalMessage, { key: "imageTooLarge" });
+      }
+      throw new Error(technicalMessage);
     }
 
     const data = (await res.json()) as SubmitResponse;
@@ -135,7 +144,16 @@ export class HiggsFieldSoulImageAdapter implements ImageAdapter {
     const data = (await res.json()) as PollResponse;
     logger.info({ data }, "Higgsfield Soul poll response");
 
-    if (data.status === "failed" || data.status === "nsfw" || data.status === "canceled") {
+    if (data.status === "nsfw") {
+      // Higgsfield content-policy блок (NSFW input или output). User-facing —
+      // юзеру нужно изменить промпт/фото. notifyOps=false: не нужно спамить
+      // тех-канал на каждый отказ модерации.
+      throw new UserFacingError(
+        `Higgsfield Soul generation rejected (nsfw): ${JSON.stringify(data)}`,
+        { key: "contentPolicyViolation", notifyOps: false },
+      );
+    }
+    if (data.status === "failed" || data.status === "canceled") {
       throw new Error(`Higgsfield Soul generation ${data.status}: ${JSON.stringify(data)}`);
     }
     if (data.status !== "completed") return null;

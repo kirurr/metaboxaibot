@@ -254,6 +254,49 @@ export interface RecordSaleResult {
   orderId?: string;
 }
 
+/**
+ * Перенос остатков (purchased + subscription токены + опционально локальная
+ * подписка) на metabox-аккаунт перед удалением юзера в боте.
+ *
+ * `purchasedTokens` идёт в `User.pendingBotTokens` (купленные/welcome/etc),
+ * `subscriptionTokens` — в `User.pendingBotSubscriptionTokens` (остаток
+ * подписочных). При повторной привязке нового TG к этому metabox-аккаунту
+ * новый бот получит их через стандартный sync-flow.
+ *
+ * `subscription` передаётся ТОЛЬКО если у юзера была локальная подписка с
+ * `metaboxSubscriptionId === null` (не пришла из metabox — например Trial).
+ * Если подписка изначально с metabox — она там уже есть, переносить не нужно.
+ *
+ * `referralMetaboxIds` — metabox-id'ы бот-рефералов удаляемого юзера, у которых
+ * уже есть metabox-привязка. Endpoint идемпотентно проставит им
+ * `referredById = удаляемого metabox-юзера`, если на metabox у них было `null`
+ * (рассинхрон — инвайтер на момент /start реферала ещё не был на metabox).
+ * Уже правильно установленные `referredById` не трогаются.
+ *
+ * Идемпотентность: на metabox-стороне дедупликация по `externalRef =
+ * bot-deletion:tg-{telegramId}` — повторный запрос (ретрай) без побочных
+ * эффектов вернёт `{ ok: true, idempotent: true }`.
+ */
+export async function transferOnDeletion(params: {
+  metaboxUserId: string;
+  telegramId: bigint;
+  purchasedTokens: number;
+  subscriptionTokens: number;
+  subscription?: {
+    planName: string;
+    period: string;
+    tokensGranted: number;
+    endDate: string;
+    startDate: string;
+  };
+  referralMetaboxIds?: string[];
+}): Promise<{ ok: true; idempotent?: boolean }> {
+  return post<{ ok: true; idempotent?: boolean }>("/credit-from-bot-deletion", {
+    ...params,
+    telegramId: params.telegramId.toString(),
+  });
+}
+
 /** Notify Metabox of a purchase made inside the bot (for MLM bonus calculation + order tracking). */
 export async function recordSale(params: {
   telegramId: bigint;

@@ -254,6 +254,8 @@ export default {
     noSubscription: "❌ An active subscription is required to use the bot.",
     noSubscriptionForPurchase: "❌ Token packages are only available with an active subscription.",
     userBlocked: "❌ Your account has been blocked. Contact support.",
+    notRegistered:
+      "👋 To start using the bot, send the /start command or follow a friend's referral link.",
     fileTooLargeForTelegram:
       "The file is too large to send via Telegram. If you are on mobile, we recommend opening the download link in a browser.",
     fileTooLargeForBotApi:
@@ -279,6 +281,10 @@ export default {
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
     kieImageAspectRatioOutOfRange:
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    imageTooLarge:
+      "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
+    promptRequired:
+      "❌ This model requires a text prompt — please describe what you want to generate and try again.",
     chatStreamInterrupted:
       "❌ {modelName} started replying but lost the thread halfway. It happens — send your message again, it'll get its act together. No tokens were charged for this request.",
     mediaSlotImagesOnly:
@@ -308,6 +314,8 @@ export default {
       "❌ The reference image dimensions {width}×{height} px exceed the Recraft img2img limit of {max} px per side.",
     recraftImg2imgResolutionTooLarge:
       "❌ The reference image resolution {width}×{height} ({mp} MP) exceeds the Recraft img2img limit of 16 MP.",
+    promptTooLong:
+      "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:
@@ -420,6 +428,8 @@ export default {
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
+    modelDoesNotSupportImages:
+      "ℹ️ {modelName} works with text prompts only — it can't use a photo reference. The photo will be ignored.",
     // Fal
     falContentPolicy:
       "❌ Your request was rejected due to a content policy violation. Please modify your prompt and try again.",
@@ -576,6 +586,7 @@ export default {
     remove: "Remove",
     optional: "(optional)",
     required: "(required)",
+    referencesNotLoaded: "💡 No references uploaded yet",
     doneUploading: "Done ✓",
     readyForPrompt: "✅ Ready! Send a text prompt to start generation.",
     readyForPromptOptional:
@@ -645,6 +656,23 @@ export default {
     password: "Password",
     submit: "Continue",
     error: "Error. Please check your details and try again.",
+  },
+  accountDelete: {
+    codeMessage:
+      "🗑 To confirm account deletion, send this code in chat: <code>{code}</code>\n\nThe code is valid for 5 minutes.",
+    cancelButton: "❌ Cancel",
+    codeAccepted:
+      "Code accepted. Please confirm account deletion — this action is irreversible. All your generations, dialogs and history will be erased.",
+    finalConfirmButton: "🗑 Delete account",
+    finalCancelButton: "Cancel",
+    codeWrong: "❌ Wrong code. Attempts left: {left}.",
+    codeExpired:
+      "⏱ The code has expired. If you still want to delete your account, try again from the mini-app.",
+    tooManyAttempts: "❌ Too many wrong attempts. Deletion cancelled. Please try again later.",
+    cancelled: "Account deletion cancelled.",
+    success:
+      "✅ Your account has been deleted. All data is erased. If you change your mind, please contact support.",
+    needCodeFirst: "Please enter the confirmation code from the message above first.",
   },
   generationFailedVariants: [
     "❌ {modelName} is temporarily unavailable. We already know and we're fixing it. Don't get bored — we have 70+ other AI models, you'll surely find something you like.",

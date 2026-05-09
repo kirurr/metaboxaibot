@@ -97,17 +97,6 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       max_tokens: input.maxTokens,
       reasoning_effort: input.reasoningEffort,
     });
-    const stream = await (
-      this.client.responses.create as (
-        p: unknown,
-      ) => Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>>
-    )({
-      model: this.model,
-      input: this.buildInput(input),
-      ...this.buildParams(input),
-      stream: true,
-    });
-
     let newResponseId: string | undefined;
     let inputTokensUsed: number | undefined;
     let cachedInputTokensUsed: number | undefined;
@@ -130,61 +119,82 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         .output_tokens_details?.reasoning_tokens;
     };
 
-    for await (const event of stream) {
-      if (event.type === "response.output_text.delta") {
-        deltaCount++;
-        yield event.delta;
-      } else if (event.type === "response.completed") {
-        sawTerminalEvent = true;
-        captureUsage(event.response);
-      } else if (event.type === "response.incomplete") {
-        sawTerminalEvent = true;
-        captureUsage(event.response);
-        const reason = event.response.incomplete_details?.reason;
-        incompleteReason = reason ?? undefined;
-        logger.warn(
-          {
-            modelId: this.model,
-            responseId: event.response.id,
-            incompleteReason: reason,
-            inputTokens: inputTokensUsed,
-            outputTokens: outputTokensUsed,
-            reasoningTokens: reasoningTokensUsed,
-            visibleDeltas: deltaCount,
-          },
-          `openai.chatStream: response incomplete (reason=${reason ?? "unknown"})`,
-        );
-      } else if (event.type === "response.failed") {
-        sawTerminalEvent = true;
-        captureUsage(event.response);
-        const error = event.response.error;
-        logger.error(
-          {
-            modelId: this.model,
-            responseId: event.response.id,
-            errorCode: error?.code,
-            errorMessage: error?.message,
-            visibleDeltas: deltaCount,
-          },
-          `openai.chatStream: response failed (${error?.code ?? "unknown"})`,
-        );
-      } else if (event.type === "error") {
-        const errEvent = event as {
-          code?: string | null;
-          message?: string;
-          param?: string | null;
-        };
-        logger.error(
-          {
-            modelId: this.model,
-            errorCode: errEvent.code,
-            errorMessage: errEvent.message,
-            errorParam: errEvent.param,
-            visibleDeltas: deltaCount,
-          },
-          `openai.chatStream: stream error event (${errEvent.code ?? "unknown"})`,
-        );
+    try {
+      const stream = await (
+        this.client.responses.create as (
+          p: unknown,
+        ) => Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>>
+      )({
+        model: this.model,
+        input: this.buildInput(input),
+        ...this.buildParams(input),
+        stream: true,
+      });
+
+      for await (const event of stream) {
+        if (event.type === "response.output_text.delta") {
+          deltaCount++;
+          yield event.delta;
+        } else if (event.type === "response.completed") {
+          sawTerminalEvent = true;
+          captureUsage(event.response);
+        } else if (event.type === "response.incomplete") {
+          sawTerminalEvent = true;
+          captureUsage(event.response);
+          const reason = event.response.incomplete_details?.reason;
+          incompleteReason = reason ?? undefined;
+          logger.warn(
+            {
+              modelId: this.model,
+              responseId: event.response.id,
+              incompleteReason: reason,
+              inputTokens: inputTokensUsed,
+              outputTokens: outputTokensUsed,
+              reasoningTokens: reasoningTokensUsed,
+              visibleDeltas: deltaCount,
+            },
+            `openai.chatStream: response incomplete (reason=${reason ?? "unknown"})`,
+          );
+        } else if (event.type === "response.failed") {
+          sawTerminalEvent = true;
+          captureUsage(event.response);
+          const error = event.response.error;
+          logger.error(
+            {
+              modelId: this.model,
+              responseId: event.response.id,
+              errorCode: error?.code,
+              errorMessage: error?.message,
+              visibleDeltas: deltaCount,
+            },
+            `openai.chatStream: response failed (${error?.code ?? "unknown"})`,
+          );
+        } else if (event.type === "error") {
+          const errEvent = event as {
+            code?: string | null;
+            message?: string;
+            param?: string | null;
+          };
+          logger.error(
+            {
+              modelId: this.model,
+              errorCode: errEvent.code,
+              errorMessage: errEvent.message,
+              errorParam: errEvent.param,
+              visibleDeltas: deltaCount,
+            },
+            `openai.chatStream: stream error event (${errEvent.code ?? "unknown"})`,
+          );
+        }
       }
+    } catch (err) {
+      // Stream.iterator throws a plain Error (no .status) when the API responds
+      // with an overload message during streaming — attach status=503 so that
+      // isFiveXxError in chat.service triggers the retry/fallback flow.
+      if (err instanceof Error && !("status" in err) && /overloaded/i.test(err.message)) {
+        (err as Error & { status: number }).status = 503;
+      }
+      throw err;
     }
 
     if (!sawTerminalEvent) {

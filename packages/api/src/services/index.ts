@@ -71,6 +71,7 @@ export {
   getMetaboxUserStatus,
   resendMetaboxVerification,
   changeMetaboxEmailPending,
+  transferOnDeletion,
 } from "./metabox-bridge.service.js";
 export type {
   AiBotProduct,
@@ -87,9 +88,20 @@ export { resolveVoiceForTTS } from "./user-voice.service.js";
 export type { ResolvedVoice } from "./user-voice.service.js";
 export { translatePromptIfNeeded, looksEnglish } from "./prompt-translate.service.js";
 export { describeImageForPrompt } from "./image-describe.service.js";
+export { mediaHintService } from "./media-hint.service.js";
 
 // ── Web (ai.metabox.global) ─────────────────────────────────────────────
 export { consumeLinkTelegramState, markLinkTelegramLinked } from "./web-session.service.js";
+
+// ── Account deletion ────────────────────────────────────────────────────
+export {
+  initiateAccountDeletion,
+  verifyDeletionCode,
+  executeAccountDeletion,
+  cancelAccountDeletion,
+  isFlowVerified,
+} from "./account-deletion.service.js";
+export type { VerifyResult } from "./account-deletion.service.js";
 
 // ── Пул API-ключей с прокси и балансировкой ─────────────────────────────
 export {

@@ -81,6 +81,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let incompleteReason: string | undefined;
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
@@ -89,10 +90,23 @@ export class AnthropicAdapter extends BaseLLMAdapter {
         inputTokens = event.message.usage.input_tokens;
       } else if (event.type === "message_delta") {
         outputTokens = event.usage.output_tokens;
+        // stop_reason → incompleteReason: позволяет chat.service отличить
+        // legit empty-response (max_tokens) от generic provider error. Без
+        // этого юзер при reasoning-cap получает «временно недоступен» вместо
+        // адресного «снизьте Глубину рассуждений / поднимите Макс. длину».
+        // SDK 0.39 знает только 4 stop_reason'а; «refusal» добавили в более
+        // новых API-версиях — пока не покрываем (см. proxy-адаптер для него).
+        if (event.delta.stop_reason === "max_tokens") {
+          incompleteReason = "max_output_tokens";
+        }
       }
     }
 
-    return { inputTokensUsed: inputTokens, outputTokensUsed: outputTokens };
+    return {
+      inputTokensUsed: inputTokens,
+      outputTokensUsed: outputTokens,
+      ...(incompleteReason ? { incompleteReason } : {}),
+    };
   }
 
   private buildMessages(input: LLMInput): Anthropic.MessageParam[] {
