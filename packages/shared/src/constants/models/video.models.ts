@@ -938,10 +938,10 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
       "Особенно популярен среди соло-креаторов, инфлюенсеров и небольших команд. Для аватаров, lip-sync, перевода видео на 175+ языков.",
     section: "video",
     provider: "heygen",
-    // $0.05/s (0.04 with 20% discount) Engine IV (Avatar IV — custom photo upload) ≈ $6.00/min
+    // $0.05/s Engine IV (Avatar IV — custom photo upload) ≈ $6.00/min
     // + $0.04 flat fee per request (API overhead) (deprecated)
     costUsdPerRequest: 0,
-    costUsdPerSecond: 0.04,
+    costUsdPerSecond: 0.05,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,

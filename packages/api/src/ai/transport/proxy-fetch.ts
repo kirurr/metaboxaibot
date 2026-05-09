@@ -30,5 +30,7 @@ export function buildProxyFetch(proxy: ProxyConfig | null): typeof fetch | null 
     undiciFetch(url as any, {
       ...(init as any),
       dispatcher: agent,
+      // undici v7 requires duplex: 'half' for any request with a body
+      duplex: "half",
     }) as unknown as Promise<Response>) as typeof fetch;
 }

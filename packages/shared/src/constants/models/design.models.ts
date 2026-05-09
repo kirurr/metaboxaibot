@@ -1016,11 +1016,12 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
         label: "Шаги генерации",
         description: "Количество шагов денойзинга. Больше шагов — детальнее, но дольше.",
         type: "slider",
-        min: 1,
+        min: 10,
         max: 50,
         step: 1,
         default: 28,
         advanced: true,
+        unavailableIf: { key: "model", eq: "schnell" },
       },
       {
         key: "guidance_scale",
@@ -1044,6 +1045,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
         step: 0.05,
         default: 0.8,
         advanced: true,
+        unavailableIf: { key: "model", eq: "schnell" },
       },
       {
         key: "go_fast",
@@ -1980,7 +1982,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
         options: [
           { value: "png", label: "PNG" },
           { value: "webp", label: "WebP" },
-          { value: "jpeg", label: "JPEG" },
+          { value: "jpg", label: "JPEG" },
         ],
         default: "png",
         advanced: true,
