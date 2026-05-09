@@ -123,6 +123,20 @@ export class ReplicateAdapter implements ImageAdapter {
         msExtras.prompt_strength = ms.prompt_strength;
       }
     }
+    // Schnell sub-model uses ~4 inference steps internally; user-saved num_inference_steps
+    // and prompt_strength values are irrelevant and can produce crashes or white noise
+    // if stale (e.g. num_inference_steps=1 saved before min was raised). Override with
+    // safe explicit values so generation is always predictable regardless of saved state.
+    if (ms.model === "schnell") {
+      msExtras.num_inference_steps = 4;
+      if (imageUrl) msExtras.prompt_strength = 0.8;
+    } else if (
+      this.modelId === "midjourney" &&
+      typeof msExtras.num_inference_steps === "number" &&
+      (msExtras.num_inference_steps as number) < 10
+    ) {
+      msExtras.num_inference_steps = 10;
+    }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
     if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
     if (ms.extra_lora_scale !== undefined) msExtras.extra_lora_scale = ms.extra_lora_scale;
