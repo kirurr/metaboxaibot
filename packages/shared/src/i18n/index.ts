@@ -80,6 +80,7 @@ export interface Translations {
     batchActionsNoDownload: string;
     batchPartialFooter: string;
     batchAllFailed: string;
+    batchSubJobFailedMessage: string;
     chooseModel: string;
   };
   audio: {
@@ -205,6 +206,7 @@ export interface Translations {
     copyrightViolation: string;
     publicFigureViolation: string;
     identityPreservationNotAllowed: string;
+    midjourneySyntaxNotSupported: string;
     klingMotionImageRecognitionFailed: string;
     generationNoResult: string;
     modelDoesNotSupportImg2img: string;

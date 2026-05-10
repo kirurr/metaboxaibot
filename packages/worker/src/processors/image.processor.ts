@@ -97,8 +97,10 @@ interface VirtualBatchSubJob {
   result?: ImageResult;
   /**
    * User-facing локализованный текст ошибки (из resolveSubJobError).
-   * Идёт в batchPartialFooter / batchAllFailed как bullet-point. Никогда
-   * не содержит сырых provider-string'ов вроде "KIE 500 ...".
+   * Используется в K=0 user-fault ветке (показываем юзеру первый user-facing
+   * error, чтобы понимал что фиксить). На partial-success / not-user-fault
+   * путях НЕ показывается — там идёт обобщённое batchSubJobFailedMessage /
+   * pickGenerationFailedMessage. Никогда не содержит сырых provider-string'ов.
    */
   error?: string;
   /**
@@ -149,29 +151,6 @@ const telegram = new Api(config.bot.token);
  *   [2] provider=evolink (FALLBACK):
  *       HTTP 502 ...
  */
-/**
- * Сворачивает повторяющиеся сообщения об ошибках в одно с суффиксом «×N».
- * Используется в virtual batch'е: если все K sub-job'ов упали с одним и тем
- * же текстом (e.g. "Service busy" от провайдера на каждом из 4 фото) — юзер
- * увидит «Service busy (×4)» вместо четырёх одинаковых строк.
- *
- * Сохраняет порядок первого появления сообщения, чтобы logically older
- * ошибки шли первыми (пользователь читает сверху вниз).
- */
-function collapseBatchErrors(errors: string[]): string[] {
-  const counts = new Map<string, number>();
-  const order: string[] = [];
-  for (const err of errors) {
-    const prev = counts.get(err);
-    if (prev === undefined) order.push(err);
-    counts.set(err, (prev ?? 0) + 1);
-  }
-  return order.map((msg) => {
-    const n = counts.get(msg) ?? 1;
-    return n > 1 ? `${msg} (×${n})` : msg;
-  });
-}
-
 function formatSubJobErrorReport(
   subJobs: VirtualBatchSubJob[],
   stage: "submit" | "poll",
@@ -192,6 +171,135 @@ function formatSubJobErrorReport(
     lines.push(`[${i}] provider=${provider}${fbMark}:\n${indented}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Virtual batch K=0 fallback re-submit. Аналог single-shot fallback в catch'е
+ * processImageJob (см. там `if (stage === "poll" && isLastAttempt && ...)`),
+ * но для virtual batch'а: главная функция в этом случае НЕ throw'ит наверх,
+ * поэтому общий catch с fallback re-enqueue не вызывается → юзер не получает
+ * fallback'овый результат хотя у модели зарегистрирован запасной провайдер.
+ *
+ * Логика: если все sub-job'ы упали с transient KIE-ошибкой (5xx или
+ * 422 task-id-blank) И есть неиспользованный fallback-кандидат →
+ *   1. Запоминаем primary провайдера в `inputData.fallback.attemptedProviders`
+ *   2. Сбрасываем `inputData.batch` (sub-job state) → fresh start с N pending
+ *   3. delayJob со stage=undefined → BullMQ перезапустит как fresh submit,
+ *      Stage 1 пойдёт через fallback провайдера (skipProviders'ом отсечёт primary)
+ *
+ * Возвращает true если fallback ИНИЦИИРОВАН (delayJob сразу throw'ит DelayedError,
+ * до return мы фактически не доходим — true это формальность для контракта).
+ * Возвращает false если все sub-jobs не transient / нет candidate / нет
+ * techRawErrors → caller продолжает обычный K=0 flow (mark failed + user message).
+ *
+ * Не покрывает partial-success (K>0 c failures) — там у юзера есть результат,
+ * fallback не нужен.
+ */
+async function tryVirtualBatchFallbackResubmit(opts: {
+  job: Job<ImageJobData>;
+  dbJobId: string;
+  modelId: string;
+  modelMeta: AIModel | undefined;
+  state: { subJobs: VirtualBatchSubJob[] };
+  techRawErrors: string[];
+  userIdStr: string;
+  token: string | undefined;
+  stage: "submit" | "poll";
+}): Promise<boolean> {
+  const { job, dbJobId, modelId, modelMeta, state, techRawErrors, userIdStr, token, stage } = opts;
+
+  if (techRawErrors.length === 0 || !modelMeta) return false;
+
+  // Все failed sub-job'ы должны быть transient KIE-ошибкой.
+  // Mixed (часть user-facing) → не fallback'аем: юзер увидит specific error.
+  const failedTechSubs = state.subJobs.filter((s) => s.status === "failed" && s.errorRaw);
+  if (failedTechSubs.length === 0) return false;
+  const allTransient = failedTechSubs.every((s) => isKieTransientError(s.errorRaw));
+  if (!allTransient) return false;
+
+  // Refetch inputData — closures внутри try-блока могут быть устаревшими.
+  const dbJob = await db.generationJob.findUnique({
+    where: { id: dbJobId },
+    select: { inputData: true },
+  });
+  const inputData = (dbJob?.inputData as Record<string, unknown> | null | undefined) ?? {};
+  const fbStateNow =
+    (inputData.fallback as
+      | { effectiveProvider?: string; attemptedProviders?: string[] }
+      | undefined) ?? {};
+  const currentEff = fbStateNow.effectiveProvider ?? modelMeta.provider;
+  const alreadyAttempted = new Set(fbStateNow.attemptedProviders ?? []);
+  alreadyAttempted.add(currentEff);
+
+  const fallbackCandidatesNow = getFallbackCandidates(modelId, "design").filter((m) =>
+    isFallbackCompatible(m, job.data.mediaInputs),
+  );
+  const nextCandidate = fallbackCandidatesNow.find((m) => !alreadyAttempted.has(m.provider));
+
+  if (!nextCandidate) {
+    logger.warn(
+      {
+        dbJobId,
+        modelId,
+        currentEff,
+        attempted: Array.from(alreadyAttempted),
+        registeredFallbacks: fallbackCandidatesNow.map((m) => m.provider),
+        stage,
+      },
+      "Virtual batch K=0: KIE transient — fallback skipped (no eligible candidate)",
+    );
+    return false;
+  }
+
+  logger.warn(
+    { dbJobId, modelId, currentEff, next: nextCandidate.provider, stage },
+    "Virtual batch K=0: KIE transient — re-enqueuing on fallback",
+  );
+
+  await notifyFallback({
+    section: "image",
+    modelId,
+    primaryProvider: modelMeta.provider,
+    fallbackProvider: nextCandidate.provider,
+    reason: "persistent_5xx",
+    jobId: dbJobId,
+    userId: userIdStr,
+  });
+
+  // Сбрасываем sub-job state'ы (`inputData.batch` → удалить) — на свежем
+  // запуске Stage 1 пересоздаст N pending sub-job'ов через fallback провайдера.
+  // providerJobId/Key чистим defensive (в virtual batch они хранятся per-sub-job,
+  // но на job-уровне всё равно можно было что-то записать в сценарии recovery).
+  const merged: Record<string, unknown> = {
+    ...inputData,
+    fallback: {
+      primaryProvider: modelMeta.provider,
+      attemptedProviders: Array.from(alreadyAttempted),
+    },
+  };
+  delete merged.batch;
+  await db.generationJob.update({
+    where: { id: dbJobId },
+    data: {
+      providerJobId: null,
+      providerKeyId: null,
+      inputData: merged as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  await delayJob(
+    job,
+    {
+      ...job.data,
+      stage: undefined,
+      pollStartedAt: undefined,
+      lastIntervalMs: undefined,
+    },
+    1000,
+    token,
+  );
+
+  return true; // unreachable due to delayJob throwing DelayedError
 }
 
 /** Upload an image to S3 and generate a thumbnail. Returns { s3Key, thumbnailS3Key }. */
@@ -315,6 +423,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
   // Накопленные ошибки sub-job'ов — выводятся юзеру в footer-сообщении
   // после mediaGroup (либо одиночным сообщением при K=0).
   const batchErrors: string[] = [];
+  // User-facing подмножество batchErrors: только те ошибки, где юзер виноват
+  // (resolved.isUserFacing === true в resolveSubJobError). Используется в
+  // K=0-ветке Stage 3: если есть user-facing ошибки → юзеру понятное сообщение
+  // что фиксить (content policy / prompt rejected / etc.), иначе — рандомный
+  // «модель отдыхает» через pickGenerationFailedMessage.
+  // Сигнал: на каждом push-point если `s.errorRaw` undefined → ошибка
+  // user-facing (см. resolveSubJobError: errorRaw записывается ТОЛЬКО для
+  // не-user-facing технических ошибок).
+  const userFacingBatchErrors: string[] = [];
 
   try {
     const existingJob = await db.generationJob.findUnique({
@@ -602,7 +719,10 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       if (isVirtualBatch) {
         const state = readBatchState();
         for (const s of state.subJobs) {
-          if (s.status === "failed" && s.error) batchErrors.push(s.error);
+          if (s.status === "failed" && s.error) {
+            batchErrors.push(s.error);
+            if (!s.errorRaw) userFacingBatchErrors.push(s.error);
+          }
         }
       }
     } else if (stage === "generate") {
@@ -835,6 +955,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             else if (s.status === "failed" && s.error) {
               batchErrors.push(s.error);
               if (s.errorRaw) techRawErrors.push(s.errorRaw);
+              else userFacingBatchErrors.push(s.error);
             }
           }
           // Один alert на batch со списком всех unknown/tech-ошибок sub-job'ов
@@ -857,8 +978,21 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             });
           }
           if (successResults.length === 0) {
-            // K=0 — все провалились. Помечаем job failed и идём в Stage 3 для
-            // отправки error-only сообщения.
+            // K=0 — все провалились. Перед mark-failed пробуем fallback re-submit:
+            // если все ошибки transient (KIE 5xx / 422 task-id-blank) и есть
+            // запасной провайдер — delayJob throw'ит DelayedError, переходим
+            // на fallback. Иначе возвращается false и продолжаем mark-failed.
+            await tryVirtualBatchFallbackResubmit({
+              job,
+              dbJobId,
+              modelId,
+              modelMeta,
+              state,
+              techRawErrors,
+              userIdStr,
+              token,
+              stage: "submit",
+            });
             await db.generationJob.update({
               where: { id: dbJobId },
               data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
@@ -1132,6 +1266,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           else if (s.status === "failed" && s.error) {
             batchErrors.push(s.error);
             if (s.errorRaw) techRawErrors.push(s.errorRaw);
+            else userFacingBatchErrors.push(s.error);
           }
         }
         if (techRawErrors.length > 0) {
@@ -1150,6 +1285,20 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           });
         }
         if (successResults.length === 0) {
+          // K=0 — все провалились. См. tryVirtualBatchFallbackResubmit:
+          // если transient KIE-ошибки и есть fallback — delayJob throw'ит,
+          // job пере-enqueue на fallback провайдера. Иначе mark failed.
+          await tryVirtualBatchFallbackResubmit({
+            job,
+            dbJobId,
+            modelId,
+            modelMeta,
+            state,
+            techRawErrors,
+            userIdStr,
+            token,
+            stage: "poll",
+          });
           await db.generationJob.update({
             where: { id: dbJobId },
             data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
@@ -1242,14 +1391,29 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       });
 
     // K=0 для virtual batch — все sub-job'ы failed, mediaGroup нет, шлём
-    // только error-сообщение со списком причин и выходим.
+    // одно сообщение и выходим. Развилка по user-fault:
+    //  - Если есть user-facing ошибка (content policy / unsupported image /
+    //    invalid prompt и т.п.) → показываем юзеру эту ошибку, чтобы он
+    //    понимал что нужно поправить. Берём первую — обычно root-cause
+    //    одинаковый, дополнительные ошибки только засоряют экран.
+    //  - Иначе (всё упало по нашей/инфра-стороне — KIE down, transient 5xx)
+    //    → один из 3 рандомных «модель отдыхает» через
+    //    pickGenerationFailedMessage. Юзер не виноват, ему нечего фиксить.
+    // Per-sub-job детали в любом случае идут в ops через formatSubJobErrorReport.
     if (outputRecords.length === 0 && batchErrors.length > 0) {
-      const collapsed = collapseBatchErrors(batchErrors);
-      const text = t.design.batchAllFailed
-        .replace("{total}", String(requestedN))
-        .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+      const text =
+        userFacingBatchErrors.length > 0
+          ? userFacingBatchErrors[0]!
+          : pickGenerationFailedMessage(t, modelName, "design");
       await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
-      logger.info({ dbJobId, errors: batchErrors.length }, "Virtual batch all failed");
+      logger.info(
+        {
+          dbJobId,
+          errors: batchErrors.length,
+          userFacing: userFacingBatchErrors.length,
+        },
+        "Virtual batch all failed",
+      );
       return;
     }
 
@@ -1319,13 +1483,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         });
       }
 
-      // Virtual-batch partial-success footer: K из N сгенерировано, перечисляем ошибки.
+      // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
+      // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
+      // равно один root-cause в 99% случаев — детали есть в ops alert).
       if (batchErrors.length > 0) {
-        const collapsed = collapseBatchErrors(batchErrors);
+        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
         const text = t.design.batchPartialFooter
           .replace("{success}", String(outputRecords.length))
           .replace("{total}", String(requestedN))
-          .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+          .replace("{errors}", errorMessage);
         await telegram
           .sendMessage(telegramChatId, text)
           .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
@@ -1431,13 +1597,14 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
-    // К одиночному фото добавляем footer-сообщение с разбором ошибок.
+    // К одиночному фото добавляем footer-сообщение с одним общим текстом
+    // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
     if (batchErrors.length > 0) {
-      const collapsed = collapseBatchErrors(batchErrors);
+      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
       const text = t.design.batchPartialFooter
         .replace("{success}", String(outputRecords.length))
         .replace("{total}", String(requestedN))
-        .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+        .replace("{errors}", errorMessage);
       await telegram
         .sendMessage(telegramChatId, text)
         .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));

@@ -1,5 +1,5 @@
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -300,14 +300,28 @@ export class KieImageAdapter implements ImageAdapter {
         rawFailMsg,
       );
       // gpt-image-2 (KIE) часто отказывает с chat-style refusal'ом, когда юзер
-      // просит «сохранить лицо» с референса. Выглядит как «I can't generate/edit
-      // that image ... identity preservation ... real people ... reference photos».
+      // просит «сохранить лицо» с референса. Виды формулировок:
+      //   "I can't generate/edit that image ... identity preservation ... real people ... reference photos"
+      //   "I can't generate or transform an image of a real child from the provided photos"
+      //   "I cannot create ... real person ... uploaded image"
+      //   "I can't make ... real face ... face reference"
       // Существующие regex (policy/publicFigure) такие фразы не ловят, и юзеру
-      // прилетал сырой длинный текст. Маппим на отдельный ключ с подсказкой
-      // переключиться на модель, которая лучше работает с face reference.
+      // прилетал сырой длинный текст или галлюцинация classifier'а с notifyOps:true.
+      // Маппим на отдельный ключ с подсказкой переключиться на модель,
+      // которая лучше работает с face reference.
+      //
+      // Часть 1 — глагол-«I can't»: добавлен `transform` (OpenAI использует на
+      // edit-режиме). Часть 2 — расширена номенклатура «real X»: помимо
+      // people/person/face добавлены child/children/kid/baby/infant/minor/
+      // individual/human (минор-кейсы провайдеры режут особенно жёстко).
+      // Также добавлен `provided (photo|image|reference)s?` рядом с
+      // `uploaded` — OpenAI варьирует «uploaded photos» / «provided photos»
+      // / «the provided images».
       const isIdentityPreservation =
-        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make)\b/i.test(rawFailMsg) &&
-        /identity|real (?:people|person|faces?)|reference (?:photo|image)|uploaded (?:photo|image|reference)|face (?:reference|swap)|likeness/i.test(
+        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make|transform)\b/i.test(
+          rawFailMsg,
+        ) &&
+        /identity|real (?:people|person|faces?|child|children|kid|baby|infant|minor|individual|human)|reference (?:photo|image)|uploaded (?:photo|image|reference)|provided (?:photo|image|reference)s?|face (?:reference|swap)|likeness/i.test(
           rawFailMsg,
         );
       const isPolicy =
@@ -346,6 +360,24 @@ export class KieImageAdapter implements ImageAdapter {
         throw new UserFacingError(technicalMessage, { key: "publicFigureViolation" });
       if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
       if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
+      // Midjourney syntax detector: KIE при 400 от провайдера часто эхает
+      // обратно сам промпт юзера в `failMsg`. Если в нём видны характерные
+      // Midjourney-маркеры (`/imagine prompt:`, флаги `--ar`/`--stylize`/
+      // `--niji`/`--seed`/`--chaos`/`--quality`/`--v` и т.п.) — юзер скопировал
+      // промпт из MJ-туториала, а отправил в gpt-image-2/nano-banana/grok-imagine
+      // которые такой синтаксис не понимают. Бросаем user-facing подсказку без
+      // notifyOps (это user-fault, не наша инфра). Иначе ошибка падала в
+      // classifier-фолбек, юзер получал generic «модель устала».
+      const isMidjourneySyntax =
+        /\/imagine\s+prompt:|--(ar|stylize|niji|seed|chaos|quality|weird|tile|repeat|style|sref|cref|v)\b/i.test(
+          rawFailMsg,
+        );
+      if (isMidjourneySyntax) {
+        throw new UserFacingError(technicalMessage, {
+          key: "midjourneySyntaxNotSupported",
+          params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+        });
+      }
 
       const classified = await classifyAIError(`${failCode ?? ""} ${sanitizedFailMsg}`.trim());
       if (classified?.shouldShow) {
