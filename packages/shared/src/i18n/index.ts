@@ -204,6 +204,7 @@ export interface Translations {
     contentPolicyViolation: string;
     copyrightViolation: string;
     publicFigureViolation: string;
+    identityPreservationNotAllowed: string;
     klingMotionImageRecognitionFailed: string;
     generationNoResult: string;
     modelDoesNotSupportImg2img: string;

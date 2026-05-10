@@ -265,21 +265,45 @@ export class KieImageAdapter implements ImageAdapter {
     const task = data.data;
 
     if (task.state === "fail") {
-      const failMsg = task.failMsg ?? "unknown error";
+      const rawFailMsg = task.failMsg ?? "unknown error";
       const failCode = task.failCode;
-      const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${failMsg}`;
-      const isCopyright = failCode === "501" || /copyright/i.test(failMsg);
+      // KIE upstream иногда возвращает chat-style ответ с подробным rationale,
+      // code-блоками и альтернативным промптом (особенно gpt-image-2 при
+      // отказе). Без обрезки 1-2 КБ текста утекают в логи, ops-алёрты и в
+      // technicalMessage внутри UserFacingError. Sanitize ТОЛЬКО для
+      // technicalMessage; детекция работает по rawFailMsg, иначе ключевые
+      // слова (identity / reference photo / copyright) внутри code-блока
+      // окажутся за границей среза и regex не сматчатся.
+      const sanitizedFailMsg = (() => {
+        const codeFenceIdx = rawFailMsg.indexOf("```");
+        const cut = codeFenceIdx >= 0 ? rawFailMsg.slice(0, codeFenceIdx) : rawFailMsg;
+        const oneLine = cut.replace(/\s+/g, " ").trim();
+        return oneLine.length > 400 ? `${oneLine.slice(0, 400)}…` : oneLine;
+      })();
+      const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${sanitizedFailMsg}`;
+      const isCopyright = failCode === "501" || /copyright/i.test(rawFailMsg);
       // KIE/evolink content moderation: "Request blocked: ... prominent public figure"
       // → отдельный мессадж про публичные лица (юзер часто пытается грузить фото
       // знаменитостей или просит их в промпте — copyright-сообщение неточно).
       const isPublicFigure = /public figure|public person|prominent figure|celebrity/i.test(
-        failMsg,
+        rawFailMsg,
       );
+      // gpt-image-2 (KIE) часто отказывает с chat-style refusal'ом, когда юзер
+      // просит «сохранить лицо» с референса. Выглядит как «I can't generate/edit
+      // that image ... identity preservation ... real people ... reference photos».
+      // Существующие regex (policy/publicFigure) такие фразы не ловят, и юзеру
+      // прилетал сырой длинный текст. Маппим на отдельный ключ с подсказкой
+      // переключиться на модель, которая лучше работает с face reference.
+      const isIdentityPreservation =
+        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make)\b/i.test(rawFailMsg) &&
+        /identity|real (?:people|person|faces?)|reference (?:photo|image)|uploaded (?:photo|image|reference)|face (?:reference|swap)|likeness/i.test(
+          rawFailMsg,
+        );
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
         /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
-          failMsg,
+          rawFailMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE
       // nano-banana backend) и подобные шлют 500 с message типа
@@ -293,11 +317,17 @@ export class KieImageAdapter implements ImageAdapter {
       // возвращает chat-style ответ ассистента ("Вот несколько вариантов на
       // английском..."). Легитимные upstream-ошибки KIE всегда на английском,
       // поэтому кириллица в failMsg = модель ушла в clarification-режим.
-      const hasCyrillic = /[Ѐ-ӿ]/.test(failMsg);
+      const hasCyrillic = /[Ѐ-ӿ]/.test(rawFailMsg);
       const isNoResult =
         /could not generate (an? )?(image|video|result)|failed to generate|no image (was )?generated|unable to generate/i.test(
-          failMsg,
+          rawFailMsg,
         ) || hasCyrillic;
+      // identityPreservation проверяем РАНЬШЕ noResult: если OpenAI ответит
+      // "could not generate ... due to identity preservation" — оба триггера
+      // сработают, но конкретная подсказка про face reference полезнее
+      // generic "переформулируйте промпт".
+      if (isIdentityPreservation)
+        throw new UserFacingError(technicalMessage, { key: "identityPreservationNotAllowed" });
       if (isNoResult) {
         throw new UserFacingError(technicalMessage, { key: "generationNoResult" });
       }
@@ -306,7 +336,7 @@ export class KieImageAdapter implements ImageAdapter {
       if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
       if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
 
-      const classified = await classifyAIError(`${failCode ?? ""} ${failMsg}`.trim());
+      const classified = await classifyAIError(`${failCode ?? ""} ${sanitizedFailMsg}`.trim());
       if (classified?.shouldShow) {
         throw new UserFacingError(technicalMessage, {
           key: "aiClassifiedError",
