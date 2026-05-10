@@ -97,8 +97,10 @@ interface VirtualBatchSubJob {
   result?: ImageResult;
   /**
    * User-facing локализованный текст ошибки (из resolveSubJobError).
-   * Идёт в batchPartialFooter / batchAllFailed как bullet-point. Никогда
-   * не содержит сырых provider-string'ов вроде "KIE 500 ...".
+   * Используется в K=0 user-fault ветке (показываем юзеру первый user-facing
+   * error, чтобы понимал что фиксить). На partial-success / not-user-fault
+   * путях НЕ показывается — там идёт обобщённое batchSubJobFailedMessage /
+   * pickGenerationFailedMessage. Никогда не содержит сырых provider-string'ов.
    */
   error?: string;
   /**
@@ -292,6 +294,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
   // Накопленные ошибки sub-job'ов — выводятся юзеру в footer-сообщении
   // после mediaGroup (либо одиночным сообщением при K=0).
   const batchErrors: string[] = [];
+  // User-facing подмножество batchErrors: только те ошибки, где юзер виноват
+  // (resolved.isUserFacing === true в resolveSubJobError). Используется в
+  // K=0-ветке Stage 3: если есть user-facing ошибки → юзеру понятное сообщение
+  // что фиксить (content policy / prompt rejected / etc.), иначе — рандомный
+  // «модель отдыхает» через pickGenerationFailedMessage.
+  // Сигнал: на каждом push-point если `s.errorRaw` undefined → ошибка
+  // user-facing (см. resolveSubJobError: errorRaw записывается ТОЛЬКО для
+  // не-user-facing технических ошибок).
+  const userFacingBatchErrors: string[] = [];
 
   try {
     const existingJob = await db.generationJob.findUnique({
@@ -579,7 +590,10 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       if (isVirtualBatch) {
         const state = readBatchState();
         for (const s of state.subJobs) {
-          if (s.status === "failed" && s.error) batchErrors.push(s.error);
+          if (s.status === "failed" && s.error) {
+            batchErrors.push(s.error);
+            if (!s.errorRaw) userFacingBatchErrors.push(s.error);
+          }
         }
       }
     } else if (stage === "generate") {
@@ -812,6 +826,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             else if (s.status === "failed" && s.error) {
               batchErrors.push(s.error);
               if (s.errorRaw) techRawErrors.push(s.errorRaw);
+              else userFacingBatchErrors.push(s.error);
             }
           }
           // Один alert на batch со списком всех unknown/tech-ошибок sub-job'ов
@@ -1109,6 +1124,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           else if (s.status === "failed" && s.error) {
             batchErrors.push(s.error);
             if (s.errorRaw) techRawErrors.push(s.errorRaw);
+            else userFacingBatchErrors.push(s.error);
           }
         }
         if (techRawErrors.length > 0) {
@@ -1219,17 +1235,29 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       });
 
     // K=0 для virtual batch — все sub-job'ы failed, mediaGroup нет, шлём
-    // одно общее сообщение и выходим. Намеренно НЕ перечисляем per-sub-job
-    // ошибки: обычно это один и тот же root-cause (KIE down, prompt rejected
-    // и т.п.), а раздутый список запутывал юзера. Per-sub-job детали идут в
-    // ops через formatSubJobErrorReport, юзеру — одно дружелюбное сообщение.
+    // одно сообщение и выходим. Развилка по user-fault:
+    //  - Если есть user-facing ошибка (content policy / unsupported image /
+    //    invalid prompt и т.п.) → показываем юзеру эту ошибку, чтобы он
+    //    понимал что нужно поправить. Берём первую — обычно root-cause
+    //    одинаковый, дополнительные ошибки только засоряют экран.
+    //  - Иначе (всё упало по нашей/инфра-стороне — KIE down, transient 5xx)
+    //    → один из 3 рандомных «модель отдыхает» через
+    //    pickGenerationFailedMessage. Юзер не виноват, ему нечего фиксить.
+    // Per-sub-job детали в любом случае идут в ops через formatSubJobErrorReport.
     if (outputRecords.length === 0 && batchErrors.length > 0) {
-      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
-      const text = t.design.batchAllFailed
-        .replace("{total}", String(requestedN))
-        .replace("{errors}", errorMessage);
+      const text =
+        userFacingBatchErrors.length > 0
+          ? userFacingBatchErrors[0]!
+          : pickGenerationFailedMessage(t, modelName, "design");
       await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
-      logger.info({ dbJobId, errors: batchErrors.length }, "Virtual batch all failed");
+      logger.info(
+        {
+          dbJobId,
+          errors: batchErrors.length,
+          userFacing: userFacingBatchErrors.length,
+        },
+        "Virtual batch all failed",
+      );
       return;
     }
 

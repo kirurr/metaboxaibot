@@ -92,10 +92,10 @@ export default {
     batchActionsNoDownload:
       "You can refine an image or get the original uncompressed file sent back into the chat.\n\n🔄 - Refine\n📎 - Send as file",
     batchPartialFooter:
-      "✅ Generated {success} of {total}. You were only charged for the successful ones. Failed:\n\n{errors}",
+      "✅ Generated {success} of {total}. You were only charged for the successful ones.\n\n{errors}",
     batchAllFailed: "❌ Failed to generate any of {total}.\n\n{errors}",
     batchSubJobFailedMessage:
-      "❌ {modelName} got tired mid-way and didn't quite finish your request. Try refining the prompt or just running it again — usually does the trick.",
+      "🪫 {modelName} did less than you asked for. The tokens for the missing ones stayed safe — turns out you saved without even trying. Retry - sure. Don't retry - also fine.",
     chooseModel: "🎨 Choose model",
   },
   audio: {
