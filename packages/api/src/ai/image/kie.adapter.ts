@@ -281,6 +281,17 @@ export class KieImageAdapter implements ImageAdapter {
         return oneLine.length > 400 ? `${oneLine.slice(0, 400)}…` : oneLine;
       })();
       const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${sanitizedFailMsg}`;
+      // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
+      // их backend в трауре, но мы передали валидный taskId. Бросаем plain Error
+      // (НЕ UserFacingError) чтобы BullMQ ретрайнул и на последней попытке
+      // processor через `isKieTransientError` триггернул re-submit на fallback
+      // (для моделей с зарегистрированным fallback'ом). Без этой ветки ошибка
+      // проваливалась в classifyAIError-фолбек, который галлюцинировал юзеру
+      // абсурд про "заполните идентификатор задачи" и спамил ops через
+      // notifyOps:true. См. kie-error.ts:isKieTransientError.
+      if (failCode === "422" && /playground failed|task id is blank/i.test(rawFailMsg)) {
+        throw new Error(technicalMessage);
+      }
       const isCopyright = failCode === "501" || /copyright/i.test(rawFailMsg);
       // KIE/evolink content moderation: "Request blocked: ... prominent public figure"
       // → отдельный мессадж про публичные лица (юзер часто пытается грузить фото
