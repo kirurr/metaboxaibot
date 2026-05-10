@@ -173,6 +173,135 @@ function formatSubJobErrorReport(
   return lines.join("\n");
 }
 
+/**
+ * Virtual batch K=0 fallback re-submit. Аналог single-shot fallback в catch'е
+ * processImageJob (см. там `if (stage === "poll" && isLastAttempt && ...)`),
+ * но для virtual batch'а: главная функция в этом случае НЕ throw'ит наверх,
+ * поэтому общий catch с fallback re-enqueue не вызывается → юзер не получает
+ * fallback'овый результат хотя у модели зарегистрирован запасной провайдер.
+ *
+ * Логика: если все sub-job'ы упали с transient KIE-ошибкой (5xx или
+ * 422 task-id-blank) И есть неиспользованный fallback-кандидат →
+ *   1. Запоминаем primary провайдера в `inputData.fallback.attemptedProviders`
+ *   2. Сбрасываем `inputData.batch` (sub-job state) → fresh start с N pending
+ *   3. delayJob со stage=undefined → BullMQ перезапустит как fresh submit,
+ *      Stage 1 пойдёт через fallback провайдера (skipProviders'ом отсечёт primary)
+ *
+ * Возвращает true если fallback ИНИЦИИРОВАН (delayJob сразу throw'ит DelayedError,
+ * до return мы фактически не доходим — true это формальность для контракта).
+ * Возвращает false если все sub-jobs не transient / нет candidate / нет
+ * techRawErrors → caller продолжает обычный K=0 flow (mark failed + user message).
+ *
+ * Не покрывает partial-success (K>0 c failures) — там у юзера есть результат,
+ * fallback не нужен.
+ */
+async function tryVirtualBatchFallbackResubmit(opts: {
+  job: Job<ImageJobData>;
+  dbJobId: string;
+  modelId: string;
+  modelMeta: AIModel | undefined;
+  state: { subJobs: VirtualBatchSubJob[] };
+  techRawErrors: string[];
+  userIdStr: string;
+  token: string | undefined;
+  stage: "submit" | "poll";
+}): Promise<boolean> {
+  const { job, dbJobId, modelId, modelMeta, state, techRawErrors, userIdStr, token, stage } = opts;
+
+  if (techRawErrors.length === 0 || !modelMeta) return false;
+
+  // Все failed sub-job'ы должны быть transient KIE-ошибкой.
+  // Mixed (часть user-facing) → не fallback'аем: юзер увидит specific error.
+  const failedTechSubs = state.subJobs.filter((s) => s.status === "failed" && s.errorRaw);
+  if (failedTechSubs.length === 0) return false;
+  const allTransient = failedTechSubs.every((s) => isKieTransientError(s.errorRaw));
+  if (!allTransient) return false;
+
+  // Refetch inputData — closures внутри try-блока могут быть устаревшими.
+  const dbJob = await db.generationJob.findUnique({
+    where: { id: dbJobId },
+    select: { inputData: true },
+  });
+  const inputData = (dbJob?.inputData as Record<string, unknown> | null | undefined) ?? {};
+  const fbStateNow =
+    (inputData.fallback as
+      | { effectiveProvider?: string; attemptedProviders?: string[] }
+      | undefined) ?? {};
+  const currentEff = fbStateNow.effectiveProvider ?? modelMeta.provider;
+  const alreadyAttempted = new Set(fbStateNow.attemptedProviders ?? []);
+  alreadyAttempted.add(currentEff);
+
+  const fallbackCandidatesNow = getFallbackCandidates(modelId, "design").filter((m) =>
+    isFallbackCompatible(m, job.data.mediaInputs),
+  );
+  const nextCandidate = fallbackCandidatesNow.find((m) => !alreadyAttempted.has(m.provider));
+
+  if (!nextCandidate) {
+    logger.warn(
+      {
+        dbJobId,
+        modelId,
+        currentEff,
+        attempted: Array.from(alreadyAttempted),
+        registeredFallbacks: fallbackCandidatesNow.map((m) => m.provider),
+        stage,
+      },
+      "Virtual batch K=0: KIE transient — fallback skipped (no eligible candidate)",
+    );
+    return false;
+  }
+
+  logger.warn(
+    { dbJobId, modelId, currentEff, next: nextCandidate.provider, stage },
+    "Virtual batch K=0: KIE transient — re-enqueuing on fallback",
+  );
+
+  await notifyFallback({
+    section: "image",
+    modelId,
+    primaryProvider: modelMeta.provider,
+    fallbackProvider: nextCandidate.provider,
+    reason: "persistent_5xx",
+    jobId: dbJobId,
+    userId: userIdStr,
+  });
+
+  // Сбрасываем sub-job state'ы (`inputData.batch` → удалить) — на свежем
+  // запуске Stage 1 пересоздаст N pending sub-job'ов через fallback провайдера.
+  // providerJobId/Key чистим defensive (в virtual batch они хранятся per-sub-job,
+  // но на job-уровне всё равно можно было что-то записать в сценарии recovery).
+  const merged: Record<string, unknown> = {
+    ...inputData,
+    fallback: {
+      primaryProvider: modelMeta.provider,
+      attemptedProviders: Array.from(alreadyAttempted),
+    },
+  };
+  delete merged.batch;
+  await db.generationJob.update({
+    where: { id: dbJobId },
+    data: {
+      providerJobId: null,
+      providerKeyId: null,
+      inputData: merged as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  await delayJob(
+    job,
+    {
+      ...job.data,
+      stage: undefined,
+      pollStartedAt: undefined,
+      lastIntervalMs: undefined,
+    },
+    1000,
+    token,
+  );
+
+  return true; // unreachable due to delayJob throwing DelayedError
+}
+
 /** Upload an image to S3 and generate a thumbnail. Returns { s3Key, thumbnailS3Key }. */
 async function uploadImageToS3(
   url: string,
@@ -849,8 +978,21 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             });
           }
           if (successResults.length === 0) {
-            // K=0 — все провалились. Помечаем job failed и идём в Stage 3 для
-            // отправки error-only сообщения.
+            // K=0 — все провалились. Перед mark-failed пробуем fallback re-submit:
+            // если все ошибки transient (KIE 5xx / 422 task-id-blank) и есть
+            // запасной провайдер — delayJob throw'ит DelayedError, переходим
+            // на fallback. Иначе возвращается false и продолжаем mark-failed.
+            await tryVirtualBatchFallbackResubmit({
+              job,
+              dbJobId,
+              modelId,
+              modelMeta,
+              state,
+              techRawErrors,
+              userIdStr,
+              token,
+              stage: "submit",
+            });
             await db.generationJob.update({
               where: { id: dbJobId },
               data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
@@ -1143,6 +1285,20 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           });
         }
         if (successResults.length === 0) {
+          // K=0 — все провалились. См. tryVirtualBatchFallbackResubmit:
+          // если transient KIE-ошибки и есть fallback — delayJob throw'ит,
+          // job пере-enqueue на fallback провайдера. Иначе mark failed.
+          await tryVirtualBatchFallbackResubmit({
+            job,
+            dbJobId,
+            modelId,
+            modelMeta,
+            state,
+            techRawErrors,
+            userIdStr,
+            token,
+            stage: "poll",
+          });
           await db.generationJob.update({
             where: { id: dbJobId },
             data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
