@@ -230,10 +230,10 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
             const u = evt.data.usage;
             if (u) outputTokens = u.output_tokens ?? outputTokens;
             // stop_reason → incompleteReason: позволяет chat.service показать
-            // адресный мессадж юзеру (modelReasoningCapExhausted vs generic
-            // modelTemporarilyUnavailable) когда стрим завершился без visible
-            // text. Anthropic шлёт `max_tokens` когда reasoning + text не
-            // уложились в max_output_tokens; `refusal` — content moderation
+            // адресный мессадж юзеру (modelReasoningCapExhaustedAnthropic vs
+            // generic modelTemporarilyUnavailable) когда стрим завершился без
+            // visible text. Anthropic шлёт `max_tokens` когда reasoning + text
+            // не уложились в max_output_tokens; `refusal` — content moderation
             // зарубила ответ ещё до первого text-блока. См. также openai.adapter.
             const stopReason = evt.data.delta?.stop_reason;
             if (stopReason === "max_tokens") incompleteReason = "max_output_tokens";

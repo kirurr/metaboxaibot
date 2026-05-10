@@ -222,6 +222,8 @@ export interface Translations {
     generationStillRunning: string;
     generationTimedOut24h: string;
     modelTemporarilyUnavailable: string;
+    modelReasoningCapExhaustedOpenai: string;
+    modelReasoningCapExhaustedAnthropic: string;
     chatInvalidImage: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;
