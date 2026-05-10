@@ -300,14 +300,28 @@ export class KieImageAdapter implements ImageAdapter {
         rawFailMsg,
       );
       // gpt-image-2 (KIE) часто отказывает с chat-style refusal'ом, когда юзер
-      // просит «сохранить лицо» с референса. Выглядит как «I can't generate/edit
-      // that image ... identity preservation ... real people ... reference photos».
+      // просит «сохранить лицо» с референса. Виды формулировок:
+      //   "I can't generate/edit that image ... identity preservation ... real people ... reference photos"
+      //   "I can't generate or transform an image of a real child from the provided photos"
+      //   "I cannot create ... real person ... uploaded image"
+      //   "I can't make ... real face ... face reference"
       // Существующие regex (policy/publicFigure) такие фразы не ловят, и юзеру
-      // прилетал сырой длинный текст. Маппим на отдельный ключ с подсказкой
-      // переключиться на модель, которая лучше работает с face reference.
+      // прилетал сырой длинный текст или галлюцинация classifier'а с notifyOps:true.
+      // Маппим на отдельный ключ с подсказкой переключиться на модель,
+      // которая лучше работает с face reference.
+      //
+      // Часть 1 — глагол-«I can't»: добавлен `transform` (OpenAI использует на
+      // edit-режиме). Часть 2 — расширена номенклатура «real X»: помимо
+      // people/person/face добавлены child/children/kid/baby/infant/minor/
+      // individual/human (минор-кейсы провайдеры режут особенно жёстко).
+      // Также добавлен `provided (photo|image|reference)s?` рядом с
+      // `uploaded` — OpenAI варьирует «uploaded photos» / «provided photos»
+      // / «the provided images».
       const isIdentityPreservation =
-        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make)\b/i.test(rawFailMsg) &&
-        /identity|real (?:people|person|faces?)|reference (?:photo|image)|uploaded (?:photo|image|reference)|face (?:reference|swap)|likeness/i.test(
+        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make|transform)\b/i.test(
+          rawFailMsg,
+        ) &&
+        /identity|real (?:people|person|faces?|child|children|kid|baby|infant|minor|individual|human)|reference (?:photo|image)|uploaded (?:photo|image|reference)|provided (?:photo|image|reference)s?|face (?:reference|swap)|likeness/i.test(
           rawFailMsg,
         );
       const isPolicy =
