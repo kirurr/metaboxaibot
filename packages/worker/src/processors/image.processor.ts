@@ -149,29 +149,6 @@ const telegram = new Api(config.bot.token);
  *   [2] provider=evolink (FALLBACK):
  *       HTTP 502 ...
  */
-/**
- * Сворачивает повторяющиеся сообщения об ошибках в одно с суффиксом «×N».
- * Используется в virtual batch'е: если все K sub-job'ов упали с одним и тем
- * же текстом (e.g. "Service busy" от провайдера на каждом из 4 фото) — юзер
- * увидит «Service busy (×4)» вместо четырёх одинаковых строк.
- *
- * Сохраняет порядок первого появления сообщения, чтобы logically older
- * ошибки шли первыми (пользователь читает сверху вниз).
- */
-function collapseBatchErrors(errors: string[]): string[] {
-  const counts = new Map<string, number>();
-  const order: string[] = [];
-  for (const err of errors) {
-    const prev = counts.get(err);
-    if (prev === undefined) order.push(err);
-    counts.set(err, (prev ?? 0) + 1);
-  }
-  return order.map((msg) => {
-    const n = counts.get(msg) ?? 1;
-    return n > 1 ? `${msg} (×${n})` : msg;
-  });
-}
-
 function formatSubJobErrorReport(
   subJobs: VirtualBatchSubJob[],
   stage: "submit" | "poll",
@@ -1242,12 +1219,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       });
 
     // K=0 для virtual batch — все sub-job'ы failed, mediaGroup нет, шлём
-    // только error-сообщение со списком причин и выходим.
+    // одно общее сообщение и выходим. Намеренно НЕ перечисляем per-sub-job
+    // ошибки: обычно это один и тот же root-cause (KIE down, prompt rejected
+    // и т.п.), а раздутый список запутывал юзера. Per-sub-job детали идут в
+    // ops через formatSubJobErrorReport, юзеру — одно дружелюбное сообщение.
     if (outputRecords.length === 0 && batchErrors.length > 0) {
-      const collapsed = collapseBatchErrors(batchErrors);
+      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
       const text = t.design.batchAllFailed
         .replace("{total}", String(requestedN))
-        .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+        .replace("{errors}", errorMessage);
       await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
       logger.info({ dbJobId, errors: batchErrors.length }, "Virtual batch all failed");
       return;
@@ -1319,13 +1299,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         });
       }
 
-      // Virtual-batch partial-success footer: K из N сгенерировано, перечисляем ошибки.
+      // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
+      // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
+      // равно один root-cause в 99% случаев — детали есть в ops alert).
       if (batchErrors.length > 0) {
-        const collapsed = collapseBatchErrors(batchErrors);
+        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
         const text = t.design.batchPartialFooter
           .replace("{success}", String(outputRecords.length))
           .replace("{total}", String(requestedN))
-          .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+          .replace("{errors}", errorMessage);
         await telegram
           .sendMessage(telegramChatId, text)
           .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
@@ -1431,13 +1413,14 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
-    // К одиночному фото добавляем footer-сообщение с разбором ошибок.
+    // К одиночному фото добавляем footer-сообщение с одним общим текстом
+    // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
     if (batchErrors.length > 0) {
-      const collapsed = collapseBatchErrors(batchErrors);
+      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
       const text = t.design.batchPartialFooter
         .replace("{success}", String(outputRecords.length))
         .replace("{total}", String(requestedN))
-        .replace("{errors}", collapsed.map((e) => `• ${e}`).join("\n"));
+        .replace("{errors}", errorMessage);
       await telegram
         .sendMessage(telegramChatId, text)
         .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));

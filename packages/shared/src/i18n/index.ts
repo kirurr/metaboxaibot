@@ -80,6 +80,7 @@ export interface Translations {
     batchActionsNoDownload: string;
     batchPartialFooter: string;
     batchAllFailed: string;
+    batchSubJobFailedMessage: string;
     chooseModel: string;
   };
   audio: {
