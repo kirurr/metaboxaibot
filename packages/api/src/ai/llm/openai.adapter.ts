@@ -53,13 +53,17 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       ...(!isReasoning && input.temperature !== undefined
         ? { temperature: input.temperature }
         : {}),
-      // `max_output_tokens` — единственный кап в Responses API; для reasoning-
-      // моделей он считает reasoning + visible output вместе. Передаём ровно
-      // то, что выбрал юзер: слайдер "Макс. длина ответа" — жёсткий потолок.
-      // Если reasoning не уложится → response.incomplete → empty-guard в
-      // chat.service покажет юзеру понятную ошибку (а не «незаметно» обойдёт
-      // лимит за счёт скрытого резерва).
-      ...(input.maxTokens !== undefined ? { max_output_tokens: input.maxTokens } : {}),
+      // `max_output_tokens` в Responses API считает reasoning + visible вместе.
+      // Для reasoning-моделей этот cap — ловушка: даже потолок слайдера 8192
+      // легко съедается думанием на сложных промптах, юзер получает пустоту.
+      // Поэтому для reasoning-моделей лимит не передаём вообще — модель сама
+      // решит когда хватит. Длиной видимого ответа управляет `verbosity`.
+      // `input.maxTokens` для reasoning игнорируем сознательно — у юзеров в
+      // user_state могли остаться значения от старого слайдера, который мы
+      // выпилили из UI; отправлять их = вернуть тот же баг.
+      ...(!isReasoning && input.maxTokens !== undefined
+        ? { max_output_tokens: input.maxTokens }
+        : {}),
       ...(input.reasoningEffort ? { reasoning: { effort: input.reasoningEffort } } : {}),
       ...(input.verbosity ? { text: { verbosity: input.verbosity } } : {}),
     };

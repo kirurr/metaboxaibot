@@ -246,19 +246,16 @@ const THINKING_BUDGET_REQUIRED: ModelSettingDef = {
 /**
  * Settings for reasoning models (gpt-5 family, o-series) — no temperature.
  * Temperature is unsupported by these models via the Responses API.
+ *
+ * Слайдер `max_tokens` намеренно убран. На reasoning-моделях OpenAI Responses
+ * API считает `max_output_tokens` как ОБЩИЙ бюджет на reasoning + visible.
+ * Юзер думал что слайдер ограничивает длину ответа, а на деле reasoning мог
+ * съесть весь cap до последнего токена — юзер получал пустой ответ. Длиной
+ * видимого ответа управляет `verbosity` (low/medium/high) — это правильный
+ * API-параметр для этой задачи. Reasoning-моделям лимит снаружи не задаём:
+ * адаптер не передаёт `max_output_tokens`, модель сама решает когда хватит.
  */
 const REASONING_MODEL_SETTINGS: ModelSettingDef[] = [
-  {
-    key: "max_tokens",
-    label: "Макс. длина ответа",
-    description:
-      "Максимальное количество слов, которые ИИ может написать за один ответ. Увеличьте для длинных текстов.",
-    type: "slider",
-    min: 256,
-    max: 8192,
-    step: 256,
-    default: 2048,
-  },
   {
     key: "system_prompt",
     label: "Системный промпт",
