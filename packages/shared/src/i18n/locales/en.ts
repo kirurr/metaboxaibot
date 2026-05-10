@@ -303,6 +303,8 @@ export default {
       "❌ Request blocked: the model detected a prominent public figure in your description or image. Provider policy disallows generating with celebrities — modify your description or use a different photo.",
     identityPreservationNotAllowed:
       "❌ This model refuses to reproduce real people's faces from reference photos — it's a provider restriction. Modify your request (without exact identity) or try a different model.",
+    midjourneySyntaxNotSupported:
+      "❌ {modelName} doesn't understand Midjourney syntax (`/imagine prompt:`, flags `--ar`, `--stylize`, etc.). Remove these commands from your prompt or switch to the «🎨 MidJourney v7» model.",
     klingMotionImageRecognitionFailed:
       "❌ Could not recognize the character in the reference image. Upload a different photo — ideally one where the full body or upper body (head, shoulders, torso) is clearly visible. Close-up face shots, back views, or cropped figures will not work.",
     generationNoResult:

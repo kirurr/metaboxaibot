@@ -206,6 +206,7 @@ export interface Translations {
     copyrightViolation: string;
     publicFigureViolation: string;
     identityPreservationNotAllowed: string;
+    midjourneySyntaxNotSupported: string;
     klingMotionImageRecognitionFailed: string;
     generationNoResult: string;
     modelDoesNotSupportImg2img: string;

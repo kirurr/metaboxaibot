@@ -1,5 +1,5 @@
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -346,6 +346,24 @@ export class KieImageAdapter implements ImageAdapter {
         throw new UserFacingError(technicalMessage, { key: "publicFigureViolation" });
       if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
       if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
+      // Midjourney syntax detector: KIE при 400 от провайдера часто эхает
+      // обратно сам промпт юзера в `failMsg`. Если в нём видны характерные
+      // Midjourney-маркеры (`/imagine prompt:`, флаги `--ar`/`--stylize`/
+      // `--niji`/`--seed`/`--chaos`/`--quality`/`--v` и т.п.) — юзер скопировал
+      // промпт из MJ-туториала, а отправил в gpt-image-2/nano-banana/grok-imagine
+      // которые такой синтаксис не понимают. Бросаем user-facing подсказку без
+      // notifyOps (это user-fault, не наша инфра). Иначе ошибка падала в
+      // classifier-фолбек, юзер получал generic «модель устала».
+      const isMidjourneySyntax =
+        /\/imagine\s+prompt:|--(ar|stylize|niji|seed|chaos|quality|weird|tile|repeat|style|sref|cref|v)\b/i.test(
+          rawFailMsg,
+        );
+      if (isMidjourneySyntax) {
+        throw new UserFacingError(technicalMessage, {
+          key: "midjourneySyntaxNotSupported",
+          params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+        });
+      }
 
       const classified = await classifyAIError(`${failCode ?? ""} ${sanitizedFailMsg}`.trim());
       if (classified?.shouldShow) {
