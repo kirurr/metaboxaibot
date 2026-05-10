@@ -48,7 +48,7 @@ import {
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
 import { notifyTechError, notifyRateLimit, notifyFallback } from "../utils/notify-error.js";
-import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
+import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
@@ -1633,7 +1633,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     // stage→generate, providerJobId→null, attemptedProviders ← +effective.
     // Virtual batch path тут не покрыт (там per-sub-job state'ы — отдельная
     // задача).
-    if (stage === "poll" && isLastAttempt && isKieFiveXxError(err) && modelMeta) {
+    if (stage === "poll" && isLastAttempt && isKieTransientError(err) && modelMeta) {
       const requestedN = job.data.numImages ?? 1;
       const isVirtualBatchNow = requestedN > 1 && (modelMeta?.nativeBatchMax ?? 1) === 1;
       // Virtual batch не покрыт — там per-sub-job state'ы, отдельная задача.
@@ -1731,7 +1731,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           { dbJobId, modelId },
           "Image fallback skipped: modelMeta missing (model not in AI_MODELS)",
         );
-      } else if (!isKieFiveXxError(err) && !isProviderTemporaryUnavailable(err)) {
+      } else if (!isKieTransientError(err) && !isProviderTemporaryUnavailable(err)) {
         logger.warn(
           {
             dbJobId,
@@ -1740,7 +1740,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             registeredFallbacks: fallbackCandidates.map((m) => m.provider),
             errMessage: err instanceof Error ? err.message : String(err),
           },
-          "Image fallback skipped: error type not eligible (need KIE 5xx or provider-unavailable)",
+          "Image fallback skipped: error type not eligible (need KIE transient or provider-unavailable)",
         );
       } else if (fallbackCandidates.length === 0) {
         logger.warn(
