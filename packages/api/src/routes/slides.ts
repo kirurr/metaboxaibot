@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -40,8 +41,43 @@ function serialize(slide: {
 }
 
 export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["slides"]),
+  );
+
   /** GET /slides — public, returns active slides */
-  fastify.get("/slides", async () => {
+  fastify.get(
+    "/slides",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              slides: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    imageUrl: { type: "string" },
+                    linkUrl: { type: "string", nullable: true },
+                    displaySeconds: { type: "number" },
+                    sortOrder: { type: "number" },
+                    active: { type: "boolean" },
+                    createdAt: { type: "string" },
+                    updatedAt: { type: "string" },
+                  },
+                  required: ["id", "imageUrl", "linkUrl", "displaySeconds", "sortOrder", "active", "createdAt", "updatedAt"],
+                },
+              },
+            },
+            required: ["slides"],
+          },
+        },
+      },
+    },
+    async () => {
     const slides = await db.bannerSlide.findMany({
       where: { active: true },
       orderBy: { sortOrder: "asc" },
@@ -51,6 +87,10 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** Admin slides management */
   await fastify.register(async (admin) => {
+    admin.addHook("onRoute", (routeOptions) =>
+      constructOpenAPIonRouteHook(routeOptions, ["slides"]),
+    );
+
     admin.addHook("preHandler", async (request, reply) => {
       const secret = config.api.adminSecret;
       const provided = request.headers["x-admin-secret"];
@@ -75,7 +115,38 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** GET /admin/slides — all slides including inactive */
-    admin.get("/admin/slides", async () => {
+    admin.get(
+      "/admin/slides",
+      {
+        schema: {
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                slides: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      imageUrl: { type: "string" },
+                      linkUrl: { type: "string", nullable: true },
+                      displaySeconds: { type: "number" },
+                      sortOrder: { type: "number" },
+                      active: { type: "boolean" },
+                      createdAt: { type: "string" },
+                      updatedAt: { type: "string" },
+                    },
+                    required: ["id", "imageUrl", "linkUrl", "displaySeconds", "sortOrder", "active", "createdAt", "updatedAt"],
+                  },
+                },
+              },
+              required: ["slides"],
+            },
+          },
+        },
+      },
+      async () => {
       const slides = await db.bannerSlide.findMany({
         orderBy: { sortOrder: "asc" },
       });
@@ -83,7 +154,30 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** POST /admin/slides — create slide with image upload */
-    admin.post("/admin/slides", async (request, reply) => {
+    admin.post(
+      "/admin/slides",
+      {
+        schema: {
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                imageUrl: { type: "string" },
+                linkUrl: { type: "string", nullable: true },
+                displaySeconds: { type: "number" },
+                sortOrder: { type: "number" },
+                active: { type: "boolean" },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+              },
+              required: ["id", "imageUrl", "linkUrl", "displaySeconds", "sortOrder", "active", "createdAt", "updatedAt"],
+            },
+            400: badRequestResponse,
+          },
+        },
+      },
+      async (request, reply) => {
       await ensureUploadsDir();
 
       const data = await request.file();
@@ -121,7 +215,43 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** PATCH /admin/slides/:id — update slide */
-    admin.patch<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
+    admin.patch<{ Params: { id: string } }>(
+      "/admin/slides/:id",
+      {
+        schema: {
+          params: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+            },
+            required: ["id"],
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                imageUrl: { type: "string" },
+                linkUrl: { type: "string", nullable: true },
+                displaySeconds: { type: "number" },
+                sortOrder: { type: "number" },
+                active: { type: "boolean" },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+              },
+              required: ["id", "imageUrl", "linkUrl", "displaySeconds", "sortOrder", "active", "createdAt", "updatedAt"],
+            },
+            404: {
+              description: "Slide not found",
+              type: "object",
+              properties: {
+                error: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
       const { id } = request.params;
       const existing = await db.bannerSlide.findUnique({ where: { id } });
       if (!existing) {
@@ -179,7 +309,36 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** DELETE /admin/slides/:id */
-    admin.delete<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
+    admin.delete<{ Params: { id: string } }>(
+      "/admin/slides/:id",
+      {
+        schema: {
+          params: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+            },
+            required: ["id"],
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                success: { type: "boolean" },
+              },
+              required: ["success"],
+            },
+            404: {
+              description: "Slide not found",
+              type: "object",
+              properties: {
+                error: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
       const { id } = request.params;
       const existing = await db.bannerSlide.findUnique({ where: { id } });
       if (!existing) {
@@ -200,7 +359,34 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** POST /admin/slides/reorder */
-    admin.post("/admin/slides/reorder", async (request, reply) => {
+    admin.post(
+      "/admin/slides/reorder",
+      {
+        schema: {
+          body: {
+            type: "object",
+            properties: {
+              slideIds: {
+                type: "array",
+                items: { type: "string" },
+                description: "Array of slide IDs in new order",
+              },
+            },
+            required: ["slideIds"],
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                success: { type: "boolean" },
+              },
+              required: ["success"],
+            },
+            400: badRequestResponse,
+          },
+        },
+      },
+      async (request, reply) => {
       const { slideIds } = request.body as { slideIds: string[] };
       if (!Array.isArray(slideIds) || slideIds.length === 0) {
         await reply.status(400).send({ error: "slideIds array required" });
