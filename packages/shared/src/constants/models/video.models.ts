@@ -1498,13 +1498,13 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["1280:720", "720:1280"],
-    durationRange: { min: 2, max: 10 },
+    supportedDurations: [5, 10],
     settings: [
       mkAspectRatio(["1280:720", "720:1280"], {
         "1280:720": "16:9",
         "720:1280": "9:16",
       }),
-      mkDurationSlider(2, 10),
+      mkDurationSelect([5, 10]),
       {
         key: "seed",
         label: "Seed",

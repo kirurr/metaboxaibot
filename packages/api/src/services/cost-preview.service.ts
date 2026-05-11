@@ -117,6 +117,19 @@ export const costPreviewService = {
       }
     }
 
+    // Snap к ближайшей из supportedDurations, если модель объявила дискретный
+    // набор. Защищает от stale userState (когда список сокращали в каталоге):
+    // иначе cost-preview списывал бы по старой длительности, а адаптер слал бы
+    // другую — и мы переплачивали разницу провайдеру.
+    if (model.supportedDurations && model.supportedDurations.length > 0) {
+      const allowed = model.supportedDurations;
+      effectiveDuration = allowed.reduce(
+        (best, d) =>
+          Math.abs(d - effectiveDuration) < Math.abs(best - effectiveDuration) ? d : best,
+        allowed[0]!,
+      );
+    }
+
     const estimatedVideoTokens = model.costUsdPerMVideoToken
       ? computeVideoTokens(
           model,

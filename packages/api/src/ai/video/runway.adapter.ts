@@ -13,6 +13,7 @@ import { logger } from "../../logger.js";
 const RUNWAY_API = "https://api.dev.runwayml.com/v1";
 
 const SUPPORTED_RATIOS = new Set(["1280:720", "720:1280"]);
+const SUPPORTED_DURATIONS = [5, 10];
 
 /**
  * Старые сохранённые в userState значения (1104:832, 960:960, 1584:672 и т.д.)
@@ -25,6 +26,18 @@ function normalizeRunwayRatio(raw: string | undefined): string {
     if (Number.isFinite(w) && Number.isFinite(h) && h > w) return "720:1280";
   }
   return "1280:720";
+}
+
+/**
+ * Runway gen4.5 принимает только 5 и 10 секунд. cost-preview уже снэпает,
+ * но это последний рубеж от 400.
+ */
+function normalizeRunwayDuration(raw: number | undefined): number {
+  if (raw == null || !Number.isFinite(raw)) return SUPPORTED_DURATIONS[0]!;
+  return SUPPORTED_DURATIONS.reduce(
+    (best, d) => (Math.abs(d - raw) < Math.abs(best - raw) ? d : best),
+    SUPPORTED_DURATIONS[0]!,
+  );
 }
 
 /**
@@ -84,7 +97,7 @@ export class RunwayAdapter implements VideoAdapter {
       promptText: input.prompt,
       model: "gen4.5",
       ratio: normalizeRunwayRatio(input.aspectRatio),
-      duration: input.duration ?? 5,
+      duration: normalizeRunwayDuration(input.duration),
     };
     if (ms.seed != null) body.seed = ms.seed;
     if (
