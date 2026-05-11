@@ -21,30 +21,70 @@ const TEMPERATURE_SETTING_CAPPED: ModelSettingDef = { ...TEMPERATURE_SETTING, ma
 /** Anthropic Claude accepts temperature 0..1 only. */
 const TEMPERATURE_SETTING_ANTHROPIC: ModelSettingDef = { ...TEMPERATURE_SETTING, max: 1 };
 
-/** Standard LLM controls: temperature, max output tokens, system prompt. */
-const LLM_SETTINGS: ModelSettingDef[] = [
-  TEMPERATURE_SETTING,
-  {
-    key: "max_tokens",
-    label: "Макс. длина ответа",
-    description:
-      "Максимальное количество слов, которые ИИ может написать за один ответ. Увеличьте для длинных текстов.",
-    type: "slider",
-    min: 256,
-    max: 8192,
-    step: 256,
-    default: 2048,
-  },
-  {
-    key: "system_prompt",
-    label: "Системный промпт",
-    description:
-      "Скрытая инструкция, которую ИИ всегда соблюдает: задайте роль, стиль или ограничения для всего диалога.",
-    type: "text",
-    default: "",
-    advanced: true,
-  },
-];
+const SYSTEM_PROMPT_SETTING: ModelSettingDef = {
+  key: "system_prompt",
+  label: "Системный промпт",
+  description:
+    "Скрытая инструкция, которую ИИ всегда соблюдает: задайте роль, стиль или ограничения для всего диалога.",
+  type: "text",
+  default: "",
+  advanced: true,
+};
+
+/**
+ * Output-token limit: opt-in toggle + slider pair built per model.
+ *
+ * Toggle is OFF by default — the chat service does NOT pass `max_tokens` to
+ * the provider when it's OFF (providers that REQUIRE the field — Anthropic —
+ * substitute `model.maxOutputTokens` instead). When the user turns the toggle
+ * ON, the slider value is sent verbatim, and if the response hits it the
+ * empty-response guard tells the user it was THEIR limit (not a model cap).
+ *
+ * Slider's max equals `model.maxOutputTokens` (model-realistic ceiling),
+ * default also equals max — so turning the toggle ON without touching the
+ * slider gives an effective no-op until the user moves it down. Step is
+ * adaptive: a 256-step slider over a 128K range would be useless.
+ *
+ * `isThinking` raises the slider's minimum to 2048 — на думающих моделях
+ * значения ниже гарантированно дают пустой ответ (reasoning съедает бюджет
+ * до visible-текста). На нон-думающих min=256 (как в старом слайдере до PR):
+ * там короткий лимит просто даст короткий ответ, без пустоты.
+ */
+function buildOutputLimitSettings(modelMax: number, isThinking: boolean): ModelSettingDef[] {
+  const step =
+    modelMax <= 8_192
+      ? 256
+      : modelMax <= 16_384
+        ? 512
+        : modelMax <= 32_768
+          ? 1024
+          : modelMax <= 65_536
+            ? 2048
+            : 4096;
+  const min = isThinking ? Math.min(2048, modelMax) : Math.min(256, modelMax);
+  return [
+    {
+      key: "max_tokens_limit_enabled",
+      label: "Ограничить длину ответа",
+      description:
+        "По умолчанию модель сама решает, когда остановиться. Включите, чтобы задать жёсткий потолок токенов — если ответ упрётся в него, появится явное предупреждение.",
+      type: "toggle",
+      default: false,
+    },
+    {
+      key: "max_tokens",
+      label: "Макс. длина ответа",
+      description:
+        "Жёсткий потолок выходных токенов. ⚠ На думающих моделях низкий лимит уйдёт на размышления — ответ будет пустым.",
+      type: "slider",
+      min,
+      max: modelMax,
+      step,
+      default: modelMax,
+      dependsOn: { key: "max_tokens_limit_enabled", value: true },
+    },
+  ];
+}
 
 const PERPLEXITY_SYSTEM_PROMPT: ModelSettingDef = {
   key: "system_prompt",
@@ -130,7 +170,7 @@ const REASONING_EFFORT_GPT5: ModelSettingDef = {
 };
 
 /**
- * Reasoning effort for gpt-5.5 / gpt-5.5-pro — supports none/low/medium/high/xhigh.
+ * Reasoning effort for gpt-5.5 — supports none/low/medium/high/xhigh.
  * `none` отключает reasoning (модель отвечает сразу без chain-of-thought).
  */
 const REASONING_EFFORT_GPT55: ModelSettingDef = {
@@ -142,6 +182,24 @@ const REASONING_EFFORT_GPT55: ModelSettingDef = {
   options: [
     { value: "none", label: "Без" },
     { value: "low", label: "Низкая" },
+    { value: "medium", label: "Средняя" },
+    { value: "high", label: "Высокая" },
+    { value: "xhigh", label: "Макс." },
+  ],
+  default: "medium",
+};
+
+/**
+ * Reasoning effort for gpt-5.5-pro — OpenAI принимает только `medium/high/xhigh`
+ * (на `none`/`low` API возвращает 400 «Unsupported value»). Отдельный сетинг —
+ * чтобы юзер не выбрал в UI значение, которое сразу даст ошибку.
+ */
+const REASONING_EFFORT_GPT55_PRO: ModelSettingDef = {
+  key: "reasoning_effort",
+  label: "Глубина рассуждений",
+  description: "Средняя — баланс, Высокая/Макс. — точнее для сложных задач (дольше).",
+  type: "select",
+  options: [
     { value: "medium", label: "Средняя" },
     { value: "high", label: "Высокая" },
     { value: "xhigh", label: "Макс." },
@@ -199,8 +257,7 @@ const VERBOSITY_SETTING: ModelSettingDef = {
 const EXTENDED_THINKING: ModelSettingDef = {
   key: "extended_thinking",
   label: "Расширенное мышление",
-  description:
-    "Модель думает дольше перед ответом — точнее для сложных задач, но медленнее. При включении настройка «Макс. длина ответа» игнорируется: ответ может занять до ~16 000 токенов.",
+  description: "Модель думает дольше перед ответом — точнее для сложных задач, но медленнее.",
   type: "toggle",
   default: false,
 };
@@ -246,19 +303,17 @@ const THINKING_BUDGET_REQUIRED: ModelSettingDef = {
 /**
  * Settings for reasoning models (gpt-5 family, o-series) — no temperature.
  * Temperature is unsupported by these models via the Responses API.
+ *
+ * `max_tokens` слайдер добавляется ниже единым append-проходом через
+ * `buildOutputLimitSettings` — он защищён opt-in тоглом «Ограничить длину
+ * ответа» и не передаётся в провайдер пока юзер сам не включит. При
+ * включении показываются явные предупреждения: для reasoning-моделей низкий
+ * лимит даёт пустой ответ (reasoning съест бюджет), а при срабатывании
+ * лимита юзер видит outputLimitReached / outputLimitOnlyThinking с конкретным
+ * числом. Это вернуло юзерам управление длиной, не воссоздавая старый баг
+ * с автоматическим max_tokens из user_state.
  */
 const REASONING_MODEL_SETTINGS: ModelSettingDef[] = [
-  {
-    key: "max_tokens",
-    label: "Макс. длина ответа",
-    description:
-      "Максимальное количество слов, которые ИИ может написать за один ответ. Увеличьте для длинных текстов.",
-    type: "slider",
-    min: 256,
-    max: 8192,
-    step: 256,
-    default: 2048,
-  },
   {
     key: "system_prompt",
     label: "Системный промпт",
@@ -290,6 +345,21 @@ function contextWindowSetting(modelMaxTokens: number): ModelSettingDef {
     advanced: true,
   };
 }
+
+/**
+ * Показывать reasoning (chain-of-thought) пользователю отдельными
+ * `<blockquote expandable>` сообщениями. Применяется ко всем моделям из
+ * `THINKING_MODEL_IDS` (см. ниже). Default false — текущий UX, мысли
+ * отбрасываются. Юзер включает явно когда хочет видеть «куда уходят токены».
+ */
+const SHOW_REASONING_SETTING: ModelSettingDef = {
+  key: "show_reasoning",
+  label: "Показывать размышления",
+  description:
+    "Если включено — сообщения с внутренними рассуждениями модели придут отдельно (свёрнутые, можно раскрыть). Помогает понять, на что ушли токены.",
+  type: "toggle",
+  default: false,
+};
 
 /** Reasoning effort for Grok 3 Mini — only supports low/high (no medium). */
 const GROK_MINI_REASONING: ModelSettingDef = {
@@ -825,7 +895,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
     isAsync: false,
     contextStrategy: "provider_chain",
     contextMaxMessages: 0,
-    settings: [REASONING_EFFORT_GPT55, VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
+    settings: [REASONING_EFFORT_GPT55_PRO, VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
   },
   "gpt-5.4-pro": {
     id: "gpt-5.4-pro",
@@ -911,6 +981,55 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
   if (cw) model.contextWindow = cw;
 }
 
+// ── Apply realistic output-token ceilings per model ────────────────────────
+// Реалистичный потолок output токенов за один turn. Используется:
+//   1) Как max слайдера «Макс. длина ответа» (toggle-gated, см. buildOutputLimitSettings).
+//   2) Как fallback для Anthropic-семейства, где `max_tokens` — обязательный
+//      параметр API; при выключенном toggle подставляем именно этот потолок,
+//      чтобы юзер получил «без ограничения» по факту.
+// Значения — из публичной документации провайдеров (OpenAI Responses, Anthropic
+// Messages, Google Gemini, xAI Grok, Perplexity, DeepSeek, Alibaba Qwen).
+const MAX_OUTPUT_TOKENS: Record<string, number> = {
+  // OpenAI gpt-5 family
+  "gpt-5.5-pro": 128_000,
+  "gpt-5.5": 128_000,
+  "gpt-5.4-pro": 128_000,
+  "gpt-5.4": 128_000,
+  "gpt-5-pro": 128_000,
+  "gpt-5-nano": 65_536,
+  // OpenAI o-series
+  "o4-mini": 100_000,
+  "o3-mini": 100_000,
+  // Anthropic Claude (4.x — расширенный output bracket)
+  "claude-opus": 64_000,
+  "claude-opus-4-5": 64_000,
+  "claude-sonnet": 64_000,
+  "claude-sonnet-4-5": 64_000,
+  "claude-haiku": 16_384,
+  // Google Gemini
+  "gemini-3-pro": 65_536,
+  "gemini-3.1-pro": 65_536,
+  "gemini-2-flash": 65_536,
+  "gemini-2-flash-lite": 8_192,
+  // DeepSeek
+  "deepseek-r1": 8_192,
+  "deepseek-v3": 8_192,
+  // xAI Grok
+  "grok-4": 32_768,
+  "grok-4-fast": 16_384,
+  // Perplexity Sonar
+  "perplexity-sonar-pro": 8_192,
+  "perplexity-sonar-research": 8_192,
+  "perplexity-sonar": 8_192,
+  // Qwen 3
+  "qwen-3-max-thinking": 16_384,
+  "qwen-3-thinking": 16_384,
+};
+for (const [id, model] of Object.entries(GPT_MODELS)) {
+  const mot = MAX_OUTPUT_TOKENS[id];
+  if (mot) model.maxOutputTokens = mot;
+}
+
 // ── Apply document-input capability flags ────────────────────────────────────
 // OpenAI Responses API and Anthropic accept PDFs natively via content blocks.
 // All other providers get server-side text extraction fallback.
@@ -936,6 +1055,7 @@ const THINKING_MODEL_IDS = new Set([
   "gpt-5.4-pro",
   "gpt-5.4",
   "gpt-5-pro",
+  "gpt-5-nano",
   // Anthropic (extended thinking)
   "claude-opus",
   "claude-opus-4-5",
@@ -984,9 +1104,10 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
   const extras: ModelSettingDef[] = [];
 
   if (id.startsWith("perplexity")) {
+    // max_tokens (toggle+slider) добавляется единым append-проходом ниже —
+    // не дублируем его в инлайн-сборке настроек этой модели.
     model.settings = [
       TEMPERATURE_SETTING_CAPPED,
-      LLM_SETTINGS[1], // max_tokens
       PERPLEXITY_SYSTEM_PROMPT,
       PERPLEXITY_EXTRA,
       PERPLEXITY_SEARCH_CONTEXT,
@@ -997,7 +1118,7 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
   if (id.startsWith("qwen")) {
     const qwenExtras: ModelSettingDef[] = [];
     if (QWEN_THINKING_IDS.has(id)) qwenExtras.push(ENABLE_THINKING);
-    model.settings = [TEMPERATURE_SETTING_CAPPED, ...LLM_SETTINGS.slice(1), ...qwenExtras];
+    model.settings = [TEMPERATURE_SETTING_CAPPED, SYSTEM_PROMPT_SETTING, ...qwenExtras];
     continue;
   }
   if (id === "grok-3-mini") {
@@ -1017,8 +1138,43 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
     ANTHROPIC_THINKING_IDS.has(id) || id === "claude-haiku"
       ? TEMPERATURE_SETTING_ANTHROPIC
       : TEMPERATURE_SETTING;
-  model.settings = [temp, ...LLM_SETTINGS.slice(1), ...extras];
+  model.settings = [temp, SYSTEM_PROMPT_SETTING, ...extras];
 }
+
+// ── Append "Показывать размышления" toggle to every thinking model ──────────
+// Толгл универсальный: дёшево включить/выключить рендеринг chain-of-thought.
+// Не запрашивает thinking у провайдеров где он opt-in (Claude extended_thinking,
+// Gemini thinking_budget) — для тех моделей сначала надо включить «думалку»,
+// потом — отдельно — этот тогл, чтобы её увидеть. У моделей с unconditional
+// reasoning (OpenAI o-series, GPT-5.x с effort != none, DeepSeek R1, Grok 4)
+// тогл достаточен сам по себе. Default false — текущее поведение сохраняется.
+for (const [id, model] of Object.entries(GPT_MODELS)) {
+  if (!THINKING_MODEL_IDS.has(id)) continue;
+  if (!model.settings) model.settings = [];
+  model.settings.push(SHOW_REASONING_SETTING);
+}
+
+// ── Append output-token limit (toggle + slider) to every LLM model ─────────
+// Парный контрол: тогл «Ограничить длину ответа» (default OFF) + слайдер с
+// верхним пределом из `maxOutputTokens`. При выключенном тогле chat.service
+// не передаёт `max_tokens` провайдеру (для Anthropic — подставляет потолок
+// модели, т.к. поле обязательное). Размещён перед context_window — оба
+// относятся к управлению объёмом запроса/ответа, идут вместе в конце листа.
+//
+// ВРЕМЕННО СКРЫТО: настройка пока не выводится в UI — решили вернуть всем
+// юзерам чистый «безлимит» до уточнения UX. Адаптеры остаются opt-in (тогл
+// нигде не сохранён → cap не передаётся; Anthropic подставляет свой ctx-aware
+// default). Чтобы вернуть в UI: раскомментировать append-loop ниже.
+// Сохранённый код и i18n-ключи (`outputLimit*`, `modelOnlyThinking`) лежат как
+// готовая инфраструктура — никаких миграций при возврате не понадобится.
+// for (const model of Object.values(GPT_MODELS)) {
+//   if (!model.maxOutputTokens) continue;
+//   if (!model.settings) model.settings = [];
+//   model.settings.push(
+//     ...buildOutputLimitSettings(model.maxOutputTokens, model.supportsThinking === true),
+//   );
+// }
+void buildOutputLimitSettings; // keep helper referenced — иначе unused-import.
 
 // ── Append context window slider to every text model ────────────────────────
 // Slider is rendered last so it appears at the bottom of the settings sheet.

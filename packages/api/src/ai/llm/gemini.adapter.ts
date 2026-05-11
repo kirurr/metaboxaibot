@@ -80,15 +80,31 @@ export class GeminiAdapter extends BaseLLMAdapter {
     const effectiveThinkingBudget =
       requiresThinking && input.thinkingBudget === 0 ? -1 : input.thinkingBudget;
 
+    // includeThoughts:true просим только когда юзер включил showReasoning И
+    // у модели есть thinking-бюджет (>0 или -1). Без includeThoughts Gemini
+    // не возвращает part'ы с thought:true, и user-side toggle становится
+    // молчаливым no-op.
+    const wantThoughts =
+      input.showReasoning === true &&
+      effectiveThinkingBudget !== undefined &&
+      effectiveThinkingBudget !== 0;
+
     const chat = this.ai.chats.create({
       model: this.apiModel,
       history,
       config: {
         ...(input.systemPrompt ? { systemInstruction: input.systemPrompt } : {}),
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        ...(input.maxTokens !== undefined ? { maxOutputTokens: input.maxTokens } : {}),
+        ...(input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+          ? { maxOutputTokens: input.maxTokens }
+          : {}),
         ...(effectiveThinkingBudget !== undefined
-          ? { thinkingConfig: { thinkingBudget: effectiveThinkingBudget } }
+          ? {
+              thinkingConfig: {
+                thinkingBudget: effectiveThinkingBudget,
+                ...(wantThoughts ? { includeThoughts: true } : {}),
+              },
+            }
           : {}),
       },
     });
@@ -121,12 +137,39 @@ export class GeminiAdapter extends BaseLLMAdapter {
     const stream = await chat.sendMessageStream({ message: userParts });
 
     let lastChunk: GenerateContentResponse | undefined;
+    // <think>...</think> обёртка вокруг thought-парт'ов. chunk.text accessor
+    // конкатенит ТОЛЬКО visible части (thought-part'ы исключаются), поэтому
+    // когда мы хотим видеть размышления — переключаемся на ручной обход parts[].
+    let inThinkBlock = false;
 
     for await (const chunk of stream) {
       lastChunk = chunk;
-      const text = chunk.text;
-      if (text) yield text;
+      if (!wantThoughts) {
+        const text = chunk.text;
+        if (text) yield text;
+        continue;
+      }
+      const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+      for (const part of parts) {
+        const text = (part as { text?: string }).text;
+        if (!text) continue;
+        const isThought = (part as { thought?: boolean }).thought === true;
+        if (isThought) {
+          if (!inThinkBlock) {
+            inThinkBlock = true;
+            yield "<think>";
+          }
+          yield text;
+        } else {
+          if (inThinkBlock) {
+            inThinkBlock = false;
+            yield "</think>";
+          }
+          yield text;
+        }
+      }
     }
+    if (inThinkBlock) yield "</think>";
 
     const usage = lastChunk?.usageMetadata;
     return {

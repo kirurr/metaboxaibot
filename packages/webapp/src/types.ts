@@ -95,6 +95,8 @@ export interface ModelSettingDef {
   default: string | number | boolean | null;
   unavailableIf?: UnavailableRule;
   advanced?: boolean;
+  /** Conditional visibility: hide until another setting (`key`) equals `value`. */
+  dependsOn?: { key: string; value: string | number | boolean };
 }
 
 export interface ElevenLabsVoice {
@@ -372,7 +374,9 @@ export interface CatalogResponse {
   canPayByCard: boolean;
   /** true если у юзера есть платная активная подписка (триал — false). */
   hasPaidSubscription: boolean;
-  usdtRubRate: number;
+  /** RUB-эквивалент одной звезды Telegram (из config.payments.starPriceRub).
+   *  Информационно — фронт может показать «1 ⭐ ≈ N ₽». */
+  starPriceRub: number;
   metaboxUrl: string;
 }
 

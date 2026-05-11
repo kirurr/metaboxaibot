@@ -5,8 +5,9 @@ import {
   type MessageRecord,
   type StreamResult,
 } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { AI_MODELS, config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { logger } from "../../logger.js";
 
 /**
  * Anthropic Messages API-совместимые прокси (KIE, Evolink, etc.) — все
@@ -40,14 +41,43 @@ const PROVIDER_CONFIGS: Record<string, ClaudeProxyConfig> = {
 };
 
 /**
- * Внутренний modelId → API-имя модели у провайдера. Anthropic-имена одинаковы
- * у обоих прокси (kie и evolink), маппинг общий.
+ * Внутренний modelId → API-имя модели у провайдера.
+ *
+ * COMMON_MODEL_MAP — alias-имена Anthropic (без snapshot-даты). Подходят
+ * провайдерам, которые принимают canonical Anthropic-aliases (KIE и сам
+ * Anthropic).
+ *
+ * EVOLINK_MODEL_OVERRIDES — Evolink в model registry держит часть моделей
+ * только под полным snapshot-именем (с датой). На короткий alias возвращает
+ * `invalid_request: No available service for model 'X'`. Подтверждённый список
+ * (по состоянию на 2026-05-11):
+ *   - claude-haiku-4-5-20251001  (alias `claude-haiku-4-5` НЕ работает)
+ *   - claude-sonnet-4-5-20250929
+ *   - claude-opus-4-1-20250805
+ *   - claude-sonnet-4-20250514
+ *   - claude-opus-4-5-20251101
+ *   - claude-opus-4-6      (alias OK)
+ *   - claude-opus-4-7      (alias OK)
+ *   - claude-sonnet-4-6    (alias OK)
+ *
+ * Поэтому в override пробрасываем только haiku, opus/sonnet остаются по alias'у.
  */
-const MODEL_MAP: Record<string, string> = {
+const COMMON_MODEL_MAP: Record<string, string> = {
   "claude-opus": "claude-opus-4-6",
   "claude-sonnet": "claude-sonnet-4-6",
   "claude-haiku": "claude-haiku-4-5",
 };
+
+const EVOLINK_MODEL_OVERRIDES: Record<string, string> = {
+  "claude-haiku": "claude-haiku-4-5-20251001",
+};
+
+function resolveApiModel(modelId: string, providerKey: string): string {
+  if (providerKey === "evolink-claude") {
+    return EVOLINK_MODEL_OVERRIDES[modelId] ?? COMMON_MODEL_MAP[modelId] ?? modelId;
+  }
+  return COMMON_MODEL_MAP[modelId] ?? modelId;
+}
 
 interface ProxyContentBlock {
   type: string;
@@ -102,7 +132,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     this.contextMaxMessages = contextMaxMessages;
     this.apiKey = apiKey ?? cfg.envKey ?? "";
     this.fetchFn = fetchFn ?? globalThis.fetch;
-    this.apiModel = MODEL_MAP[modelId] ?? modelId;
+    this.apiModel = resolveApiModel(modelId, providerKey);
   }
 
   async chat(input: LLMInput): Promise<LLMOutput> {
@@ -114,13 +144,31 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
   }
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
+    // Anthropic Messages API требует `max_tokens` ВСЕГДА (без него 400). Когда
+    // юзер не включал тогл «Ограничить длину ответа», подставляем щедрый
+    // потолок `min(modelCap, ctx * 0.4)` — это эффективный «безлимит» для
+    // дефолтных context window (Opus/Sonnet 200K → 64K cap = весь modelCap),
+    // и достаточно для extended_thinking чтобы reasoning не задушил visible.
+    //
+    // Чтобы НЕ упереться в Anthropic-инвариант `input_tokens + max_tokens ≤
+    // context_window`, прокидываем `adapterOutputReservation` в truncate —
+    // оно зарезервирует ровно то значение, которое мы пошлём в API. Иначе
+    // на длинных диалогах было бы `prompt is too long` 400.
+    //
+    // При включённом тогле — ровно значение юзера, без silent-override.
+    const userContextWindow =
+      input.contextWindowOverride && input.contextWindowOverride > 0
+        ? input.contextWindowOverride
+        : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
+    const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
+    const maxTokens =
+      input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? input.maxTokens
+        : Math.min(modelCap, Math.floor(userContextWindow * 0.4));
+    // Hint в truncate — должен идти ДО `this.truncateInput`.
+    input = { ...input, adapterOutputReservation: maxTokens };
     input = this.truncateInput(input);
     const messages = this.buildMessages(input);
-
-    // Extended thinking требует max_tokens >= ~16k (как у нативного Anthropic).
-    const maxTokens = input.extendedThinking
-      ? Math.max(input.maxTokens ?? 16000, 16000)
-      : (input.maxTokens ?? 4096);
 
     const body: Record<string, unknown> = {
       model: this.apiModel,
@@ -195,6 +243,37 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let outputTokens = 0;
     let cachedInputTokens = 0;
     let incompleteReason: string | undefined;
+    // Reasoning буферизуем ВСЕГДА (независимо от `showReasoning`), НЕ yield'им
+    // сразу при каждом thinking_delta. Зачем:
+    //   1) gateway-503 escalation ниже проверяет `visibleChunks === 0`, но
+    //      chat.service отдельно смотрит `chunks.length > 0` (включая reasoning
+    //      chunks) и при mid-stream обрыве БЛОКИРУЕТ retry. Если yield'ить
+    //      reasoning сразу — при обрыве chat.service считал бы стрим
+    //      mid-stream и не пробовал бы другие ключи.
+    //   2) Если визибл не пришёл и причина = max_tokens — нам нужно показать
+    //      юзеру что произошло (куда ушли его токены), даже когда у него
+    //      `showReasoning=false`. Иначе он видит пустоту с непонятным сообщением.
+    //
+    // Yield'аем в двух случаях:
+    //  (a) первый text_delta пришёл и `showReasoning=true` → yield `<think>` +
+    //      buffer + `</think>` + visible. При `showReasoning=false` тогда
+    //      yield'аем только visible — буфер выкидываем без yield (юзер не
+    //      хочет видеть размышления при нормальном ответе).
+    //  (b) стрим завершился с `stop_reason ∈ {max_tokens, end_turn}` И visible
+    //      ни одного → yield буфер `<think>...</think>` ВСЕГДА (даже при
+    //      `showReasoning=false`). Юзер увидит, что модель только подумала.
+    let thinkingBuffer = "";
+    // Диагностика пустых стримов (KIE-прокси иногда висит и закрывает
+    // соединение без терминального message_delta — юзер видит generic
+    // "модель отдыхает", в логах нет ни stop_reason, ни тайминга. Считаем
+    // event-типы и фиксируем стоп-причину/usage-флаг, чтобы при пустом
+    // ответе понять: стрим оборвался / Claude вернул end_turn без контента
+    // / message_delta пришёл без usage. См. warn-блок ниже.
+    const streamStartedAt = Date.now();
+    let visibleChunks = 0;
+    let lastStopReason: string | undefined;
+    let messageDeltaWithUsage = false;
+    const eventTypeCounts: Record<string, number> = {};
 
     // Stream parser: SSE events delimited by "\n\n"; each event has
     // `event: <name>\ndata: <json>` lines (Anthropic-compatible).
@@ -215,11 +294,31 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           const evt = parseSseEvent(raw);
           if (!evt?.data) continue;
 
-          const text = handleEvent(evt.data, (delta) => delta);
-          if (text) yield text;
+          // text_delta → visible. Если в буфере накоплен reasoning И юзер
+          //   хочет его видеть — yield `<think>...</think>` ПЕРЕД visible.
+          //   При showReasoning=false просто очищаем буфер без yield.
+          // thinking_delta → reasoning. ВСЕГДА копим в буфер (см. комментарий
+          //   выше). Гейт на showReasoning стоит только на yield'е.
+          const visibleText = handleVisibleDelta(evt.data);
+          if (visibleText) {
+            if (thinkingBuffer.length > 0) {
+              if (input.showReasoning) {
+                yield "<think>";
+                yield thinkingBuffer;
+                yield "</think>";
+              }
+              thinkingBuffer = "";
+            }
+            visibleChunks++;
+            yield visibleText;
+          } else {
+            const reasoningText = handleThinkingDelta(evt.data);
+            if (reasoningText) thinkingBuffer += reasoningText;
+          }
 
           // Извлекаем токены из служебных событий.
           const t = evt.data.type;
+          if (typeof t === "string") eventTypeCounts[t] = (eventTypeCounts[t] ?? 0) + 1;
           if (t === "message_start") {
             const u = evt.data.message?.usage;
             if (u) {
@@ -228,14 +327,18 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
             }
           } else if (t === "message_delta") {
             const u = evt.data.usage;
-            if (u) outputTokens = u.output_tokens ?? outputTokens;
+            if (u) {
+              outputTokens = u.output_tokens ?? outputTokens;
+              messageDeltaWithUsage = true;
+            }
             // stop_reason → incompleteReason: позволяет chat.service показать
-            // адресный мессадж юзеру (modelReasoningCapExhausted vs generic
-            // modelTemporarilyUnavailable) когда стрим завершился без visible
-            // text. Anthropic шлёт `max_tokens` когда reasoning + text не
-            // уложились в max_output_tokens; `refusal` — content moderation
+            // адресный мессадж юзеру (modelReasoningCapExhaustedAnthropic vs
+            // generic modelTemporarilyUnavailable) когда стрим завершился без
+            // visible text. Anthropic шлёт `max_tokens` когда reasoning + text
+            // не уложились в max_output_tokens; `refusal` — content moderation
             // зарубила ответ ещё до первого text-блока. См. также openai.adapter.
             const stopReason = evt.data.delta?.stop_reason;
+            if (typeof stopReason === "string") lastStopReason = stopReason;
             if (stopReason === "max_tokens") incompleteReason = "max_output_tokens";
             else if (stopReason === "refusal") incompleteReason = "content_filter";
           }
@@ -245,11 +348,94 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       reader.releaseLock();
     }
 
+    // Gateway-пустота KIE/Evolink: HTTP 200 открыл стрим, но прокси закрыл
+    // соединение БЕЗ терминального события (нет ни stop_reason, ни usage).
+    // Это инфра-сбой прокси, а не легитимный «модель ответила пустотой» —
+    // у легитимного был бы хотя бы `stop_reason` в message_delta.
+    //
+    // Бросаем 503 — `isFiveXxError` в chat.service триггерит штатный retry.
+    // Поскольку reasoning буферизуется и НЕ yield'ится до первого text_delta,
+    // на этот момент `chunks.length === 0` в chat.service гарантировано, и
+    // retry/fallback flow реально сработает (а не уйдёт в chatStreamInterrupted).
+    //
+    // `!lastStopReason` — главный сторож от ложных срабатываний: если хоть
+    // какой-то stop_reason пришёл (включая end_turn без usage), это легит.
+    if (
+      visibleChunks === 0 &&
+      outputTokens === 0 &&
+      !messageDeltaWithUsage &&
+      !lastStopReason &&
+      !incompleteReason
+    ) {
+      logger.warn(
+        {
+          modelId: this.modelId,
+          apiModel: this.apiModel,
+          provider: this.proxyConfig.providerLabel,
+          streamDurationMs: Date.now() - streamStartedAt,
+          inputTokens,
+          eventTypeCounts,
+          lastStopReason,
+        },
+        "claude-anthropic-proxy: gateway empty stream — escalating as 503 for retry",
+      );
+      const err = new Error(
+        `${this.proxyConfig.providerLabel} Claude proxy returned empty stream (no message_delta)`,
+      ) as Error & { status?: number };
+      err.status = 503;
+      throw err;
+    }
+
+    // Аномальный финал: модель завершила стрим с reasoning, но без visible.
+    // Flush буфера на ЛЮБОЙ легитимный stop_reason кроме `refusal` (там
+    // содержимое thinking — потенциально refusal-rationale, не показываем).
+    // Покрытие: `max_tokens` (reasoning сожрал бюджет), `end_turn` (модель
+    // решила не отвечать), `stop_sequence`/`tool_use`/`pause_turn` — редкие
+    // но возможные кейсы. Flush ВСЕГДА (независимо от showReasoning): юзер
+    // должен видеть свои размышления, иначе сообщение «модель не ответила»
+    // необъяснимо. chat.service по `<think>` блокам узнает спец-кейс и
+    // покажет `outputLimitOnlyThinking` / `modelOnlyThinking`.
+    const isOnlyThinkingFinal =
+      visibleChunks === 0 &&
+      thinkingBuffer.length > 0 &&
+      lastStopReason !== undefined &&
+      lastStopReason !== "refusal";
+    if (isOnlyThinkingFinal) {
+      yield "<think>";
+      yield thinkingBuffer;
+      yield "</think>";
+      thinkingBuffer = "";
+    }
+
+    // Триггер ровно совпадает с empty-guard'ом в chat.service.ts:
+    // там тоже "0 visible chunks → пустой ответ юзеру". Если ужесточить
+    // условие (например AND outputTokens===0), потеряем кейс когда Claude
+    // потратил токены на thinking-блоки, но не выдал ни одного visible
+    // дельта-чанка — а это как раз самый интересный случай для диагностики.
+    if (visibleChunks === 0) {
+      logger.warn(
+        {
+          modelId: this.modelId,
+          apiModel: this.apiModel,
+          provider: this.proxyConfig.providerLabel,
+          streamDurationMs: Date.now() - streamStartedAt,
+          inputTokens,
+          outputTokens,
+          eventTypeCounts,
+          lastStopReason,
+          messageDeltaWithUsage,
+          incompleteReason,
+        },
+        "claude-anthropic-proxy: stream ended with no visible text",
+      );
+    }
+
     return {
       inputTokensUsed: inputTokens,
       outputTokensUsed: outputTokens,
       ...(cachedInputTokens > 0 ? { cachedInputTokensUsed: cachedInputTokens } : {}),
       ...(incompleteReason ? { incompleteReason } : {}),
+      ...(lastStopReason ? { lastStopReason } : {}),
     };
   }
 
@@ -305,7 +491,9 @@ interface SseUsage {
 }
 interface SseData {
   type: string;
-  delta?: { type?: string; text?: string; stop_reason?: string };
+  // delta может быть text_delta (visible) или thinking_delta (reasoning).
+  // Оба идут внутри content_block_delta, отличает их поле type.
+  delta?: { type?: string; text?: string; thinking?: string; stop_reason?: string };
   message?: { usage?: SseUsage };
   usage?: SseUsage;
 }
@@ -329,9 +517,16 @@ function parseSseEvent(raw: string): { event?: string; data?: SseData } | null {
   return { event, data };
 }
 
-function handleEvent(d: SseData, pickText: (s: string) => string): string | null {
+function handleVisibleDelta(d: SseData): string | null {
   if (d.type === "content_block_delta" && d.delta?.type === "text_delta" && d.delta.text) {
-    return pickText(d.delta.text);
+    return d.delta.text;
+  }
+  return null;
+}
+
+function handleThinkingDelta(d: SseData): string | null {
+  if (d.type === "content_block_delta" && d.delta?.type === "thinking_delta" && d.delta.thinking) {
+    return d.delta.thinking;
   }
   return null;
 }

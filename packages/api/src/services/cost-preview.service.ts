@@ -117,6 +117,21 @@ export const costPreviewService = {
       }
     }
 
+    // Runway gen4.5 принимает только 5/10s; в userState у части юзеров остались
+    // значения 2-4, 6-9 со старого слайдера 2..10. Снэпаем здесь, чтобы списание
+    // совпало с тем, что адаптер фактически отправит провайдеру. Для остальных
+    // моделей с supportedDurations не трогаем — у них исторически встречаются
+    // stale-значения (см. 21b144a по veo: 5/7), которые провайдер принимает,
+    // и тихая правка укоротила бы юзерам видео.
+    if (modelId === "runway" && model.supportedDurations && model.supportedDurations.length > 0) {
+      const allowed = model.supportedDurations;
+      effectiveDuration = allowed.reduce(
+        (best, d) =>
+          Math.abs(d - effectiveDuration) < Math.abs(best - effectiveDuration) ? d : best,
+        allowed[0]!,
+      );
+    }
+
     const estimatedVideoTokens = model.costUsdPerMVideoToken
       ? computeVideoTokens(
           model,

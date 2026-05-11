@@ -1,13 +1,8 @@
 import type { BotContext } from "../types/context.js";
-import {
-  paymentService,
-  getRate,
-  STAR_PRICE_USD,
-  checkPaidSubscription,
-} from "@metabox/api/services";
+import { paymentService, checkPaidSubscription } from "@metabox/api/services";
 import type { SaleUserInfo } from "@metabox/api/services";
 import { logger } from "../logger.js";
-import { getT } from "@metabox/shared";
+import { config, getT } from "@metabox/shared";
 
 /** Answer Telegram's pre-checkout query — must respond within 10 seconds. */
 export async function handlePreCheckoutQuery(ctx: BotContext): Promise<void> {
@@ -43,10 +38,10 @@ export async function handleSuccessfulPayment(ctx: BotContext): Promise<void> {
   const payload = payment.invoice_payload;
 
   try {
-    // Compute star rate: 1 star = usdtRubRate × STAR_PRICE_USD (in RUB)
-    const usdtRubRate = await getRate();
+    // RUB-эквивалент одной звезды берётся напрямую из конфига
+    // (STAR_PRICE_RUB env), без промежуточного USD-курса.
     const stars = payment.total_amount; // actual Stars charged by Telegram
-    const starRate = usdtRubRate * STAR_PRICE_USD;
+    const starRate = config.payments.starPriceRub;
 
     // Build user info from Telegram context
     const userInfo: SaleUserInfo = {

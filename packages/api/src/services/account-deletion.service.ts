@@ -279,6 +279,16 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
   };
 
   await db.$transaction([
+    // Перенос рефералов удаляемого юзера на одну ступень вверх — к его
+    // собственному реферрору. Без этого Prisma `onDelete: SetNull` (на
+    // referredById у User в schema) обнулил бы их referredById, и
+    // реферальная цепочка обрывалась бы на удалённом узле.
+    // Идемпотентно: после updateMany ни одна строка уже не указывает на
+    // userId, поэтому последующий delete не триггерит cascade-SetNull.
+    db.user.updateMany({
+      where: { referredById: userId },
+      data: { referredById: user.referredById },
+    }),
     db.deletedUser.create({ data: snapshot }),
     db.user.delete({ where: { id: userId } }),
   ]);

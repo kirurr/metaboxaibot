@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ModelSettingDef, UnavailableRule } from "../../types.js";
 import { useI18n } from "../../i18n.js";
 import { SETTING_TRANSLATIONS } from "@metabox/shared-browser";
@@ -51,6 +51,40 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
   const settingLocale = SETTING_TRANSLATIONS[locale] ?? SETTING_TRANSLATIONS["en"] ?? {};
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  // Auto-sync stale slider values to current min/max bounds. Legacy values в
+  // user_state могут оказаться вне нового диапазона (например, `max_tokens=500`
+  // когда min теперь 2048). Без авто-синка UI отрендерит clamp'нутое значение,
+  // но DB останется со стейлом — и на следующем запросе chat.service пошлёт
+  // 500 в провайдер, противореча тому что юзер видел на слайдере.
+  //
+  // ВАЖНО: clamp'аем только ВИДИМЫЕ слайдеры. Скрытый через `dependsOn` слайдер
+  // юзер не видит — молча менять его значение нельзя (юзер сохранит то, чего
+  // никогда не выбирал). Для скрытых стейл-значения пусть лежат: пока тогл OFF,
+  // адаптер их всё равно игнорирует (см. chat.service); если юзер потом
+  // включит тогл — слайдер станет видимым, новый рендер прогонит этот же
+  // эффект и подтянет clamp.
+  useEffect(() => {
+    if (!settings) return;
+    // Mini-`effectiveValues` для проверки `dependsOn` — повторяем логику ниже,
+    // но не хотим тянуть туда side-effect; defaults берём из самих settings.
+    const depVals: Record<string, unknown> = {};
+    for (const def of settings) {
+      depVals[def.key] = values[def.key] !== undefined ? values[def.key] : def.default;
+    }
+    for (const def of settings) {
+      if (def.type !== "slider") continue;
+      if (def.dependsOn && depVals[def.dependsOn.key] !== def.dependsOn.value) continue;
+      const raw = values[def.key];
+      if (raw === undefined || raw === null) continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num)) continue;
+      const min = def.min ?? 0;
+      const max = def.max ?? Number.MAX_SAFE_INTEGER;
+      const clamped = Math.max(min, Math.min(max, num));
+      if (clamped !== num) onChange(def.key, clamped);
+    }
+  }, [settings, values]);
+
   if (!settings || settings.length === 0) return null;
 
   // Resolve effective values: fill in defaults for any setting not yet saved by the user.
@@ -79,6 +113,13 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
 
   function renderSetting(def: ModelSettingDef) {
     if (def.unavailableIf && evalRule(def.unavailableIf, effectiveValues)) return null;
+    // dependsOn: скрываем сетинг пока зависимый ключ не примет нужное значение.
+    // Используется для «slider под toggle» (max_tokens видим только если включён
+    // max_tokens_limit_enabled), чтобы не показывать число, которое ни на что
+    // не влияет, пока юзер не opt-in'нет.
+    if (def.dependsOn && effectiveValues[def.dependsOn.key] !== def.dependsOn.value) {
+      return null;
+    }
     const val = effectiveValues[def.key];
     const settingT = settingLocale[def.key];
     const label = settingT?.label ?? def.label;
@@ -88,67 +129,101 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
         <span className="settings-panel__label">{label}</span>
         {description && <span className="settings-panel__desc">{description}</span>}
         {def.type === "select" &&
-          (def.key === "aspect_ratio" ? (
-            (() => {
-              const visible = def
-                .options!.filter(
-                  (opt) => !(opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues)),
-                )
-                .map((opt) => ({
+          (def.key === "aspect_ratio"
+            ? (() => {
+                const visible = def
+                  .options!.filter(
+                    (opt) => !(opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues)),
+                  )
+                  .map((opt) => ({
+                    value: String(opt.value),
+                    label: settingT?.options?.[String(opt.value)] ?? opt.label,
+                  }));
+                const fallback = String(def.default ?? visible[0]?.value ?? "");
+                const rawValue = String(val ?? fallback);
+                // Stale userState (опции вырезали из каталога) — отдаём в Wheel
+                // только валидное значение, иначе он молча показал бы первую
+                // опцию, а в БД оставалось бы старое.
+                const currentValue = visible.some((v) => v.value === rawValue)
+                  ? rawValue
+                  : fallback;
+                return (
+                  <AspectRatioWheel
+                    options={visible}
+                    value={currentValue}
+                    onChange={(v) => onChange(def.key, v)}
+                  />
+                );
+              })()
+            : (() => {
+                const valueSet = new Set<unknown>(def.options!.map((o) => o.value));
+                const activeValue = valueSet.has(val)
+                  ? val
+                  : (def.default ?? def.options![0]?.value);
+                return (
+                  <div className="image-settings-ratios">
+                    {def.options!.map((opt) => {
+                      const optDisabled =
+                        !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues);
+                      const optLabel = settingT?.options?.[String(opt.value)] ?? opt.label;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          disabled={optDisabled}
+                          className={`ratio-btn${activeValue === opt.value ? " ratio-btn--active" : ""}${optDisabled ? " ratio-btn--disabled" : ""}`}
+                          onClick={() => !optDisabled && onChange(def.key, opt.value)}
+                        >
+                          {optLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })())}
+        {def.type === "dropdown" &&
+          (() => {
+            const optionValues = def.options!.map((o) => String(o.value));
+            const rawValue = String(val ?? def.default ?? "");
+            const currentValue = optionValues.includes(rawValue)
+              ? rawValue
+              : String(def.default ?? optionValues[0] ?? "");
+            return (
+              <StyledSelect
+                value={currentValue}
+                onChange={(v) => onChange(def.key, v)}
+                options={def.options!.map((opt) => ({
                   value: String(opt.value),
                   label: settingT?.options?.[String(opt.value)] ?? opt.label,
-                }));
-              const currentValue = String(val ?? def.default ?? visible[0]?.value ?? "");
-              return (
-                <AspectRatioWheel
-                  options={visible}
-                  value={currentValue}
+                  disabled: !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues),
+                }))}
+              />
+            );
+          })()}
+        {def.type === "slider" &&
+          (() => {
+            // Clamp value to [min, max] — legacy values in user_state may fall
+            // outside the current slider's range (e.g. old `max_tokens=500` when
+            // the new min is 2048). Without clamping, CustomSlider shows the
+            // handle at the rail's start but the number label keeps the stale
+            // value — inconsistent. Companion to commit 8cc9da2 which clamped
+            // select/dropdown options, but missed sliders.
+            const min = def.min ?? 0;
+            const max = def.max ?? 100;
+            const rawVal = Number(val ?? def.default ?? min);
+            const clamped = Math.max(min, Math.min(max, rawVal));
+            return (
+              <div className="settings-panel__slider-row">
+                <CustomSlider
+                  min={min}
+                  max={max}
+                  step={def.step ?? 1}
+                  value={clamped}
                   onChange={(v) => onChange(def.key, v)}
                 />
-              );
-            })()
-          ) : (
-            <div className="image-settings-ratios">
-              {def.options!.map((opt) => {
-                const optDisabled =
-                  !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues);
-                const optLabel = settingT?.options?.[String(opt.value)] ?? opt.label;
-                return (
-                  <button
-                    key={String(opt.value)}
-                    disabled={optDisabled}
-                    className={`ratio-btn${val === opt.value ? " ratio-btn--active" : ""}${optDisabled ? " ratio-btn--disabled" : ""}`}
-                    onClick={() => !optDisabled && onChange(def.key, opt.value)}
-                  >
-                    {optLabel}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        {def.type === "dropdown" && (
-          <StyledSelect
-            value={String(val ?? def.default ?? "")}
-            onChange={(v) => onChange(def.key, v)}
-            options={def.options!.map((opt) => ({
-              value: String(opt.value),
-              label: settingT?.options?.[String(opt.value)] ?? opt.label,
-              disabled: !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues),
-            }))}
-          />
-        )}
-        {def.type === "slider" && (
-          <div className="settings-panel__slider-row">
-            <CustomSlider
-              min={def.min ?? 0}
-              max={def.max ?? 100}
-              step={def.step ?? 1}
-              value={Number(val ?? def.min ?? 0)}
-              onChange={(v) => onChange(def.key, v)}
-            />
-            <span className="settings-panel__slider-value">{Number(val ?? def.min ?? 0)}</span>
-          </div>
-        )}
+                <span className="settings-panel__slider-value">{clamped}</span>
+              </div>
+            );
+          })()}
         {def.type === "toggle" && (
           <div className="settings-panel__toggle-row">
             <label className="settings-panel__toggle-label">

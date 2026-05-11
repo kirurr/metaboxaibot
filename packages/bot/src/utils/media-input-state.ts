@@ -93,6 +93,26 @@ export function validateMediaAgainstSlot(
         .replace("{maxH}", String(c.maxHeight ?? 0));
     }
 
+    // Frame pixels = w × h. Чек дополняет minWidth/minHeight/maxWidth/maxHeight:
+    // обе стороны могут влезть в [min..max], но суммарная площадь — нет.
+    // Пример: 4K phone-видео 3840×2160 = 8.29M пикселей превышает лимит
+    // Evolink Seedance reference-to-video (~2.08M), хотя width=3840 ≤ 6000
+    // и height=2160 ≤ 6000 проходят индивидуально.
+    if (c.minFramePixels !== undefined || c.maxFramePixels !== undefined) {
+      const frame = w * h;
+      const belowMinFp = c.minFramePixels !== undefined && frame < c.minFramePixels;
+      const aboveMaxFp = c.maxFramePixels !== undefined && frame > c.maxFramePixels;
+      if (belowMinFp || aboveMaxFp) {
+        const fmtMp = (px: number): string => (px / 1_000_000).toFixed(1);
+        return t.errors.mediaSlotFramePixelsOutOfRange
+          .replace("{actualW}", String(w))
+          .replace("{actualH}", String(h))
+          .replace("{actualMpix}", fmtMp(frame))
+          .replace("{minMpix}", c.minFramePixels !== undefined ? fmtMp(c.minFramePixels) : "—")
+          .replace("{maxMpix}", c.maxFramePixels !== undefined ? fmtMp(c.maxFramePixels) : "—");
+      }
+    }
+
     // Aspect ratio (width / height). Validate только если хотя бы один лимит задан
     // и обе стороны известны. Например, KIE Kling требует ratio ∈ [1:2.5, 2.5:1]
     // (т.е. w/h ∈ [0.4, 2.5]) — иначе submit падает 422 на стороне провайдера.

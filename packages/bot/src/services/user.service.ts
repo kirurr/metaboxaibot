@@ -62,13 +62,39 @@ export const userService = {
     return mapUser(user);
   },
 
-  async creditWelcomeBonus(userId: bigint): Promise<void> {
+  /**
+   * Начисляет welcome-бонус, если ещё не начислялся (проверка через
+   * `welcome_bonus_receipts`). Возвращает `true` если токены реально
+   * зачислены в этом вызове, `false` если был пропуск (дубль). Caller
+   * использует возвращаемое значение, чтобы не показывать сообщение
+   * «вот ваши N приветственных токенов», когда фактически начисления не было.
+   */
+  async creditWelcomeBonus(userId: bigint): Promise<boolean> {
+    // Дедуп через welcome_bonus_receipts (без FK, переживает удаление User).
+    // Кейс: юзер /start → бонус → удаление аккаунта → /start заново. Без
+    // receipt'а isNew=true у новой User-строки → бонус выдавался повторно.
+    const existingReceipt = await db.welcomeBonusReceipt.findUnique({
+      where: { telegramId: userId },
+    });
+    if (existingReceipt) {
+      // Выставляем isNew=false — иначе /start продолжит идти по new-ветке
+      // (показывать "tokensGranted", онбординг и т.д.) на каждом запуске.
+      await db.user.update({
+        where: { id: userId },
+        data: { isNew: false },
+      });
+      return false;
+    }
+
     // End of day MSK (23:59:59.999 Moscow time) for trial period
     const rawEnd = new Date();
     rawEnd.setDate(rawEnd.getDate() + 3);
     const mskDateStr = rawEnd.toLocaleDateString("sv-SE", { timeZone: "Europe/Moscow" });
     const trialEndDate = new Date(mskDateStr + "T23:59:59.999+03:00");
 
+    // Receipt создаём ВНУТРИ той же транзакции, что и начисление: при
+    // конкурентном /start unique-violation на telegramId откатит весь батч
+    // и не задвоит начисление; на следующем /start ранний return сработает.
     await db.$transaction([
       db.user.update({
         where: { id: userId },
@@ -83,6 +109,12 @@ export const userService = {
           amount: WELCOME_BONUS_TOKENS,
           type: "credit",
           reason: "welcome_bonus",
+        },
+      }),
+      db.welcomeBonusReceipt.create({
+        data: {
+          telegramId: userId,
+          amount: WELCOME_BONUS_TOKENS,
         },
       }),
     ]);
@@ -112,5 +144,7 @@ export const userService = {
         },
       });
     }
+
+    return true;
   },
 };

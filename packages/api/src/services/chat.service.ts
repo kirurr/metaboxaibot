@@ -55,24 +55,6 @@ import {
 export { ContextOverflowError } from "../ai/llm/truncate.js";
 
 /**
- * Минимальный `max_tokens` для каждого уровня `reasoning_effort` на gpt-5/
- * o-series. Меньше — заведомо пустой ответ: reasoning не уложится в общий
- * `max_output_tokens` (Responses API считает reasoning + visible вместе).
- *
- * Числа лояльные: блокируем только явно несовместимые комбо (high+маленький
- * лимит). На промежуточных значениях даём шанс — если всё-таки не уложится,
- * runtime-guard в конце потока поймает с тем же сообщением.
- */
-const REASONING_MIN_MAX_TOKENS: Record<string, number> = {
-  none: 0,
-  minimal: 0,
-  low: 0,
-  medium: 0,
-  high: 768,
-  xhigh: 1536,
-};
-
-/**
  * Per-request memoiser for `extractTextFromS3Cached` calls. Eliminates the
  * N+1 pattern when the same s3Key appears in multiple history messages
  * (e.g. a CSV re-attached every turn). Lives only for the duration of one
@@ -238,21 +220,59 @@ export const chatService = {
       if (def !== undefined) ms.reasoning_effort = def;
     }
 
-    // Pre-валидация: для reasoning-моделей `max_output_tokens` в Responses API
-    // считает reasoning + visible вместе. Если юзер выбрал тесные настройки
-    // (high effort + маленький max_tokens), reasoning гарантированно съест весь
-    // бюджет → пустой ответ. Лучше отклонить запрос ДО списания токенов и до
-    // вызова OpenAI с понятной подсказкой что поправить.
+    // Защита от legacy/stale `reasoning_effort`: юзер мог сохранить значение на
+    // одной модели (gpt-5-nano default `low`) и переключиться на другую, где
+    // это значение не поддерживается провайдером (gpt-5.5-pro принимает только
+    // medium/high/xhigh — `low` даёт 400 от OpenAI). Если текущая модель имеет
+    // явный список `options` и значение в `ms.reasoning_effort` туда не
+    // попадает — заменяем на default настройки. То же ловит любые будущие
+    // расхождения опций без отдельного фикса.
+    if (ms.reasoning_effort !== undefined && model?.settings) {
+      const setting = model.settings.find((s) => s.key === "reasoning_effort");
+      if (setting?.options) {
+        const valid = setting.options.some((o) => o.value === ms.reasoning_effort);
+        if (!valid) {
+          logger.warn(
+            {
+              modelId: dialog.modelId,
+              dialogId,
+              staleValue: ms.reasoning_effort,
+              fallback: setting.default,
+            },
+            "chat: reasoning_effort outside model options — clamping to default",
+          );
+          ms.reasoning_effort = setting.default ?? undefined;
+        }
+      }
+    }
+
+    // Same fix для `max_tokens`: если юзер включил тогл «Ограничить длину
+    // ответа», но слайдер ни разу не двигал — `ms.max_tokens` останется
+    // undefined и адаптеры OpenAI/Gemini/etc. вообще не отправят cap. Юзер
+    // думает что включил ограничение — на деле ничего не ограничено.
+    // Подмешиваем default из catalog (= `model.maxOutputTokens`).
+    //
+    // Для Anthropic-провайдеров дополнительно ограничиваем подмешиваемое
+    // значение `min(modelCap, contextWindow*0.2)`. Anthropic enforces
+    // `input_tokens + max_tokens ≤ context_window`. modelCap=64K на узком
+    // context_window override (32K min) дал бы 400 «prompt is too long» —
+    // тот же сценарий, от которого защищена OFF-ветка адаптера.
     if (
-      typeof ms.reasoning_effort === "string" &&
-      typeof ms.max_tokens === "number" &&
-      ms.max_tokens < REASONING_MIN_MAX_TOKENS[ms.reasoning_effort]
+      ms.max_tokens_limit_enabled === true &&
+      ms.max_tokens === undefined &&
+      model?.maxOutputTokens
     ) {
-      throw new UserFacingError("Reasoning effort incompatible with max_tokens", {
-        key: "modelReasoningCapExhausted",
-        section: "gpt",
-        params: { modelName: model?.name ?? dialog.modelId },
-      });
+      const isAnthropic =
+        model.provider === "anthropic" ||
+        model.provider === "kie-claude" ||
+        model.provider === "evolink-claude";
+      if (isAnthropic) {
+        const ctxWindow =
+          (ms.context_window as number | undefined) ?? model.contextWindow ?? 200_000;
+        ms.max_tokens = Math.min(model.maxOutputTokens, Math.floor(ctxWindow * 0.2));
+      } else {
+        ms.max_tokens = model.maxOutputTokens;
+      }
     }
 
     const extractCache: ExtractCache = new Map();
@@ -300,6 +320,12 @@ export const chatService = {
       ...(currentDocAttachments?.length ? { documentAttachments: currentDocAttachments } : {}),
       ...(ms.temperature !== undefined ? { temperature: ms.temperature as number } : {}),
       ...(ms.max_tokens !== undefined ? { maxTokens: ms.max_tokens as number } : {}),
+      // Opt-in cap: значение `max_tokens` идёт в провайдер только при
+      // включённом юзером тогле. Иначе адаптеры игнорируют или подставляют
+      // потолок модели (Anthropic требует поле всегда).
+      ...(ms.max_tokens_limit_enabled !== undefined
+        ? { maxTokensLimitEnabled: ms.max_tokens_limit_enabled as boolean }
+        : {}),
       ...(ms.system_prompt ? { systemPrompt: ms.system_prompt as string } : {}),
       ...(ms.search_recency_filter
         ? { searchRecencyFilter: ms.search_recency_filter as string }
@@ -315,6 +341,7 @@ export const chatService = {
         ? { enableThinking: ms.enable_thinking as boolean }
         : {}),
       ...(ms.thinking_budget !== undefined ? { thinkingBudget: ms.thinking_budget as number } : {}),
+      ...(ms.show_reasoning !== undefined ? { showReasoning: ms.show_reasoning as boolean } : {}),
       ...(ms.seed != null ? { seed: ms.seed as number } : {}),
       ...(ms.context_window != null ? { contextWindowOverride: ms.context_window as number } : {}),
     };
@@ -454,6 +481,7 @@ export const chatService = {
     let outputTokensUsed: number | undefined;
     let providerUsdCost: number | undefined;
     let incompleteReason: string | undefined;
+    let lastStopReason: string | undefined;
 
     const runStream = async function* (
       this: void,
@@ -479,6 +507,7 @@ export const chatService = {
           outputTokensUsed = result?.outputTokensUsed;
           providerUsdCost = result?.providerUsdCost;
           incompleteReason = result?.incompleteReason;
+          lastStopReason = result?.lastStopReason;
           return;
         }
         chunks.push(next.value);
@@ -768,7 +797,12 @@ export const chatService = {
 
     if (acquiredKeyId) void recordSuccess(acquiredKeyId);
 
-    const responseText = stripThinkingBlocks(chunks.join(""));
+    const rawAssistantText = chunks.join("");
+    const responseText = stripThinkingBlocks(rawAssistantText);
+    // Был ли в стриме хотя бы один thinking-блок. Используется ниже для
+    // спец-кейса `outputLimitOnlyThinking`: модель потратила лимит на
+    // размышления и не дошла до visible ответа.
+    const hadThinking = /<think>[\s\S]*?<\/think>/.test(rawAssistantText);
 
     // Провайдер дошёл до конца стрима без визуального текста (gpt-5 reasoning
     // съел max_output_tokens, пустой response.completed, refusal без content
@@ -791,33 +825,73 @@ export const chatService = {
         "chat.sendMessageStream: provider returned empty response",
       );
       await dialogService.markMessageFailed(userMessage.id);
-      // Три ветки по incompleteReason:
-      //  - `max_output_tokens` — reasoning + visible не уложились в лимит,
-      //    даём адресную подсказку (понизить effort / поднять лимит). Алёртим
-      //    ops, чтобы видеть тренды (зашитый лимит давит юзеров) без походов в логи.
-      //  - `content_filter` — провайдер зарубил ответ по своим правилам
-      //    (Claude refusal, OpenAI moderation). Юзер видит тот же текст,
-      //    что у image/video. Ops НЕ алёртим: причина — пользовательский
-      //    контент, не наша инфра.
+      // Ветки по incompleteReason:
+      //  - `max_output_tokens` + юзер ЯВНО включил тогл → его выбор:
+      //    `outputLimitReached` с конкретным числом лимита.
+      //  - `max_output_tokens` БЕЗ тогла → это провайдерский/модельный cap
+      //    (Anthropic мы всегда шлём modelCap, поле обязательное; OpenAI
+      //    мог применить свой default cap). Это редкий легитимный случай:
+      //    показываем старое модельно-зависимое сообщение, чтобы юзер не
+      //    видел совет «отключите тогл, который и так выключен».
+      //  - `content_filter` — провайдер зарубил по правилам. Ops НЕ алёртим.
       //  - всё остальное (network drop / silent end_turn / unknown) — generic
       //    «временно недоступен», алёртим — причина непрозрачна.
+      //
+      // Ops-алёрты на любой `max_output_tokens` отключены: и юзерский лимит,
+      // и упор в modelCap — оба «не наша инфра», в чат не флудим.
       const isContentFilter = incompleteReason === "content_filter";
-      const messageKey =
-        incompleteReason === "max_output_tokens"
-          ? "modelReasoningCapExhausted"
-          : isContentFilter
-            ? "contentPolicyViolation"
-            : "modelTemporarilyUnavailable";
+      const userLimitEnabled = ms.max_tokens_limit_enabled === true;
+      const userMaxTokens = ms.max_tokens as number | undefined;
+      // Юзерский лимит «настоящий» когда (a) тогл явно включён И (b) слайдер
+      // сохранён в user_state. Сам по себе faktum `max_output_tokens` от
+      // провайдера не означает юзерскую вину — Anthropic мы шлём cap всегда
+      // (поле обязательное), OpenAI gpt-5* имеет свой internal cap.
+      const isUserLimit =
+        incompleteReason === "max_output_tokens" && userLimitEnabled && userMaxTokens !== undefined;
+      const isProviderCap = incompleteReason === "max_output_tokens" && !isUserLimit;
+      // Спец-кейс: «модель только подумала» — адаптер флашит буферизованный
+      // thinking в стрим перед return (см. claude-anthropic-proxy.adapter). Юзер
+      // увидит chain-of-thought blockquote в боте, и мы покажем спец-сообщение.
+      //
+      // Покрытие thinking-only:
+      //  - `isUserLimit + hadThinking` → outputLimitOnlyThinking (юзерский cap)
+      //  - `isProviderCap + hadThinking` → modelOnlyThinking (наш OFF-default cap)
+      //  - `hadThinking` + `lastStopReason ∈ {end_turn, stop_sequence, tool_use,
+      //     pause_turn}` без incompleteReason → modelOnlyThinking (модель решила
+      //     не отвечать). Без этой ветки юзер видит blockquote + противоречащее
+      //     «временно недоступно».
+      const isOnlyThinkingUserLimit = isUserLimit && hadThinking;
+      const isLegitimateNonRefusalStop =
+        lastStopReason !== undefined &&
+        lastStopReason !== "refusal" &&
+        incompleteReason === undefined;
+      const isOnlyThinkingModelCap =
+        hadThinking && !isUserLimit && (isProviderCap || isLegitimateNonRefusalStop);
+      const isOpenai = model?.provider === "openai";
+      const reasoningKey = isOpenai
+        ? "modelReasoningCapExhaustedOpenai"
+        : "modelReasoningCapExhaustedAnthropic";
+      const messageKey = isOnlyThinkingUserLimit
+        ? "outputLimitOnlyThinking"
+        : isOnlyThinkingModelCap
+          ? "modelOnlyThinking"
+          : isUserLimit
+            ? "outputLimitReached"
+            : isProviderCap
+              ? reasoningKey
+              : isContentFilter
+                ? "contentPolicyViolation"
+                : "modelTemporarilyUnavailable";
       throw new UserFacingError(
         `Provider returned empty response (reason: ${incompleteReason ?? "unknown"}, chunks: ${chunks.length}, outputTokens: ${outputTokensUsed ?? 0})`,
         {
           key: messageKey,
           section: "gpt",
-          params: { modelName: model?.name ?? dialog.modelId },
-          notifyOps: !isContentFilter,
-          // Burst-throttle: 5 алёртов / 30 мин per (cause, model). При шторме
-          // (зашитый maxTokens прижимает 100 юзеров) не флудим ops-чат, но
-          // первые 5 пробьются — этого хватит увидеть тренд.
+          params: {
+            modelName: model?.name ?? dialog.modelId,
+            ...(isUserLimit && userMaxTokens !== undefined ? { limit: userMaxTokens } : {}),
+          },
+          notifyOps: !isContentFilter && !isUserLimit && !isProviderCap && !isOnlyThinkingModelCap,
           opsAlertDedupKey: `chat-empty-${incompleteReason ?? "unknown"}-${dialog.modelId}`,
         },
       );

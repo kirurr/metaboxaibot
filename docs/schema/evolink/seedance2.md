@@ -338,7 +338,7 @@ components:
 
             - Supported formats: `.mp4`, `.mov`
 
-            - Resolution: 480p, 720p
+            - Resolution: 480p, 720p, 1080p
 
             - Duration per video: `2` ~ `15` seconds, max 3 videos, total
             duration of all videos <= `15` seconds
@@ -347,8 +347,8 @@ components:
 
             - Width/height pixels: `300` ~ `6000` px
 
-            - Frame pixels (width x height): `409,600` ~ `927,408` (e.g.,
-            640x640 ~ 834x1112)
+            - Frame pixels (width x height): `409,600` ~ `2,086,876` (e.g.,
+            640x640 ~ 2206x946)
 
             - Max size per video: `50MB`
 

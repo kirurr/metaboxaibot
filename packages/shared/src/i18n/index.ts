@@ -60,6 +60,8 @@ export interface Translations {
       thinkingWarning: string;
       filesWarning: string;
     };
+    reasoningHeader: string;
+    reasoningPartLabel: string;
   };
   design: {
     sectionTitle: string;
@@ -80,6 +82,7 @@ export interface Translations {
     batchActionsNoDownload: string;
     batchPartialFooter: string;
     batchAllFailed: string;
+    batchSubJobFailedMessage: string;
     chooseModel: string;
   };
   audio: {
@@ -191,6 +194,7 @@ export interface Translations {
     mediaSlotImageTooSmall: string;
     mediaSlotImageTooLarge: string;
     mediaSlotAspectRatioOutOfRange: string;
+    mediaSlotFramePixelsOutOfRange: string;
     mediaSlotReadMetadataFailed: string;
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
@@ -204,6 +208,8 @@ export interface Translations {
     contentPolicyViolation: string;
     copyrightViolation: string;
     publicFigureViolation: string;
+    identityPreservationNotAllowed: string;
+    midjourneySyntaxNotSupported: string;
     klingMotionImageRecognitionFailed: string;
     generationNoResult: string;
     modelDoesNotSupportImg2img: string;
@@ -221,6 +227,11 @@ export interface Translations {
     generationStillRunning: string;
     generationTimedOut24h: string;
     modelTemporarilyUnavailable: string;
+    modelReasoningCapExhaustedOpenai: string;
+    modelReasoningCapExhaustedAnthropic: string;
+    outputLimitReached: string;
+    outputLimitOnlyThinking: string;
+    modelOnlyThinking: string;
     chatInvalidImage: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;

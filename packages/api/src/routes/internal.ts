@@ -49,17 +49,29 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * grantType "tokens" (default): credits to regular tokenBalance.
    */
   fastify.post("/grant-tokens", async (request, reply) => {
-    const { telegramId, tokens, description, grantType, endDate, planName, subscriptionId } =
-      request.body as {
-        telegramId: string;
-        tokens: number;
-        description?: string;
-        grantType?: "subscription" | "tokens";
-        endDate?: string;
-        planName?: string;
-        /** AiBoxSubscription.id from Metabox — used for idempotency */
-        subscriptionId?: string;
-      };
+    const {
+      telegramId,
+      tokens,
+      description,
+      grantType,
+      endDate,
+      planName,
+      subscriptionId,
+      orderId,
+    } = request.body as {
+      telegramId: string;
+      tokens: number;
+      description?: string;
+      grantType?: "subscription" | "tokens";
+      endDate?: string;
+      planName?: string;
+      /** AiBoxSubscription.id from Metabox — used for idempotency */
+      subscriptionId?: string;
+      /** AiBotOrder.id from Metabox — used for idempotency on token-pack grants.
+       *  Optional для обратной совместимости со старыми вызовами (без orderId
+       *  работает по-старому, без dedup'а). */
+      orderId?: string;
+    };
 
     if (!telegramId || typeof tokens !== "number" || tokens === 0) {
       return reply.code(400).send({ error: "telegramId and non-zero tokens are required" });
@@ -89,6 +101,25 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       );
       // alreadyGranted (false) is a no-op — idempotent, always return ok
     } else {
+      // Идемпотентность по orderId — если запись уже есть в GrantedMetaboxOrder,
+      // токены ранее зачислены, повторный вызов от metabox (ретрай / сетевой
+      // повтор / параллельный pull-flow syncMetaboxGrants) → no-op.
+      if (orderId) {
+        const existing = await db.grantedMetaboxOrder.findUnique({
+          where: { orderId },
+        });
+        if (existing) {
+          console.log(
+            `[grant-tokens] order ${orderId} already granted — idempotent skip (no double-credit)`,
+          );
+          return { ok: true, alreadyGranted: true };
+        }
+      }
+
+      // Insert в GrantedMetaboxOrder идёт в той же транзакции. При гонке
+      // (например, syncMetaboxGrants уже зачислил с тем же orderId) сработает
+      // unique-violation на pkey и весь батч откатится — двойного зачисления
+      // не будет.
       await db.$transaction([
         db.user.update({
           where: { id: userId },
@@ -103,6 +134,18 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
             description: description || null,
           },
         }),
+        ...(orderId
+          ? [
+              db.grantedMetaboxOrder.create({
+                data: {
+                  orderId,
+                  telegramId: userId,
+                  tokens,
+                  description: description || null,
+                },
+              }),
+            ]
+          : []),
       ]);
     }
 
@@ -120,6 +163,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       telegramId,
       subscriptionTokenBalance,
       tokenBalance,
+      orderGrants,
       // LocalSubscription fields
       endDate,
       planName,
@@ -131,6 +175,11 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       telegramId: string;
       subscriptionTokenBalance?: number;
       tokenBalance?: number;
+      /** Per-order разрез pendingBotTokens — каждая запись идёт через dedup
+       *  по GrantedMetaboxOrder. Когда передано, `tokenBalance` игнорируется
+       *  (эффективная сумма считается из не-выданных orderGrants). Без поля
+       *  работает как раньше (увеличение на `tokenBalance` без dedup'а). */
+      orderGrants?: Array<{ orderId: string; tokens: number; description?: string }>;
       endDate?: string;
       planName?: string;
       period?: string;
@@ -149,15 +198,82 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ error: "User not found" });
     }
 
-    // Update User token balances (INCREMENT pending tokens onto existing balance)
-    const userData: Record<string, unknown> = {};
-    if (subscriptionTokenBalance !== undefined && subscriptionTokenBalance > 0)
-      userData.subscriptionTokenBalance = { increment: subscriptionTokenBalance };
-    if (tokenBalance !== undefined && tokenBalance > 0)
-      userData.tokenBalance = { increment: tokenBalance };
+    // Idempotency check 1: subscriptionTokenBalance дедуплицируется по
+    // metaboxSubscriptionId. Если LocalSubscription с этим metaboxSubscriptionId
+    // уже существует и активна — токены этой подписки были начислены ранее.
+    // Параллель с `grantMetaboxSubscription` (см. payment.service.ts:283-292).
+    let shouldApplySubscriptionTokens =
+      subscriptionTokenBalance !== undefined && subscriptionTokenBalance > 0;
+    if (shouldApplySubscriptionTokens && metaboxSubscriptionId) {
+      const linkedSub = await db.localSubscription.findUnique({
+        where: { metaboxSubscriptionId },
+      });
+      if (linkedSub && linkedSub.isActive) {
+        console.log(
+          `[sync-subscription] skip subTokens: metaboxSubscriptionId=${metaboxSubscriptionId} already linked + active`,
+        );
+        shouldApplySubscriptionTokens = false;
+      }
+    }
 
+    // Idempotency check 2: token-pack credit по orderGrants.
+    // Если передан per-order список — фильтруем уже выданные через
+    // GrantedMetaboxOrder, считаем сумму только новых orderId'ов и
+    // создаём записи в той же транзакции. Без orderGrants работаем
+    // по-старому (legacy `tokenBalance` инкремент без dedup'а).
+    let effectiveTokenBalance = tokenBalance !== undefined && tokenBalance > 0 ? tokenBalance : 0;
+    const newOrderInserts: Array<{
+      orderId: string;
+      telegramId: bigint;
+      tokens: number;
+      description: string | null;
+    }> = [];
+    if (orderGrants && orderGrants.length > 0) {
+      const existing = await db.grantedMetaboxOrder.findMany({
+        where: { orderId: { in: orderGrants.map((g) => g.orderId) } },
+        select: { orderId: true },
+      });
+      const grantedSet = new Set(existing.map((e) => e.orderId));
+      const newGrants = orderGrants.filter((g) => !grantedSet.has(g.orderId));
+      // Override legacy `tokenBalance` суммой новых orderGrants — источник
+      // истины смещается на AiBotOrder list, чтобы pendingBotTokens-расхождения
+      // (если есть) не мешали корректному зачислению.
+      effectiveTokenBalance = newGrants.reduce((sum, g) => sum + g.tokens, 0);
+      for (const grant of newGrants) {
+        newOrderInserts.push({
+          orderId: grant.orderId,
+          telegramId: userId,
+          tokens: grant.tokens,
+          description: grant.description ?? null,
+        });
+      }
+      if (newGrants.length < orderGrants.length) {
+        console.log(
+          `[sync-subscription] dedup: ${orderGrants.length - newGrants.length}/${orderGrants.length} orders уже в GrantedMetaboxOrder, скипаем`,
+        );
+      }
+    }
+
+    // Apply user updates + GrantedMetaboxOrder inserts атомарно.
+    const userData: Record<string, unknown> = {};
+    if (shouldApplySubscriptionTokens) {
+      userData.subscriptionTokenBalance = { increment: subscriptionTokenBalance! };
+    }
+    if (effectiveTokenBalance > 0) {
+      userData.tokenBalance = { increment: effectiveTokenBalance };
+    }
+
+    const ops: Array<
+      ReturnType<typeof db.user.update> | ReturnType<typeof db.grantedMetaboxOrder.create>
+    > = [];
     if (Object.keys(userData).length > 0) {
-      await db.user.update({ where: { id: userId }, data: userData });
+      ops.push(db.user.update({ where: { id: userId }, data: userData }));
+    }
+    for (const insert of newOrderInserts) {
+      ops.push(db.grantedMetaboxOrder.create({ data: insert }));
+    }
+    if (ops.length > 0) {
+      await db.$transaction(ops);
     }
 
     // Upsert LocalSubscription (single source of truth for subscription state).
@@ -414,6 +530,69 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     return { ok: true, previousBalance: Number(user.tokenBalance) };
+  });
+
+  /**
+   * POST /internal/set-referrer
+   * Called by Metabox admin when a user's mentor is changed on the site.
+   *
+   * Both mentee and new mentor are identified by Metabox User.id (UUID) —
+   * the stable cross-system identifier. Bot looks them up via the
+   * metaboxUserId column.
+   *
+   * Cases:
+   *  - mentee not found in bot (never linked TG)        → no-op, ok
+   *  - new mentor not found in bot (никогда не запускал) → referredById = null
+   *  - new mentor found                                  → referredById = mentor.id
+   *  - newMentorMetaboxUserId === null                   → referredById = null
+   *
+   * Сайт — единый источник истины для MLM/реферальной структуры. Локальный
+   * referredById в боте используется только для информационных целей (см.
+   * profile.ts fallback). Поэтому на стороне бота мы НЕ создаём stub'ов
+   * для несвязанных менторов — просто храним null, пока тот не запустит бота.
+   */
+  fastify.post("/set-referrer", async (request, reply) => {
+    const { metaboxUserId, newMentorMetaboxUserId } = request.body as {
+      metaboxUserId?: string;
+      newMentorMetaboxUserId?: string | null;
+    };
+
+    if (!metaboxUserId) {
+      return reply.code(400).send({ error: "metaboxUserId is required" });
+    }
+
+    const mentee = await db.user.findFirst({
+      where: { metaboxUserId },
+      select: { id: true },
+    });
+
+    if (!mentee) {
+      // User never started the bot — nothing to mirror.
+      return { ok: true, applied: false, reason: "mentee_not_in_bot" };
+    }
+
+    let newReferredById: bigint | null = null;
+    if (newMentorMetaboxUserId) {
+      const mentor = await db.user.findFirst({
+        where: { metaboxUserId: newMentorMetaboxUserId },
+        select: { id: true },
+      });
+      // Если ментора в боте нет — пишем null. Сайт всё равно видит верную
+      // структуру через свою БД, бот «дозаполнится» сам когда ментор начнёт
+      // использовать бота (сейчас этого никто не делает, и это by design).
+      newReferredById = mentor?.id ?? null;
+    }
+
+    await db.user.update({
+      where: { id: mentee.id },
+      data: { referredById: newReferredById },
+    });
+
+    return {
+      ok: true,
+      applied: true,
+      referredById: newReferredById?.toString() ?? null,
+    };
   });
 
   /**

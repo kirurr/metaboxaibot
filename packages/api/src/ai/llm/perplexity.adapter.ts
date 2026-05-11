@@ -65,7 +65,9 @@ export class PerplexityAdapter extends BaseLLMAdapter {
 
     const extraParams: Record<string, unknown> = {};
     if (input.temperature !== undefined) extraParams.temperature = input.temperature;
-    if (input.maxTokens !== undefined) extraParams.max_tokens = input.maxTokens;
+    if (input.maxTokensLimitEnabled === true && input.maxTokens !== undefined) {
+      extraParams.max_tokens = input.maxTokens;
+    }
     if (input.searchRecencyFilter) extraParams.search_recency_filter = input.searchRecencyFilter;
     if (input.searchContextSize)
       extraParams.web_search_options = { search_context_size: input.searchContextSize };

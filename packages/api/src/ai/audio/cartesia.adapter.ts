@@ -1,7 +1,19 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
+
+/**
+ * Cartesia /tts/bytes ругается 400/404 на голос, который у нас сохранён,
+ * но на стороне провайдера уже не существует (или передан мусор, прошедший
+ * структурную валидацию). Отличаем такие ошибки от прочих 4xx (auth, rate
+ * limit), чтобы юзер получил понятное «выберите голос», а не generic.
+ */
+function isCartesiaVoiceError(status: number, body: string): boolean {
+  if (status !== 400 && status !== 404) return false;
+  const lower = body.toLowerCase();
+  return lower.includes("voice");
+}
 
 const CARTESIA_API = "https://api.cartesia.ai";
 
@@ -109,6 +121,12 @@ export class CartesiaAdapter implements AudioAdapter {
 
     if (!res.ok) {
       const text = await res.text();
+      if (isCartesiaVoiceError(res.status, text)) {
+        throw new UserFacingError(`Cartesia TTS voice unavailable: ${res.status} ${text}`, {
+          key: "ttsVoiceUnavailable",
+          section: "audio",
+        });
+      }
       throw new Error(`Cartesia TTS failed: ${res.status} ${text}`);
     }
 

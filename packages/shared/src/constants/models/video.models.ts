@@ -138,13 +138,37 @@ const MI_SEEDANCE_LAST_FRAME: MediaInputSlot = {
   exclusiveGroup: "frames",
 };
 
-/** Seedance 2 reference-to-video slots — exclusive with frame slots. */
+/**
+ * Seedance 2 reference-to-video slots — exclusive with frame slots.
+ *
+ * Constraints ниже взяты из docs/schema/evolink/seedance2.md:
+ *   - Изображения: jpeg/png/webp; 300–6000 px по каждой стороне; ratio 0.4–2.5;
+ *     ≤30 MB на файл (общий request body ≤64 MB, но это не лимит на отдельный
+ *     слот — проверяем по штучно).
+ *   - Видео: mp4/mov; 480p–1080p; 300–6000 px; ratio 0.4–2.5; frame pixels
+ *     409,600–2,086,876 (≈640² до 2206×946 — 4K phone-видео 8.29M НЕ влезает,
+ *     отсюда maxFramePixels); 2–15s; ≤50 MB; total duration всех видео ≤15s.
+ *   - Аудио: wav/mp3; 2–15s на клип; ≤15 MB на клип.
+ *
+ * FPS-чек (24–60) технически тоже есть в доке, но Telegram через
+ * `message.video.{...}` его не отдаёт, без ffprobe мы не валидируем.
+ * Это единственный gap'а — остальное падает на upload, не на Evolink.
+ */
 const MI_REF_IMAGES: MediaInputSlot = {
   slotKey: "ref_images",
   mode: "reference_image",
   labelKey: "referenceImages",
   maxImages: 9,
   exclusiveGroup: "refs",
+  constraints: {
+    maxFileSizeBytes: 30 * 1024 * 1024,
+    minWidth: 300,
+    maxWidth: 6000,
+    minHeight: 300,
+    maxHeight: 6000,
+    minAspectRatio: 0.4,
+    maxAspectRatio: 2.5,
+  },
 };
 const MI_REF_VIDEOS: MediaInputSlot = {
   slotKey: "ref_videos",
@@ -152,6 +176,19 @@ const MI_REF_VIDEOS: MediaInputSlot = {
   labelKey: "referenceVideos",
   maxImages: 3,
   exclusiveGroup: "refs",
+  constraints: {
+    minDurationSec: 2,
+    maxDurationSec: 15,
+    maxFileSizeBytes: 50 * 1024 * 1024,
+    minWidth: 300,
+    maxWidth: 6000,
+    minHeight: 300,
+    maxHeight: 6000,
+    minAspectRatio: 0.4,
+    maxAspectRatio: 2.5,
+    minFramePixels: 409_600,
+    maxFramePixels: 2_086_876,
+  },
 };
 const MI_REF_AUDIOS: MediaInputSlot = {
   slotKey: "ref_audios",
@@ -159,6 +196,11 @@ const MI_REF_AUDIOS: MediaInputSlot = {
   labelKey: "referenceAudios",
   maxImages: 3,
   exclusiveGroup: "refs",
+  constraints: {
+    minDurationSec: 2,
+    maxDurationSec: 15,
+    maxFileSizeBytes: 15 * 1024 * 1024,
+  },
 };
 
 /** Grok Imagine r2v: до 7 reference-картинок, ссылаются в промпте через @image1..@image7. Required — модель без картинок не имеет смысла. */
@@ -1497,18 +1539,14 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
-    supportedAspectRatios: ["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"],
-    durationRange: { min: 2, max: 10 },
+    supportedAspectRatios: ["1280:720", "720:1280"],
+    supportedDurations: [5, 10],
     settings: [
-      mkAspectRatio(["1280:720", "720:1280", "1104:832", "832:1104", "960:960", "1584:672"], {
+      mkAspectRatio(["1280:720", "720:1280"], {
         "1280:720": "16:9",
         "720:1280": "9:16",
-        "1104:832": "4:3",
-        "832:1104": "3:4",
-        "960:960": "1:1",
-        "1584:672": "21:9",
       }),
-      mkDurationSlider(2, 10),
+      mkDurationSelect([5, 10]),
       {
         key: "seed",
         label: "Seed",

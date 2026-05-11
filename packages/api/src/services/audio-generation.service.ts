@@ -1,8 +1,29 @@
 import { db } from "../db.js";
 import { getAudioQueue } from "../queues/audio.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
+import { AI_MODELS, ONE_SHOT_SETTING_KEYS, UserFacingError } from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Cartesia принимает только UUID. В userState.modelSettings.voice_id может
+ * лежать либо живой Cartesia UUID, либо UserVoice.id (cuid, резолвится в
+ * воркере). Если ни то, ни другое — голос мёртвый (например, UserVoice удалили),
+ * адаптер на сабмите получит 400. Лучше упасть здесь, до списания токенов,
+ * с понятным сообщением, чем тратить ретраи воркера и токены.
+ */
+async function ensureCartesiaVoiceResolvable(voiceId: string): Promise<void> {
+  if (UUID_RE.test(voiceId)) return;
+  const userVoice =
+    (await db.userVoice.findFirst({ where: { id: voiceId }, select: { id: true } })) ??
+    (await db.userVoice.findFirst({ where: { externalId: voiceId }, select: { id: true } }));
+  if (userVoice) return;
+  throw new UserFacingError("Selected voice is unavailable", {
+    key: "ttsVoiceUnavailable",
+    section: "audio",
+  });
+}
 
 /** Drop one-shot upload fields (voice_*, talking_photo_id) from the history
  * snapshot so `inputData.modelSettings` stays clean of per-generation noise. */
@@ -39,6 +60,22 @@ export const audioGenerationService = {
 
     const preview = await costPreviewService.previewAudio(params);
     const modelSettings = preview.effectiveModelSettings;
+
+    if (modelId === "tts-cartesia") {
+      const raw = modelSettings.voice_id ?? voiceId;
+      // null/undefined/"" — «голос не выбран», адаптер использует DEFAULT_VOICE_ID.
+      // Сохраняем поведение старого `(ms.voice_id) || input.voiceId || DEFAULT`.
+      if (raw !== undefined && raw !== null && raw !== "") {
+        if (typeof raw !== "string") {
+          throw new UserFacingError("Selected voice is unavailable", {
+            key: "ttsVoiceUnavailable",
+            section: "audio",
+          });
+        }
+        await ensureCartesiaVoiceResolvable(raw);
+      }
+    }
+
     await checkBalance(userId, preview.cost);
 
     const job = await db.generationJob.create({

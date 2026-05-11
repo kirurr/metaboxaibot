@@ -80,6 +80,12 @@ export interface ModelSettingDef {
   unavailableIf?: UnavailableRule;
   /** When true the setting is rendered inside a collapsible "Advanced" section. */
   advanced?: boolean;
+  /**
+   * Conditional visibility: setting is hidden until another setting (`key`)
+   * holds the given `value`. Used to gate a slider behind a toggle so users
+   * don't see a number that has no effect until they opt in.
+   */
+  dependsOn?: { key: string; value: string | number | boolean };
 }
 
 // ── Media input slot types ───────────────────────────────────────────────────
@@ -127,6 +133,20 @@ export interface MediaInputConstraints {
    * Изображения шире этого лимита отбраковываются.
    */
   maxAspectRatio?: number;
+  /**
+   * Минимальное произведение width × height (frame pixels). Дополняет
+   * `minWidth`/`minHeight`: бывает, что обе стороны проходят, но суммарная
+   * площадь кадра ниже минимума (например, Evolink Seedance r2v требует
+   * ≥409,600 пикселей на кадр reference-видео).
+   */
+  minFramePixels?: number;
+  /**
+   * Максимальное произведение width × height. Особенно актуально для
+   * reference-видео — 4K-видео с телефона имеет ~8.3M пикселей на кадр и
+   * выходит за лимит Seedance (~2.08M). Width/height по отдельности при
+   * этом проходят (3840 ≤ 6000, 2160 ≤ 6000), а площадь — нет.
+   */
+  maxFramePixels?: number;
 }
 
 export interface MediaInputSlot {
@@ -343,6 +363,15 @@ export interface AIModel {
    * `context_window` setting (which defaults to this value).
    */
   contextWindow?: number;
+  /**
+   * Realistic ceiling for output tokens per turn. Drives the `max_tokens`
+   * slider's upper bound + acts as the implicit cap for providers that
+   * require `max_tokens` in every request (Anthropic Messages API). When the
+   * user's "Ограничить длину ответа" toggle is OFF, the chat service either
+   * skips the field entirely (OpenAI Responses, Gemini, OpenAI-compatible)
+   * or substitutes this value (Anthropic — required field).
+   */
+  maxOutputTokens?: number;
   /**
    * USD per megapixel for models with per-megapixel billing (e.g. FLUX).
    * When set, costUsdPerRequest must be 0; actual cost = ceil(px/1_000_000) × this rate.

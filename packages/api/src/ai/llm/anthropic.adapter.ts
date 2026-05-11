@@ -6,7 +6,7 @@ import {
   type MessageRecord,
   type StreamResult,
 } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { AI_MODELS, config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 
 const MODEL_MAP: Record<string, string> = {
@@ -54,18 +54,30 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   }
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
+    // Anthropic Messages API требует `max_tokens` всегда. Если юзер не включил
+    // тогл «Ограничить длину ответа» — подставляем щедрый потолок
+    // `min(modelCap, ctx * 0.4)`. См. claude-anthropic-proxy.adapter для
+    // полного обоснования. Hint `adapterOutputReservation` синхронизирует
+    // truncate'овый резерв с реально отправляемым `max_tokens` — иначе на
+    // длинных диалогах Anthropic вернёт 400 «prompt is too long».
+    const userContextWindow =
+      input.contextWindowOverride && input.contextWindowOverride > 0
+        ? input.contextWindowOverride
+        : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
+    const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
+    const maxTokens =
+      input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? input.maxTokens
+        : Math.min(modelCap, Math.floor(userContextWindow * 0.4));
+    input = { ...input, adapterOutputReservation: maxTokens };
     input = this.truncateInput(input);
     const messages = this.buildMessages(input);
     logCall(this.apiModel, "chatStream", {
       temperature: input.temperature,
-      max_tokens: input.maxTokens,
+      max_tokens: maxTokens,
       messages_count: messages.length,
       extended_thinking: input.extendedThinking,
     });
-    // Extended thinking requires a higher max_tokens budget (must exceed budget_tokens).
-    const maxTokens = input.extendedThinking
-      ? Math.max(input.maxTokens ?? 16000, 16000)
-      : (input.maxTokens ?? 4096);
     const stream = (
       this.client.messages.stream as (p: unknown) => ReturnType<typeof this.client.messages.stream>
     )({
@@ -82,30 +94,66 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let incompleteReason: string | undefined;
+    let lastStopReason: string | undefined;
+    let visibleChunks = 0;
+    // Reasoning буферизуется и yield'ится только перед первым text_delta
+    // (если showReasoning=true) ИЛИ перед return при non-refusal stop_reason
+    // с visibleChunks=0 (всегда, чтобы юзер понял что произошло). Симметрично
+    // claude-anthropic-proxy.adapter — гарантирует что mid-stream обрыв на
+    // reasoning ОСТАВЛЯЕТ `chunks.length === 0` в chat.service и retry/fallback
+    // реально срабатывает.
+    let thinkingBuffer = "";
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        if (thinkingBuffer.length > 0) {
+          if (input.showReasoning) {
+            yield "<think>";
+            yield thinkingBuffer;
+            yield "</think>";
+          }
+          thinkingBuffer = "";
+        }
+        visibleChunks++;
         yield event.delta.text;
+      } else if (
+        event.type === "content_block_delta" &&
+        (event.delta as { type?: string; thinking?: string }).type === "thinking_delta"
+      ) {
+        const text = (event.delta as { thinking?: string }).thinking ?? "";
+        if (text) thinkingBuffer += text;
       } else if (event.type === "message_start") {
         inputTokens = event.message.usage.input_tokens;
       } else if (event.type === "message_delta") {
         outputTokens = event.usage.output_tokens;
+        const stopReason = event.delta.stop_reason;
+        if (typeof stopReason === "string") lastStopReason = stopReason;
         // stop_reason → incompleteReason: позволяет chat.service отличить
-        // legit empty-response (max_tokens) от generic provider error. Без
-        // этого юзер при reasoning-cap получает «временно недоступен» вместо
-        // адресного «снизьте Глубину рассуждений / поднимите Макс. длину».
-        // SDK 0.39 знает только 4 stop_reason'а; «refusal» добавили в более
-        // новых API-версиях — пока не покрываем (см. proxy-адаптер для него).
-        if (event.delta.stop_reason === "max_tokens") {
+        // legit empty-response (max_tokens) от generic provider error.
+        if (stopReason === "max_tokens") {
           incompleteReason = "max_output_tokens";
         }
       }
+    }
+
+    // Финальный flush буфера: при любом non-refusal завершении с visible=0 —
+    // показываем thinking, иначе chat.service увидит пустой ответ.
+    if (
+      visibleChunks === 0 &&
+      thinkingBuffer.length > 0 &&
+      lastStopReason !== undefined &&
+      lastStopReason !== "refusal"
+    ) {
+      yield "<think>";
+      yield thinkingBuffer;
+      yield "</think>";
     }
 
     return {
       inputTokensUsed: inputTokens,
       outputTokensUsed: outputTokens,
       ...(incompleteReason ? { incompleteReason } : {}),
+      ...(lastStopReason ? { lastStopReason } : {}),
     };
   }
 

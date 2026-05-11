@@ -231,6 +231,14 @@ export class KieVeoAdapter implements VideoAdapter {
       const errorMessage = task.errorMessage ?? "unknown error";
       const technicalMessage = `KIE ${this.modelId} generation failed: ${errorCode} ${errorMessage}`;
 
+      // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
+      // их backend в трауре, plain Error чтобы processor через
+      // `isKieTransientError` триггернул re-submit на fallback.
+      // См. kie-error.ts:isKieTransientError + kie.adapter.ts:image/video.
+      if (errorCode === "422" && /playground failed|task id is blank/i.test(errorMessage)) {
+        throw new Error(technicalMessage);
+      }
+
       // 400: prompt flagged / unsafe image / failed to fetch image — policy/user-input issue.
       const isUserInputIssue = task.errorCode === 400;
       const isPublicFigure =

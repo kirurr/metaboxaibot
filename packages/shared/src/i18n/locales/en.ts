@@ -71,6 +71,8 @@ export default {
       filesWarning:
         "\n<blockquote>💡Text neural networks don't generate images or create files.</blockquote>",
     },
+    reasoningHeader: "🧠 Model reasoning",
+    reasoningPartLabel: "part {index}/{total}",
   },
   design: {
     sectionTitle: "🎨 AI Design",
@@ -92,8 +94,10 @@ export default {
     batchActionsNoDownload:
       "You can refine an image or get the original uncompressed file sent back into the chat.\n\n🔄 - Refine\n📎 - Send as file",
     batchPartialFooter:
-      "✅ Generated {success} of {total}. You were only charged for the successful ones. Failed:\n{errors}",
-    batchAllFailed: "❌ Failed to generate any of {total}. Errors:\n{errors}",
+      "✅ Generated {success} of {total}. You were only charged for the successful ones.\n\n{errors}",
+    batchAllFailed: "❌ Failed to generate any of {total}.\n\n{errors}",
+    batchSubJobFailedMessage:
+      "🪫 {modelName} did less than you asked for. The tokens for the missing ones stayed safe — turns out you saved without even trying. Retry - sure. Don't retry - also fine.",
     chooseModel: "🎨 Choose model",
   },
   audio: {
@@ -275,6 +279,8 @@ export default {
       "❌ The image is too large ({actualW}×{actualH} px). Maximum size is {maxW}×{maxH} px.",
     mediaSlotAspectRatioOutOfRange:
       "❌ Image aspect ratio ({actualW}×{actualH}) is outside the allowed range {minRatio}–{maxRatio}.",
+    mediaSlotFramePixelsOutOfRange:
+      "❌ Frame {actualW}×{actualH} ({actualMpix} MP) is outside the allowed range {minMpix}–{maxMpix} MP. Try a lower-resolution video.",
     mediaSlotReadMetadataFailed: "❌ Failed to read file metadata. Check the format and try again.",
     kieVideoDurationOutOfRange: "❌ Video duration must be between {min} and {max} seconds.",
     kieImageTooSmall:
@@ -299,6 +305,10 @@ export default {
       "❌ The output looks similar to copyrighted material (recognizable characters, brands, celebrities). Please rephrase your prompt and try again.",
     publicFigureViolation:
       "❌ Request blocked: the model detected a prominent public figure in your description or image. Provider policy disallows generating with celebrities — modify your description or use a different photo.",
+    identityPreservationNotAllowed:
+      "❌ This model refuses to reproduce real people's faces from reference photos — it's a provider restriction. Modify your request (without exact identity) or try a different model.",
+    midjourneySyntaxNotSupported:
+      "❌ {modelName} doesn't understand Midjourney syntax (`/imagine prompt:`, flags `--ar`, `--stylize`, etc.). Remove these commands from your prompt or switch to the «🎨 MidJourney v7» model.",
     klingMotionImageRecognitionFailed:
       "❌ Could not recognize the character in the reference image. Upload a different photo — ideally one where the full body or upper body (head, shoulders, torso) is clearly visible. Close-up face shots, back views, or cropped figures will not work.",
     generationNoResult:
@@ -330,9 +340,17 @@ export default {
     generationTimedOut24h:
       "❌ {modelName}: generation did not finish within 24 hours and was cancelled. Please try again.",
     modelTemporarilyUnavailable:
-      "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you.",
-    modelReasoningCapExhausted:
-      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth» or raise «Max response length».",
+      "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you. Tokens for this request were not charged.",
+    modelReasoningCapExhaustedOpenai:
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth». Tokens for this request were not charged.",
+    modelReasoningCapExhaustedAnthropic:
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management and turn off «Extended thinking» — or try shortening the prompt. Tokens for this request were not charged.",
+    outputLimitReached:
+      "✂️ {modelName} hit your set limit of {limit} tokens. Open ⚙ Management → model and disable «Limit response length» or raise the slider. Tokens for this request were not charged.",
+    outputLimitOnlyThinking:
+      "🧠 {modelName} only had room to think within your {limit}-token limit — no room left for the actual answer. Reasoning is above ☝ Open ⚙ Management and raise «Max response length» or disable «Limit response length». Tokens for this request were not charged.",
+    modelOnlyThinking:
+      "🧠 {modelName} only had room to think — no space left for the actual answer. Reasoning is above ☝ Try turning off «Extended thinking», shortening the prompt, or picking another model. Tokens for this request were not charged.",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",
@@ -373,6 +391,8 @@ export default {
       "❌ Audio length does not match video length. Please check your input files.",
     heygenAvatarNotFound: "❌ Avatar not found. Please select a different avatar in settings.",
     heygenVoiceNotFound: "❌ Voice not found. Please select a different voice in settings.",
+    ttsVoiceUnavailable:
+      "❌ Selected voice is unavailable. Open Management → model settings and pick a voice again.",
     heygenVoicePremium: "❌ The selected voice is only available for HeyGen premium accounts.",
     heygenTtsLanguage: "❌ TTS language error. Please check your voice settings.",
     heygenTrialLimit:
