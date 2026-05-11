@@ -7,6 +7,7 @@ import { config, getT } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
 import { db } from "../db.js";
 import { usdToTokens } from "../services/token.service.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 /** Должна совпадать со значениями в bot/scenes/video.ts и worker/processors/avatar.processor.ts. */
 const SOUL_COST_USD = 2.5;
@@ -15,30 +16,75 @@ type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["user-avatars"]),
+  );
 
   /** GET /user-avatars?provider=heygen — list user avatars */
-  fastify.get<{ Querystring: { provider?: string } }>("/user-avatars", async (request) => {
-    const { userId } = request as AuthRequest;
-    const { provider } = request.query;
-    const avatars = await userAvatarService.list(userId, provider);
-    return Promise.all(
-      avatars.map(async (a) => {
-        let previewUrl = a.previewUrl;
-        if (previewUrl && !previewUrl.startsWith("http")) {
-          previewUrl = await getFileUrl(previewUrl).catch(() => null);
-        }
-        return {
-          id: a.id,
-          provider: a.provider,
-          name: a.name,
-          externalId: a.externalId,
-          previewUrl,
-          status: a.status,
-          createdAt: a.createdAt.toISOString(),
-        };
-      }),
-    );
-  });
+  fastify.get<{ Querystring: { provider?: string } }>(
+    "/user-avatars",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            provider: {
+              type: "string",
+              description: "Filter by provider (heygen, higgsfield_soul)",
+            },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Avatar ID" },
+                provider: { type: "string", description: "Provider name" },
+                name: { type: "string", description: "Avatar name" },
+                externalId: { type: "string", description: "External provider ID" },
+                previewUrl: { type: "string", nullable: true, description: "Preview image URL" },
+                status: { type: "string", description: "Avatar status" },
+                createdAt: { type: "string", description: "Creation timestamp" },
+              },
+              required: [
+                "id",
+                "provider",
+                "name",
+                "externalId",
+                "previewUrl",
+                "status",
+                "createdAt",
+              ],
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const { provider } = request.query;
+      const avatars = await userAvatarService.list(userId, provider);
+      return Promise.all(
+        avatars.map(async (a) => {
+          let previewUrl = a.previewUrl;
+          if (previewUrl && !previewUrl.startsWith("http")) {
+            previewUrl = await getFileUrl(previewUrl).catch(() => null);
+          }
+          return {
+            id: a.id,
+            provider: a.provider,
+            name: a.name,
+            externalId: a.externalId,
+            previewUrl,
+            status: a.status,
+            createdAt: a.createdAt.toISOString(),
+          };
+        }),
+      );
+    },
+  );
 
   /**
    * POST /user-avatars/start-creation
@@ -46,6 +92,31 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Body: { provider: string } }>(
     "/user-avatars/start-creation",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            provider: {
+              type: "string",
+              enum: ["heygen", "higgsfield_soul"],
+              description: "Avatar provider",
+            },
+          },
+          required: ["provider"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { provider } = request.body ?? {};
@@ -108,6 +179,41 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /user-avatars/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
     "/user-avatars/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Avatar ID" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "New avatar name" },
+          },
+          required: ["name"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+          400: badRequestResponse,
+          404: {
+            description: "Avatar not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -120,11 +226,41 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-avatars/:id */
-  fastify.delete<{ Params: { id: string } }>("/user-avatars/:id", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
-    const ok = await userAvatarService.delete(id, userId);
-    if (!ok) return reply.status(404).send({ error: "Avatar not found" });
-    return { ok: true };
-  });
+  fastify.delete<{ Params: { id: string } }>(
+    "/user-avatars/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Avatar ID" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+          404: {
+            description: "Avatar not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
+      const ok = await userAvatarService.delete(id, userId);
+      if (!ok) return reply.status(404).send({ error: "Avatar not found" });
+      return { ok: true };
+    },
+  );
 };

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
+import { constructOpenAPIonRouteHook, forbiddenResponse } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -10,6 +11,10 @@ type AuthRequest = { userId: bigint };
  * or via legacy x-admin-secret header.
  */
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["admin"]),
+  );
+
   fastify.addHook("preHandler", async (request, reply) => {
     // Legacy: secret-based auth
     const secret = config.api.adminSecret;
@@ -38,6 +43,59 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** GET /admin/users?page=1&limit=50&search=john */
   fastify.get<{ Querystring: { page?: string; limit?: string; search?: string } }>(
     "/admin/users",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "string", description: "Page number, starts from 1" },
+            limit: { type: "string", description: "Items per page, max 100" },
+            search: { type: "string", description: "Search by username, firstName, or lastName" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              users: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", description: "User ID" },
+                    username: { type: "string", nullable: true, description: "Telegram username" },
+                    firstName: { type: "string", nullable: true, description: "User's first name" },
+                    tokenBalance: { type: "string", description: "Current token balance" },
+                    role: { type: "string", description: "User role: USER, MODERATOR, or ADMIN" },
+                    isBlocked: { type: "boolean", description: "Whether user is blocked" },
+                    createdAt: { type: "string", description: "Account creation timestamp" },
+                  },
+                  required: [
+                    "id",
+                    "username",
+                    "firstName",
+                    "tokenBalance",
+                    "role",
+                    "isBlocked",
+                    "createdAt",
+                  ],
+                },
+              },
+              total: { type: "number", description: "Total number of users matching the filter" },
+              page: { type: "number", description: "Current page number" },
+              limit: { type: "number", description: "Items per page" },
+            },
+            required: ["users", "total", "page", "limit"],
+          },
+          403: {
+            type: "object",
+            properties: {
+              error: { type: "string", description: "Forbidden - admin access required" },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       const page = Math.max(1, Number(request.query.page ?? 1));
       const limit = Math.min(100, Number(request.query.limit ?? 50));
@@ -88,6 +146,44 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** POST /admin/grant — grant tokens to a user */
   fastify.post<{ Body: { userId: string; amount: number; reason?: string } }>(
     "/admin/grant",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "Target user's ID" },
+            amount: { type: "number", description: "Positive amount of tokens to grant" },
+            reason: { type: "string", description: "Reason for granting tokens" },
+          },
+          required: ["userId", "amount"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              newBalance: { type: "string", description: "User's new token balance" },
+            },
+            required: ["success", "newBalance"],
+          },
+          400: {
+            description: "Bad request - userId and positive amount required",
+            type: "object",
+            properties: {
+              error: { type: "string", const: "userId and positive amount required" },
+            },
+          },
+          403: forbiddenResponse,
+          404: {
+            description: "User not found",
+            type: "object",
+            properties: {
+              error: { type: "string", const: "User not found" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, amount, reason } = request.body;
       if (!userId || !amount || amount <= 0) {
@@ -117,9 +213,46 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  /** POST /admin/block */
+  /** POST /admin/block - block or unblock a user */
   fastify.post<{ Body: { userId: string; blocked: boolean } }>(
     "/admin/block",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "Target user's ID" },
+            blocked: { type: "boolean", description: "Set to true to block, false to unblock" },
+          },
+          required: ["userId", "blocked"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              isBlocked: { type: "boolean", description: "Current blocked status" },
+            },
+            required: ["success", "isBlocked"],
+          },
+          400: {
+            description: "Bad request - userId required",
+            type: "object",
+            properties: {
+              error: { type: "string", const: "userId required" },
+            },
+          },
+          403: forbiddenResponse,
+          404: {
+            description: "User not found",
+            type: "object",
+            properties: {
+              error: { type: "string", const: "User not found" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, blocked } = request.body;
       if (!userId) {
@@ -142,6 +275,52 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** POST /admin/role — change user role (ADMIN only) */
   fastify.post<{ Body: { userId: string; role: string } }>(
     "/admin/role",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "Target user's ID" },
+            role: {
+              type: "string",
+              enum: ["USER", "MODERATOR", "ADMIN"],
+              description: "New role to assign",
+            },
+          },
+          required: ["userId", "role"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+            required: ["success"],
+          },
+          400: {
+            description: "Bad request",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          403: {
+            description: "Forbidden - only admins can change user roles",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          404: {
+            description: "User not found",
+            type: "object",
+            properties: {
+              error: { type: "string", const: "User not found" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, role } = request.body;
       if (!userId || !role) {
