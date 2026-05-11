@@ -343,6 +343,12 @@ export default {
       "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth».",
     modelReasoningCapExhaustedAnthropic:
       "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and disable «Extended thinking» or raise «Max response length».",
+    outputLimitReached:
+      "✂️ {modelName} hit your set limit of {limit} tokens. Open ⚙ Management → model and disable «Limit response length» or raise the slider. Tokens for this request were not charged.",
+    outputLimitOnlyThinking:
+      "🧠 {modelName} only had room to think within your {limit}-token limit — no room left for the actual answer. Reasoning is above ☝ Open ⚙ Management and raise «Max response length» or disable «Limit response length». Tokens for this request were not charged.",
+    modelOnlyThinking:
+      "🧠 {modelName} only had room to think — no space left for the actual answer. Reasoning is above ☝ Try turning off «Extended thinking», shortening the prompt, or picking another model. Tokens for this request were not charged.",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",

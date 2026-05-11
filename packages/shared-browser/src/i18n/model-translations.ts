@@ -419,10 +419,15 @@ export const SETTING_TRANSLATIONS_EN: Record<string, SettingTranslation> = {
     description:
       "Randomness of responses: lower = more precise and predictable, higher = more varied and creative.",
   },
+  max_tokens_limit_enabled: {
+    label: "Limit response length",
+    description:
+      "By default the model decides when to stop. Turn this on to set a hard token ceiling — if a response hits it, you'll see an explicit warning.",
+  },
   max_tokens: {
     label: "Max response length",
     description:
-      "Maximum number of words the AI can write in one response. Increase for long texts.",
+      "Hard ceiling on output tokens. ⚠ On thinking models a low limit gets consumed by reasoning — the visible response will be empty.",
   },
   system_prompt: {
     label: "System prompt",
