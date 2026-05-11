@@ -23,7 +23,21 @@ export class ContextOverflowError extends Error {
 }
 
 function reservedOutput(input: LLMInput, contextWindow: number): number {
-  if (input.maxTokens && input.maxTokens > 0) return input.maxTokens;
+  // Adapter-level reservation hint (Anthropic — поле max_tokens обязательное,
+  // адаптер знает что отправит N токенов). Имеет приоритет: если адаптер
+  // явно сказал «зарезервируй N», truncate отдаёт ровно N — это синхронизирует
+  // history-trimming с тем что реально пойдёт в API и предотвращает
+  // `input_tokens + max_tokens > context_window`.
+  if (input.adapterOutputReservation && input.adapterOutputReservation > 0) {
+    return input.adapterOutputReservation;
+  }
+  // Резерв под output применяется только когда юзер ЯВНО включил тогл
+  // «Ограничить длину ответа». Иначе резервируем дефолтные 10% окна (не
+  // больше 4096) — иначе на default=max выходные у длинных диалогов
+  // история отрезалась бы агрессивно ещё до отправки.
+  if (input.maxTokensLimitEnabled === true && input.maxTokens && input.maxTokens > 0) {
+    return input.maxTokens;
+  }
   return Math.min(4096, Math.floor(contextWindow * 0.1));
 }
 

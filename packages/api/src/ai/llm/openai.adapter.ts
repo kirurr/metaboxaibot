@@ -46,6 +46,16 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     // o-series (o1, o3, o4-mini…) and all gpt-5 variants are reasoning models
     // and do not support the temperature parameter.
     const isReasoning = /^o\d|^gpt-5/.test(this.model);
+    // Opt-in cap: `max_output_tokens` идёт в провайдер ТОЛЬКО когда юзер явно
+    // включил тогл «Ограничить длину ответа» (maxTokensLimitEnabled === true).
+    // На reasoning-моделях этот cap считает reasoning + visible вместе — при
+    // выключенном тогле не передаём вообще, чтобы reasoning не съел бюджет
+    // и не оставил юзера с пустым ответом. См. также описание поля в
+    // LLMInput.maxTokensLimitEnabled.
+    const userCap =
+      input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? input.maxTokens
+        : undefined;
     return {
       ...(input.previousResponseId ? { previous_response_id: input.previousResponseId } : {}),
       ...(input.systemPrompt ? { instructions: input.systemPrompt } : {}),
@@ -53,17 +63,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       ...(!isReasoning && input.temperature !== undefined
         ? { temperature: input.temperature }
         : {}),
-      // `max_output_tokens` в Responses API считает reasoning + visible вместе.
-      // Для reasoning-моделей этот cap — ловушка: даже потолок слайдера 8192
-      // легко съедается думанием на сложных промптах, юзер получает пустоту.
-      // Поэтому для reasoning-моделей лимит не передаём вообще — модель сама
-      // решит когда хватит. Длиной видимого ответа управляет `verbosity`.
-      // `input.maxTokens` для reasoning игнорируем сознательно — у юзеров в
-      // user_state могли остаться значения от старого слайдера, который мы
-      // выпилили из UI; отправлять их = вернуть тот же баг.
-      ...(!isReasoning && input.maxTokens !== undefined
-        ? { max_output_tokens: input.maxTokens }
-        : {}),
+      ...(userCap !== undefined ? { max_output_tokens: userCap } : {}),
       // `reasoning.summary: "auto"` просим только когда юзер включил
       // showReasoning — это бесплатный summary-вывод (не увеличивает
       // reasoning_tokens billing'а), но добавляет SSE event-типы
