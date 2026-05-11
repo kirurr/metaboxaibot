@@ -12,6 +12,8 @@
  *   ref_fam:{familyId}:{outputId}  — show family members submenu
  *   ref_mdl:{modelId}:{outputId}   — activate model
  *   ref_slt:{slotKey}:{outputId}   — pick slot (when model has multiple)
+ *   ref_rep:{slotKey}:{outputId}   — slot has content, user chose "replace"
+ *   ref_add:{slotKey}:{outputId}   — slot has content, user chose "append"
  */
 import type { BotContext } from "../types/context.js";
 import { generationService, userStateService } from "@metabox/api/services";
@@ -26,6 +28,7 @@ import {
 import { InlineKeyboard } from "grammy";
 import { activateVideoModel, sendVideoMediaInputStatus } from "./video.js";
 import { activateDesignModel, sendDesignMediaInputStatus } from "./design.js";
+import { sendSlotPreview } from "../utils/media-input-state.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -156,6 +159,59 @@ async function fillSlotAndSendStatus(
   }
 }
 
+/**
+ * Подготовка финального шага наполнения слота: если в слоте уже есть
+ * изображения, шлём превью существующего содержимого и предлагаем выбор —
+ * заменить или (если есть свободное место) добавить рядом. Если слот пуст,
+ * сразу наполняем как раньше. Callback'и `ref_rep:` / `ref_add:` несут
+ * (slotKey, jobId); modelId и section достаём из state в обработчике.
+ */
+async function maybeAskConflictOrFill(
+  ctx: BotContext,
+  modelId: string,
+  slotKey: string,
+  jobId: string,
+  s3Key: string,
+  section: "design" | "video",
+): Promise<void> {
+  if (!ctx.user) return;
+  const inputs = await userStateService.getMediaInputs(ctx.user.id, modelId);
+  const existing = inputs[slotKey] ?? [];
+
+  if (existing.length === 0) {
+    await fillSlotAndSendStatus(ctx, modelId, slotKey, s3Key, section);
+    return;
+  }
+
+  const model = AI_MODELS[modelId];
+  const slot = model?.mediaInputs?.find((s) => s.slotKey === slotKey);
+  if (!slot) {
+    // Slot definition disappeared — fallback to overwrite to avoid stuck state.
+    await fillSlotAndSendStatus(ctx, modelId, slotKey, s3Key, section);
+    return;
+  }
+  const maxImages = slot.maxImages ?? 1;
+  const canAdd = existing.length < maxImages;
+
+  await sendSlotPreview(ctx, slot, existing);
+
+  const kb = new InlineKeyboard().text(
+    ctx.t.mediaInput.refineReplaceBtn,
+    `ref_rep:${slotKey}:${jobId}`,
+  );
+  if (canAdd) {
+    kb.text(ctx.t.mediaInput.refineAddBtn, `ref_add:${slotKey}:${jobId}`);
+  }
+  kb.row();
+
+  const text = canAdd
+    ? ctx.t.mediaInput.refineSlotConflict
+    : ctx.t.mediaInput.refineSlotConflictFull
+        .replace("{count}", String(existing.length))
+        .replace("{max}", String(maxImages));
+  await ctx.reply(text, { reply_markup: kb });
+}
+
 /** Show "choose which slot" inline buttons for a model with multiple compatible slots. */
 async function showSlotChoice(
   ctx: BotContext,
@@ -245,8 +301,15 @@ export async function handleRefineUseActive(ctx: BotContext): Promise<void> {
   const compatibleSlots = getCompatibleSlots(model?.mediaInputs, section);
 
   if (compatibleSlots.length === 1) {
-    // Single slot — fill directly
-    await fillSlotAndSendStatus(ctx, activeModelId, compatibleSlots[0].slotKey, job.s3Key, section);
+    // Single slot — go through conflict check
+    await maybeAskConflictOrFill(
+      ctx,
+      activeModelId,
+      compatibleSlots[0].slotKey,
+      jobId,
+      job.s3Key,
+      section,
+    );
   } else if (compatibleSlots.length > 1) {
     // Multiple slots — ask which one
     await showSlotChoice(ctx, compatibleSlots, jobId);
@@ -361,18 +424,14 @@ export async function handleRefineModel(ctx: BotContext): Promise<void> {
 
   // Fill the slot
   if (compatibleSlots.length === 1) {
-    await userStateService.addMediaInput(
-      ctx.user.id,
+    await maybeAskConflictOrFill(
+      ctx,
       modelId,
       compatibleSlots[0].slotKey,
+      jobId,
       job.s3Key,
+      section,
     );
-    const statusText = buildRefineStatusText(ctx, modelId);
-    if (section === "video") {
-      await sendVideoMediaInputStatus(ctx, { statusText });
-    } else {
-      await sendDesignMediaInputStatus(ctx, { statusText });
-    }
   } else {
     // Multiple compatible slots — ask which one
     const kb = new InlineKeyboard();
@@ -405,6 +464,68 @@ export async function handleRefineSlot(ctx: BotContext): Promise<void> {
   if (!modelId) return;
 
   // Remove the slot chooser keyboard
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => void 0);
+
+  await maybeAskConflictOrFill(ctx, modelId, slotKey, jobId, job.s3Key, section);
+}
+
+// ── ref_rep:{slotKey}:{jobId} — replace existing slot content ───────────────
+
+export async function handleRefineReplace(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  const data = (ctx.callbackQuery?.data ?? "").replace("ref_rep:", "");
+  const sepIdx = data.lastIndexOf(":");
+  const slotKey = data.slice(0, sepIdx);
+  const jobId = data.slice(sepIdx + 1);
+  await ctx.answerCallbackQuery();
+
+  const job = await generationService.getOutputById(jobId);
+  if (!job?.s3Key) return;
+
+  const state = await userStateService.get(ctx.user.id);
+  const section = (state?.section ?? "design") as "design" | "video";
+  const modelId =
+    section === "video" ? (state?.videoModelId ?? null) : (state?.designModelId ?? null);
+  if (!modelId) return;
+
+  // Remove the conflict-question keyboard.
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => void 0);
+
+  // Replace = overwrite slot values with the single new image. Используем
+  // setMediaInputsForModel, чтобы атомарно подменить массив слота, не трогая
+  // соседние слоты модели.
+  const inputs = await userStateService.getMediaInputs(ctx.user.id, modelId);
+  inputs[slotKey] = [job.s3Key];
+  await userStateService.setMediaInputsForModel(ctx.user.id, modelId, inputs);
+
+  const statusText = buildRefineStatusText(ctx, modelId);
+  if (section === "video") {
+    await sendVideoMediaInputStatus(ctx, { statusText });
+  } else {
+    await sendDesignMediaInputStatus(ctx, { statusText });
+  }
+}
+
+// ── ref_add:{slotKey}:{jobId} — append to existing slot content ─────────────
+
+export async function handleRefineAdd(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  const data = (ctx.callbackQuery?.data ?? "").replace("ref_add:", "");
+  const sepIdx = data.lastIndexOf(":");
+  const slotKey = data.slice(0, sepIdx);
+  const jobId = data.slice(sepIdx + 1);
+  await ctx.answerCallbackQuery();
+
+  const job = await generationService.getOutputById(jobId);
+  if (!job?.s3Key) return;
+
+  const state = await userStateService.get(ctx.user.id);
+  const section = (state?.section ?? "design") as "design" | "video";
+  const modelId =
+    section === "video" ? (state?.videoModelId ?? null) : (state?.designModelId ?? null);
+  if (!modelId) return;
+
+  // Remove the conflict-question keyboard.
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => void 0);
 
   await fillSlotAndSendStatus(ctx, modelId, slotKey, job.s3Key, section);

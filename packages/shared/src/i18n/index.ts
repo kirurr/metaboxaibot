@@ -444,6 +444,10 @@ export interface Translations {
     refineSaved: string;
     refineReadyForPrompt: string;
     refinePickSection: string;
+    refineSlotConflict: string;
+    refineSlotConflictFull: string;
+    refineReplaceBtn: string;
+    refineAddBtn: string;
   };
   confirmGeneration: {
     message: string;
