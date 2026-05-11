@@ -51,38 +51,42 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /uploads?type=voice — list user uploads, optionally filtered by type */
-  fastify.get<{ Querystring: { type?: string } }>("/uploads", {
-    schema: {
-      description: "List user uploads, optionally filtered by type",
-      querystring: {
-        type: "object",
-        properties: {
-          type: { type: "string", description: "Filter by upload type (e.g., voice)" },
+  fastify.get<{ Querystring: { type?: string } }>(
+    "/uploads",
+    {
+      schema: {
+        description: "List user uploads, optionally filtered by type",
+        querystring: {
+          type: "object",
+          properties: {
+            type: { type: "string", description: "Filter by upload type (e.g., voice)" },
+          },
         },
-      },
-      response: {
-        200: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              type: { type: "string" },
-              name: { type: "string" },
-              url: { type: "string" },
-              s3Key: { type: "string", nullable: true },
-              createdAt: { type: "string" },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                type: { type: "string" },
+                name: { type: "string" },
+                url: { type: "string" },
+                s3Key: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+              },
             },
           },
         },
       },
     },
-  }, async (request) => {
-    const { userId } = request as AuthRequest;
-    const { type } = request.query;
-    const uploads = await userUploadsService.list(userId, type);
-    return Promise.all(uploads.map(toDTO));
-  });
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const { type } = request.query;
+      const uploads = await userUploadsService.list(userId, type);
+      return Promise.all(uploads.map(toDTO));
+    },
+  );
 
   /** PATCH /uploads/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
@@ -114,15 +118,15 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
               createdAt: { type: "string" },
             },
           },
-          400: { 
-            type: "object", 
+          400: {
+            type: "object",
             description: "Name is required",
-            properties: { error: { type: "string" } } 
+            properties: { error: { type: "string" } },
           },
-          404: { 
-            type: "object", 
+          404: {
+            type: "object",
             description: "Not found",
-            properties: { error: { type: "string" } } 
+            properties: { error: { type: "string" } },
           },
         },
       },
@@ -141,30 +145,34 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /uploads/:id */
-  fastify.delete<{ Params: { id: string } }>("/uploads/:id", {
-    schema: {
-      description: "Delete an upload by ID",
-      params: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-        },
-      },
-      response: {
-        200: {
+  fastify.delete<{ Params: { id: string } }>(
+    "/uploads/:id",
+    {
+      schema: {
+        description: "Delete an upload by ID",
+        params: {
           type: "object",
           properties: {
-            success: { type: "boolean" },
+            id: { type: "string" },
           },
         },
-        404: { type: "object", properties: { error: { type: "string" } } },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+          },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
     },
-  }, async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
-    const ok = await userUploadsService.delete(id, userId);
-    if (!ok) return reply.status(404).send({ error: "Upload not found" });
-    return { success: true };
-  });
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
+      const ok = await userUploadsService.delete(id, userId);
+      if (!ok) return reply.status(404).send({ error: "Upload not found" });
+      return { success: true };
+    },
+  );
 };

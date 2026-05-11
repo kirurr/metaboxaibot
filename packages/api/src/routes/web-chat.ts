@@ -102,59 +102,63 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── GET /web/balance ────────────────────────────────────────────────────
-  fastify.get("/web/balance", {
-    schema: {
-      description: "Get user balance information",
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            tokenBalance: { type: "string" },
-            subscriptionTokenBalance: { type: "string" },
-            subscription: {
-              type: "object",
-              nullable: true,
-              properties: {
-                planName: { type: "string" },
-                period: { type: "string" },
-                endDate: { type: "string" },
-                tokensGranted: { type: "number" },
+  fastify.get(
+    "/web/balance",
+    {
+      schema: {
+        description: "Get user balance information",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              tokenBalance: { type: "string" },
+              subscriptionTokenBalance: { type: "string" },
+              subscription: {
+                type: "object",
+                nullable: true,
+                properties: {
+                  planName: { type: "string" },
+                  period: { type: "string" },
+                  endDate: { type: "string" },
+                  tokensGranted: { type: "number" },
+                },
               },
             },
           },
         },
       },
     },
-  }, async (request) => {
-    const { aibUserId } = request.webUser!;
-    const user = await db.user.findUnique({
-      where: { id: aibUserId! },
-      select: {
-        tokenBalance: true,
-        subscriptionTokenBalance: true,
-        localSubscription: {
-          select: {
-            planName: true,
-            period: true,
-            endDate: true,
-            tokensGranted: true,
+    async (request) => {
+      const { aibUserId } = request.webUser!;
+      const user = await db.user.findUnique({
+        where: { id: aibUserId! },
+        select: {
+          tokenBalance: true,
+          subscriptionTokenBalance: true,
+          localSubscription: {
+            select: {
+              planName: true,
+              period: true,
+              endDate: true,
+              tokensGranted: true,
+            },
           },
         },
-      },
-    });
-    return {
-      tokenBalance: user?.tokenBalance.toString() ?? "0",
-      subscriptionTokenBalance: user?.subscriptionTokenBalance.toString() ?? "0",
-      subscription: user?.localSubscription
-        ? {
-            planName: user.localSubscription.planName,
-            period: user.localSubscription.period,
-            endDate: user.localSubscription.endDate.toISOString(),
-            tokensGranted: user.localSubscription.tokensGranted,
-          }
-        : null,
-    };
-  });
+      });
+      return {
+        tokenBalance: user?.tokenBalance.toString() ?? "0",
+        subscriptionTokenBalance: user?.subscriptionTokenBalance.toString() ?? "0",
+        subscription: user?.localSubscription
+          ? {
+              planName: user.localSubscription.planName,
+              period: user.localSubscription.period,
+              endDate: user.localSubscription.endDate.toISOString(),
+              tokensGranted: user.localSubscription.tokensGranted,
+            }
+          : null,
+      };
+    },
+  );
 
   // ── GET /web/dialogs ────────────────────────────────────────────────────
   fastify.get<{ Querystring: { section?: string } }>(
@@ -287,9 +291,21 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
               title: { type: "string" },
             },
           },
-          400: { type: "object", properties: { error: { type: "string" } }, description: "Title is required" },
-          403: { type: "object", properties: { error: { type: "string" } }, description: "Forbidden" },
-          404: { type: "object", properties: { error: { type: "string" } }, description: "Not found" },
+          400: {
+            type: "object",
+            properties: { error: { type: "string" } },
+            description: "Title is required",
+          },
+          403: {
+            type: "object",
+            properties: { error: { type: "string" } },
+            description: "Forbidden",
+          },
+          404: {
+            type: "object",
+            properties: { error: { type: "string" } },
+            description: "Not found",
+          },
         },
       },
     },
@@ -444,7 +460,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "string",
-            description: "SSE stream. event: chunk (data: { text }), event: done (data: { tokensUsed, balance }), event: error (data: { code, message })",
+            description:
+              "SSE stream. event: chunk (data: { text }), event: done (data: { tokensUsed, balance }), event: error (data: { code, message })",
           },
           400: badRequestResponse,
           403: badRequestResponse,

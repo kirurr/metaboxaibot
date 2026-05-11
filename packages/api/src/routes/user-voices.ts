@@ -25,52 +25,56 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /user-voices?provider=elevenlabs — list user voices */
-  fastify.get<{ Querystring: { provider?: string } }>("/user-voices", {
-    schema: {
-      description: "List user voices, optionally filtered by provider",
-      querystring: {
-        type: "object",
-        properties: {
-          provider: { type: "string" },
+  fastify.get<{ Querystring: { provider?: string } }>(
+    "/user-voices",
+    {
+      schema: {
+        description: "List user voices, optionally filtered by provider",
+        querystring: {
+          type: "object",
+          properties: {
+            provider: { type: "string" },
+          },
         },
-      },
-      response: {
-        200: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              provider: { type: "string" },
-              name: { type: "string" },
-              externalId: { type: "string", nullable: true },
-              previewUrl: { type: "string", nullable: true },
-              hasAudio: { type: "boolean" },
-              status: { type: "string" },
-              createdAt: { type: "string" },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                provider: { type: "string" },
+                name: { type: "string" },
+                externalId: { type: "string", nullable: true },
+                previewUrl: { type: "string", nullable: true },
+                hasAudio: { type: "boolean" },
+                status: { type: "string" },
+                createdAt: { type: "string" },
+              },
             },
           },
         },
       },
     },
-  }, async (request) => {
-    const { userId } = request as AuthRequest;
-    const { provider } = request.query;
-    const voices = await db.userVoice.findMany({
-      where: { userId, ...(provider ? { provider } : {}) },
-      orderBy: { createdAt: "desc" },
-    });
-    return voices.map((v) => ({
-      id: v.id,
-      provider: v.provider,
-      name: v.name,
-      externalId: v.externalId,
-      previewUrl: v.previewUrl,
-      hasAudio: v.previewUrl !== null || v.audioS3Key !== null,
-      status: v.status,
-      createdAt: v.createdAt.toISOString(),
-    }));
-  });
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const { provider } = request.query;
+      const voices = await db.userVoice.findMany({
+        where: { userId, ...(provider ? { provider } : {}) },
+        orderBy: { createdAt: "desc" },
+      });
+      return voices.map((v) => ({
+        id: v.id,
+        provider: v.provider,
+        name: v.name,
+        externalId: v.externalId,
+        previewUrl: v.previewUrl,
+        hasAudio: v.previewUrl !== null || v.audioS3Key !== null,
+        status: v.status,
+        createdAt: v.createdAt.toISOString(),
+      }));
+    },
+  );
 
   /**
    * POST /user-voices/start-creation
@@ -87,7 +91,8 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
     "/user-voices/start-creation",
     {
       schema: {
-        description: "Start voice clone creation by activating voice-clone model and sending Telegram prompt",
+        description:
+          "Start voice clone creation by activating voice-clone model and sending Telegram prompt",
         body: {
           type: "object",
           properties: {
@@ -261,49 +266,53 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-voices/:id — delete from DB and from ElevenLabs */
-  fastify.delete<{ Params: { id: string } }>("/user-voices/:id", {
-    schema: {
-      description: "Delete a voice by ID",
-      params: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-        },
-      },
-      response: {
-        200: {
+  fastify.delete<{ Params: { id: string } }>(
+    "/user-voices/:id",
+    {
+      schema: {
+        description: "Delete a voice by ID",
+        params: {
           type: "object",
           properties: {
-            success: { type: "boolean" },
+            id: { type: "string" },
           },
         },
-        404: badRequestResponse,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+          },
+          404: badRequestResponse,
+        },
       },
     },
-  }, async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const voice = await db.userVoice.findFirst({ where: { id, userId } });
-    if (!voice) return reply.status(404).send({ error: "Voice not found" });
+      const voice = await db.userVoice.findFirst({ where: { id, userId } });
+      if (!voice) return reply.status(404).send({ error: "Voice not found" });
 
-    // Delete from ElevenLabs on the SAME key the voice was created on — voice_id
-    // живёт per-account, env-ключ может его не видеть. Если ключ уже удалён из
-    // пула — acquireById fallback'ается на env (best-effort). Failure не блокирует
-    // удаление из БД.
-    if (voice.externalId) {
-      try {
-        const acquired = await acquireById(voice.providerKeyId, "elevenlabs");
-        await ElevenLabsAdapter.deleteVoice(voice.externalId, acquired.apiKey);
-      } catch (err) {
-        logger.warn(
-          { voiceId: voice.id, externalId: voice.externalId, err },
-          "user-voices DELETE: ElevenLabs cleanup failed (continuing with DB delete)",
-        );
+      // Delete from ElevenLabs on the SAME key the voice was created on — voice_id
+      // живёт per-account, env-ключ может его не видеть. Если ключ уже удалён из
+      // пула — acquireById fallback'ается на env (best-effort). Failure не блокирует
+      // удаление из БД.
+      if (voice.externalId) {
+        try {
+          const acquired = await acquireById(voice.providerKeyId, "elevenlabs");
+          await ElevenLabsAdapter.deleteVoice(voice.externalId, acquired.apiKey);
+        } catch (err) {
+          logger.warn(
+            { voiceId: voice.id, externalId: voice.externalId, err },
+            "user-voices DELETE: ElevenLabs cleanup failed (continuing with DB delete)",
+          );
+        }
       }
-    }
 
-    await db.userVoice.delete({ where: { id } });
-    return { success: true };
-  });
+      await db.userVoice.delete({ where: { id } });
+      return { success: true };
+    },
+  );
 };

@@ -53,80 +53,84 @@ export const didVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /d-id-voices — proxy to D-ID /tts/voices, returns simplified voice list */
-  fastify.get("/d-id-voices", {
-    schema: {
-      description: "Get list of public D-ID voices (cached for 1 hour)",
-      response: {
-        200: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string", description: "Voice ID" },
-              name: { type: "string", description: "Voice name" },
-              gender: { type: "string", description: "Voice gender" },
-              languages: { type: "array", items: { type: "object" } },
-              provider: { type: "string", description: "Voice provider" },
-              styles: { type: "array", items: { type: "string" } },
-              description: { type: "string", description: "Voice description" },
+  fastify.get(
+    "/d-id-voices",
+    {
+      schema: {
+        description: "Get list of public D-ID voices (cached for 1 hour)",
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Voice ID" },
+                name: { type: "string", description: "Voice name" },
+                gender: { type: "string", description: "Voice gender" },
+                languages: { type: "array", items: { type: "object" } },
+                provider: { type: "string", description: "Voice provider" },
+                styles: { type: "array", items: { type: "string" } },
+                description: { type: "string", description: "Voice description" },
+              },
             },
           },
+          502: badRequestResponse,
+          503: badRequestResponse,
         },
-        502: badRequestResponse,
-        503: badRequestResponse,
       },
     },
-  }, async (_request, reply) => {
-    if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-      return voicesCache.data;
-    }
-
-    let apiKey: string;
-    try {
-      apiKey = (await acquireKey("did")).apiKey;
-    } catch (err) {
-      if (err instanceof PoolExhaustedError) {
-        return reply.status(503).send({ error: "D-ID API key not configured" });
+    async (_request, reply) => {
+      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
+        return voicesCache.data;
       }
-      throw err;
-    }
 
-    const encoded = Buffer.from(`${apiKey}:`).toString("base64");
-    const res = await fetch("https://api.d-id.com/tts/voices", {
-      headers: { Authorization: `Basic ${encoded}`, Accept: "application/json" },
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      return reply.status(502).send({ error: `D-ID error: ${res.status} ${text}` });
-    }
-
-    const json = (await res.json()) as DIDVoicesResponse;
-    const voices = json ?? [];
-
-    const data = voices.reduce(
-      (acc, v) => {
-        if (v.access === "public") {
-          const languages = filterSafeLanguages(v);
-          if (!languages) {
-            return acc;
-          }
-          acc.push({
-            id: v.id,
-            name: v.name,
-            gender: v.gender ?? "",
-            languages: languages,
-            provider: v.provider ?? "microsoft",
-            styles: v.styles ?? [],
-            description: v.description ?? "",
-          });
+      let apiKey: string;
+      try {
+        apiKey = (await acquireKey("did")).apiKey;
+      } catch (err) {
+        if (err instanceof PoolExhaustedError) {
+          return reply.status(503).send({ error: "D-ID API key not configured" });
         }
-        return acc;
-      },
-      [] as Omit<DIDVoice, "isLegacy" | "access">[],
-    );
+        throw err;
+      }
 
-    voicesCache = { data, at: Date.now() };
-    return data;
-  });
+      const encoded = Buffer.from(`${apiKey}:`).toString("base64");
+      const res = await fetch("https://api.d-id.com/tts/voices", {
+        headers: { Authorization: `Basic ${encoded}`, Accept: "application/json" },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        return reply.status(502).send({ error: `D-ID error: ${res.status} ${text}` });
+      }
+
+      const json = (await res.json()) as DIDVoicesResponse;
+      const voices = json ?? [];
+
+      const data = voices.reduce(
+        (acc, v) => {
+          if (v.access === "public") {
+            const languages = filterSafeLanguages(v);
+            if (!languages) {
+              return acc;
+            }
+            acc.push({
+              id: v.id,
+              name: v.name,
+              gender: v.gender ?? "",
+              languages: languages,
+              provider: v.provider ?? "microsoft",
+              styles: v.styles ?? [],
+              description: v.description ?? "",
+            });
+          }
+          return acc;
+        },
+        [] as Omit<DIDVoice, "isLegacy" | "access">[],
+      );
+
+      voicesCache = { data, at: Date.now() };
+      return data;
+    },
+  );
 };

@@ -42,31 +42,33 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** GET /admin/users?page=1&limit=50&search=john */
   fastify.get<{ Querystring: { page?: string; limit?: string; search?: string } }>(
-    "/admin/users", {
-    schema: {
-      description: "List users with pagination and search",
-      querystring: {
-        type: "object",
-        properties: {
-          page: { type: "string", description: "Page number (default 1)" },
-          limit: { type: "string", description: "Items per page (default 50, max 100)" },
-          search: { type: "string", description: "Search by username or name" },
-        },
-      },
-      response: {
-        200: {
+    "/admin/users",
+    {
+      schema: {
+        description: "List users with pagination and search",
+        querystring: {
           type: "object",
           properties: {
-            users: { type: "array", items: { type: "object" } },
-            total: { type: "number" },
-            page: { type: "number" },
-            limit: { type: "number" },
+            page: { type: "string", description: "Page number (default 1)" },
+            limit: { type: "string", description: "Items per page (default 50, max 100)" },
+            search: { type: "string", description: "Search by username or name" },
           },
-          required: ["users", "total", "page", "limit"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              users: { type: "array", items: { type: "object" } },
+              total: { type: "number" },
+              page: { type: "number" },
+              limit: { type: "number" },
+            },
+            required: ["users", "total", "page", "limit"],
+          },
         },
       },
     },
-    }, async (request) => {
+    async (request) => {
       const page = Math.max(1, Number(request.query.page ?? 1));
       const limit = Math.min(100, Number(request.query.limit ?? 50));
       const search = request.query.search?.trim();
@@ -115,25 +117,31 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** POST /admin/grant — grant tokens to a user */
   fastify.post<{ Body: { userId: string; amount: number; reason?: string } }>(
-    "/admin/grant", {
-    schema: {
-      description: "Grant tokens to a user",
-      body: {
-        type: "object",
-        properties: {
-          userId: { type: "string", description: "User ID" },
-          amount: { type: "number", description: "Token amount to grant (must be positive)" },
-          reason: { type: "string", description: "Optional reason for the grant" },
+    "/admin/grant",
+    {
+      schema: {
+        description: "Grant tokens to a user",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            amount: { type: "number", description: "Token amount to grant (must be positive)" },
+            reason: { type: "string", description: "Optional reason for the grant" },
+          },
+          required: ["userId", "amount"],
         },
-        required: ["userId", "amount"],
-      },
-      response: {
-        200: { type: "object", properties: { success: { type: "boolean" }, newBalance: { type: "string" } }, required: ["success", "newBalance"] },
-        400: badRequestResponse,
-        404: { type: "object", properties: { error: { type: "string" } } },
+        response: {
+          200: {
+            type: "object",
+            properties: { success: { type: "boolean" }, newBalance: { type: "string" } },
+            required: ["success", "newBalance"],
+          },
+          400: badRequestResponse,
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
     },
-    }, async (request, reply) => {
+    async (request, reply) => {
       const { userId, amount, reason } = request.body;
       if (!userId || !amount || amount <= 0) {
         await reply.status(400).send({ error: "userId and positive amount required" });
@@ -164,24 +172,30 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** POST /admin/block */
   fastify.post<{ Body: { userId: string; blocked: boolean } }>(
-    "/admin/block", {
-    schema: {
-      description: "Block or unblock a user",
-      body: {
-        type: "object",
-        properties: {
-          userId: { type: "string", description: "User ID" },
-          blocked: { type: "boolean", description: "Block status" },
+    "/admin/block",
+    {
+      schema: {
+        description: "Block or unblock a user",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            blocked: { type: "boolean", description: "Block status" },
+          },
+          required: ["userId", "blocked"],
         },
-        required: ["userId", "blocked"],
-      },
-      response: {
-        200: { type: "object", properties: { success: { type: "boolean" }, isBlocked: { type: "boolean" } }, required: ["success", "isBlocked"] },
-        400: badRequestResponse,
-        404: { type: "object", properties: { error: { type: "string" } } },
+        response: {
+          200: {
+            type: "object",
+            properties: { success: { type: "boolean" }, isBlocked: { type: "boolean" } },
+            required: ["success", "isBlocked"],
+          },
+          400: badRequestResponse,
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
     },
-    }, async (request, reply) => {
+    async (request, reply) => {
       const { userId, blocked } = request.body;
       if (!userId) {
         await reply.status(400).send({ error: "userId required" });
@@ -202,25 +216,31 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   /** POST /admin/role — change user role (ADMIN only) */
   fastify.post<{ Body: { userId: string; role: string } }>(
-    "/admin/role", {
-    schema: {
-      description: "Change user role (ADMIN only)",
-      body: {
-        type: "object",
-        properties: {
-          userId: { type: "string", description: "User ID" },
-          role: { type: "string", enum: ["USER", "MODERATOR", "ADMIN"], description: "New role" },
+    "/admin/role",
+    {
+      schema: {
+        description: "Change user role (ADMIN only)",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            role: { type: "string", enum: ["USER", "MODERATOR", "ADMIN"], description: "New role" },
+          },
+          required: ["userId", "role"],
         },
-        required: ["userId", "role"],
-      },
-      response: {
-        200: { type: "object", properties: { success: { type: "boolean" } }, required: ["success"] },
-        400: badRequestResponse,
-        403: { type: "object", properties: { error: { type: "string" } } },
-        404: { type: "object", properties: { error: { type: "string" } } },
+        response: {
+          200: {
+            type: "object",
+            properties: { success: { type: "boolean" } },
+            required: ["success"],
+          },
+          400: badRequestResponse,
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
     },
-    }, async (request, reply) => {
+    async (request, reply) => {
       const { userId, role } = request.body;
       if (!userId || !role) {
         await reply.status(400).send({ error: "userId and role required" });

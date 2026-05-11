@@ -523,47 +523,51 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /state — current bot state with per-section active dialogs */
-  fastify.get("/state", {
-    schema: {
-      description: "Get current bot state with per-section active dialogs",
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            state: { type: "string" },
-            section: { type: "string", nullable: true },
-            gptModelId: { type: "string", nullable: true },
-            gptDialogId: { type: "string", nullable: true },
-            designDialogId: { type: "string", nullable: true },
-            audioDialogId: { type: "string", nullable: true },
-            videoDialogId: { type: "string", nullable: true },
-            designModelId: { type: "string", nullable: true },
-            audioModelId: { type: "string", nullable: true },
-            videoModelId: { type: "string", nullable: true },
-            selectedModes: { type: "object" },
+  fastify.get(
+    "/state",
+    {
+      schema: {
+        description: "Get current bot state with per-section active dialogs",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              state: { type: "string" },
+              section: { type: "string", nullable: true },
+              gptModelId: { type: "string", nullable: true },
+              gptDialogId: { type: "string", nullable: true },
+              designDialogId: { type: "string", nullable: true },
+              audioDialogId: { type: "string", nullable: true },
+              videoDialogId: { type: "string", nullable: true },
+              designModelId: { type: "string", nullable: true },
+              audioModelId: { type: "string", nullable: true },
+              videoModelId: { type: "string", nullable: true },
+              selectedModes: { type: "object" },
+            },
           },
         },
       },
     },
-  }, async (request) => {
-    const { userId } = request as AuthRequest;
-    const state = await userStateService.get(userId);
-    const selectedModes = await userStateService.getSelectedModes(userId);
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const state = await userStateService.get(userId);
+      const selectedModes = await userStateService.getSelectedModes(userId);
 
-    return {
-      state: state?.state ?? "IDLE",
-      section: state?.section ?? null,
-      gptModelId: state?.gptModelId ?? null,
-      gptDialogId: state?.gptDialogId ?? null,
-      designDialogId: state?.designDialogId ?? null,
-      audioDialogId: state?.audioDialogId ?? null,
-      videoDialogId: state?.videoDialogId ?? null,
-      designModelId: state?.designModelId ?? null,
-      audioModelId: state?.audioModelId ?? null,
-      videoModelId: state?.videoModelId ?? null,
-      selectedModes,
-    };
-  });
+      return {
+        state: state?.state ?? "IDLE",
+        section: state?.section ?? null,
+        gptModelId: state?.gptModelId ?? null,
+        gptDialogId: state?.gptDialogId ?? null,
+        designDialogId: state?.designDialogId ?? null,
+        audioDialogId: state?.audioDialogId ?? null,
+        videoDialogId: state?.videoDialogId ?? null,
+        designModelId: state?.designModelId ?? null,
+        audioModelId: state?.audioModelId ?? null,
+        videoModelId: state?.videoModelId ?? null,
+        selectedModes,
+      };
+    },
+  );
 
   /** POST /state/selected-mode — persist user's chosen mode for a model */
   fastify.post<{

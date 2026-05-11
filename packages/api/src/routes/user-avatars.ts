@@ -21,55 +21,59 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /user-avatars?provider=heygen — list user avatars */
-  fastify.get<{ Querystring: { provider?: string } }>("/user-avatars", {
-    schema: {
-      description: "List user avatars, optionally filtered by provider",
-      querystring: {
-        type: "object",
-        properties: {
-          provider: { type: "string" },
+  fastify.get<{ Querystring: { provider?: string } }>(
+    "/user-avatars",
+    {
+      schema: {
+        description: "List user avatars, optionally filtered by provider",
+        querystring: {
+          type: "object",
+          properties: {
+            provider: { type: "string" },
+          },
         },
-      },
-      response: {
-        200: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              provider: { type: "string" },
-              name: { type: "string" },
-              externalId: { type: "string", nullable: true },
-              previewUrl: { type: "string", nullable: true },
-              status: { type: "string" },
-              createdAt: { type: "string" },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                provider: { type: "string" },
+                name: { type: "string" },
+                externalId: { type: "string", nullable: true },
+                previewUrl: { type: "string", nullable: true },
+                status: { type: "string" },
+                createdAt: { type: "string" },
+              },
             },
           },
         },
       },
     },
-  }, async (request) => {
-    const { userId } = request as AuthRequest;
-    const { provider } = request.query;
-    const avatars = await userAvatarService.list(userId, provider);
-    return Promise.all(
-      avatars.map(async (a) => {
-        let previewUrl = a.previewUrl;
-        if (previewUrl && !previewUrl.startsWith("http")) {
-          previewUrl = await getFileUrl(previewUrl).catch(() => null);
-        }
-        return {
-          id: a.id,
-          provider: a.provider,
-          name: a.name,
-          externalId: a.externalId,
-          previewUrl,
-          status: a.status,
-          createdAt: a.createdAt.toISOString(),
-        };
-      }),
-    );
-  });
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const { provider } = request.query;
+      const avatars = await userAvatarService.list(userId, provider);
+      return Promise.all(
+        avatars.map(async (a) => {
+          let previewUrl = a.previewUrl;
+          if (previewUrl && !previewUrl.startsWith("http")) {
+            previewUrl = await getFileUrl(previewUrl).catch(() => null);
+          }
+          return {
+            id: a.id,
+            provider: a.provider,
+            name: a.name,
+            externalId: a.externalId,
+            previewUrl,
+            status: a.status,
+            createdAt: a.createdAt.toISOString(),
+          };
+        }),
+      );
+    },
+  );
 
   /**
    * POST /user-avatars/start-creation
@@ -199,30 +203,34 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-avatars/:id */
-  fastify.delete<{ Params: { id: string } }>("/user-avatars/:id", {
-    schema: {
-      description: "Delete an avatar by ID",
-      params: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-        },
-      },
-      response: {
-        200: {
+  fastify.delete<{ Params: { id: string } }>(
+    "/user-avatars/:id",
+    {
+      schema: {
+        description: "Delete an avatar by ID",
+        params: {
           type: "object",
           properties: {
-            ok: { type: "boolean" },
+            id: { type: "string" },
           },
         },
-        404: badRequestResponse,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+          404: badRequestResponse,
+        },
       },
     },
-  }, async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
-    const ok = await userAvatarService.delete(id, userId);
-    if (!ok) return reply.status(404).send({ error: "Avatar not found" });
-    return { ok: true };
-  });
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
+      const ok = await userAvatarService.delete(id, userId);
+      if (!ok) return reply.status(404).send({ error: "Avatar not found" });
+      return { ok: true };
+    },
+  );
 };
