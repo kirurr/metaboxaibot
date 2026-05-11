@@ -14,14 +14,46 @@ import {
 } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["user-voices"]),
+  );
 
   /** GET /user-voices?provider=elevenlabs — list user voices */
-  fastify.get<{ Querystring: { provider?: string } }>("/user-voices", async (request) => {
+  fastify.get<{ Querystring: { provider?: string } }>("/user-voices", {
+    schema: {
+      description: "List user voices, optionally filtered by provider",
+      querystring: {
+        type: "object",
+        properties: {
+          provider: { type: "string" },
+        },
+      },
+      response: {
+        200: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              provider: { type: "string" },
+              name: { type: "string" },
+              externalId: { type: "string", nullable: true },
+              previewUrl: { type: "string", nullable: true },
+              hasAudio: { type: "boolean" },
+              status: { type: "string" },
+              createdAt: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  }, async (request) => {
     const { userId } = request as AuthRequest;
     const { provider } = request.query;
     const voices = await db.userVoice.findMany({
@@ -53,6 +85,26 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Body?: { returnTo?: string } }>(
     "/user-voices/start-creation",
+    {
+      schema: {
+        description: "Start voice clone creation by activating voice-clone model and sending Telegram prompt",
+        body: {
+          type: "object",
+          properties: {
+            returnTo: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const returnTo = request.body?.returnTo;
@@ -108,6 +160,26 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{ Params: { id: string } }>(
     "/user-voices/:id/preview-url",
+    {
+      schema: {
+        description: "Resolve a playable URL for a voice by ID",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+            },
+          },
+          404: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -128,6 +200,40 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /user-voices/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
     "/user-voices/:id",
+    {
+      schema: {
+        description: "Rename a voice by ID",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              provider: { type: "string" },
+              name: { type: "string" },
+              externalId: { type: "string", nullable: true },
+              previewUrl: { type: "string", nullable: true },
+              hasAudio: { type: "boolean" },
+              status: { type: "string" },
+              createdAt: { type: "string" },
+            },
+          },
+          400: badRequestResponse,
+          404: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -155,7 +261,26 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-voices/:id — delete from DB and from ElevenLabs */
-  fastify.delete<{ Params: { id: string } }>("/user-voices/:id", async (request, reply) => {
+  fastify.delete<{ Params: { id: string } }>("/user-voices/:id", {
+    schema: {
+      description: "Delete a voice by ID",
+      params: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+        },
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            success: { type: "boolean" },
+          },
+        },
+        404: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
 

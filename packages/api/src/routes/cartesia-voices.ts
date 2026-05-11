@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface CartesiaVoiceRaw {
   id: string;
@@ -37,6 +38,9 @@ async function getCartesiaApiKey(): Promise<string | null> {
 
 export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["cartesia-voices"]),
+  );
 
   /**
    * GET /cartesia-voices — список официальных (public) Cartesia voices.
@@ -48,7 +52,29 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    * стабильно возвращал бы протухшие линки. Клиент получает только `has_preview`,
    * а сам URL запрашивается on-demand через `/cartesia-voices/:id/preview-url`.
    */
-  fastify.get("/cartesia-voices", async (_request, reply) => {
+  fastify.get("/cartesia-voices", {
+    schema: {
+      description: "Get list of public Cartesia voices (cached for 1 hour)",
+      response: {
+        200: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              voice_id: { type: "string", description: "Voice ID" },
+              name: { type: "string", description: "Voice name" },
+              description: { type: "string", nullable: true, description: "Voice description" },
+              gender: { type: "string", nullable: true, description: "Voice gender" },
+              language: { type: "string", nullable: true, description: "Voice language" },
+              has_preview: { type: "boolean", description: "Whether preview audio is available" },
+            },
+          },
+        },
+        502: badRequestResponse,
+        503: badRequestResponse,
+      },
+    },
+  }, async (_request, reply) => {
     if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
       return voicesCache.data;
     }
@@ -113,9 +139,18 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    * Webapp вызывает это через api.cartesiaVoices.previewBlob, который оборачивает
    * ответ в blob: URL для <audio>.
    */
-  fastify.get<{ Params: { id: string } }>(
-    "/cartesia-voices/:id/preview",
-    async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>("/cartesia-voices/:id/preview", {
+    schema: {
+      description: "Stream voice preview audio from Cartesia",
+      params: { type: "object", properties: { id: { type: "string", description: "Voice ID" } }, required: ["id"] },
+      response: {
+        200: { type: "string", contentEncoding: "binary" },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        502: { type: "object", properties: { error: { type: "string" } } },
+        503: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
       const { id } = request.params;
       const apiKey = await getCartesiaApiKey();
       if (!apiKey) {

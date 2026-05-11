@@ -6,6 +6,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { expireSubscription, grantMetaboxSubscription } from "../services/payment.service.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 function checkKey(request: FastifyRequest): boolean {
   const key = config.metabox.internalKey;
@@ -13,6 +14,10 @@ function checkKey(request: FastifyRequest): boolean {
 }
 
 export const internalRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["internal"]),
+  );
+
   fastify.addHook("preHandler", async (request, reply) => {
     if (!checkKey(request)) {
       await reply.code(401).send({ error: "Unauthorized" });
@@ -24,7 +29,23 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Called by Metabox after a user links their Telegram via deep link.
    * Updates AI Box user.metaboxUserId.
    */
-  fastify.post("/link-metabox", async (request, reply) => {
+  fastify.post("/link-metabox", {
+    schema: {
+      description: "Link Metabox user to AI Box user via Telegram",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string", description: "Telegram user ID" },
+          metaboxUserId: { type: "string", description: "Metabox user ID" },
+        },
+        required: ["telegramId", "metaboxUserId"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" } } },
+        400: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const { telegramId, metaboxUserId } = request.body as {
       telegramId: string;
       metaboxUserId: string;
@@ -48,7 +69,30 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * grantType "subscription": credits to subscriptionTokenBalance + sets endDate / planName.
    * grantType "tokens" (default): credits to regular tokenBalance.
    */
-  fastify.post("/grant-tokens", async (request, reply) => {
+  fastify.post("/grant-tokens", {
+    schema: {
+      description: "Grant tokens to user from Metabox",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string", description: "Telegram user ID" },
+          tokens: { type: "number", description: "Number of tokens to grant" },
+          description: { type: "string", description: "Description for transaction" },
+          grantType: { type: "string", enum: ["subscription", "tokens"], description: "Type of grant" },
+          endDate: { type: "string", description: "Subscription end date (ISO 8601)" },
+          planName: { type: "string", description: "Subscription plan name" },
+          subscriptionId: { type: "string", description: "Metabox subscription ID for idempotency" },
+          orderId: { type: "string", description: "Order ID for idempotency on token grants" },
+        },
+        required: ["telegramId", "tokens"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" }, granted: { type: "boolean" } } },
+        400: badRequestResponse,
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const {
       telegramId,
       tokens,
@@ -158,7 +202,27 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * SETS token balances on User + upserts LocalSubscription.
    * No TokenTransaction created. Used when reconnecting site to bot.
    */
-  fastify.post("/sync-subscription", async (request, reply) => {
+  fastify.post("/sync-subscription", {
+    schema: {
+      description: "Sync subscription state from Metabox to AI Box",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string" },
+          tokens: { type: "number" },
+          endDate: { type: "string" },
+          planName: { type: "string" },
+          subscriptionId: { type: "string" },
+        },
+        required: ["telegramId", "tokens", "endDate", "planName"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" } } },
+        400: badRequestResponse,
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const {
       telegramId,
       subscriptionTokenBalance,
@@ -323,7 +387,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /internal/unlink-subscription
    * Clears metaboxSubscriptionId on LocalSubscription (used by disconnect "keep in bot").
    */
-  fastify.post("/unlink-subscription", async (request, reply) => {
+  fastify.post("/unlink-subscription", {
+    schema: {
+      description: "Unlink Metabox subscription from AI Box",
+      body: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.body as { telegramId: string };
     if (!telegramId) {
       return reply.code(400).send({ error: "telegramId is required" });
@@ -348,7 +418,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Zeroes subscription balance, clears endDate/planName, deactivates local subscription record.
    * Body: { telegramId: string }
    */
-  fastify.post("/revoke-tokens", async (request, reply) => {
+  fastify.post("/revoke-tokens", {
+    schema: {
+      description: "Revoke subscription tokens from user",
+      body: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.body as { telegramId: string };
 
     if (!telegramId) {
@@ -377,7 +453,24 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    *
    * Body: { telegramId: string, tokens: number, description?: string }
    */
-  fastify.post("/decrement-tokens", async (request, reply) => {
+  fastify.post("/decrement-tokens", {
+    schema: {
+      description: "Decrement user's token balance (rollback)",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string" },
+          tokens: { type: "number" },
+          description: { type: "string" },
+        },
+        required: ["telegramId", "tokens"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" }, deducted: { type: "number" }, newBalance: { type: "number" } } },
+        400: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const { telegramId, tokens, description } = request.body as {
       telegramId: string;
       tokens: number;
@@ -444,7 +537,25 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    *   metaboxSubscriptionId?: string,
    * }
    */
-  fastify.post("/decrement-subscription-tokens", async (request, reply) => {
+  fastify.post("/decrement-subscription-tokens", {
+    schema: {
+      description: "Decrement subscription token balance (rollback)",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string" },
+          tokens: { type: "number" },
+          description: { type: "string" },
+          metaboxSubscriptionId: { type: "string" },
+        },
+        required: ["telegramId", "tokens"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" }, deducted: { type: "number" }, newBalance: { type: "number" }, localSubscriptionDeleted: { type: "boolean" } } },
+        400: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const { telegramId, tokens, description, metaboxSubscriptionId } = request.body as {
       telegramId: string;
       tokens: number;
@@ -515,7 +626,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * and transfers all tokens to site. More reliable than decrement.
    * Body: { telegramId: string }
    */
-  fastify.post("/reset-token-balance", async (request, reply) => {
+  fastify.post("/reset-token-balance", {
+    schema: {
+      description: "Reset user's token balance to zero",
+      body: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" }, previousBalance: { type: "number" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.body as { telegramId: string };
     if (!telegramId) {
       return reply.code(400).send({ error: "telegramId is required" });
@@ -538,20 +655,25 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    *
    * Both mentee and new mentor are identified by Metabox User.id (UUID) —
    * the stable cross-system identifier. Bot looks them up via the
-   * metaboxUserId column.
-   *
-   * Cases:
-   *  - mentee not found in bot (never linked TG)        → no-op, ok
-   *  - new mentor not found in bot (никогда не запускал) → referredById = null
-   *  - new mentor found                                  → referredById = mentor.id
-   *  - newMentorMetaboxUserId === null                   → referredById = null
-   *
-   * Сайт — единый источник истины для MLM/реферальной структуры. Локальный
-   * referredById в боте используется только для информационных целей (см.
-   * profile.ts fallback). Поэтому на стороне бота мы НЕ создаём stub'ов
-   * для несвязанных менторов — просто храним null, пока тот не запустит бота.
+* metaboxUserId column.
    */
-  fastify.post("/set-referrer", async (request, reply) => {
+  fastify.post("/set-referrer", {
+    schema: {
+      description: "Set referrer for user",
+      body: {
+        type: "object",
+        properties: {
+          metaboxUserId: { type: "string" },
+          newMentorMetaboxUserId: { type: "string", nullable: true },
+        },
+        required: ["metaboxUserId"],
+      },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" }, applied: { type: "boolean" }, referredById: { type: "string", nullable: true }, reason: { type: "string" } } },
+        400: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const { metaboxUserId, newMentorMetaboxUserId } = request.body as {
       metaboxUserId?: string;
       newMentorMetaboxUserId?: string | null;
@@ -600,7 +722,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Called by Metabox admin when an admin disconnects a user's Telegram account.
    * Clears metaboxUserId and metaboxReferralCode from the AI Box user record.
    */
-  fastify.post("/unlink-metabox", async (request, reply) => {
+  fastify.post("/unlink-metabox", {
+    schema: {
+      description: "Unlink Metabox from user account",
+      body: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.body as { telegramId: string };
 
     if (!telegramId) {
@@ -629,7 +757,17 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Called by Metabox to get the current token balance of a bot user.
    * Returns { tokens: number } or 404 if user not found.
    */
-  fastify.get<{ Querystring: { telegramId?: string } }>("/user-balance", async (request, reply) => {
+  fastify.get<{ Querystring: { telegramId?: string } }>("/user-balance", {
+    schema: {
+      description: "Get user's token balance",
+      querystring: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: {
+        200: { type: "object", properties: { tokens: { type: "number" } } },
+        400: badRequestResponse,
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.query;
     if (!telegramId) {
       return reply.code(400).send({ error: "telegramId is required" });
@@ -653,9 +791,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Called by Metabox to check whether a user has ever started the AI Box bot.
    * Returns { activated: true } if the user exists in the bot DB, { activated: false } otherwise.
    */
-  fastify.get<{ Querystring: { telegramId?: string } }>(
-    "/check-bot-user",
-    async (request, reply) => {
+  fastify.get<{ Querystring: { telegramId?: string } }>("/check-bot-user", {
+    schema: {
+      description: "Check if user has started the bot",
+      querystring: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object", properties: { activated: { type: "boolean" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
       const { telegramId } = request.query;
       if (!telegramId) {
         return reply.code(400).send({ error: "telegramId is required" });
@@ -674,7 +816,24 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Saves subscription data locally so bot can check it independently.
    * Body: { telegramId, planName, period, tokensGranted, endDate, startDate }
    */
-  fastify.post("/save-subscription", async (request, reply) => {
+  fastify.post("/save-subscription", {
+    schema: {
+      description: "Save subscription data to AI Box",
+      body: {
+        type: "object",
+        properties: {
+          telegramId: { type: "string" },
+          planName: { type: "string" },
+          period: { type: "string" },
+          tokensGranted: { type: "number" },
+          endDate: { type: "string" },
+          startDate: { type: "string" },
+        },
+        required: ["telegramId", "planName", "endDate"],
+      },
+      response: { 200: { type: "object", properties: { ok: { type: "boolean" } } }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId, planName, period, tokensGranted, endDate, startDate } = request.body as {
       telegramId: string;
       planName: string;
@@ -719,9 +878,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /internal/get-local-subscription?telegramId=<id>
    * Returns local subscription data if exists and active.
    */
-  fastify.get<{ Querystring: { telegramId?: string } }>(
-    "/get-local-subscription",
-    async (request, reply) => {
+  fastify.get<{ Querystring: { telegramId?: string } }>("/get-local-subscription", {
+    schema: {
+      description: "Get user's local subscription data",
+      querystring: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object" }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
       const { telegramId } = request.query;
       if (!telegramId) {
         return reply.code(400).send({ error: "telegramId is required" });
@@ -755,7 +918,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * Returns and deletes the local subscription data.
    * Body: { telegramId }
    */
-  fastify.post("/consume-local-subscription", async (request, reply) => {
+  fastify.post("/consume-local-subscription", {
+    schema: {
+      description: "Consume and delete local subscription data",
+      body: { type: "object", properties: { telegramId: { type: "string" } }, required: ["telegramId"] },
+      response: { 200: { type: "object" }, 400: badRequestResponse },
+    },
+  }, async (request, reply) => {
     const { telegramId } = request.body as { telegramId: string };
     if (!telegramId) {
       return reply.code(400).send({ error: "telegramId is required" });

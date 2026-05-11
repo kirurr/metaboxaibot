@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { getFileUrl, deleteFile, compressForTelegramPhoto } from "../services/s3.service.js";
 import { buildDownloadButton, generateDownloadToken } from "../utils/download-token.js";
 import { AI_MODELS, config, getT, buildResultCaption } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -133,6 +134,9 @@ async function prepareImageBuffer(
 
 export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["gallery"]),
+  );
 
   /**
    * GET /gallery?section=image|audio|video&page=1&limit=20
@@ -149,7 +153,33 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
       modelIds?: string;
       folderId?: string;
     };
-  }>("/gallery", async (request) => {
+  }>("/gallery", {
+    schema: {
+      description: "Get user's completed generation jobs",
+      querystring: {
+        type: "object",
+        properties: {
+          section: { type: "string", description: "Filter by section (image, audio, video, design)" },
+          page: { type: "string", description: "Page number (default 1)" },
+          limit: { type: "string", description: "Items per page (default 20, max 100)" },
+          modelId: { type: "string", description: "Filter by single model ID" },
+          modelIds: { type: "string", description: "Filter by multiple model IDs (comma-separated)" },
+          folderId: { type: "string", description: "Filter by folder ID" },
+        },
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            items: { type: "array", items: { type: "object" } },
+            total: { type: "number" },
+            page: { type: "number" },
+            limit: { type: "number" },
+          },
+        },
+      },
+    },
+  }, async (request) => {
     const userId = (request as AuthRequest).userId;
     const { section, page = "1", limit = "20", modelId, modelIds, folderId } = request.query;
 
@@ -249,7 +279,19 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    *   • size > 50 MB           → URL `/download/<token>` ("⬇️ Скачать")
    * Files > 20 MB without an S3 key are unreachable and skipped silently.
    */
-  fastify.post<{ Params: { id: string } }>("/gallery/jobs/:id/send", async (request, reply) => {
+  fastify.post<{ Params: { id: string } }>("/gallery/jobs/:id/send", {
+    schema: {
+      description: "Re-deliver job outputs to user's Telegram chat",
+      params: { type: "object", properties: { id: { type: "string", description: "Job ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { ok: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        422: { type: "object", properties: { error: { type: "string" } } },
+        502: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { id } = request.params;
 
@@ -533,7 +575,13 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{
     Querystring: { section?: string };
-  }>("/gallery/model-counts", async (request) => {
+  }>("/gallery/model-counts", {
+    schema: {
+      description: "Get per-model generation counts for user",
+      querystring: { type: "object", properties: { section: { type: "string", description: "Filter by section" } } },
+      response: { 200: { type: "array", items: { type: "object", properties: { modelId: { type: "string" }, count: { type: "number" } } } } },
+    },
+  }, async (request) => {
     const userId = (request as AuthRequest).userId;
     const { section } = request.query;
 
@@ -556,7 +604,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * Returns a playable URL for the gallery item on demand.
    * :id is a GenerationJobOutput ID.
    */
-  fastify.get<{ Params: { id: string } }>("/gallery/:id/preview-url", async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>("/gallery/:id/preview-url", {
+    schema: {
+      description: "Get playable preview URL for gallery item",
+      params: { type: "object", properties: { id: { type: "string", description: "Output ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { url: { type: "string" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        422: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { id } = request.params;
 
@@ -584,9 +643,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * downloads the original file instead of opening it inline. Falls back
    * to the provider URL when the file is not in S3.
    */
-  fastify.get<{ Params: { id: string } }>(
-    "/gallery/outputs/:id/original-url",
-    async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>("/gallery/outputs/:id/original-url", {
+    schema: {
+      description: "Get original file download URL",
+      params: { type: "object", properties: { id: { type: "string", description: "Output ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { url: { type: "string" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+        422: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { id } = request.params;
 
@@ -614,7 +682,17 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /gallery/jobs/:id
    * Removes the entire generation job — all its outputs and S3 artifacts.
    */
-  fastify.delete<{ Params: { id: string } }>("/gallery/jobs/:id", async (request, reply) => {
+  fastify.delete<{ Params: { id: string } }>("/gallery/jobs/:id", {
+    schema: {
+      description: "Delete entire generation job and its outputs",
+      params: { type: "object", properties: { id: { type: "string", description: "Job ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { id } = request.params;
 
@@ -649,7 +727,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * Returns all folders for the current user sorted: pinned first, then by name.
    * Includes item count per folder.
    */
-  fastify.get("/gallery/folders", async (request) => {
+  fastify.get("/gallery/folders", {
+    schema: {
+      description: "Get user's gallery folders",
+      response: { 200: { type: "array", items: { type: "object" } } },
+    },
+  }, async (request) => {
     const userId = (request as AuthRequest).userId;
 
     const folders = await db.galleryFolder.findMany({
@@ -673,7 +756,16 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /gallery/folders
    * Creates a new user folder.
    */
-  fastify.post<{ Body: { name: string } }>("/gallery/folders", async (request, reply) => {
+  fastify.post<{ Body: { name: string } }>("/gallery/folders", {
+    schema: {
+      description: "Create a new gallery folder",
+      body: { type: "object", properties: { name: { type: "string", description: "Folder name" } }, required: ["name"] },
+      response: {
+        200: { type: "object" },
+        400: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { name } = request.body;
 
@@ -701,7 +793,25 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.patch<{
     Params: { folderId: string };
     Body: { name?: string; isPinned?: boolean };
-  }>("/gallery/folders/:folderId", async (request, reply) => {
+  }>("/gallery/folders/:folderId", {
+    schema: {
+      description: "Update folder name or pin status",
+      params: { type: "object", properties: { folderId: { type: "string", description: "Folder ID" } }, required: ["folderId"] },
+      body: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "New folder name" },
+          isPinned: { type: "boolean", description: "Pin status" },
+        },
+      },
+      response: {
+        200: { type: "object" },
+        400: badRequestResponse,
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { folderId } = request.params;
     const { name, isPinned } = request.body;
@@ -738,9 +848,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /gallery/folders/:folderId
    * Deletes a user folder. Default (Favorites) folders cannot be deleted.
    */
-  fastify.delete<{ Params: { folderId: string } }>(
-    "/gallery/folders/:folderId",
-    async (request, reply) => {
+  fastify.delete<{ Params: { folderId: string } }>("/gallery/folders/:folderId", {
+    schema: {
+      description: "Delete a gallery folder",
+      params: { type: "object", properties: { folderId: { type: "string", description: "Folder ID" } }, required: ["folderId"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        400: badRequestResponse,
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId } = request.params;
 
@@ -761,7 +880,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
     Params: { folderId: string };
     Body: { jobId: string };
-  }>("/gallery/folders/:folderId/items", async (request, reply) => {
+  }>("/gallery/folders/:folderId/items", {
+    schema: {
+      description: "Add job to folder",
+      params: { type: "object", properties: { folderId: { type: "string", description: "Folder ID" } }, required: ["folderId"] },
+      body: { type: "object", properties: { jobId: { type: "string", description: "Job ID" } }, required: ["jobId"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { folderId } = request.params;
     const { jobId } = request.body;
@@ -790,9 +920,17 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /gallery/folders/:folderId/items/:jobId
    * Removes a generation job from a folder.
    */
-  fastify.delete<{ Params: { folderId: string; jobId: string } }>(
-    "/gallery/folders/:folderId/items/:jobId",
-    async (request, reply) => {
+  fastify.delete<{ Params: { folderId: string; jobId: string } }>("/gallery/folders/:folderId/items/:jobId", {
+    schema: {
+      description: "Remove job from folder",
+      params: { type: "object", properties: { folderId: { type: "string", description: "Folder ID" }, jobId: { type: "string", description: "Job ID" } }, required: ["folderId", "jobId"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId, jobId } = request.params;
 
@@ -810,7 +948,17 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * Ensures the Favorites folder exists for the user, then adds the job.
    * Returns the Favorites folder id.
    */
-  fastify.post<{ Body: { jobId: string } }>("/gallery/favorites", async (request, reply) => {
+  fastify.post<{ Body: { jobId: string } }>("/gallery/favorites", {
+    schema: {
+      description: "Add job to Favorites folder",
+      body: { type: "object", properties: { jobId: { type: "string", description: "Job ID" } }, required: ["jobId"] },
+      response: {
+        200: { type: "object", properties: { folderId: { type: "string" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { jobId } = request.body;
 
@@ -841,9 +989,16 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /gallery/favorites/:jobId
    * Removes a job from the Favorites folder (if it exists).
    */
-  fastify.delete<{ Params: { jobId: string } }>(
-    "/gallery/favorites/:jobId",
-    async (request, reply) => {
+  fastify.delete<{ Params: { jobId: string } }>("/gallery/favorites/:jobId", {
+    schema: {
+      description: "Remove job from Favorites folder",
+      params: { type: "object", properties: { jobId: { type: "string", description: "Job ID" } }, required: ["jobId"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { jobId } = request.params;
 

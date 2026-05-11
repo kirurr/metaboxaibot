@@ -5,6 +5,7 @@ import { config } from "@metabox/shared";
 import { getAiBotCatalog } from "../services/metabox-bridge.service.js";
 import { calcStars } from "../services/exchange-rate.service.js";
 import type { AiBotCatalog } from "../services/metabox-bridge.service.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -15,13 +16,66 @@ function emptyCatalog(): AiBotCatalog {
 
 export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["tariffs"]),
+  );
 
   /**
    * GET /tariffs/catalog
    * Returns unified catalog of subscriptions + token packages with Stars prices.
    * Returns empty catalog if Metabox API is unavailable.
    */
-  fastify.get("/tariffs/catalog", async (request) => {
+  fastify.get("/tariffs/catalog", {
+    schema: {
+      description: "Returns unified catalog of subscriptions and token packages with Stars prices. Returns empty catalog if Metabox API is unavailable.",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            subscriptions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  tokens: { type: "string" },
+                  periods: {
+                    type: "object",
+                    additionalProperties: {
+                      type: "object",
+                      properties: {
+                        priceRub: { type: "string" },
+                        stars: { type: "number" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            tokenPackages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  tokens: { type: "string" },
+                  priceRub: { type: "string" },
+                  stars: { type: "number" },
+                  badge: { type: "string" },
+                },
+              },
+            },
+            canPayByCard: { type: "boolean" },
+            hasPaidSubscription: { type: "boolean" },
+            starPriceRub: { type: "number" },
+            metaboxUrl: { type: "string" },
+          },
+        },
+      },
+    },
+  }, async (request) => {
     const { userId } = request as AuthRequest;
 
     // Fetch catalog from Metabox (with fallback) + user + sub.

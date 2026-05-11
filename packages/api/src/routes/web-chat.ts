@@ -27,6 +27,7 @@ import {
   type Section,
   type AIModel,
 } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 function serializeModelCompact(m: AIModel) {
   return {
@@ -51,11 +52,46 @@ function serializeModelCompact(m: AIModel) {
 export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // Все роуты здесь требуют и авторизации, и привязанного Telegram.
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["web-chat"]),
+  );
 
   // ── GET /web/models ─────────────────────────────────────────────────────
   fastify.get<{ Querystring: { section?: string } }>(
     "/web/models",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Get list of AI models, optionally filtered by section",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                description: { type: "string" },
+                section: { type: "string" },
+                provider: { type: "string" },
+                familyId: { type: "string", nullable: true },
+                familyName: { type: "string", nullable: true },
+                familyDefaultModelId: { type: "string", nullable: true },
+                versionLabel: { type: "string", nullable: true },
+                variantLabel: { type: "string", nullable: true },
+                supportsImages: { type: "boolean" },
+                supportsDocuments: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       const { section } = request.query;
       const models = section
@@ -66,7 +102,30 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── GET /web/balance ────────────────────────────────────────────────────
-  fastify.get("/web/balance", { schema: { hide: true } as any }, async (request) => {
+  fastify.get("/web/balance", {
+    schema: {
+      description: "Get user balance information",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            tokenBalance: { type: "string" },
+            subscriptionTokenBalance: { type: "string" },
+            subscription: {
+              type: "object",
+              nullable: true,
+              properties: {
+                planName: { type: "string" },
+                period: { type: "string" },
+                endDate: { type: "string" },
+                tokensGranted: { type: "number" },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request) => {
     const { aibUserId } = request.webUser!;
     const user = await db.user.findUnique({
       where: { id: aibUserId! },
@@ -100,7 +159,33 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // ── GET /web/dialogs ────────────────────────────────────────────────────
   fastify.get<{ Querystring: { section?: string } }>(
     "/web/dialogs",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "List user dialogs optionally filtered by section",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                section: { type: "string" },
+                modelId: { type: "string" },
+                title: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       const { aibUserId } = request.webUser!;
       const dialogs = await dialogService.listByUser(
@@ -121,7 +206,34 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /web/dialogs ───────────────────────────────────────────────────
   fastify.post<{ Body: { section?: string; modelId?: string; title?: string } }>(
     "/web/dialogs",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Create a new dialog",
+        body: {
+          type: "object",
+          properties: {
+            section: { type: "string" },
+            modelId: { type: "string" },
+            title: { type: "string" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              section: { type: "string" },
+              modelId: { type: "string" },
+              title: { type: "string", nullable: true },
+              createdAt: { type: "string" },
+              updatedAt: { type: "string" },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { section, modelId, title } = request.body ?? {};
@@ -151,7 +263,36 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // ── PATCH /web/dialogs/:id ──────────────────────────────────────────────
   fastify.patch<{ Params: { id: string }; Body: { title?: string } }>(
     "/web/dialogs/:id",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Update dialog title by ID",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        body: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+          },
+          required: ["title"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+            },
+          },
+          400: { type: "object", properties: { error: { type: "string" } }, description: "Title is required" },
+          403: { type: "object", properties: { error: { type: "string" } }, description: "Forbidden" },
+          404: { type: "object", properties: { error: { type: "string" } }, description: "Not found" },
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { id } = request.params;
@@ -170,7 +311,27 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // ── DELETE /web/dialogs/:id ─────────────────────────────────────────────
   fastify.delete<{ Params: { id: string } }>(
     "/web/dialogs/:id",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Soft-delete a dialog by ID",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+          },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { id } = request.params;
@@ -186,7 +347,35 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // ── GET /web/dialogs/:id/messages ───────────────────────────────────────
   fastify.get<{ Params: { id: string } }>(
     "/web/dialogs/:id/messages",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Get messages for a dialog by ID",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                role: { type: "string" },
+                content: { type: "string" },
+                mediaUrl: { type: "string", nullable: true },
+                mediaType: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+              },
+            },
+          },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { id } = request.params;
@@ -236,7 +425,33 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Params: { id: string }; Body: { content?: string } }>(
     "/web/dialogs/:id/send",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Send message to dialog with SSE streaming response",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+          },
+        },
+        body: {
+          type: "object",
+          properties: {
+            content: { type: "string" },
+          },
+          required: ["content"],
+        },
+        response: {
+          200: {
+            type: "string",
+            description: "SSE stream. event: chunk (data: { text }), event: done (data: { tokensUsed, balance }), event: error (data: { code, message })",
+          },
+          400: badRequestResponse,
+          403: badRequestResponse,
+          404: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { id } = request.params;

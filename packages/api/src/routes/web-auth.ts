@@ -38,6 +38,7 @@ import {
 import { extractWebUserFromRequest, webAuthPreHandler } from "../middlewares/web-auth.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 const REFRESH_COOKIE_NAME = "aibw_refresh";
 
@@ -155,6 +156,10 @@ async function issueSession(
 }
 
 export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["web-auth"]),
+  );
+
   // Fail-fast проверка конфигурации при регистрации плагина.
   // Если секретов нет — web-auth не запускается, но остальной API работает (бот, TG-миниапп).
   if (!config.web.jwtSecret) {
@@ -187,7 +192,36 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
       firstName?: string;
       referralCode?: string;
     };
-  }>("/auth/web-signup", { schema: { hide: true } as any }, async (request, reply) => {
+  }>("/auth/web-signup", {
+    schema: {
+      description: "Register a new web user",
+      security: [],
+      body: {
+        type: "object",
+        properties: {
+          email: { type: "string" },
+          password: { type: "string" },
+          firstName: { type: "string" },
+          referralCode: { type: "string" },
+        },
+        required: ["email", "password", "firstName"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            user: { type: "object" },
+            accessToken: { type: "string" },
+            accessTokenExpiresAt: { type: "number" },
+            csrfToken: { type: "string" },
+          },
+        },
+        400: { type: "object", properties: { error: { type: "string", description: "Invalid email, password too short, or empty firstName" } } },
+        409: { type: "object", properties: { error: { type: "string", description: "Email already registered" } } },
+        502: { type: "object", properties: { error: { type: "string", description: "Failed to create account" } } },
+      },
+    },
+  }, async (request, reply) => {
     try {
       const { email = "", password = "", firstName = "", referralCode } = request.body ?? {};
       const emailNorm = email.toLowerCase().trim();
@@ -256,7 +290,36 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-login ─────────────────────────────────────────────────
   fastify.post<{
     Body: { email?: string; password?: string; rememberMe?: boolean };
-  }>("/auth/web-login", { schema: { hide: true } as any }, async (request, reply) => {
+  }>("/auth/web-login", {
+    schema: {
+      description: "Login web user with email and password",
+      security: [],
+      body: {
+        type: "object",
+        properties: {
+          email: { type: "string" },
+          password: { type: "string" },
+          rememberMe: { type: "boolean" },
+        },
+        required: ["email", "password"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            user: { type: "object" },
+            accessToken: { type: "string" },
+            accessTokenExpiresAt: { type: "number" },
+            csrfToken: { type: "string" },
+          },
+        },
+        400: { type: "object", properties: { error: { type: "string", description: "Email and password are required" } } },
+        401: { type: "object", properties: { error: { type: "string", description: "Invalid email or password" } } },
+        403: { type: "object", properties: { error: { type: "string", description: "Access denied" } } },
+        502: { type: "object", properties: { error: { type: "string", description: "Temporary error. Try again later." } } },
+      },
+    },
+  }, async (request, reply) => {
     try {
       const { email = "", password = "", rememberMe = true } = request.body ?? {};
       const emailNorm = email.toLowerCase().trim();
@@ -305,7 +368,23 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ── POST /auth/web-refresh ───────────────────────────────────────────────
-  fastify.post("/auth/web-refresh", { schema: { hide: true } as any }, async (request, reply) => {
+  fastify.post("/auth/web-refresh", {
+    schema: {
+      description: "Refresh access token using refresh cookie",
+      security: [],
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            accessToken: { type: "string" },
+            accessTokenExpiresAt: { type: "number" },
+            csrfToken: { type: "string" },
+          },
+        },
+        401: { type: "object", properties: { error: { type: "string", description: "Missing or expired refresh token" } } },
+      },
+    },
+  }, async (request, reply) => {
     const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
     if (!refreshToken) return reply.code(401).send({ error: "No refresh token" });
 
@@ -328,7 +407,19 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ── POST /auth/web-logout ────────────────────────────────────────────────
-  fastify.post("/auth/web-logout", { schema: { hide: true } as any }, async (request, reply) => {
+  fastify.post("/auth/web-logout", {
+    schema: {
+      description: "Logout web user and revoke refresh session",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
     if (refreshToken) await revokeRefreshSession(refreshToken);
     reply.clearCookie(REFRESH_COOKIE_NAME, {
@@ -341,7 +432,21 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── GET /auth/web-me ─────────────────────────────────────────────────────
   fastify.get(
     "/auth/web-me",
-    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Get current web user profile",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              user: { type: "object" },
+              csrfToken: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { metaboxUserId } = request.webUser!;
 
@@ -384,7 +489,27 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-forgot-password ──────────────────────────────────────
   fastify.post<{ Body: { email?: string } }>(
     "/auth/web-forgot-password",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Request password reset email",
+        security: [],
+        body: {
+          type: "object",
+          properties: {
+            email: { type: "string" },
+          },
+          required: ["email"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const email = (request.body?.email ?? "").toLowerCase().trim();
       if (!isValidEmail(email)) {
@@ -411,7 +536,30 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-reset-password ───────────────────────────────────────
   fastify.post<{ Body: { token?: string; newPassword?: string } }>(
     "/auth/web-reset-password",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Reset password with token from email",
+        security: [],
+        body: {
+          type: "object",
+          properties: {
+            token: { type: "string" },
+            newPassword: { type: "string" },
+          },
+          required: ["token", "newPassword"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+          400: { type: "object", properties: { error: { type: "string", description: "Invalid or expired token" } } },
+          502: { type: "object", properties: { error: { type: "string", description: "Failed to reset password" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const { token = "", newPassword = "" } = request.body ?? {};
       if (!token || !isStrongPassword(newPassword))
@@ -433,7 +581,31 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-change-password ──────────────────────────────────────
   fastify.post<{ Body: { oldPassword?: string; newPassword?: string } }>(
     "/auth/web-change-password",
-    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Change password for authenticated web user",
+        body: {
+          type: "object",
+          properties: {
+            oldPassword: { type: "string" },
+            newPassword: { type: "string" },
+          },
+          required: ["oldPassword", "newPassword"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+          400: { type: "object", properties: { error: { type: "string", description: "Missing old or new password, or new password too short" } } },
+          401: { type: "object", properties: { error: { type: "string", description: "Old password is incorrect" } } },
+          502: { type: "object", properties: { error: { type: "string", description: "Failed to change password" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const { oldPassword = "", newPassword = "" } = request.body ?? {};
       if (!oldPassword || !isStrongPassword(newPassword))
@@ -455,7 +627,20 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-unlink-telegram ──────────────────────────────────────
   fastify.post(
     "/auth/web-unlink-telegram",
-    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Unlink Telegram from web account",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { metaboxUserId } = request.webUser!;
       // На AI Box стороне зачищаем связь. Сам User остаётся — у него есть история.
@@ -479,7 +664,21 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-link-telegram/init ───────────────────────────────────
   fastify.post(
     "/auth/web-link-telegram/init",
-    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Initiate Telegram link for web user",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              deepLinkUrl: { type: "string" },
+              state: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { metaboxUserId } = request.webUser!;
       const state = await createLinkTelegramState(metaboxUserId);
@@ -495,7 +694,29 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-link-telegram/status ─────────────────────────────────
   fastify.post<{ Body: { state?: string } }>(
     "/auth/web-link-telegram/status",
-    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Check Telegram link status by state",
+        body: {
+          type: "object",
+          properties: {
+            state: { type: "string" },
+          },
+          required: ["state"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              linked: { type: "boolean" },
+              telegramUsername: { type: "string", nullable: true },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const state = request.body?.state ?? "";
       if (!state) return reply.code(400).send({ error: "state is required" });

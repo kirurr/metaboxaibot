@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface HeyGenVoice {
   voice_id: string;
@@ -22,9 +23,33 @@ let voicesCache: { data: object[]; at: number } | null = null;
 
 export const heygenVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["heygen-voices"]),
+  );
 
   /** GET /heygen-voices — proxy to HeyGen v2/voices, returns simplified voice list */
-  fastify.get("/heygen-voices", async (_request, reply) => {
+  fastify.get("/heygen-voices", {
+    schema: {
+      description: "Get list of HeyGen voices (cached for 1 hour)",
+      response: {
+        200: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              voice_id: { type: "string", description: "Voice ID" },
+              name: { type: "string", description: "Voice name" },
+              language: { type: "string", description: "Voice language" },
+              gender: { type: "string", description: "Voice gender" },
+              preview_audio: { type: "string", nullable: true, description: "Preview audio URL" },
+            },
+          },
+        },
+        502: badRequestResponse,
+        503: badRequestResponse,
+      },
+    },
+  }, async (_request, reply) => {
     if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
       return voicesCache.data;
     }

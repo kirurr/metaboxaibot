@@ -11,16 +11,39 @@ import type { AiBotCatalog } from "../services/metabox-bridge.service.js";
 import { calcStars } from "../services/exchange-rate.service.js";
 import type { SaleUserInfo } from "../services/payment.service.js";
 import { config } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["payments"]),
+  );
 
   /** POST /payments/invoice — create Telegram Stars invoice for a product or subscription */
   fastify.post<{
     Body: { type: "product" | "subscription"; id: string; period?: string; planId?: string };
-  }>("/payments/invoice", async (request, reply) => {
+  }>("/payments/invoice", {
+    schema: {
+      description: "Create Telegram Stars invoice for payment",
+      body: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["product", "subscription"], description: "Payment type" },
+          id: { type: "string", description: "Product or subscription ID" },
+          period: { type: "string", description: "Subscription period (M1, M3, M6, M12)" },
+          planId: { type: "string", description: "Legacy plan ID" },
+        },
+        required: ["id"],
+      },
+      response: {
+        200: { type: "object", properties: { invoiceUrl: { type: "string" } } },
+        400: { type: "object", properties: { error: { type: "string" } }, description: "type and id are required, or invalid type/subscription period" },
+        404: { type: "object", properties: { error: { type: "string" } }, description: "Product not found or Subscription plan not found" },
+      },
+    },
+  }, async (request, reply) => {
     const { type, id, period, planId: legacyPlanId } = request.body;
 
     // Legacy support: old format with planId
@@ -147,7 +170,26 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
   /** POST /payments/card-invoice — create card payment invoice via Metabox/Lava */
   fastify.post<{
     Body: { type: "product" | "subscription"; id: string; period?: string };
-  }>("/payments/card-invoice", async (request, reply) => {
+  }>("/payments/card-invoice", {
+    schema: {
+      description: "Create card payment invoice via Metabox",
+      body: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["product", "subscription"], description: "Payment type" },
+          id: { type: "string", description: "Product or subscription ID" },
+          period: { type: "string", description: "Subscription period (M1, M3, M6, M12)" },
+        },
+        required: ["type", "id"],
+      },
+      response: {
+        200: { type: "object", properties: { paymentUrl: { type: "string" } } },
+        400: badRequestResponse,
+        409: { type: "object", properties: { error: { type: "string" } } },
+        502: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { type, id, period } = request.body;
 

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -40,8 +41,19 @@ function serialize(slide: {
 }
 
 export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["slides"]),
+  );
+
   /** GET /slides — public, returns active slides */
-  fastify.get("/slides", async () => {
+  fastify.get("/slides", {
+    schema: {
+      description: "Get active banner slides",
+      response: {
+        200: { type: "object", properties: { slides: { type: "array", items: { type: "object" } } } },
+      },
+    },
+  }, async () => {
     const slides = await db.bannerSlide.findMany({
       where: { active: true },
       orderBy: { sortOrder: "asc" },
@@ -121,7 +133,13 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** PATCH /admin/slides/:id — update slide */
-    admin.patch<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
+    admin.patch<{ Params: { id: string } }>("/admin/slides/:id", {
+      schema: {
+        description: "Update a banner slide by ID",
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: { 404: { type: "object", properties: { error: { type: "string" } } } },
+      },
+    }, async (request, reply) => {
       const { id } = request.params;
       const existing = await db.bannerSlide.findUnique({ where: { id } });
       if (!existing) {
@@ -179,7 +197,16 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** DELETE /admin/slides/:id */
-    admin.delete<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
+    admin.delete<{ Params: { id: string } }>("/admin/slides/:id", {
+      schema: {
+        description: "Delete a banner slide by ID",
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          404: { type: "object", properties: { error: { type: "string" } }, description: "Slide not found" },
+        },
+      },
+    }, async (request, reply) => {
       const { id } = request.params;
       const existing = await db.bannerSlide.findUnique({ where: { id } });
       if (!existing) {

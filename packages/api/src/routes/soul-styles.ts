@@ -3,6 +3,7 @@ import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface SoulStyle {
   id: string;
@@ -16,9 +17,32 @@ let stylesCache: { data: SoulStyle[]; at: number } | null = null;
 
 export const soulStylesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["soul-styles"]),
+  );
 
   /** GET /soul-styles — proxy to Higgsfield Cloud /v1/text2image/soul-styles with 1-hour cache */
-  fastify.get("/soul-styles", async (_request, reply) => {
+  fastify.get("/soul-styles", {
+    schema: {
+      description: "Get Higgsfield Soul styles (cached for 1 hour)",
+      response: {
+        200: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Style ID" },
+              name: { type: "string", description: "Style name" },
+              description: { type: "string", nullable: true, description: "Style description" },
+              preview_url: { type: "string", description: "Preview image URL" },
+            },
+          },
+        },
+        502: badRequestResponse,
+        503: badRequestResponse,
+      },
+    },
+  }, async (_request, reply) => {
     if (stylesCache && Date.now() - stylesCache.at < CACHE_TTL_MS) {
       return stylesCache.data;
     }

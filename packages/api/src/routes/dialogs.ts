@@ -13,14 +13,26 @@ import {
   type Section,
 } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["dialogs"]),
+  );
 
   /** GET /dialogs?section=gpt — list active dialogs */
-  fastify.get<{ Querystring: { section?: string } }>("/dialogs", async (request) => {
+  fastify.get<{ Querystring: { section?: string } }>("/dialogs", {
+    schema: {
+      description: "List active dialogs for user",
+      querystring: { type: "object", properties: { section: { type: "string", description: "Filter by section (e.g., gpt, image)" } } },
+      response: {
+        200: { type: "array", items: { type: "object", properties: { id: { type: "string" }, section: { type: "string" }, modelId: { type: "string" }, title: { type: "string", nullable: true }, createdAt: { type: "string" }, updatedAt: { type: "string" } } } },
+      },
+    },
+  }, async (request) => {
     const { userId } = request as AuthRequest;
     const section = request.query.section as Section | undefined;
 
@@ -37,8 +49,24 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
 
   /** POST /dialogs — create new dialog */
   fastify.post<{ Body: { section: string; modelId: string; title?: string } }>(
-    "/dialogs",
-    async (request, reply) => {
+    "/dialogs", {
+    schema: {
+      description: "Create a new dialog",
+      body: {
+        type: "object",
+        properties: {
+          section: { type: "string", description: "Section (e.g., gpt, image)" },
+          modelId: { type: "string", description: "Model ID to use" },
+          title: { type: "string", description: "Optional dialog title" },
+        },
+        required: ["section", "modelId"],
+      },
+      response: {
+        200: { type: "object", properties: { id: { type: "string" }, section: { type: "string" }, modelId: { type: "string" }, title: { type: "string", nullable: true }, createdAt: { type: "string" }, updatedAt: { type: "string" } } },
+        400: badRequestResponse,
+      },
+    },
+    }, async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { section, modelId, title } = request.body;
 
@@ -66,8 +94,19 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
 
   /** PATCH /dialogs/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { title: string } }>(
-    "/dialogs/:id",
-    async (request, reply) => {
+    "/dialogs/:id", {
+    schema: {
+      description: "Rename a dialog",
+      params: { type: "object", properties: { id: { type: "string", description: "Dialog ID" } }, required: ["id"] },
+      body: { type: "object", properties: { title: { type: "string", description: "New dialog title" } }, required: ["title"] },
+      response: {
+        200: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } } },
+        400: badRequestResponse,
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+    }, async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
       const { title } = request.body;
@@ -85,7 +124,17 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /dialogs/:id — soft delete */
-  fastify.delete<{ Params: { id: string } }>("/dialogs/:id", async (request, reply) => {
+  fastify.delete<{ Params: { id: string } }>("/dialogs/:id", {
+    schema: {
+      description: "Soft delete a dialog",
+      params: { type: "object", properties: { id: { type: "string", description: "Dialog ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
 
@@ -99,7 +148,17 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /** POST /dialogs/:id/activate — set as active dialog */
-  fastify.post<{ Params: { id: string } }>("/dialogs/:id/activate", async (request, reply) => {
+  fastify.post<{ Params: { id: string } }>("/dialogs/:id/activate", {
+    schema: {
+      description: "Set dialog as active",
+      params: { type: "object", properties: { id: { type: "string", description: "Dialog ID" } }, required: ["id"] },
+      response: {
+        200: { type: "object", properties: { success: { type: "boolean" } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
 
@@ -122,7 +181,17 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /** GET /dialogs/:id/messages — message history */
-  fastify.get<{ Params: { id: string } }>("/dialogs/:id/messages", async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>("/dialogs/:id/messages", {
+    schema: {
+      description: "Get message history for a dialog",
+      params: { type: "object", properties: { id: { type: "string", description: "Dialog ID" } }, required: ["id"] },
+      response: {
+        200: { type: "array", items: { type: "object", properties: { id: { type: "string" }, role: { type: "string" }, content: { type: "string" }, mediaUrl: { type: "string", nullable: true }, mediaType: { type: "string", nullable: true }, attachments: { type: "array", items: { type: "object" } }, createdAt: { type: "string" } } } },
+        403: { type: "object", properties: { error: { type: "string" } } },
+        404: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  }, async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
 

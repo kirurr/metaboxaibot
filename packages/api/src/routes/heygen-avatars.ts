@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface HeyGenLookItem {
   id: string;
@@ -77,6 +78,9 @@ function applyFilters(
 
 export const heygenAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["heygen-avatars"]),
+  );
 
   /**
    * GET /heygen-avatars — paginated public avatar list with server-side filtering.
@@ -95,7 +99,32 @@ export const heygenAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{
     Querystring: { token?: string; limit?: string; gender?: string; search?: string };
-  }>("/heygen-avatars", async (request, reply) => {
+  }>("/heygen-avatars", {
+    schema: {
+      description: "Get paginated HeyGen public avatars with optional filtering",
+      querystring: {
+        type: "object",
+        properties: {
+          token: { type: "string", description: "Pagination cursor from previous response" },
+          limit: { type: "string", description: "Number of items to return (default 20, max 50)" },
+          gender: { type: "string", description: "Filter by gender (Man, Woman, or all)" },
+          search: { type: "string", description: "Search by avatar name (case-insensitive)" },
+        },
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            items: { type: "array", items: { type: "object", properties: { avatar_id: { type: "string" }, avatar_name: { type: "string" }, gender: { type: "string" }, preview_image_url: { type: "string", nullable: true } } } },
+            has_more: { type: "boolean" },
+            next_token: { type: "string", nullable: true },
+          },
+        },
+        502: badRequestResponse,
+        503: badRequestResponse,
+      },
+    },
+  }, async (request, reply) => {
     let apiKey: string;
     try {
       apiKey = (await acquireKey("heygen")).apiKey;

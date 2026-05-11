@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface ElevenLabsVoiceRaw {
   voice_id: string;
@@ -20,9 +21,34 @@ let voicesCache: { data: object[]; at: number } | null = null;
 
 export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["elevenlabs-voices"]),
+  );
 
   /** GET /elevenlabs-voices — proxy to ElevenLabs /v1/voices, returns premade voices */
-  fastify.get("/elevenlabs-voices", async (_request, reply) => {
+  fastify.get("/elevenlabs-voices", {
+    schema: {
+      description: "Get list of premade ElevenLabs voices (cached for 1 hour)",
+      response: {
+        200: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              voice_id: { type: "string", description: "Voice ID" },
+              name: { type: "string", description: "Voice name" },
+              category: { type: "string", description: "Voice category" },
+              gender: { type: "string", nullable: true, description: "Voice gender" },
+              language: { type: "string", nullable: true, description: "Voice language" },
+              preview_url: { type: "string", nullable: true, description: "Preview audio URL" },
+            },
+          },
+        },
+        502: badRequestResponse,
+        503: badRequestResponse,
+      },
+    },
+  }, async (_request, reply) => {
     if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
       return voicesCache.data;
     }

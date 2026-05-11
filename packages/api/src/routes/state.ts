@@ -21,6 +21,7 @@ import {
 import type { Language } from "@metabox/shared";
 import { getRedis } from "../redis.js";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -517,9 +518,34 @@ async function sendModelActivatedNotification(
 
 export const stateRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["state"]),
+  );
 
   /** GET /state — current bot state with per-section active dialogs */
-  fastify.get("/state", async (request) => {
+  fastify.get("/state", {
+    schema: {
+      description: "Get current bot state with per-section active dialogs",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            state: { type: "string" },
+            section: { type: "string", nullable: true },
+            gptModelId: { type: "string", nullable: true },
+            gptDialogId: { type: "string", nullable: true },
+            designDialogId: { type: "string", nullable: true },
+            audioDialogId: { type: "string", nullable: true },
+            videoDialogId: { type: "string", nullable: true },
+            designModelId: { type: "string", nullable: true },
+            audioModelId: { type: "string", nullable: true },
+            videoModelId: { type: "string", nullable: true },
+            selectedModes: { type: "object" },
+          },
+        },
+      },
+    },
+  }, async (request) => {
     const { userId } = request as AuthRequest;
     const state = await userStateService.get(userId);
     const selectedModes = await userStateService.getSelectedModes(userId);
