@@ -88,55 +88,76 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
         <span className="settings-panel__label">{label}</span>
         {description && <span className="settings-panel__desc">{description}</span>}
         {def.type === "select" &&
-          (def.key === "aspect_ratio" ? (
-            (() => {
-              const visible = def
-                .options!.filter(
-                  (opt) => !(opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues)),
-                )
-                .map((opt) => ({
+          (def.key === "aspect_ratio"
+            ? (() => {
+                const visible = def
+                  .options!.filter(
+                    (opt) => !(opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues)),
+                  )
+                  .map((opt) => ({
+                    value: String(opt.value),
+                    label: settingT?.options?.[String(opt.value)] ?? opt.label,
+                  }));
+                const fallback = String(def.default ?? visible[0]?.value ?? "");
+                const rawValue = String(val ?? fallback);
+                // Stale userState (опции вырезали из каталога) — отдаём в Wheel
+                // только валидное значение, иначе он молча показал бы первую
+                // опцию, а в БД оставалось бы старое.
+                const currentValue = visible.some((v) => v.value === rawValue)
+                  ? rawValue
+                  : fallback;
+                return (
+                  <AspectRatioWheel
+                    options={visible}
+                    value={currentValue}
+                    onChange={(v) => onChange(def.key, v)}
+                  />
+                );
+              })()
+            : (() => {
+                const valueSet = new Set<unknown>(def.options!.map((o) => o.value));
+                const activeValue = valueSet.has(val)
+                  ? val
+                  : (def.default ?? def.options![0]?.value);
+                return (
+                  <div className="image-settings-ratios">
+                    {def.options!.map((opt) => {
+                      const optDisabled =
+                        !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues);
+                      const optLabel = settingT?.options?.[String(opt.value)] ?? opt.label;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          disabled={optDisabled}
+                          className={`ratio-btn${activeValue === opt.value ? " ratio-btn--active" : ""}${optDisabled ? " ratio-btn--disabled" : ""}`}
+                          onClick={() => !optDisabled && onChange(def.key, opt.value)}
+                        >
+                          {optLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })())}
+        {def.type === "dropdown" &&
+          (() => {
+            const optionValues = def.options!.map((o) => String(o.value));
+            const rawValue = String(val ?? def.default ?? "");
+            const currentValue = optionValues.includes(rawValue)
+              ? rawValue
+              : String(def.default ?? optionValues[0] ?? "");
+            return (
+              <StyledSelect
+                value={currentValue}
+                onChange={(v) => onChange(def.key, v)}
+                options={def.options!.map((opt) => ({
                   value: String(opt.value),
                   label: settingT?.options?.[String(opt.value)] ?? opt.label,
-                }));
-              const currentValue = String(val ?? def.default ?? visible[0]?.value ?? "");
-              return (
-                <AspectRatioWheel
-                  options={visible}
-                  value={currentValue}
-                  onChange={(v) => onChange(def.key, v)}
-                />
-              );
-            })()
-          ) : (
-            <div className="image-settings-ratios">
-              {def.options!.map((opt) => {
-                const optDisabled =
-                  !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues);
-                const optLabel = settingT?.options?.[String(opt.value)] ?? opt.label;
-                return (
-                  <button
-                    key={String(opt.value)}
-                    disabled={optDisabled}
-                    className={`ratio-btn${val === opt.value ? " ratio-btn--active" : ""}${optDisabled ? " ratio-btn--disabled" : ""}`}
-                    onClick={() => !optDisabled && onChange(def.key, opt.value)}
-                  >
-                    {optLabel}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        {def.type === "dropdown" && (
-          <StyledSelect
-            value={String(val ?? def.default ?? "")}
-            onChange={(v) => onChange(def.key, v)}
-            options={def.options!.map((opt) => ({
-              value: String(opt.value),
-              label: settingT?.options?.[String(opt.value)] ?? opt.label,
-              disabled: !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues),
-            }))}
-          />
-        )}
+                  disabled: !!opt.unavailableIf && evalRule(opt.unavailableIf, effectiveValues),
+                }))}
+              />
+            );
+          })()}
         {def.type === "slider" && (
           <div className="settings-panel__slider-row">
             <CustomSlider
