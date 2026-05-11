@@ -15,14 +15,79 @@ import {
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["web-billing"]),
+  );
 
   // ── GET /web/billing/catalog ────────────────────────────────────────────
+  /**
+   * Получение каталога подписок и токен-пакетов для покупки на вебе.
+   */
   fastify.get(
     "/web/billing/catalog",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Catalog of subscriptions and token packages for purchase",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              subscriptions: {
+                type: "array",
+                description: "Available subscriptions",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", description: "Subscription ID" },
+                    name: { type: "string", description: "Subscription name" },
+                    tokens: { type: "number", description: "Monthly token allowance" },
+                    periods: {
+                      type: "object",
+                      description: "Available billing periods with prices",
+                      additionalProperties: {
+                        type: "object",
+                        properties: {
+                          priceRub: { type: "string", description: "Price in RUB" },
+                          discountPct: { type: "number", description: "Discount percentage" },
+                        },
+                      },
+                    },
+                  },
+                  required: ["id", "name", "tokens", "periods"],
+                },
+              },
+              tokenPackages: {
+                type: "array",
+                description: "Available token packages",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", description: "Package ID" },
+                    name: { type: "string", description: "Package name" },
+                    tokens: { type: "number", description: "Number of tokens" },
+                    priceRub: { type: "string", description: "Price in RUB" },
+                    badge: { type: "string", nullable: true, description: "Badge (e.g., 'Popular')" },
+                  },
+                  required: ["id", "name", "tokens", "priceRub"],
+                },
+              },
+            },
+            required: ["subscriptions", "tokenPackages"],
+          },
+          502: {
+            description: "Catalog temporarily unavailable",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (_request, reply) => {
       try {
         const catalog = await getAiBotCatalog();
@@ -77,9 +142,42 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── POST /web/billing/subscription-invoice ──────────────────────────────
+  /**
+   * Создание заказа на подписку. Возвращает URL для оплаты.
+   */
   fastify.post<{ Body: { planId?: string; period?: string } }>(
     "/web/billing/subscription-invoice",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Create subscription order",
+        body: {
+          type: "object",
+          properties: {
+            planId: { type: "string", description: "Subscription ID from catalog" },
+            period: { type: "string", description: "Subscription period (M1, M3, M6, M12)" },
+          },
+          required: ["planId", "period"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              orderId: { type: "string", description: "Created order ID" },
+              paymentUrl: { type: "string", description: "Payment URL" },
+            },
+            required: ["orderId", "paymentUrl"],
+          },
+          400: badRequestResponse,
+          502: {
+            description: "Failed to create order",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId, metaboxUserId } = request.webUser!;
       const { planId, period } = request.body ?? {};
@@ -109,9 +207,41 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── POST /web/billing/tokens-invoice ────────────────────────────────────
+  /**
+   * Создание заказа на токен-пакет. Возвращает URL для оплаты.
+   */
   fastify.post<{ Body: { productId?: string } }>(
     "/web/billing/tokens-invoice",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Create token package order",
+        body: {
+          type: "object",
+          properties: {
+            productId: { type: "string", description: "Token package ID from catalog" },
+          },
+          required: ["productId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              orderId: { type: "string", description: "Created order ID" },
+              paymentUrl: { type: "string", description: "Payment URL" },
+            },
+            required: ["orderId", "paymentUrl"],
+          },
+          400: badRequestResponse,
+          502: {
+            description: "Failed to create order",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { aibUserId, metaboxUserId } = request.webUser!;
       const { productId } = request.body ?? {};
@@ -138,12 +268,40 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── GET /web/billing/order/:id/status ───────────────────────────────────
-  // Просто прокси в meta-box /api/internal/alt-order-status (он публичный для связки
-  // и возвращает статус по id для любого провайдера). Используется для polling
-  // со страницы /payment/pending.
+  /**
+   * Получение статуса заказа. Прокси в meta-box API.
+   * Используется для polling со страницы ожидания оплаты.
+   */
   fastify.get<{ Params: { id: string } }>(
     "/web/billing/order/:id/status",
-    { schema: { hide: true } as any },
+    {
+      schema: {
+        description: "Get order status",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Order ID" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              status: { type: "string", description: "Order status (PENDING etc.)" },
+            },
+            required: ["status"],
+          },
+          502: {
+            description: "Failed to get status",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { id } = request.params;
       const { config } = await import("@metabox/shared");
