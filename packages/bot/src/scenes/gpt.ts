@@ -515,6 +515,16 @@ async function streamGptResponse(
     } else if (err instanceof ContextOverflowError) {
       await ctx.reply(ctx.t.gpt.contextOverflow);
     } else if (err instanceof UserFacingError) {
+      // Спец-кейс «модель только подумала» — i18n тексты outputLimitOnlyThinking
+      // и modelOnlyThinking обещают «Размышления выше ☝», а в success-path
+      // reasoning публикуется на строке выше (sendReasoningMessages после
+      // finalizeMessage). В error-path placeholder удалён, reasoning не
+      // отправлен — обещание невыполнено. Публикуем reasoning ДО error-текста
+      // ровно в этих двух ветках; для других ошибок accumulated может
+      // содержать reasoning, но показывать его без явной отсылки нет смысла.
+      if (err.key === "outputLimitOnlyThinking" || err.key === "modelOnlyThinking") {
+        await sendReasoningMessages(ctx, chatId, accumulated);
+      }
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
       // Тех-канал получает alert только если UserFacingError просит об этом
       // (notifyOps=true) или несёт оригинальную ошибку через cause —

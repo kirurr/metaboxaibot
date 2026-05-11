@@ -5,7 +5,7 @@ import {
   type MessageRecord,
   type StreamResult,
 } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { AI_MODELS, config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
 
@@ -115,13 +115,31 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
   }
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
+    // Anthropic Messages API требует `max_tokens` ВСЕГДА (без него 400). Когда
+    // юзер не включал тогл «Ограничить длину ответа», подставляем щедрый
+    // потолок `min(modelCap, ctx * 0.4)` — это эффективный «безлимит» для
+    // дефолтных context window (Opus/Sonnet 200K → 64K cap = весь modelCap),
+    // и достаточно для extended_thinking чтобы reasoning не задушил visible.
+    //
+    // Чтобы НЕ упереться в Anthropic-инвариант `input_tokens + max_tokens ≤
+    // context_window`, прокидываем `adapterOutputReservation` в truncate —
+    // оно зарезервирует ровно то значение, которое мы пошлём в API. Иначе
+    // на длинных диалогах было бы `prompt is too long` 400.
+    //
+    // При включённом тогле — ровно значение юзера, без silent-override.
+    const userContextWindow =
+      input.contextWindowOverride && input.contextWindowOverride > 0
+        ? input.contextWindowOverride
+        : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
+    const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
+    const maxTokens =
+      input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? input.maxTokens
+        : Math.min(modelCap, Math.floor(userContextWindow * 0.4));
+    // Hint в truncate — должен идти ДО `this.truncateInput`.
+    input = { ...input, adapterOutputReservation: maxTokens };
     input = this.truncateInput(input);
     const messages = this.buildMessages(input);
-
-    // Extended thinking требует max_tokens >= ~16k (как у нативного Anthropic).
-    const maxTokens = input.extendedThinking
-      ? Math.max(input.maxTokens ?? 16000, 16000)
-      : (input.maxTokens ?? 4096);
 
     const body: Record<string, unknown> = {
       model: this.apiModel,
@@ -196,16 +214,26 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let outputTokens = 0;
     let cachedInputTokens = 0;
     let incompleteReason: string | undefined;
-    // <think>...</think> обёртка вокруг thinking_delta. extended_thinking —
-    // отдельный opt-in флаг (см. body.thinkingFlag); thinking_delta события
-    // приходят только когда он включён. showReasoning без extended_thinking
-    // = тогл «показывать» при выключенной «думалке» — правомерное no-op.
-    let inThinkBlock = false;
-    const closeThink = (): string => {
-      if (!inThinkBlock) return "";
-      inThinkBlock = false;
-      return "</think>";
-    };
+    // Reasoning буферизуем ВСЕГДА (независимо от `showReasoning`), НЕ yield'им
+    // сразу при каждом thinking_delta. Зачем:
+    //   1) gateway-503 escalation ниже проверяет `visibleChunks === 0`, но
+    //      chat.service отдельно смотрит `chunks.length > 0` (включая reasoning
+    //      chunks) и при mid-stream обрыве БЛОКИРУЕТ retry. Если yield'ить
+    //      reasoning сразу — при обрыве chat.service считал бы стрим
+    //      mid-stream и не пробовал бы другие ключи.
+    //   2) Если визибл не пришёл и причина = max_tokens — нам нужно показать
+    //      юзеру что произошло (куда ушли его токены), даже когда у него
+    //      `showReasoning=false`. Иначе он видит пустоту с непонятным сообщением.
+    //
+    // Yield'аем в двух случаях:
+    //  (a) первый text_delta пришёл и `showReasoning=true` → yield `<think>` +
+    //      buffer + `</think>` + visible. При `showReasoning=false` тогда
+    //      yield'аем только visible — буфер выкидываем без yield (юзер не
+    //      хочет видеть размышления при нормальном ответе).
+    //  (b) стрим завершился с `stop_reason ∈ {max_tokens, end_turn}` И visible
+    //      ни одного → yield буфер `<think>...</think>` ВСЕГДА (даже при
+    //      `showReasoning=false`). Юзер увидит, что модель только подумала.
+    let thinkingBuffer = "";
     // Диагностика пустых стримов (KIE-прокси иногда висит и закрывает
     // соединение без терминального message_delta — юзер видит generic
     // "модель отдыхает", в логах нет ни stop_reason, ни тайминга. Считаем
@@ -237,24 +265,26 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           const evt = parseSseEvent(raw);
           if (!evt?.data) continue;
 
-          // text_delta → visible (закрываем reasoning-обёртку если открыта).
-          // thinking_delta → reasoning (открываем `<think>` если ещё не открыт)
-          // и yield'им сырой текст внутри.
+          // text_delta → visible. Если в буфере накоплен reasoning И юзер
+          //   хочет его видеть — yield `<think>...</think>` ПЕРЕД visible.
+          //   При showReasoning=false просто очищаем буфер без yield.
+          // thinking_delta → reasoning. ВСЕГДА копим в буфер (см. комментарий
+          //   выше). Гейт на showReasoning стоит только на yield'е.
           const visibleText = handleVisibleDelta(evt.data);
           if (visibleText) {
-            const close = closeThink();
-            if (close) yield close;
+            if (thinkingBuffer.length > 0) {
+              if (input.showReasoning) {
+                yield "<think>";
+                yield thinkingBuffer;
+                yield "</think>";
+              }
+              thinkingBuffer = "";
+            }
             visibleChunks++;
             yield visibleText;
-          } else if (input.showReasoning) {
+          } else {
             const reasoningText = handleThinkingDelta(evt.data);
-            if (reasoningText) {
-              if (!inThinkBlock) {
-                inThinkBlock = true;
-                yield "<think>";
-              }
-              yield reasoningText;
-            }
+            if (reasoningText) thinkingBuffer += reasoningText;
           }
 
           // Извлекаем токены из служебных событий.
@@ -289,10 +319,64 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       reader.releaseLock();
     }
 
-    // Стрим завершился внутри thinking-блока (visible не пришёл) — закрываем
-    // тег, иначе stripThinkingBlocks выкинет хвост сообщения у юзера.
-    const tail = closeThink();
-    if (tail) yield tail;
+    // Gateway-пустота KIE/Evolink: HTTP 200 открыл стрим, но прокси закрыл
+    // соединение БЕЗ терминального события (нет ни stop_reason, ни usage).
+    // Это инфра-сбой прокси, а не легитимный «модель ответила пустотой» —
+    // у легитимного был бы хотя бы `stop_reason` в message_delta.
+    //
+    // Бросаем 503 — `isFiveXxError` в chat.service триггерит штатный retry.
+    // Поскольку reasoning буферизуется и НЕ yield'ится до первого text_delta,
+    // на этот момент `chunks.length === 0` в chat.service гарантировано, и
+    // retry/fallback flow реально сработает (а не уйдёт в chatStreamInterrupted).
+    //
+    // `!lastStopReason` — главный сторож от ложных срабатываний: если хоть
+    // какой-то stop_reason пришёл (включая end_turn без usage), это легит.
+    if (
+      visibleChunks === 0 &&
+      outputTokens === 0 &&
+      !messageDeltaWithUsage &&
+      !lastStopReason &&
+      !incompleteReason
+    ) {
+      logger.warn(
+        {
+          modelId: this.modelId,
+          apiModel: this.apiModel,
+          provider: this.proxyConfig.providerLabel,
+          streamDurationMs: Date.now() - streamStartedAt,
+          inputTokens,
+          eventTypeCounts,
+          lastStopReason,
+        },
+        "claude-anthropic-proxy: gateway empty stream — escalating as 503 for retry",
+      );
+      const err = new Error(
+        `${this.proxyConfig.providerLabel} Claude proxy returned empty stream (no message_delta)`,
+      ) as Error & { status?: number };
+      err.status = 503;
+      throw err;
+    }
+
+    // Аномальный финал: модель завершила стрим с reasoning, но без visible.
+    // Flush буфера на ЛЮБОЙ легитимный stop_reason кроме `refusal` (там
+    // содержимое thinking — потенциально refusal-rationale, не показываем).
+    // Покрытие: `max_tokens` (reasoning сожрал бюджет), `end_turn` (модель
+    // решила не отвечать), `stop_sequence`/`tool_use`/`pause_turn` — редкие
+    // но возможные кейсы. Flush ВСЕГДА (независимо от showReasoning): юзер
+    // должен видеть свои размышления, иначе сообщение «модель не ответила»
+    // необъяснимо. chat.service по `<think>` блокам узнает спец-кейс и
+    // покажет `outputLimitOnlyThinking` / `modelOnlyThinking`.
+    const isOnlyThinkingFinal =
+      visibleChunks === 0 &&
+      thinkingBuffer.length > 0 &&
+      lastStopReason !== undefined &&
+      lastStopReason !== "refusal";
+    if (isOnlyThinkingFinal) {
+      yield "<think>";
+      yield thinkingBuffer;
+      yield "</think>";
+      thinkingBuffer = "";
+    }
 
     // Триггер ровно совпадает с empty-guard'ом в chat.service.ts:
     // там тоже "0 visible chunks → пустой ответ юзеру". Если ужесточить
@@ -322,6 +406,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       outputTokensUsed: outputTokens,
       ...(cachedInputTokens > 0 ? { cachedInputTokensUsed: cachedInputTokens } : {}),
       ...(incompleteReason ? { incompleteReason } : {}),
+      ...(lastStopReason ? { lastStopReason } : {}),
     };
   }
 
