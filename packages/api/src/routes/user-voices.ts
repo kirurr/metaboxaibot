@@ -14,14 +14,49 @@ import {
 } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["user-voices"]),
+  );
 
   /** GET /user-voices?provider=elevenlabs — list user voices */
-  fastify.get<{ Querystring: { provider?: string } }>("/user-voices", async (request) => {
+  fastify.get<{ Querystring: { provider?: string } }>(
+    "/user-voices",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            provider: { type: "string", description: "Filter by provider (e.g., elevenlabs)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Voice ID" },
+                provider: { type: "string", description: "Provider name" },
+                name: { type: "string", description: "Voice name" },
+                externalId: { type: "string", description: "External provider ID" },
+                previewUrl: { type: "string", nullable: true, description: "Preview URL" },
+                hasAudio: { type: "boolean", description: "Whether voice has audio" },
+                status: { type: "string", description: "Voice status" },
+                createdAt: { type: "string", description: "Creation timestamp" },
+              },
+              required: ["id", "provider", "name", "externalId", "previewUrl", "hasAudio", "status", "createdAt"],
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const { provider } = request.query;
     const voices = await db.userVoice.findMany({
@@ -42,17 +77,31 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /user-voices/start-creation
-   * Activates the `voice-clone` audio model (so the next voice/audio
-   * upload is routed into `handleVoiceCloneUpload`) and sends the
-   * cloning prompt to Telegram.
-   *
-   * Optional `returnTo` flag stores a Redis marker so the bot can
-   * re-activate that video model right after the clone succeeds —
-   * e.g. user came from the HeyGen voice picker and expects to land
-   * back on HeyGen once the clone is done.
+   * Activates the `voice-clone` audio model and sends the cloning prompt to Telegram.
+   * Optional `returnTo` flag stores a Redis marker to return to HeyGen after clone succeeds.
    */
   fastify.post<{ Body?: { returnTo?: string } }>(
     "/user-voices/start-creation",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            returnTo: { type: "string", enum: ["heygen"], description: "Return to HeyGen after clone" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const returnTo = request.body?.returnTo;
@@ -103,11 +152,37 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /user-voices/:id/preview-url — resolve a playable URL on demand.
-   * Prefers ElevenLabs-hosted preview; otherwise mints a fresh presigned URL
-   * for the original recording in S3 (no public bucket).
+   * Prefers ElevenLabs-hosted preview; otherwise mints a fresh presigned URL for S3.
    */
   fastify.get<{ Params: { id: string } }>(
     "/user-voices/:id/preview-url",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Voice ID" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "Playable audio URL" },
+            },
+            required: ["url"],
+          },
+          404: {
+            description: "Voice not found or no preview available",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -128,6 +203,48 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /user-voices/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
     "/user-voices/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Voice ID" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "New voice name" },
+          },
+          required: ["name"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              provider: { type: "string" },
+              name: { type: "string" },
+              externalId: { type: "string" },
+              previewUrl: { type: "string", nullable: true },
+              hasAudio: { type: "boolean" },
+              status: { type: "string" },
+              createdAt: { type: "string" },
+            },
+            required: ["id", "provider", "name", "externalId", "previewUrl", "hasAudio", "status", "createdAt"],
+          },
+          400: badRequestResponse,
+          404: {
+            description: "Voice not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -155,7 +272,36 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-voices/:id — delete from DB and from ElevenLabs */
-  fastify.delete<{ Params: { id: string } }>("/user-voices/:id", async (request, reply) => {
+  fastify.delete<{ Params: { id: string } }>(
+    "/user-voices/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Voice ID" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+            required: ["success"],
+          },
+          404: {
+            description: "Voice not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
 
