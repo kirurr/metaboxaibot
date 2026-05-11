@@ -24,6 +24,14 @@ export const userIsBlockedResponse = {
   },
 };
 
+export const forbiddenResponse = {
+  description: "Forbidden",
+  type: "object",
+  properties: {
+    error: { type: "string" },
+  },
+};
+
 export const conflictResponse = {
   description: "Conflict",
   type: "object",
@@ -69,6 +77,10 @@ export const gatewayErrorResponse = {
   },
 };
 
+/**
+ *
+ * Used in 'onRoute' hook to add common response schemas, auth guard and tag to all endpoints within router.
+ */
 export function constructOpenAPIonRouteHook(routeOptions: RouteOptions, tags: string[]) {
   routeOptions.schema ??= {};
   routeOptions.schema.response ??= {};
@@ -77,8 +89,14 @@ export function constructOpenAPIonRouteHook(routeOptions: RouteOptions, tags: st
   if (!routeOptions.schema.response[401]) {
     // @ts-expect-error response is unknown
     routeOptions.schema.response[401] = unauthorizedResponse;
+  }
+  // @ts-expect-error response is unknown
+  if (!routeOptions.schema.response[404]) {
     // @ts-expect-error response is unknown
     routeOptions.schema.response[404] = userNotFoundResponse;
+  }
+  // @ts-expect-error response is unknown
+  if (!routeOptions.schema.response[403]) {
     // @ts-expect-error response is unknown
     routeOptions.schema.response[403] = userIsBlockedResponse;
   }
