@@ -3,15 +3,16 @@
  *
  * Schedule: 4× daily at 00:00, 06:00, 12:00, 18:00 MSK (UTC+3).
  * Rate is adjusted by –2.5% to account for exchange commission.
- * Star price is fixed at $0.02 per Telegram Star.
+ *
+ * Note: расчёт звёзд больше НЕ использует этот курс (см. `calcStars` ниже —
+ * считается из `config.payments.starPriceRub` напрямую в рублях). Курс
+ * остаётся для информационных целей / возможной аналитики.
  */
 
 import { db } from "../db.js";
+import { config } from "@metabox/shared";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-/** 1 Telegram Star ≈ $0.02 USD */
-export const STAR_PRICE_USD = 0.02;
 
 /** Commission deduction from exchange rate (2.5%) */
 const EXCHANGE_COMMISSION = 0.025;
@@ -105,11 +106,15 @@ export async function getRate(): Promise<number> {
 
 /**
  * Calculate Telegram Stars price from RUB price.
- * Rounds up to nearest 10 (e.g. 1297 → 1300, 1367 → 1370).
+ * Делит цену в RUB на `config.payments.starPriceRub` (RUB за 1 Star) и
+ * округляет вверх до десятки (e.g. 1297 → 1300, 1367 → 1370).
+ *
+ * Раньше принимал второй аргумент `usdtRubRate` и шёл через USD —
+ * избавились от лишнего звена, чтобы цена не зависела от Binance-курса
+ * и могла настраиваться одной env-переменной.
  */
-export function calcStars(priceRub: number, usdtRubRate: number): number {
-  const priceUsd = priceRub / usdtRubRate;
-  const rawStars = priceUsd / STAR_PRICE_USD;
+export function calcStars(priceRub: number): number {
+  const rawStars = priceRub / config.payments.starPriceRub;
   return Math.ceil(rawStars / 10) * 10;
 }
 

@@ -12,7 +12,7 @@ import type {
   Model,
   ModelSettingDef,
 } from "../types.js";
-import { openExternalLink } from "../utils/telegram.js";
+import { openExternalLink, closeMiniApp } from "../utils/telegram.js";
 import { SETTING_TRANSLATIONS } from "@metabox/shared-browser";
 import { StyledSelect } from "../components/management/StyledSelect.js";
 import { AvatarsPage } from "./AvatarsPage.js";
@@ -236,7 +236,14 @@ function OverviewTab({ profile }: { profile: UserProfile }) {
                       ? t(REASON_KEYS[tx.reason] as TranslationKey)
                       : tx.reason)}
                 </span>
-                {tx.modelId && <span className="tx-item__model">{tx.modelId}</span>}
+                {tx.modelId && tx.reason !== "purchase" && (
+                  // Для покупок (subscription/token-package) в modelId лежит
+                  // внутренний product/plan-id, который пользователю ничего
+                  // не говорит — description выше уже описывает покупку
+                  // понятным текстом. Показываем modelId только для AI-debit'ов
+                  // (ai_usage / autotranslate / describe_image и т.п.).
+                  <span className="tx-item__model">{tx.modelId}</span>
+                )}
                 <span className="tx-item__date">{new Date(tx.createdAt).toLocaleDateString()}</span>
               </div>
               <span className={`tx-item__amount tx-item__amount--${tx.type}`}>
@@ -2116,7 +2123,13 @@ function AccountTab(props: { profile: UserProfile }) {
               <div className="modal-actions">
                 <button
                   className="btn btn--primary"
-                  onClick={() => setShowDeleteInstruction(false)}
+                  onClick={() => {
+                    // Закрываем модалку как fallback — если closeMiniApp
+                    // не сработает (старый клиент без WebApp.close), юзер
+                    // хотя бы не останется с открытой instruction-модалкой.
+                    setShowDeleteInstruction(false);
+                    closeMiniApp();
+                  }}
                 >
                   {t("account.deleteCheckBotClose")}
                 </button>

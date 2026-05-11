@@ -8,8 +8,9 @@ import {
   createSubscriptionInvoice,
 } from "../services/metabox-bridge.service.js";
 import type { AiBotCatalog } from "../services/metabox-bridge.service.js";
-import { getRate, calcStars, STAR_PRICE_USD } from "../services/exchange-rate.service.js";
+import { calcStars } from "../services/exchange-rate.service.js";
 import type { SaleUserInfo } from "../services/payment.service.js";
+import { config } from "@metabox/shared";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -36,7 +37,10 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
       console.error("[payments/invoice] Metabox catalog unavailable:", err.message);
       return { subscriptions: [], tokenPackages: [] };
     });
-    const rate = await getRate();
+
+    // RUB-эквивалент одной звезды Telegram — единственная «настраиваемая»
+    // ставка для расчёта инвойсов в Stars и записи starRate в Metabox.
+    const starRate = config.payments.starPriceRub;
 
     const isTestMode = false; // Always use real Telegram Stars payments
     const { userId } = request as AuthRequest;
@@ -49,8 +53,7 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
       const product = catalog.tokenPackages.find((p) => p.id === id);
       if (!product) return reply.code(404).send({ error: "Product not found" });
 
-      const stars = calcStars(Number(product.priceRub), rate);
-      const starRate = rate * STAR_PRICE_USD;
+      const stars = calcStars(Number(product.priceRub));
 
       // Test mode: skip Telegram Invoice, credit directly
       if (isTestMode) {
@@ -104,8 +107,7 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
               : "0";
       const totalPrice = monthly * months * (1 - Number(discountField) / 100);
       const tokens = sub.tokens * months;
-      const stars = calcStars(totalPrice, rate);
-      const starRate = rate * STAR_PRICE_USD;
+      const stars = calcStars(totalPrice);
 
       // Test mode: skip Telegram Invoice, credit directly
       if (isTestMode) {

@@ -3,7 +3,7 @@ import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { getAiBotCatalog } from "../services/metabox-bridge.service.js";
-import { getRate, calcStars } from "../services/exchange-rate.service.js";
+import { calcStars } from "../services/exchange-rate.service.js";
 import type { AiBotCatalog } from "../services/metabox-bridge.service.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
@@ -24,13 +24,14 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/tariffs/catalog", async (request) => {
     const { userId } = request as AuthRequest;
 
-    // Fetch catalog from Metabox (with fallback) + exchange rate + user + sub
-    const [catalog, usdtRubRate, user, localSub] = await Promise.all([
+    // Fetch catalog from Metabox (with fallback) + user + sub.
+    // Курс USDT/RUB больше не нужен — звёзды считаем напрямую из priceRub
+    // через config.payments.starPriceRub.
+    const [catalog, user, localSub] = await Promise.all([
       getAiBotCatalog().catch((err) => {
         console.error("[tariffs/catalog] Metabox catalog unavailable:", err.message);
         return emptyCatalog();
       }),
-      getRate(),
       db.user.findUnique({
         where: { id: userId },
         select: { metaboxUserId: true, role: true },
@@ -62,19 +63,19 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
       const periods: Record<string, { priceRub: string; stars: number }> = {};
 
       const priceM1 = Math.round(monthly);
-      periods.M1 = { priceRub: priceM1.toFixed(2), stars: calcStars(priceM1, usdtRubRate) };
+      periods.M1 = { priceRub: priceM1.toFixed(2), stars: calcStars(priceM1) };
 
       if (d3 > 0) {
         const priceM3 = Math.round(monthly * 3 * (1 - d3 / 100));
-        periods.M3 = { priceRub: priceM3.toFixed(2), stars: calcStars(priceM3, usdtRubRate) };
+        periods.M3 = { priceRub: priceM3.toFixed(2), stars: calcStars(priceM3) };
       }
       if (d6 > 0) {
         const priceM6 = Math.round(monthly * 6 * (1 - d6 / 100));
-        periods.M6 = { priceRub: priceM6.toFixed(2), stars: calcStars(priceM6, usdtRubRate) };
+        periods.M6 = { priceRub: priceM6.toFixed(2), stars: calcStars(priceM6) };
       }
       if (d12 > 0) {
         const priceM12 = Math.round(monthly * 12 * (1 - d12 / 100));
-        periods.M12 = { priceRub: priceM12.toFixed(2), stars: calcStars(priceM12, usdtRubRate) };
+        periods.M12 = { priceRub: priceM12.toFixed(2), stars: calcStars(priceM12) };
       }
 
       return {
@@ -91,7 +92,7 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
       name: pkg.name,
       tokens: pkg.tokens,
       priceRub: pkg.priceRub,
-      stars: calcStars(Number(pkg.priceRub), usdtRubRate),
+      stars: calcStars(Number(pkg.priceRub)),
       badge: pkg.badge,
     }));
 
@@ -100,7 +101,7 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
       tokenPackages,
       canPayByCard: !!user?.metaboxUserId,
       hasPaidSubscription,
-      usdtRubRate,
+      starPriceRub: config.payments.starPriceRub,
       metaboxUrl: config.metabox.apiUrl || "https://app.meta-box.ru",
     };
   });

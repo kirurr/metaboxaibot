@@ -372,7 +372,9 @@ export interface CatalogResponse {
   canPayByCard: boolean;
   /** true если у юзера есть платная активная подписка (триал — false). */
   hasPaidSubscription: boolean;
-  usdtRubRate: number;
+  /** RUB-эквивалент одной звезды Telegram (из config.payments.starPriceRub).
+   *  Информационно — фронт может показать «1 ⭐ ≈ N ₽». */
+  starPriceRub: number;
   metaboxUrl: string;
 }
 

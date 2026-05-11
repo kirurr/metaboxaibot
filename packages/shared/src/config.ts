@@ -101,6 +101,23 @@ export const config = {
   },
 
   /**
+   * Payments / Telegram Stars pricing.
+   *
+   * starPriceRub — RUB-эквивалент одной звезды Telegram. Используется напрямую
+   * при расчёте цены инвойсов в звёздах (`calcStars(priceRub) = ceil(priceRub /
+   * starPriceRub / 10) * 10`) и при записи `starRate` в Metabox recordSale.
+   *
+   * Раньше считалось через USD: `priceRub / usdtRubRate / STAR_PRICE_USD`.
+   * Теперь — одна константа в рублях, конфигурируется через env, чтобы
+   * подстраиваться под фактический курс Telegram Stars в RUB без редеплоя.
+   *
+   * Override через STAR_PRICE_RUB.
+   */
+  payments: {
+    starPriceRub: optFloat("STAR_PRICE_RUB", 1.7136),
+  },
+
+  /**
    * S3-compatible object storage (optional).
    * If S3_BUCKET is not set, file uploads are skipped gracefully.
    * Compatible with AWS S3, Cloudflare R2, MinIO, etc.
