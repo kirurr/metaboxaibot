@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface DIDLanguageConfig {
   modelId?: string;
@@ -47,9 +48,61 @@ const filterSafeLanguages = (voice: DIDVoice) => {
 
 export const didVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["d-id-voices"]),
+  );
 
   /** GET /d-id-voices — proxy to D-ID /tts/voices, returns simplified voice list */
-  fastify.get("/d-id-voices", async (_request, reply) => {
+  fastify.get(
+    "/d-id-voices",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Voice ID" },
+                name: { type: "string", description: "Voice name" },
+                gender: { type: "string", description: "Gender" },
+                languages: {
+                  type: "array",
+                  description: "Available languages",
+                  items: {
+                    type: "object",
+                    properties: {
+                      language: { type: "string" },
+                      locale: { type: "string" },
+                      accent: { type: "string" },
+                    },
+                  },
+                },
+                provider: { type: "string", description: "Voice provider" },
+                styles: { type: "array", items: { type: "string" }, description: "Voice styles" },
+                description: { type: "string", description: "Voice description" },
+              },
+              required: ["id", "name", "gender", "languages", "provider", "styles", "description"],
+            },
+          },
+          502: {
+            description: "D-ID API error",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          503: {
+            description: "D-ID API key not configured",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (_request, reply) => {
     if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
       return voicesCache.data;
     }
