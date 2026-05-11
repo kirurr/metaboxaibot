@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface HiggsFieldMotion {
   id: string;
@@ -16,9 +17,48 @@ let motionsCache: { data: HiggsFieldMotion[]; at: number } | null = null;
 
 export const higgsfieldMotionsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["higgsfield-motions"]),
+  );
 
   /** GET /higgsfield-motions — proxy to Higgsfield /v1/motions with 1-hour cache */
-  fastify.get("/higgsfield-motions", async (_request, reply) => {
+  fastify.get(
+    "/higgsfield-motions",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Motion ID" },
+                name: { type: "string", description: "Motion name" },
+                description: { type: "string", nullable: true, description: "Motion description" },
+                preview_url: { type: "string", nullable: true, description: "Preview video URL" },
+                category: { type: "string", nullable: true, description: "Motion category" },
+              },
+              required: ["id", "name", "description", "preview_url", "category"],
+            },
+          },
+          502: {
+            description: "Higgsfield API error",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          503: {
+            description: "Higgsfield API key not configured",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (_request, reply) => {
     if (motionsCache && Date.now() - motionsCache.at < CACHE_TTL_MS) {
       return motionsCache.data;
     }
