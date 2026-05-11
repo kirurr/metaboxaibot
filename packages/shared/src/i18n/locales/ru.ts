@@ -72,6 +72,8 @@ export default {
       filesWarning:
         "\n<blockquote>💡Текстовые нейросети не генерируют изображения и не создают файлы.</blockquote>",
     },
+    reasoningHeader: "🧠 Размышления модели",
+    reasoningPartLabel: "часть {index}/{total}",
   },
   design: {
     sectionTitle: "🎨 Дизайн с ИИ",

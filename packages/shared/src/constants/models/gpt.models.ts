@@ -288,6 +288,21 @@ function contextWindowSetting(modelMaxTokens: number): ModelSettingDef {
   };
 }
 
+/**
+ * Показывать reasoning (chain-of-thought) пользователю отдельными
+ * `<blockquote expandable>` сообщениями. Применяется ко всем моделям из
+ * `THINKING_MODEL_IDS` (см. ниже). Default false — текущий UX, мысли
+ * отбрасываются. Юзер включает явно когда хочет видеть «куда уходят токены».
+ */
+const SHOW_REASONING_SETTING: ModelSettingDef = {
+  key: "show_reasoning",
+  label: "Показывать размышления",
+  description:
+    "Если включено — сообщения с внутренними рассуждениями модели придут отдельно (свёрнутые, можно раскрыть). Помогает понять, на что ушли токены.",
+  type: "toggle",
+  default: false,
+};
+
 /** Reasoning effort for Grok 3 Mini — only supports low/high (no medium). */
 const GROK_MINI_REASONING: ModelSettingDef = {
   key: "reasoning_effort",
@@ -1015,6 +1030,19 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
       ? TEMPERATURE_SETTING_ANTHROPIC
       : TEMPERATURE_SETTING;
   model.settings = [temp, ...LLM_SETTINGS.slice(1), ...extras];
+}
+
+// ── Append "Показывать размышления" toggle to every thinking model ──────────
+// Толгл универсальный: дёшево включить/выключить рендеринг chain-of-thought.
+// Не запрашивает thinking у провайдеров где он opt-in (Claude extended_thinking,
+// Gemini thinking_budget) — для тех моделей сначала надо включить «думалку»,
+// потом — отдельно — этот тогл, чтобы её увидеть. У моделей с unconditional
+// reasoning (OpenAI o-series, GPT-5.x с effort != none, DeepSeek R1, Grok 4)
+// тогл достаточен сам по себе. Default false — текущее поведение сохраняется.
+for (const [id, model] of Object.entries(GPT_MODELS)) {
+  if (!THINKING_MODEL_IDS.has(id)) continue;
+  if (!model.settings) model.settings = [];
+  model.settings.push(SHOW_REASONING_SETTING);
 }
 
 // ── Append context window slider to every text model ────────────────────────
