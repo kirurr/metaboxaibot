@@ -2,7 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { userUploadsService } from "../services/user-uploads.service.js";
 import { getFileUrl } from "../services/s3.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 

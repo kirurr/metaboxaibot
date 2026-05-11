@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 

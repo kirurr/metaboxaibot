@@ -11,7 +11,7 @@ import { db } from "../db.js";
 import { config, encryptSecret, maskKey, decryptSecret } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { extractWebUserFromRequest } from "../middlewares/web-auth.js";
-import { invalidatePoolCache, getKeyStats } from "../services/key-pool.service.js";
+import { invalidatePoolCache } from "../services/key-pool.service.js";
 import { clearKeyThrottle } from "../services/throttle.service.js";
 import { logger } from "../logger.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
@@ -40,7 +40,7 @@ type KeyCreateBody = {
   isActive?: boolean;
   notes?: string;
 };
-type KeyUpdateBody = Partial<Omit<KeyCreateBody, "provider">>;
+
 
 const VALID_PROTOCOLS = new Set(["http", "https", "socks5"]);
 
