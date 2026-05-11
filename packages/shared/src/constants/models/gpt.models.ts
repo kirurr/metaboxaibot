@@ -170,7 +170,7 @@ const REASONING_EFFORT_GPT5: ModelSettingDef = {
 };
 
 /**
- * Reasoning effort for gpt-5.5 / gpt-5.5-pro — supports none/low/medium/high/xhigh.
+ * Reasoning effort for gpt-5.5 — supports none/low/medium/high/xhigh.
  * `none` отключает reasoning (модель отвечает сразу без chain-of-thought).
  */
 const REASONING_EFFORT_GPT55: ModelSettingDef = {
@@ -182,6 +182,24 @@ const REASONING_EFFORT_GPT55: ModelSettingDef = {
   options: [
     { value: "none", label: "Без" },
     { value: "low", label: "Низкая" },
+    { value: "medium", label: "Средняя" },
+    { value: "high", label: "Высокая" },
+    { value: "xhigh", label: "Макс." },
+  ],
+  default: "medium",
+};
+
+/**
+ * Reasoning effort for gpt-5.5-pro — OpenAI принимает только `medium/high/xhigh`
+ * (на `none`/`low` API возвращает 400 «Unsupported value»). Отдельный сетинг —
+ * чтобы юзер не выбрал в UI значение, которое сразу даст ошибку.
+ */
+const REASONING_EFFORT_GPT55_PRO: ModelSettingDef = {
+  key: "reasoning_effort",
+  label: "Глубина рассуждений",
+  description: "Средняя — баланс, Высокая/Макс. — точнее для сложных задач (дольше).",
+  type: "select",
+  options: [
     { value: "medium", label: "Средняя" },
     { value: "high", label: "Высокая" },
     { value: "xhigh", label: "Макс." },
@@ -877,7 +895,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
     isAsync: false,
     contextStrategy: "provider_chain",
     contextMaxMessages: 0,
-    settings: [REASONING_EFFORT_GPT55, VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
+    settings: [REASONING_EFFORT_GPT55_PRO, VERBOSITY_SETTING, ...REASONING_MODEL_SETTINGS],
   },
   "gpt-5.4-pro": {
     id: "gpt-5.4-pro",

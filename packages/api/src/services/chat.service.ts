@@ -220,6 +220,32 @@ export const chatService = {
       if (def !== undefined) ms.reasoning_effort = def;
     }
 
+    // Защита от legacy/stale `reasoning_effort`: юзер мог сохранить значение на
+    // одной модели (gpt-5-nano default `low`) и переключиться на другую, где
+    // это значение не поддерживается провайдером (gpt-5.5-pro принимает только
+    // medium/high/xhigh — `low` даёт 400 от OpenAI). Если текущая модель имеет
+    // явный список `options` и значение в `ms.reasoning_effort` туда не
+    // попадает — заменяем на default настройки. То же ловит любые будущие
+    // расхождения опций без отдельного фикса.
+    if (ms.reasoning_effort !== undefined && model?.settings) {
+      const setting = model.settings.find((s) => s.key === "reasoning_effort");
+      if (setting?.options) {
+        const valid = setting.options.some((o) => o.value === ms.reasoning_effort);
+        if (!valid) {
+          logger.warn(
+            {
+              modelId: dialog.modelId,
+              dialogId,
+              staleValue: ms.reasoning_effort,
+              fallback: setting.default,
+            },
+            "chat: reasoning_effort outside model options — clamping to default",
+          );
+          ms.reasoning_effort = setting.default ?? undefined;
+        }
+      }
+    }
+
     // Same fix для `max_tokens`: если юзер включил тогл «Ограничить длину
     // ответа», но слайдер ни разу не двигал — `ms.max_tokens` останется
     // undefined и адаптеры OpenAI/Gemini/etc. вообще не отправят cap. Юзер
