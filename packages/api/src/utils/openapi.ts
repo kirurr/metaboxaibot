@@ -104,7 +104,7 @@ export function constructOpenAPIonRouteHook(routeOptions: RouteOptions, tags: st
   routeOptions.schema.tags ??= tags;
   routeOptions.schema.security ??= [
     {
-      telegramAuth: [],
+      auth: [],
     },
   ];
 }
