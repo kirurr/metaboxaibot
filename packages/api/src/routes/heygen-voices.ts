@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface HeyGenVoice {
   voice_id: string;
@@ -22,9 +23,48 @@ let voicesCache: { data: object[]; at: number } | null = null;
 
 export const heygenVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["heygen-voices"]),
+  );
 
   /** GET /heygen-voices — proxy to HeyGen v2/voices, returns simplified voice list */
-  fastify.get("/heygen-voices", async (_request, reply) => {
+  fastify.get(
+    "/heygen-voices",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                voice_id: { type: "string", description: "Voice ID" },
+                name: { type: "string", description: "Voice name" },
+                language: { type: "string", description: "Primary language" },
+                gender: { type: "string", description: "Gender" },
+                preview_audio: { type: "string", nullable: true, description: "Preview audio URL" },
+              },
+              required: ["voice_id", "name", "language", "gender", "preview_audio"],
+            },
+          },
+          502: {
+            description: "HeyGen API error",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          503: {
+            description: "HeyGen API key not configured",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (_request, reply) => {
     if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
       return voicesCache.data;
     }

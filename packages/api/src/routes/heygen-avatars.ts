@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface HeyGenLookItem {
   id: string;
@@ -77,25 +78,71 @@ function applyFilters(
 
 export const heygenAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["heygen-avatars"]),
+  );
 
   /**
    * GET /heygen-avatars — paginated public avatar list with server-side filtering.
    *
    * When filters (gender/search) are active the server keeps fetching HeyGen pages
    * until it has collected `limit` matching items or exhausted the full list.
-   *
-   * Query params:
-   *   token  — opaque cursor returned by a previous response (omit for first page)
-   *   limit  — desired number of matching items (default 20, max 50)
-   *   gender — filter: Man | Woman (omit / "all" for no filter)
-   *   search — name substring (case-insensitive)
-   *
-   * Response: { items, has_more, next_token }
-   *   next_token — pass back on the next request to continue from where we left off
    */
   fastify.get<{
     Querystring: { token?: string; limit?: string; gender?: string; search?: string };
-  }>("/heygen-avatars", async (request, reply) => {
+  }>(
+    "/heygen-avatars",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "Opaque cursor for pagination" },
+            limit: { type: "string", description: "Items per page (default 20, max 50)" },
+            gender: { type: "string", description: "Filter by gender: Man, Woman, or all" },
+            search: { type: "string", description: "Search by name (case-insensitive)" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    avatar_id: { type: "string", description: "Avatar ID" },
+                    avatar_name: { type: "string", description: "Avatar name" },
+                    gender: { type: "string", description: "Gender" },
+                    preview_image_url: { type: "string", nullable: true, description: "Preview image URL" },
+                  },
+                  required: ["avatar_id", "avatar_name", "gender", "preview_image_url"],
+                },
+              },
+              has_more: { type: "boolean", description: "Whether more results exist" },
+              next_token: { type: "string", nullable: true, description: "Cursor for next page" },
+            },
+            required: ["items", "has_more", "next_token"],
+          },
+          502: {
+            description: "HeyGen API error",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          503: {
+            description: "HeyGen API key not configured",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     let apiKey: string;
     try {
       apiKey = (await acquireKey("heygen")).apiKey;
