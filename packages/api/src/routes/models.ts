@@ -13,7 +13,6 @@ import { calculateCost, usdToTokens } from "../services/token.service.js";
 import { getModelMultiplier } from "../services/pricing-config.service.js";
 import { db } from "../db.js";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
-import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 /** USD → tokens с применением per-model multiplier (единый шаблон с calculateCost). */
 function modelUsdToTokens(modelId: string, usd: number): number {
@@ -157,151 +156,20 @@ function serializeModel(m: AIModel, lang: Language) {
 
 export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["models"]),
-  );
 
   /** GET /models?section=gpt — list all models or filter by section */
-  fastify.get<{ Querystring: { section?: string } }>(
-    "/models",
-    {
-      schema: {
-        description: "Get list of available AI models, optionally filtered by section",
-        querystring: {
-          type: "object",
-          properties: {
-            section: {
-              type: "string",
-              description: "Filter models by section (e.g., 'gpt', 'image', 'video')",
-            },
-          },
-        },
-        response: {
-          200: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                modes: {
-                  type: "array",
-                  nullable: true,
-                  description: "Operation modes (e.g., t2v, i2v, r2v) - null if model has no modes",
-                  items: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string", description: "Mode ID" },
-                      label: { type: "string", description: "Mode display label" },
-                      textOnly: { type: "boolean", description: "Whether mode supports text only" },
-                      default: { type: "boolean", description: "Whether this is the default mode" },
-                    },
-                  },
-                },
-                familyId: {
-                  type: "string",
-                  nullable: true,
-                  description: "Family ID this model belongs to",
-                },
-                familyName: { type: "string", nullable: true, description: "Family display name" },
-                familyDefaultModelId: {
-                  type: "string",
-                  nullable: true,
-                  description: "Default model ID for family",
-                },
-                versionLabel: {
-                  type: "string",
-                  nullable: true,
-                  description: "Version label within family",
-                },
-                variantLabel: {
-                  type: "string",
-                  nullable: true,
-                  description: "Variant label within family",
-                },
-                descriptionOverride: {
-                  type: "string",
-                  nullable: true,
-                  description: "Per-variant description",
-                },
-                id: { type: "string", description: "Model ID" },
-                name: { type: "string", description: "Model name" },
-                description: { type: "string", description: "Model description" },
-                section: { type: "string", description: "Model section" },
-                provider: { type: "string", description: "Provider name (anthropic/openai/etc)" },
-                supportsImages: { type: "boolean", description: "Supports image input" },
-                supportsDocuments: { type: "boolean", description: "Supports document input" },
-                supportsVoice: { type: "boolean", description: "Supports voice input" },
-                supportsWeb: { type: "boolean", description: "Supports web search" },
-                isAsync: { type: "boolean", description: "Uses async generation" },
-                supportedAspectRatios: {
-                  type: "array",
-                  nullable: true,
-                  description: "Supported aspect ratios",
-                },
-                supportedDurations: {
-                  type: "array",
-                  nullable: true,
-                  description: "Supported video durations",
-                },
-                durationRange: {
-                  type: "object",
-                  nullable: true,
-                  description: "Video duration range",
-                },
-                tokenCostPerRequest: {
-                  type: "number",
-                  description: "Fixed cost per request in tokens",
-                },
-                tokenCostApproxMsg: {
-                  type: "number",
-                  description: "Estimated cost per message in tokens (LLM only)",
-                },
-                tokenCostPerMPixel: { type: "number", description: "Cost per megapixel in tokens" },
-                tokenCostPerMVideoToken: {
-                  type: "number",
-                  description: "Cost per 1M video tokens",
-                },
-                videoFps: { type: "number", description: "FPS used in video token calculation" },
-                tokenCostPerSecond: { type: "number", description: "Cost per second in tokens" },
-                tokenCostPerKChar: {
-                  type: "number",
-                  description: "Cost per 1K characters in tokens",
-                },
-                isLLM: { type: "boolean", description: "Whether model is an LLM" },
-                settings: { type: "array", description: "Configurable generation parameters" },
-                costMatrix: {
-                  type: "object",
-                  nullable: true,
-                  description: "Multi-dimensional cost table",
-                },
-                tokenCostVariants: {
-                  type: "object",
-                  nullable: true,
-                  description: "Token cost per variant",
-                },
-                tokenCostAddons: {
-                  type: "array",
-                  nullable: true,
-                  description: "Additive token cost per setting",
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    async (request) => {
-      const { userId } = request as AuthRequestM;
-      const { section } = request.query;
-      const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
-      const lang = (user?.language ?? "en") as Language;
+  fastify.get<{ Querystring: { section?: string } }>("/models", async (request) => {
+    const { userId } = request as AuthRequestM;
+    const { section } = request.query;
+    const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
+    const lang = (user?.language ?? "en") as Language;
 
-      const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
-      // Скрытые модели (например, `grok-imagine-extend`) активируются только
-      // через спец-сценарии (кнопка «Продлить») и не должны показываться в
-      // обычном webapp-списке моделей.
-      const models = allModels.filter((m) => !m.hiddenFromCarousel);
+    const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
+    // Скрытые модели (например, `grok-imagine-extend`) активируются только
+    // через спец-сценарии (кнопка «Продлить») и не должны показываться в
+    // обычном webapp-списке моделей.
+    const models = allModels.filter((m) => !m.hiddenFromCarousel);
 
-      return models.map((m) => serializeModel(m, lang));
-    },
-  );
+    return models.map((m) => serializeModel(m, lang));
+  });
 };

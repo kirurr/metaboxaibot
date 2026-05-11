@@ -83,11 +83,11 @@ await server.register(swagger, {
     },
     components: {
       securitySchemes: {
-        auth: {
+        telegramAuth: {
           type: "apiKey",
           in: "header",
           name: "Authorization",
-          description: "`tma <initDataRaw> | Bearer <token>`",
+          description: "Telegram Mini App auth: `tma <initDataRaw>`",
         },
       },
     },
