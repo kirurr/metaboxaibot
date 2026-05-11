@@ -62,7 +62,14 @@ export const userService = {
     return mapUser(user);
   },
 
-  async creditWelcomeBonus(userId: bigint): Promise<void> {
+  /**
+   * Начисляет welcome-бонус, если ещё не начислялся (проверка через
+   * `welcome_bonus_receipts`). Возвращает `true` если токены реально
+   * зачислены в этом вызове, `false` если был пропуск (дубль). Caller
+   * использует возвращаемое значение, чтобы не показывать сообщение
+   * «вот ваши N приветственных токенов», когда фактически начисления не было.
+   */
+  async creditWelcomeBonus(userId: bigint): Promise<boolean> {
     // Дедуп через welcome_bonus_receipts (без FK, переживает удаление User).
     // Кейс: юзер /start → бонус → удаление аккаунта → /start заново. Без
     // receipt'а isNew=true у новой User-строки → бонус выдавался повторно.
@@ -76,7 +83,7 @@ export const userService = {
         where: { id: userId },
         data: { isNew: false },
       });
-      return;
+      return false;
     }
 
     // End of day MSK (23:59:59.999 Moscow time) for trial period
@@ -137,5 +144,7 @@ export const userService = {
         },
       });
     }
+
+    return true;
   },
 };

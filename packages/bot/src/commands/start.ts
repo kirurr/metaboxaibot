@@ -456,12 +456,15 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     })();
   }
 
-  if (isNew) {
-    await userService.creditWelcomeBonus(ctx.user.id);
-  }
+  // creditedNow=true только если бонус реально начислен в этом вызове.
+  // Когда `welcome_bonus_receipts` уже содержит запись (повторный /start
+  // после удаления аккаунта) — фактического начисления не было, поэтому
+  // сообщение «вот ваши N приветственных токенов» показывать нельзя;
+  // воспринимаем юзера как возвращающегося (balance + main menu).
+  const creditedNow = isNew ? await userService.creditWelcomeBonus(ctx.user.id) : false;
 
   await sendStartMessages(ctx, inferredLang, {
-    isNew,
+    isNew: creditedNow,
     tokenBalance: updatedUser.tokenBalance as number,
   });
 
