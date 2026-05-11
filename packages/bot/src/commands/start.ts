@@ -20,25 +20,57 @@ import { logger } from "../logger.js";
 /**
  * Sync pending token-pack orders from Metabox for a newly linked/started user.
  * Note: subscription sync is handled by site via /internal/sync-subscription on connect.
+ *
+ * Идемпотентность — таблица `granted_metabox_orders` на bot-стороне:
+ *  - Перед зачислением проверяем, не выдавался ли уже этот orderId. Если да —
+ *    скипаем зачисление, но всё равно дёргаем mark-order-granted на metabox'е
+ *    (на случай, если в прошлый раз HTTP-вызов сорвался между записью на боте
+ *    и flip'ом tokensGrantedToBot на сайте).
+ *  - Зачисление + insert в GrantedMetaboxOrder идут одной db.$transaction —
+ *    unique-violation на orderId откатит весь батч, токены не задвоятся.
  */
 async function syncMetaboxGrants(userId: bigint): Promise<void> {
   // Token-pack orders sync
   const pendingOrders = await getPendingTokenGrants(userId);
   for (const order of pendingOrders) {
     try {
-      await db.user.update({
-        where: { id: userId },
-        data: { tokenBalance: { increment: order.tokens } },
+      const alreadyGranted = await db.grantedMetaboxOrder.findUnique({
+        where: { orderId: order.orderId },
       });
-      await db.tokenTransaction.create({
-        data: {
-          userId,
-          amount: order.tokens,
-          type: "credit",
-          reason: "metabox_purchase",
-          description: order.description,
-        },
-      });
+      if (alreadyGranted) {
+        // Запись есть — токены уже зачислялись. Чистим metabox-state
+        // (mark-order-granted идемпотентен) и идём дальше.
+        await markOrderGrantedOnMetabox(order.orderId);
+        logger.info(
+          { orderId: order.orderId, userId: userId.toString() },
+          "[syncMetaboxGrants] order already granted — skip credit, refresh metabox flag",
+        );
+        continue;
+      }
+
+      await db.$transaction([
+        db.user.update({
+          where: { id: userId },
+          data: { tokenBalance: { increment: order.tokens } },
+        }),
+        db.tokenTransaction.create({
+          data: {
+            userId,
+            amount: order.tokens,
+            type: "credit",
+            reason: "metabox_purchase",
+            description: order.description,
+          },
+        }),
+        db.grantedMetaboxOrder.create({
+          data: {
+            orderId: order.orderId,
+            telegramId: userId,
+            tokens: order.tokens,
+            description: order.description,
+          },
+        }),
+      ]);
       await markOrderGrantedOnMetabox(order.orderId);
     } catch (err) {
       logger.error({ err, orderId: order.orderId }, "[syncMetaboxGrants] token order grant failed");

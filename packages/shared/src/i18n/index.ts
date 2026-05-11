@@ -228,6 +228,9 @@ export interface Translations {
     modelTemporarilyUnavailable: string;
     modelReasoningCapExhaustedOpenai: string;
     modelReasoningCapExhaustedAnthropic: string;
+    outputLimitReached: string;
+    outputLimitOnlyThinking: string;
+    modelOnlyThinking: string;
     chatInvalidImage: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;

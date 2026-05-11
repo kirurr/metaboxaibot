@@ -83,7 +83,9 @@ export class QwenAdapter extends BaseLLMAdapter {
       ...(input.temperature !== undefined
         ? { temperature: parseFloat(String(input.temperature)) }
         : {}),
-      ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}),
+      ...(input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? { max_tokens: input.maxTokens }
+        : {}),
       ...(input.enableThinking !== undefined ? { enable_thinking: input.enableThinking } : {}),
     });
 

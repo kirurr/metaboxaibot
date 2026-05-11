@@ -513,6 +513,40 @@ model PricingOverride {
 }
 
 // ─────────────────────────────────────────────
+// Идемпотентность зачисления токенов по AiBotOrder со стороны Metabox.
+//
+// Сценарии double-credit'а, которые этим блокируем:
+//  1. Metabox дёрнул /grant-tokens с orderId X → бот зачислил и записал
+//     GrantedMetaboxOrder, но HTTP-ответ потерялся → Metabox ретраит →
+//     второй вызов на /grant-tokens увидит запись и no-op'нет.
+//  2. /start запускает syncMetaboxGrants → бот успел зачислить + создать
+//     запись, но mark-order-granted на metabox-стороне упал → AiBotOrder
+//     остался tokensGrantedToBot=false → следующий /start снова приходит
+//     в getPendingTokenGrants → пред-чек видит запись, скипает зачисление,
+//     только дёргает mark-order-granted (чистит metabox-state).
+//  3. /grant-tokens и syncMetaboxGrants пересеклись на одном order'е —
+//     один из путей упадёт на unique-violation orderId и откатит транзакцию.
+//
+// Без FK на User — запись переживает удаление аккаунта (account-deletion),
+// иначе после deletion + повторного /start metabox мог бы повторно выдать
+// уже зачислявшийся order. Ключ — AiBotOrder.id (cuid), глобально уникален
+// на metabox-стороне.
+//
+// Аналог по подпискам — LocalSubscription.metaboxSubscriptionId
+// (используется в grantMetaboxSubscription как ALREADY_GRANTED check).
+// ─────────────────────────────────────────────
+model GrantedMetaboxOrder {
+  orderId     String   @id
+  telegramId  BigInt
+  tokens      Decimal  @db.Decimal(12, 4)
+  description String?
+  grantedAt   DateTime @default(now())
+
+  @@index([telegramId])
+  @@map("granted_metabox_orders")
+}
+
+// ─────────────────────────────────────────────
 // Учёт выдач welcome-бонуса.
 // Намеренно БЕЗ foreign key на User — запись должна пережить cascade-удаление
 // аккаунта (см. account-deletion.service.ts), иначе после deletion + повторного

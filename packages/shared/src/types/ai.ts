@@ -80,6 +80,12 @@ export interface ModelSettingDef {
   unavailableIf?: UnavailableRule;
   /** When true the setting is rendered inside a collapsible "Advanced" section. */
   advanced?: boolean;
+  /**
+   * Conditional visibility: setting is hidden until another setting (`key`)
+   * holds the given `value`. Used to gate a slider behind a toggle so users
+   * don't see a number that has no effect until they opt in.
+   */
+  dependsOn?: { key: string; value: string | number | boolean };
 }
 
 // ── Media input slot types ───────────────────────────────────────────────────
@@ -343,6 +349,15 @@ export interface AIModel {
    * `context_window` setting (which defaults to this value).
    */
   contextWindow?: number;
+  /**
+   * Realistic ceiling for output tokens per turn. Drives the `max_tokens`
+   * slider's upper bound + acts as the implicit cap for providers that
+   * require `max_tokens` in every request (Anthropic Messages API). When the
+   * user's "Ограничить длину ответа" toggle is OFF, the chat service either
+   * skips the field entirely (OpenAI Responses, Gemini, OpenAI-compatible)
+   * or substitutes this value (Anthropic — required field).
+   */
+  maxOutputTokens?: number;
   /**
    * USD per megapixel for models with per-megapixel billing (e.g. FLUX).
    * When set, costUsdPerRequest must be 0; actual cost = ceil(px/1_000_000) × this rate.

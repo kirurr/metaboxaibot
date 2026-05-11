@@ -95,7 +95,9 @@ export class GeminiAdapter extends BaseLLMAdapter {
       config: {
         ...(input.systemPrompt ? { systemInstruction: input.systemPrompt } : {}),
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        ...(input.maxTokens !== undefined ? { maxOutputTokens: input.maxTokens } : {}),
+        ...(input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+          ? { maxOutputTokens: input.maxTokens }
+          : {}),
         ...(effectiveThinkingBudget !== undefined
           ? {
               thinkingConfig: {
