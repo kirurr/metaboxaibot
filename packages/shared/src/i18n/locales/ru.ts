@@ -278,6 +278,8 @@ export default {
       "❌ Изображение слишком большое ({actualW}×{actualH} пкс). Максимальный размер — {maxW}×{maxH} пкс.",
     mediaSlotAspectRatioOutOfRange:
       "❌ Соотношение сторон изображения ({actualW}×{actualH}) выходит за пределы {minRatio}–{maxRatio}.",
+    mediaSlotFramePixelsOutOfRange:
+      "❌ Кадр {actualW}×{actualH} ({actualMpix} МП) выходит за допустимые пределы {minMpix}–{maxMpix} МП. Попробуйте видео меньшего разрешения.",
     mediaSlotReadMetadataFailed:
       "❌ Не удалось прочитать параметры файла. Проверьте формат и попробуйте снова.",
     kieVideoDurationOutOfRange: "❌ Длительность видео должна быть от {min} до {max} секунд.",

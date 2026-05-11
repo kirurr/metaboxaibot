@@ -691,6 +691,25 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       }
 
       case "invalid_parameters": {
+        // Для seedance-2 / seedance-2-fast чаще всего invalid_parameters
+        // прилетает из-за reference-видео, которое не прошло наши upload-side
+        // constraints (например, видео было загружено ДО появления валидации,
+        // или прошло через legacy-канал без metadata). Конкретизируем подсказку,
+        // чтобы юзер понимал куда смотреть — generic Evolink message «check
+        // resolution, duration, prompt length» не информативен.
+        const isSeedance2 = this.modelId === "seedance-2" || this.modelId === "seedance-2-fast";
+        if (isSeedance2) {
+          throw new UserFacingError(technicalMessage, {
+            key: "aiClassifiedError",
+            params: {
+              messageRu:
+                "Параметры запроса не подходят Seedance 2.0. Проверьте reference-видео: длительность 2–15 с (суммарно ≤15 с), разрешение 480p–1080p, кадр ≤2.08 МП (Full HD), размер ≤50 МБ, формат mp4/mov. Картинки: 300–6000 px, ratio 1:2.5–2.5:1, ≤30 МБ.",
+              messageEn:
+                "Request parameters not accepted by Seedance 2.0. Check reference video: 2–15 s (total ≤15 s), 480p–1080p, ≤2.08 MP per frame (Full HD), ≤50 MB, mp4/mov. Images: 300–6000 px, ratio 1:2.5–2.5:1, ≤30 MB.",
+            },
+            notifyOps: true,
+          });
+        }
         throw new UserFacingError(technicalMessage, {
           key: "aiClassifiedError",
           params: {

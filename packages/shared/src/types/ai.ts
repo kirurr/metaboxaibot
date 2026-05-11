@@ -133,6 +133,20 @@ export interface MediaInputConstraints {
    * Изображения шире этого лимита отбраковываются.
    */
   maxAspectRatio?: number;
+  /**
+   * Минимальное произведение width × height (frame pixels). Дополняет
+   * `minWidth`/`minHeight`: бывает, что обе стороны проходят, но суммарная
+   * площадь кадра ниже минимума (например, Evolink Seedance r2v требует
+   * ≥409,600 пикселей на кадр reference-видео).
+   */
+  minFramePixels?: number;
+  /**
+   * Максимальное произведение width × height. Особенно актуально для
+   * reference-видео — 4K-видео с телефона имеет ~8.3M пикселей на кадр и
+   * выходит за лимит Seedance (~2.08M). Width/height по отдельности при
+   * этом проходят (3840 ≤ 6000, 2160 ≤ 6000), а площадь — нет.
+   */
+  maxFramePixels?: number;
 }
 
 export interface MediaInputSlot {

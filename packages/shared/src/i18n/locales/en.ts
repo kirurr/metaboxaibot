@@ -279,6 +279,8 @@ export default {
       "❌ The image is too large ({actualW}×{actualH} px). Maximum size is {maxW}×{maxH} px.",
     mediaSlotAspectRatioOutOfRange:
       "❌ Image aspect ratio ({actualW}×{actualH}) is outside the allowed range {minRatio}–{maxRatio}.",
+    mediaSlotFramePixelsOutOfRange:
+      "❌ Frame {actualW}×{actualH} ({actualMpix} MP) is outside the allowed range {minMpix}–{maxMpix} MP. Try a lower-resolution video.",
     mediaSlotReadMetadataFailed: "❌ Failed to read file metadata. Check the format and try again.",
     kieVideoDurationOutOfRange: "❌ Video duration must be between {min} and {max} seconds.",
     kieImageTooSmall:

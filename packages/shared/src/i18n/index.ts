@@ -194,6 +194,7 @@ export interface Translations {
     mediaSlotImageTooSmall: string;
     mediaSlotImageTooLarge: string;
     mediaSlotAspectRatioOutOfRange: string;
+    mediaSlotFramePixelsOutOfRange: string;
     mediaSlotReadMetadataFailed: string;
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
