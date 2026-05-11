@@ -95,6 +95,8 @@ export interface ModelSettingDef {
   default: string | number | boolean | null;
   unavailableIf?: UnavailableRule;
   advanced?: boolean;
+  /** Conditional visibility: hide until another setting (`key`) equals `value`. */
+  dependsOn?: { key: string; value: string | number | boolean };
 }
 
 export interface ElevenLabsVoice {
