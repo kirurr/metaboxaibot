@@ -18,6 +18,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/verify",
     {
       schema: {
+        security: [],
         description: "Verify Telegram initData and get user profile",
         body: {
           type: "object",
@@ -96,6 +97,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/webtoken",
     {
       schema: {
+        security: [],
         description: "Verify web token for KeyboardButtonWebApp launches",
         body: {
           type: "object",
