@@ -41,14 +41,43 @@ const PROVIDER_CONFIGS: Record<string, ClaudeProxyConfig> = {
 };
 
 /**
- * Внутренний modelId → API-имя модели у провайдера. Anthropic-имена одинаковы
- * у обоих прокси (kie и evolink), маппинг общий.
+ * Внутренний modelId → API-имя модели у провайдера.
+ *
+ * COMMON_MODEL_MAP — alias-имена Anthropic (без snapshot-даты). Подходят
+ * провайдерам, которые принимают canonical Anthropic-aliases (KIE и сам
+ * Anthropic).
+ *
+ * EVOLINK_MODEL_OVERRIDES — Evolink в model registry держит часть моделей
+ * только под полным snapshot-именем (с датой). На короткий alias возвращает
+ * `invalid_request: No available service for model 'X'`. Подтверждённый список
+ * (по состоянию на 2026-05-11):
+ *   - claude-haiku-4-5-20251001  (alias `claude-haiku-4-5` НЕ работает)
+ *   - claude-sonnet-4-5-20250929
+ *   - claude-opus-4-1-20250805
+ *   - claude-sonnet-4-20250514
+ *   - claude-opus-4-5-20251101
+ *   - claude-opus-4-6      (alias OK)
+ *   - claude-opus-4-7      (alias OK)
+ *   - claude-sonnet-4-6    (alias OK)
+ *
+ * Поэтому в override пробрасываем только haiku, opus/sonnet остаются по alias'у.
  */
-const MODEL_MAP: Record<string, string> = {
+const COMMON_MODEL_MAP: Record<string, string> = {
   "claude-opus": "claude-opus-4-6",
   "claude-sonnet": "claude-sonnet-4-6",
   "claude-haiku": "claude-haiku-4-5",
 };
+
+const EVOLINK_MODEL_OVERRIDES: Record<string, string> = {
+  "claude-haiku": "claude-haiku-4-5-20251001",
+};
+
+function resolveApiModel(modelId: string, providerKey: string): string {
+  if (providerKey === "evolink-claude") {
+    return EVOLINK_MODEL_OVERRIDES[modelId] ?? COMMON_MODEL_MAP[modelId] ?? modelId;
+  }
+  return COMMON_MODEL_MAP[modelId] ?? modelId;
+}
 
 interface ProxyContentBlock {
   type: string;
@@ -103,7 +132,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     this.contextMaxMessages = contextMaxMessages;
     this.apiKey = apiKey ?? cfg.envKey ?? "";
     this.fetchFn = fetchFn ?? globalThis.fetch;
-    this.apiModel = MODEL_MAP[modelId] ?? modelId;
+    this.apiModel = resolveApiModel(modelId, providerKey);
   }
 
   async chat(input: LLMInput): Promise<LLMOutput> {
