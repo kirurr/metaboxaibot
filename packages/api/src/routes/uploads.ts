@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { userUploadsService } from "../services/user-uploads.service.js";
 import { getFileUrl } from "../services/s3.service.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -45,9 +46,41 @@ async function toDTO(u: RawUpload): Promise<UploadDTO> {
 
 export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["uploads"]),
+  );
 
   /** GET /uploads?type=voice — list user uploads, optionally filtered by type */
-  fastify.get<{ Querystring: { type?: string } }>("/uploads", async (request) => {
+  fastify.get<{ Querystring: { type?: string } }>(
+    "/uploads",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            type: { type: "string", description: "Filter by upload type (e.g., voice)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Upload ID" },
+                type: { type: "string", description: "Upload type" },
+                name: { type: "string", description: "File name" },
+                url: { type: "string", description: "Access URL" },
+                s3Key: { type: "string", nullable: true, description: "S3 storage key" },
+                createdAt: { type: "string", description: "Creation timestamp" },
+              },
+              required: ["id", "type", "name", "url", "s3Key", "createdAt"],
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const { type } = request.query;
     const uploads = await userUploadsService.list(userId, type);
@@ -57,6 +90,46 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /uploads/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
     "/uploads/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Upload ID" },
+          },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "New file name" },
+          },
+          required: ["name"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              type: { type: "string" },
+              name: { type: "string" },
+              url: { type: "string" },
+              s3Key: { type: "string", nullable: true },
+              createdAt: { type: "string" },
+            },
+            required: ["id", "type", "name", "url", "s3Key", "createdAt"],
+          },
+          400: badRequestResponse,
+          404: {
+            description: "Upload not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -71,7 +144,36 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /uploads/:id */
-  fastify.delete<{ Params: { id: string } }>("/uploads/:id", async (request, reply) => {
+  fastify.delete<{ Params: { id: string } }>(
+    "/uploads/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Upload ID" },
+          },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+            required: ["success"],
+          },
+          404: {
+            description: "Upload not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
     const { userId } = request as AuthRequest;
     const { id } = request.params;
     const ok = await userUploadsService.delete(id, userId);
