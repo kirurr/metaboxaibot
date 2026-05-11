@@ -60,39 +60,40 @@ export const soulStylesRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (_request, reply) => {
-    if (stylesCache && Date.now() - stylesCache.at < CACHE_TTL_MS) {
-      return stylesCache.data;
-    }
-
-    // Higgsfield Soul использует комбинированный credential `apiKey:apiSecret`
-    // (формат провайдера `higgsfield_soul` в key-pool, env-fallback соберёт пару
-    // из двух env-переменных).
-    let combined: string;
-    try {
-      combined = (await acquireKey("higgsfield_soul")).apiKey;
-    } catch (err) {
-      if (err instanceof PoolExhaustedError) {
-        return reply.status(503).send({ error: "Higgsfield API key not configured" });
+      if (stylesCache && Date.now() - stylesCache.at < CACHE_TTL_MS) {
+        return stylesCache.data;
       }
-      throw err;
-    }
 
-    const res = await fetch("https://platform.higgsfield.ai/v1/text2image/soul-styles", {
-      headers: {
-        Authorization: `Key ${combined}`,
-        Accept: "application/json",
-      },
-    });
+      // Higgsfield Soul использует комбинированный credential `apiKey:apiSecret`
+      // (формат провайдера `higgsfield_soul` в key-pool, env-fallback соберёт пару
+      // из двух env-переменных).
+      let combined: string;
+      try {
+        combined = (await acquireKey("higgsfield_soul")).apiKey;
+      } catch (err) {
+        if (err instanceof PoolExhaustedError) {
+          return reply.status(503).send({ error: "Higgsfield API key not configured" });
+        }
+        throw err;
+      }
 
-    if (!res.ok) {
-      const text = await res.text();
-      logger.warn({ status: res.status, body: text }, "Higgsfield soul-styles fetch failed");
-      return reply.status(502).send({ error: `Higgsfield error: ${res.status} ${text}` });
-    }
+      const res = await fetch("https://platform.higgsfield.ai/v1/text2image/soul-styles", {
+        headers: {
+          Authorization: `Key ${combined}`,
+          Accept: "application/json",
+        },
+      });
 
-    const data = (await res.json()) as SoulStyle[];
-    logger.info({ count: data.length }, "Higgsfield soul-styles fetched");
-    stylesCache = { data, at: Date.now() };
-    return data;
-  });
+      if (!res.ok) {
+        const text = await res.text();
+        logger.warn({ status: res.status, body: text }, "Higgsfield soul-styles fetch failed");
+        return reply.status(502).send({ error: `Higgsfield error: ${res.status} ${text}` });
+      }
+
+      const data = (await res.json()) as SoulStyle[];
+      logger.info({ count: data.length }, "Higgsfield soul-styles fetched");
+      stylesCache = { data, at: Date.now() };
+      return data;
+    },
+  );
 };

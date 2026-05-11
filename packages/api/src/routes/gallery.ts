@@ -166,7 +166,11 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
         querystring: {
           type: "object",
           properties: {
-            section: { type: "string", enum: ["image", "audio", "video"], description: "Filter by section type" },
+            section: {
+              type: "string",
+              enum: ["image", "audio", "video"],
+              description: "Filter by section type",
+            },
             page: { type: "string", description: "Page number, starts from 1" },
             limit: { type: "string", description: "Items per page, max 100" },
             modelId: { type: "string", description: "Filter by single model ID" },
@@ -185,14 +189,36 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
                   type: "object",
                   properties: {
                     id: { type: "string", description: "Generation job ID" },
-                    section: { type: "string", description: "Section type: image, audio, or video" },
+                    section: {
+                      type: "string",
+                      description: "Section type: image, audio, or video",
+                    },
                     modelId: { type: "string", description: "Model identifier used" },
                     modelName: { type: "string", description: "Human-readable model name" },
-                    prompt: { type: "string", nullable: true, description: "Original prompt used for generation" },
-                    modelSettings: { type: "object", description: "Settings used for this generation" },
-                    tokensSpent: { type: "string", nullable: true, description: "Tokens spent on this job" },
-                    completedAt: { type: "string", format: "date-time", description: "Job completion timestamp" },
-                    folderIds: { type: "array", items: { type: "string" }, description: "Folder IDs this job belongs to" },
+                    prompt: {
+                      type: "string",
+                      nullable: true,
+                      description: "Original prompt used for generation",
+                    },
+                    modelSettings: {
+                      type: "object",
+                      description: "Settings used for this generation",
+                    },
+                    tokensSpent: {
+                      type: "string",
+                      nullable: true,
+                      description: "Tokens spent on this job",
+                    },
+                    completedAt: {
+                      type: "string",
+                      format: "date-time",
+                      description: "Job completion timestamp",
+                    },
+                    folderIds: {
+                      type: "array",
+                      items: { type: "string" },
+                      description: "Folder IDs this job belongs to",
+                    },
                     outputs: {
                       type: "array",
                       description: "Generated output files",
@@ -201,9 +227,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
                         properties: {
                           id: { type: "string", description: "Output file ID" },
                           s3Key: { type: "string", nullable: true, description: "S3 storage key" },
-                          outputUrl: { type: "string", nullable: true, description: "Provider's output URL" },
-                          previewUrl: { type: "string", nullable: true, description: "Preview URL for viewing" },
-                          thumbnailUrl: { type: "string", nullable: true, description: "Thumbnail URL" },
+                          outputUrl: {
+                            type: "string",
+                            nullable: true,
+                            description: "Provider's output URL",
+                          },
+                          previewUrl: {
+                            type: "string",
+                            nullable: true,
+                            description: "Preview URL for viewing",
+                          },
+                          thumbnailUrl: {
+                            type: "string",
+                            nullable: true,
+                            description: "Thumbnail URL",
+                          },
                         },
                         required: ["id", "s3Key", "outputUrl", "previewUrl", "thumbnailUrl"],
                       },
@@ -1128,17 +1166,17 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
             required: ["success"],
           },
           400: {
-						...badRequestResponse,
-						description: "Cannot delete default folder",
-					},
+            ...badRequestResponse,
+            description: "Cannot delete default folder",
+          },
           403: forbiddenResponse,
           404: {
-						description: "Folder not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
+            description: "Folder not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
@@ -1191,12 +1229,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           },
           403: forbiddenResponse,
           404: {
-							description: "Job or folder not found",
-							type: "object",
-							properties: {
-								error: { type: "string" },
-							},
-						},
+            description: "Job or folder not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
@@ -1252,12 +1290,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           },
           403: forbiddenResponse,
           404: {
-						description: "Folder not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
+            description: "Folder not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
@@ -1300,12 +1338,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           },
           403: forbiddenResponse,
           404: {
-						description: "Job not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
+            description: "Job not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
@@ -1361,12 +1399,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
             required: ["success"],
           },
           404: {
-						description: "No favorites folder",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
+            description: "No favorites folder",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },

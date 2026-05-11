@@ -15,10 +15,7 @@ import { invalidatePoolCache, getKeyStats } from "../services/key-pool.service.j
 import { clearKeyThrottle } from "../services/throttle.service.js";
 import { logger } from "../logger.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
-import {
-  constructOpenAPIonRouteHook,
-  badRequestResponse,
-} from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -187,7 +184,19 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
                     createdAt: { type: "string", description: "Creation timestamp" },
                     updatedAt: { type: "string", description: "Last update timestamp" },
                   },
-                  required: ["id", "label", "protocol", "host", "port", "hasUsername", "hasPassword", "isActive", "notes", "createdAt", "updatedAt"],
+                  required: [
+                    "id",
+                    "label",
+                    "protocol",
+                    "host",
+                    "port",
+                    "hasUsername",
+                    "hasPassword",
+                    "isActive",
+                    "notes",
+                    "createdAt",
+                    "updatedAt",
+                  ],
                 },
               },
             },
@@ -197,9 +206,10 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async () => {
-    const proxies = await db.proxy.findMany({ orderBy: { createdAt: "desc" } });
-    return { proxies: proxies.map(serializeProxy) };
-  });
+      const proxies = await db.proxy.findMany({ orderBy: { createdAt: "desc" } });
+      return { proxies: proxies.map(serializeProxy) };
+    },
+  );
 
   /**
    * POST /admin/proxies
@@ -213,7 +223,11 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           type: "object",
           properties: {
             label: { type: "string", description: "Human-readable label" },
-            protocol: { type: "string", enum: ["http", "https", "socks5"], description: "Protocol" },
+            protocol: {
+              type: "string",
+              enum: ["http", "https", "socks5"],
+              description: "Protocol",
+            },
             host: { type: "string", description: "Proxy hostname or IP" },
             port: { type: "number", description: "Proxy port" },
             username: { type: "string", description: "Optional username for auth" },
@@ -236,30 +250,31 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-    const b = request.body;
-    if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
-      await reply.status(400).send({ error: "label, protocol, host, port required" });
-      return;
-    }
-    if (!VALID_PROTOCOLS.has(b.protocol)) {
-      await reply.status(400).send({ error: "protocol must be http|https|socks5" });
-      return;
-    }
-    const proxy = await db.proxy.create({
-      data: {
-        label: b.label,
-        protocol: b.protocol,
-        host: b.host,
-        port: b.port,
-        username: b.username ? encryptSecret(b.username) : null,
-        passwordCipher: b.password ? encryptSecret(b.password) : null,
-        isActive: b.isActive ?? true,
-        notes: b.notes ?? null,
-      },
-    });
-    invalidatePoolCache();
-    return { proxy: serializeProxy(proxy) };
-  });
+      const b = request.body;
+      if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
+        await reply.status(400).send({ error: "label, protocol, host, port required" });
+        return;
+      }
+      if (!VALID_PROTOCOLS.has(b.protocol)) {
+        await reply.status(400).send({ error: "protocol must be http|https|socks5" });
+        return;
+      }
+      const proxy = await db.proxy.create({
+        data: {
+          label: b.label,
+          protocol: b.protocol,
+          host: b.host,
+          port: b.port,
+          username: b.username ? encryptSecret(b.username) : null,
+          passwordCipher: b.password ? encryptSecret(b.password) : null,
+          isActive: b.isActive ?? true,
+          notes: b.notes ?? null,
+        },
+      });
+      invalidatePoolCache();
+      return { proxy: serializeProxy(proxy) };
+    },
+  );
 
   /**
    * PATCH /admin/proxies/:id
@@ -280,7 +295,11 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           type: "object",
           properties: {
             label: { type: "string", description: "Human-readable label" },
-            protocol: { type: "string", enum: ["http", "https", "socks5"], description: "Protocol" },
+            protocol: {
+              type: "string",
+              enum: ["http", "https", "socks5"],
+              description: "Protocol",
+            },
             host: { type: "string", description: "Proxy hostname or IP" },
             port: { type: "number", description: "Proxy port" },
             username: { type: "string", description: "Optional username for auth" },
@@ -366,18 +385,19 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-    const { id } = request.params;
-    const inUse = await db.providerKey.count({ where: { proxyId: id } });
-    if (inUse > 0) {
-      await reply
-        .status(409)
-        .send({ error: `Proxy is used by ${inUse} provider key(s); detach them first` });
-      return;
-    }
-    await db.proxy.delete({ where: { id } });
-    invalidatePoolCache();
-    return { success: true };
-  });
+      const { id } = request.params;
+      const inUse = await db.providerKey.count({ where: { proxyId: id } });
+      if (inUse > 0) {
+        await reply
+          .status(409)
+          .send({ error: `Proxy is used by ${inUse} provider key(s); detach them first` });
+        return;
+      }
+      await db.proxy.delete({ where: { id } });
+      invalidatePoolCache();
+      return { success: true };
+    },
+  );
 
   /** Test connectivity through proxy — fetches https://api.ipify.org and returns IP. */
   fastify.post<{ Params: { id: string } }>(
@@ -420,37 +440,38 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-    const proxy = await db.proxy.findUnique({ where: { id: request.params.id } });
-    if (!proxy) {
-      await reply.status(404).send({ error: "Proxy not found" });
-      return;
-    }
-    const username = proxy.username ? decryptSecret(proxy.username) : undefined;
-    const password = proxy.passwordCipher ? decryptSecret(proxy.passwordCipher) : undefined;
-    const auth =
-      username && password
-        ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
-        : "";
-    const uri = `${proxy.protocol}://${auth}${proxy.host}:${proxy.port}`;
-    try {
-      const agent = new ProxyAgent({ uri });
-      const res = await undiciFetch("https://api.ipify.org?format=json", {
-        dispatcher: agent,
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) {
-        await reply.status(502).send({ ok: false, status: res.status });
+      const proxy = await db.proxy.findUnique({ where: { id: request.params.id } });
+      if (!proxy) {
+        await reply.status(404).send({ error: "Proxy not found" });
         return;
       }
-      const json = (await res.json()) as { ip: string };
-      return { ok: true, ip: json.ip };
-    } catch (err) {
-      logger.warn({ err, proxyId: proxy.id }, "admin proxy test failed");
-      await reply
-        .status(502)
-        .send({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-  });
+      const username = proxy.username ? decryptSecret(proxy.username) : undefined;
+      const password = proxy.passwordCipher ? decryptSecret(proxy.passwordCipher) : undefined;
+      const auth =
+        username && password
+          ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+          : "";
+      const uri = `${proxy.protocol}://${auth}${proxy.host}:${proxy.port}`;
+      try {
+        const agent = new ProxyAgent({ uri });
+        const res = await undiciFetch("https://api.ipify.org?format=json", {
+          dispatcher: agent,
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) {
+          await reply.status(502).send({ ok: false, status: res.status });
+          return;
+        }
+        const json = (await res.json()) as { ip: string };
+        return { ok: true, ip: json.ip };
+      } catch (err) {
+        logger.warn({ err, proxyId: proxy.id }, "admin proxy test failed");
+        await reply
+          .status(502)
+          .send({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
 
   // ── Provider keys ────────────────────────────────────────────────────────
   /**
@@ -464,7 +485,10 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         querystring: {
           type: "object",
           properties: {
-            provider: { type: "string", description: "Filter by provider name (e.g., openai, anthropic)" },
+            provider: {
+              type: "string",
+              description: "Filter by provider name (e.g., openai, anthropic)",
+            },
           },
         },
         response: {
@@ -479,21 +503,58 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
                     id: { type: "string", description: "Key ID" },
                     provider: { type: "string", description: "Provider name" },
                     label: { type: "string", description: "Human-readable label" },
-                    keyMask: { type: "string", description: "Masked key for display (e.g., sk-...abc)" },
+                    keyMask: {
+                      type: "string",
+                      description: "Masked key for display (e.g., sk-...abc)",
+                    },
                     proxyId: { type: "string", nullable: true, description: "Attached proxy ID" },
-                    proxy: { type: "object", nullable: true, description: "Proxy info", properties: { id: { type: "string" }, label: { type: "string" } } },
+                    proxy: {
+                      type: "object",
+                      nullable: true,
+                      description: "Proxy info",
+                      properties: { id: { type: "string" }, label: { type: "string" } },
+                    },
                     priority: { type: "number", description: "Priority (higher = used first)" },
                     isActive: { type: "boolean", description: "Whether key is active" },
                     notes: { type: "string", nullable: true, description: "Admin notes" },
                     requestCount: { type: "string", description: "Total request count" },
                     errorCount: { type: "string", description: "Total error count" },
-                    lastUsedAt: { type: "string", nullable: true, description: "Last usage timestamp" },
-                    lastErrorAt: { type: "string", nullable: true, description: "Last error timestamp" },
-                    lastErrorText: { type: "string", nullable: true, description: "Last error message" },
+                    lastUsedAt: {
+                      type: "string",
+                      nullable: true,
+                      description: "Last usage timestamp",
+                    },
+                    lastErrorAt: {
+                      type: "string",
+                      nullable: true,
+                      description: "Last error timestamp",
+                    },
+                    lastErrorText: {
+                      type: "string",
+                      nullable: true,
+                      description: "Last error message",
+                    },
                     createdAt: { type: "string", description: "Creation timestamp" },
                     updatedAt: { type: "string", description: "Last update timestamp" },
                   },
-                  required: ["id", "provider", "label", "keyMask", "proxyId", "proxy", "priority", "isActive", "notes", "requestCount", "errorCount", "lastUsedAt", "lastErrorAt", "lastErrorText", "createdAt", "updatedAt"],
+                  required: [
+                    "id",
+                    "provider",
+                    "label",
+                    "keyMask",
+                    "proxyId",
+                    "proxy",
+                    "priority",
+                    "isActive",
+                    "notes",
+                    "requestCount",
+                    "errorCount",
+                    "lastUsedAt",
+                    "lastErrorAt",
+                    "lastErrorText",
+                    "createdAt",
+                    "updatedAt",
+                  ],
                 },
               },
             },
@@ -503,14 +564,15 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request) => {
-    const where = request.query.provider ? { provider: request.query.provider } : {};
-    const keys = await db.providerKey.findMany({
-      where,
-      orderBy: [{ provider: "asc" }, { priority: "desc" }, { createdAt: "asc" }],
-      include: { proxy: { select: { id: true, label: true } } },
-    });
-    return { keys: keys.map(serializeKey) };
-  });
+      const where = request.query.provider ? { provider: request.query.provider } : {};
+      const keys = await db.providerKey.findMany({
+        where,
+        orderBy: [{ provider: "asc" }, { priority: "desc" }, { createdAt: "asc" }],
+        include: { proxy: { select: { id: true, label: true } } },
+      });
+      return { keys: keys.map(serializeKey) };
+    },
+  );
 
   /**
    * POST /admin/provider-keys
@@ -546,34 +608,35 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-    const b = request.body;
-    if (!b?.provider || !b?.label || !b?.keyValue) {
-      await reply.status(400).send({ error: "provider, label, keyValue required" });
-      return;
-    }
-    if (b.proxyId) {
-      const proxy = await db.proxy.findUnique({ where: { id: b.proxyId } });
-      if (!proxy) {
-        await reply.status(400).send({ error: "proxyId not found" });
+      const b = request.body;
+      if (!b?.provider || !b?.label || !b?.keyValue) {
+        await reply.status(400).send({ error: "provider, label, keyValue required" });
         return;
       }
-    }
-    const key = await db.providerKey.create({
-      data: {
-        provider: b.provider,
-        label: b.label,
-        keyCipher: encryptSecret(b.keyValue),
-        keyMask: maskKey(b.keyValue),
-        proxyId: b.proxyId ?? null,
-        priority: b.priority ?? 0,
-        isActive: b.isActive ?? true,
-        notes: b.notes ?? null,
-      },
-      include: { proxy: { select: { id: true, label: true } } },
-    });
-    invalidatePoolCache(b.provider);
-    return { key: serializeKey(key) };
-  });
+      if (b.proxyId) {
+        const proxy = await db.proxy.findUnique({ where: { id: b.proxyId } });
+        if (!proxy) {
+          await reply.status(400).send({ error: "proxyId not found" });
+          return;
+        }
+      }
+      const key = await db.providerKey.create({
+        data: {
+          provider: b.provider,
+          label: b.label,
+          keyCipher: encryptSecret(b.keyValue),
+          keyMask: maskKey(b.keyValue),
+          proxyId: b.proxyId ?? null,
+          priority: b.priority ?? 0,
+          isActive: b.isActive ?? true,
+          notes: b.notes ?? null,
+        },
+        include: { proxy: { select: { id: true, label: true } } },
+      });
+      invalidatePoolCache(b.provider);
+      return { key: serializeKey(key) };
+    },
+  );
 
   /**
    * PATCH /admin/provider-keys/:id
@@ -689,15 +752,16 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-    const existing = await db.providerKey.findUnique({ where: { id: request.params.id } });
-    if (!existing) {
-      await reply.status(404).send({ error: "Key not found" });
-      return;
-    }
-    await db.providerKey.delete({ where: { id: request.params.id } });
-    invalidatePoolCache(existing.provider);
-    return { success: true };
-  });
+      const existing = await db.providerKey.findUnique({ where: { id: request.params.id } });
+      if (!existing) {
+        await reply.status(404).send({ error: "Key not found" });
+        return;
+      }
+      await db.providerKey.delete({ where: { id: request.params.id } });
+      invalidatePoolCache(existing.provider);
+      return { success: true };
+    },
+  );
 
   /**
    * GET /admin/provider-keys/:id/stats
@@ -723,10 +787,25 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
               lastUsedAt: { type: "string", nullable: true, description: "Last usage timestamp" },
               lastErrorAt: { type: "string", nullable: true, description: "Last error timestamp" },
               lastErrorText: { type: "string", nullable: true, description: "Last error message" },
-              currentCooldownMs: { type: "number", description: "Current cooldown in milliseconds" },
-              cooldownReason: { type: "string", nullable: true, description: "Reason for cooldown" },
+              currentCooldownMs: {
+                type: "number",
+                description: "Current cooldown in milliseconds",
+              },
+              cooldownReason: {
+                type: "string",
+                nullable: true,
+                description: "Reason for cooldown",
+              },
             },
-            required: ["requestCount", "errorCount", "lastUsedAt", "lastErrorAt", "lastErrorText", "currentCooldownMs", "cooldownReason"],
+            required: [
+              "requestCount",
+              "errorCount",
+              "lastUsedAt",
+              "lastErrorAt",
+              "lastErrorText",
+              "currentCooldownMs",
+              "cooldownReason",
+            ],
           },
           404: {
             description: "Key not found",
@@ -844,15 +923,16 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async () => {
-    const grouped = await db.providerKey.groupBy({
-      by: ["provider"],
-      _count: { _all: true },
-      where: { isActive: true },
-    });
-    const providers = grouped.map((g) => ({
-      provider: g.provider,
-      activeKeyCount: g._count._all,
-    }));
-    return { providers };
-  });
+      const grouped = await db.providerKey.groupBy({
+        by: ["provider"],
+        _count: { _all: true },
+        where: { isActive: true },
+      });
+      const providers = grouped.map((g) => ({
+        provider: g.provider,
+        activeKeyCount: g._count._all,
+      }));
+      return { providers };
+    },
+  );
 }

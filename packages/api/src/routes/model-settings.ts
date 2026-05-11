@@ -18,13 +18,14 @@ export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         response: {
           200: {
-						examples: [
-							{
-								"gpt-4": {
-									"temperature": 0.7,
-									"top_p": 1,
-								}
-							}],
+            examples: [
+              {
+                "gpt-4": {
+                  temperature: 0.7,
+                  top_p: 1,
+                },
+              },
+            ],
             type: "object",
             description: "Map of model IDs to their settings (key-value pairs)",
             additionalProperties: {

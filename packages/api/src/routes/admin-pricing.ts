@@ -170,13 +170,31 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
                     provider: { type: "string", description: "Provider name" },
                     isLLM: { type: "boolean", description: "Whether model is LLM" },
                     baseTokens: { type: "number", description: "Base tokens without multiplier" },
-                    effectiveTokens: { type: "number", description: "Tokens with current multiplier" },
-                    multiplier: { type: "number", description: "Current multiplier (1.0 = no override)" },
+                    effectiveTokens: {
+                      type: "number",
+                      description: "Tokens with current multiplier",
+                    },
+                    multiplier: {
+                      type: "number",
+                      description: "Current multiplier (1.0 = no override)",
+                    },
                     note: { type: "string", nullable: true, description: "Admin note" },
                     updatedBy: { type: "string", nullable: true, description: "Who updated" },
                     updatedAt: { type: "string", nullable: true, description: "Update timestamp" },
                   },
-                  required: ["id", "name", "section", "provider", "isLLM", "baseTokens", "effectiveTokens", "multiplier", "note", "updatedBy", "updatedAt"],
+                  required: [
+                    "id",
+                    "name",
+                    "section",
+                    "provider",
+                    "isLLM",
+                    "baseTokens",
+                    "effectiveTokens",
+                    "multiplier",
+                    "note",
+                    "updatedBy",
+                    "updatedAt",
+                  ],
                 },
               },
             },
@@ -186,16 +204,17 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
       },
     },
     async () => {
-    const overrides = getAllOverrides();
-    const models = Object.keys(AI_MODELS)
-      .map(modelToDto)
-      .filter((m): m is ModelPricingDto => m !== null);
-    return {
-      configDefault: config.billing.targetMargin,
-      global: overrides.global,
-      models,
-    };
-  });
+      const overrides = getAllOverrides();
+      const models = Object.keys(AI_MODELS)
+        .map(modelToDto)
+        .filter((m): m is ModelPricingDto => m !== null);
+      return {
+        configDefault: config.billing.targetMargin,
+        global: overrides.global,
+        models,
+      };
+    },
+  );
 
   // ── PUT /admin/pricing/model/:id ─────────────────────────────────────────
   /**
@@ -293,12 +312,13 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
       },
     },
     async (request) => {
-    const { id } = request.params;
-    // deleteMany — idempotent, не падает если записи нет.
-    await db.pricingOverride.deleteMany({ where: { scope: "model", key: id } });
-    await broadcastInvalidation();
-    return { success: true, model: modelToDto(id) };
-  });
+      const { id } = request.params;
+      // deleteMany — idempotent, не падает если записи нет.
+      await db.pricingOverride.deleteMany({ where: { scope: "model", key: id } });
+      await broadcastInvalidation();
+      return { success: true, model: modelToDto(id) };
+    },
+  );
 
   // ── PUT /admin/pricing/global — override targetMargin ────────────────────
   /**
@@ -330,30 +350,31 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
       },
     },
     async (request, reply) => {
-    const value = validateMultiplier(request.body?.multiplier);
-    if (value === null) {
-      await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
-      return;
-    }
-    const updatedBy = await resolveUpdatedBy(request);
-    await db.pricingOverride.upsert({
-      where: { scope_key: { scope: "global", key: "targetMargin" } },
-      create: {
-        scope: "global",
-        key: "targetMargin",
-        multiplier: value,
-        note: request.body?.note ?? null,
-        updatedBy,
-      },
-      update: {
-        multiplier: value,
-        note: request.body?.note ?? null,
-        updatedBy,
-      },
-    });
-    await broadcastInvalidation();
-    return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
-  });
+      const value = validateMultiplier(request.body?.multiplier);
+      if (value === null) {
+        await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
+        return;
+      }
+      const updatedBy = await resolveUpdatedBy(request);
+      await db.pricingOverride.upsert({
+        where: { scope_key: { scope: "global", key: "targetMargin" } },
+        create: {
+          scope: "global",
+          key: "targetMargin",
+          multiplier: value,
+          note: request.body?.note ?? null,
+          updatedBy,
+        },
+        update: {
+          multiplier: value,
+          note: request.body?.note ?? null,
+          updatedBy,
+        },
+      });
+      await broadcastInvalidation();
+      return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
+    },
+  );
 
   // ── DELETE /admin/pricing/global ─────────────────────────────────────────
   /**
@@ -377,10 +398,11 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
       },
     },
     async () => {
-    await db.pricingOverride.deleteMany({
-      where: { scope: "global", key: "targetMargin" },
-    });
-    await broadcastInvalidation();
-    return { success: true, configDefault: config.billing.targetMargin };
-  });
+      await db.pricingOverride.deleteMany({
+        where: { scope: "global", key: "targetMargin" },
+      });
+      await broadcastInvalidation();
+      return { success: true, configDefault: config.billing.targetMargin };
+    },
+  );
 }

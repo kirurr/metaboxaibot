@@ -31,7 +31,10 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
         querystring: {
           type: "object",
           properties: {
-            section: { type: "string", description: "Filter by section (e.g., gpt, design, audio, video)" },
+            section: {
+              type: "string",
+              description: "Filter by section (e.g., gpt, design, audio, video)",
+            },
           },
         },
         response: {
@@ -54,19 +57,20 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const section = request.query.section as Section | undefined;
+      const { userId } = request as AuthRequest;
+      const section = request.query.section as Section | undefined;
 
-    const dialogs = await dialogService.listByUser(userId, section);
-    return dialogs.map((d) => ({
-      id: d.id,
-      section: d.section,
-      modelId: d.modelId,
-      title: d.title ?? null,
-      createdAt: d.createdAt.toISOString(),
-      updatedAt: d.updatedAt.toISOString(),
-    }));
-  });
+      const dialogs = await dialogService.listByUser(userId, section);
+      return dialogs.map((d) => ({
+        id: d.id,
+        section: d.section,
+        modelId: d.modelId,
+        title: d.title ?? null,
+        createdAt: d.createdAt.toISOString(),
+        updatedAt: d.updatedAt.toISOString(),
+      }));
+    },
+  );
 
   /** POST /dialogs — create new dialog */
   fastify.post<{ Body: { section: string; modelId: string; title?: string } }>(
@@ -154,13 +158,13 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
             required: ["id", "title"],
           },
           400: badRequestResponse,
-					404: {
-						description: "Dialog not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					}
+          404: {
+            description: "Dialog not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
@@ -201,35 +205,36 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
             },
             required: ["success"],
           },
-					404: {
-						description: "Dialog not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
-					403: {
-						description: "Forbidden",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					}
+          404: {
+            description: "Dialog not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          403: {
+            description: "Forbidden",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    await dialogService.softDelete(id, userId);
+      await dialogService.softDelete(id, userId);
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   /** POST /dialogs/:id/activate — set as active dialog */
   fastify.post<{ Params: { id: string } }>(
@@ -251,44 +256,45 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
             },
             required: ["success"],
           },
-					404: {
-						description: "Dialog not found",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					},
-					403: {
-						description: "Forbidden",
-						type: "object",
-						properties: {
-							error: { type: "string" },
-						},
-					}
+          404: {
+            description: "Dialog not found",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
+          403: {
+            description: "Forbidden",
+            type: "object",
+            properties: {
+              error: { type: "string" },
+            },
+          },
         },
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const state = await userStateService.get(userId);
+      const state = await userStateService.get(userId);
 
-    if (state?.gptDialogId === dialog.id && state.state === "GPT_ACTIVE") {
+      if (state?.gptDialogId === dialog.id && state.state === "GPT_ACTIVE") {
+        return { success: true };
+      }
+
+      await userStateService.setDialogForSection(userId, dialog.section as Section, id);
+
+      // Notify user in chat (fire-and-forget)
+      sendDialogSelectedNotification(userId, dialog.title, dialog.modelId).catch(() => void 0);
+
       return { success: true };
-    }
-
-    await userStateService.setDialogForSection(userId, dialog.section as Section, id);
-
-    // Notify user in chat (fire-and-forget)
-    sendDialogSelectedNotification(userId, dialog.title, dialog.modelId).catch(() => void 0);
-
-    return { success: true };
-  });
+    },
+  );
 
   /** GET /dialogs/:id/messages — message history */
   fastify.get<{ Params: { id: string } }>(
@@ -336,50 +342,51 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const messages = await dialogService.getMessages(id);
+      const messages = await dialogService.getMessages(id);
 
-    // Resolve S3 keys to presigned URLs (S3 keys don't start with "http")
-    const resolvedMessages = await Promise.all(
-      messages.map(async (m) => {
-        let mediaUrl = m.mediaUrl ?? null;
-        if (mediaUrl && !mediaUrl.startsWith("http")) {
-          mediaUrl = (await getFileUrl(mediaUrl)) ?? mediaUrl;
-        }
-        const rawAttachments = Array.isArray(m.attachments)
-          ? (m.attachments as unknown as Array<{
-              s3Key: string;
-              mimeType: string;
-              name: string;
-              size?: number;
-            }>)
-          : [];
-        const attachments = await Promise.all(
-          rawAttachments.map(async (a) => ({
-            ...a,
-            previewUrl: (await getFileUrl(a.s3Key)) ?? undefined,
-          })),
-        );
-        return {
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          mediaUrl,
-          mediaType: m.mediaType ?? null,
-          attachments: attachments.length ? attachments : undefined,
-          createdAt: m.createdAt.toISOString(),
-        };
-      }),
-    );
+      // Resolve S3 keys to presigned URLs (S3 keys don't start with "http")
+      const resolvedMessages = await Promise.all(
+        messages.map(async (m) => {
+          let mediaUrl = m.mediaUrl ?? null;
+          if (mediaUrl && !mediaUrl.startsWith("http")) {
+            mediaUrl = (await getFileUrl(mediaUrl)) ?? mediaUrl;
+          }
+          const rawAttachments = Array.isArray(m.attachments)
+            ? (m.attachments as unknown as Array<{
+                s3Key: string;
+                mimeType: string;
+                name: string;
+                size?: number;
+              }>)
+            : [];
+          const attachments = await Promise.all(
+            rawAttachments.map(async (a) => ({
+              ...a,
+              previewUrl: (await getFileUrl(a.s3Key)) ?? undefined,
+            })),
+          );
+          return {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            mediaUrl,
+            mediaType: m.mediaType ?? null,
+            attachments: attachments.length ? attachments : undefined,
+            createdAt: m.createdAt.toISOString(),
+          };
+        }),
+      );
 
-    return resolvedMessages;
-  });
+      return resolvedMessages;
+    },
+  );
 };
 
 async function sendDialogSelectedNotification(

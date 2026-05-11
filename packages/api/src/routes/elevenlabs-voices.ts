@@ -40,7 +40,11 @@ export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
                 voice_id: { type: "string", description: "Unique voice identifier" },
                 name: { type: "string", description: "Voice display name" },
                 category: { type: "string", description: "Voice category (premade)" },
-                gender: { type: "string", nullable: true, description: "Gender (male/female/null)" },
+                gender: {
+                  type: "string",
+                  nullable: true,
+                  description: "Gender (male/female/null)",
+                },
                 language: { type: "string", nullable: true, description: "Primary language code" },
                 preview_url: { type: "string", nullable: true, description: "Preview audio URL" },
               },
@@ -65,42 +69,43 @@ export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (_request, reply) => {
-    if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-      return voicesCache.data;
-    }
-
-    let apiKey: string;
-    try {
-      apiKey = (await acquireKey("elevenlabs")).apiKey;
-    } catch (err) {
-      if (err instanceof PoolExhaustedError) {
-        return reply.status(503).send({ error: "ElevenLabs API key not configured" });
+      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
+        return voicesCache.data;
       }
-      throw err;
-    }
 
-    const res = await fetch("https://api.elevenlabs.io/v1/voices?show_legacy=false", {
-      headers: { "xi-api-key": apiKey, Accept: "application/json" },
-    });
+      let apiKey: string;
+      try {
+        apiKey = (await acquireKey("elevenlabs")).apiKey;
+      } catch (err) {
+        if (err instanceof PoolExhaustedError) {
+          return reply.status(503).send({ error: "ElevenLabs API key not configured" });
+        }
+        throw err;
+      }
 
-    if (!res.ok) {
-      const text = await res.text();
-      return reply.status(502).send({ error: `ElevenLabs error: ${res.status} ${text}` });
-    }
+      const res = await fetch("https://api.elevenlabs.io/v1/voices?show_legacy=false", {
+        headers: { "xi-api-key": apiKey, Accept: "application/json" },
+      });
 
-    const json = (await res.json()) as ElevenLabsVoicesResponse;
-    const voices = (json.voices ?? []).filter((v) => v.category === "premade");
+      if (!res.ok) {
+        const text = await res.text();
+        return reply.status(502).send({ error: `ElevenLabs error: ${res.status} ${text}` });
+      }
 
-    const data = voices.map((v) => ({
-      voice_id: v.voice_id,
-      name: v.name,
-      category: v.category ?? "premade",
-      gender: v.labels?.gender ?? null,
-      language: v.labels?.language ?? null,
-      preview_url: v.preview_url ?? null,
-    }));
+      const json = (await res.json()) as ElevenLabsVoicesResponse;
+      const voices = (json.voices ?? []).filter((v) => v.category === "premade");
 
-    voicesCache = { data, at: Date.now() };
-    return data;
-  });
+      const data = voices.map((v) => ({
+        voice_id: v.voice_id,
+        name: v.name,
+        category: v.category ?? "premade",
+        gender: v.labels?.gender ?? null,
+        language: v.labels?.language ?? null,
+        preview_url: v.preview_url ?? null,
+      }));
+
+      voicesCache = { data, at: Date.now() };
+      return data;
+    },
+  );
 };

@@ -23,8 +23,16 @@ export const videoSettingsRoutes: FastifyPluginAsync = async (fastify) => {
             additionalProperties: {
               type: "object",
               properties: {
-                aspectRatio: { type: "string", nullable: true, description: "Selected aspect ratio" },
-                duration: { type: "number", nullable: true, description: "Selected duration in seconds" },
+                aspectRatio: {
+                  type: "string",
+                  nullable: true,
+                  description: "Selected aspect ratio",
+                },
+                duration: {
+                  type: "number",
+                  nullable: true,
+                  description: "Selected duration in seconds",
+                },
               },
             },
           },
@@ -32,9 +40,10 @@ export const videoSettingsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    return userStateService.getVideoSettings(userId);
-  });
+      const { userId } = request as AuthRequest;
+      return userStateService.getVideoSettings(userId);
+    },
+  );
 
   /** PATCH /video-settings — save aspect ratio and/or duration for a model */
   fastify.patch<{ Body: { modelId: string; aspectRatio?: string; duration?: number } }>(

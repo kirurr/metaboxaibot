@@ -18,13 +18,13 @@ export const imageSettingsRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         response: {
           200: {
-						examples: [
-							{
-								"gpt-4": {
-									"aspectRatio": "16:9"
-								}
-							}
-						],
+            examples: [
+              {
+                "gpt-4": {
+                  aspectRatio: "16:9",
+                },
+              },
+            ],
             type: "object",
             description: "Map of model IDs to their image settings (aspect ratio)",
             additionalProperties: {
@@ -32,7 +32,8 @@ export const imageSettingsRoutes: FastifyPluginAsync = async (fastify) => {
               properties: {
                 aspectRatio: {
                   type: "string",
-                  description: "The selected aspect ratio for this model (e.g., '16:9', '1:1', '9:16')",
+                  description:
+                    "The selected aspect ratio for this model (e.g., '16:9', '1:1', '9:16')",
                 },
               },
             },

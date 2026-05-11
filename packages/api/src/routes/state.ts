@@ -532,41 +532,82 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
             type: "object",
             properties: {
               state: { type: "string", description: "Current FSM state (e.g., IDLE, GPT_ACTIVE)" },
-              section: { type: "string", nullable: true, description: "Active section (gpt, design, audio, video)" },
+              section: {
+                type: "string",
+                nullable: true,
+                description: "Active section (gpt, design, audio, video)",
+              },
               gptModelId: { type: "string", nullable: true, description: "Selected GPT model ID" },
               gptDialogId: { type: "string", nullable: true, description: "Active GPT dialog ID" },
-              designDialogId: { type: "string", nullable: true, description: "Active design dialog ID" },
-              audioDialogId: { type: "string", nullable: true, description: "Active audio dialog ID" },
-              videoDialogId: { type: "string", nullable: true, description: "Active video dialog ID" },
-              designModelId: { type: "string", nullable: true, description: "Selected design model ID" },
-              audioModelId: { type: "string", nullable: true, description: "Selected audio model ID" },
-              videoModelId: { type: "string", nullable: true, description: "Selected video model ID" },
+              designDialogId: {
+                type: "string",
+                nullable: true,
+                description: "Active design dialog ID",
+              },
+              audioDialogId: {
+                type: "string",
+                nullable: true,
+                description: "Active audio dialog ID",
+              },
+              videoDialogId: {
+                type: "string",
+                nullable: true,
+                description: "Active video dialog ID",
+              },
+              designModelId: {
+                type: "string",
+                nullable: true,
+                description: "Selected design model ID",
+              },
+              audioModelId: {
+                type: "string",
+                nullable: true,
+                description: "Selected audio model ID",
+              },
+              videoModelId: {
+                type: "string",
+                nullable: true,
+                description: "Selected video model ID",
+              },
               selectedModes: { type: "object", description: "Selected mode per model" },
             },
-            required: ["state", "section", "gptModelId", "gptDialogId", "designDialogId", "audioDialogId", "videoDialogId", "designModelId", "audioModelId", "videoModelId", "selectedModes"],
+            required: [
+              "state",
+              "section",
+              "gptModelId",
+              "gptDialogId",
+              "designDialogId",
+              "audioDialogId",
+              "videoDialogId",
+              "designModelId",
+              "audioModelId",
+              "videoModelId",
+              "selectedModes",
+            ],
           },
         },
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const state = await userStateService.get(userId);
-    const selectedModes = await userStateService.getSelectedModes(userId);
+      const { userId } = request as AuthRequest;
+      const state = await userStateService.get(userId);
+      const selectedModes = await userStateService.getSelectedModes(userId);
 
-    return {
-      state: state?.state ?? "IDLE",
-      section: state?.section ?? null,
-      gptModelId: state?.gptModelId ?? null,
-      gptDialogId: state?.gptDialogId ?? null,
-      designDialogId: state?.designDialogId ?? null,
-      audioDialogId: state?.audioDialogId ?? null,
-      videoDialogId: state?.videoDialogId ?? null,
-      designModelId: state?.designModelId ?? null,
-      audioModelId: state?.audioModelId ?? null,
-      videoModelId: state?.videoModelId ?? null,
-      selectedModes,
-    };
-  });
+      return {
+        state: state?.state ?? "IDLE",
+        section: state?.section ?? null,
+        gptModelId: state?.gptModelId ?? null,
+        gptDialogId: state?.gptDialogId ?? null,
+        designDialogId: state?.designDialogId ?? null,
+        audioDialogId: state?.audioDialogId ?? null,
+        videoDialogId: state?.videoDialogId ?? null,
+        designModelId: state?.designModelId ?? null,
+        audioModelId: state?.audioModelId ?? null,
+        videoModelId: state?.videoModelId ?? null,
+        selectedModes,
+      };
+    },
+  );
 
   /** POST /state/selected-mode — persist user's chosen mode for a model */
   fastify.post<{
@@ -595,15 +636,16 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const { modelId, modeId } = request.body;
-    const model = AI_MODELS[modelId];
-    if (!model) return { success: false };
-    const modes = getResolvedModes(model);
-    if (!modes?.some((m) => m.id === modeId)) return { success: false };
-    await userStateService.setSelectedMode(userId, modelId, modeId);
-    return { success: true };
-  });
+      const { userId } = request as AuthRequest;
+      const { modelId, modeId } = request.body;
+      const model = AI_MODELS[modelId];
+      if (!model) return { success: false };
+      const modes = getResolvedModes(model);
+      if (!modes?.some((m) => m.id === modeId)) return { success: false };
+      await userStateService.setSelectedMode(userId, modelId, modeId);
+      return { success: true };
+    },
+  );
 
   /** PATCH /state — update gptModelId, per-section dialogId, or per-section modelId */
   fastify.patch<{
@@ -621,8 +663,16 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
           type: "object",
           properties: {
             gptModelId: { type: "string", description: "GPT model ID to set" },
-            section: { type: "string", enum: ["gpt", "design", "audio", "video"], description: "Section for dialog/model update" },
-            dialogId: { type: "string", nullable: true, description: "Dialog ID to set for section" },
+            section: {
+              type: "string",
+              enum: ["gpt", "design", "audio", "video"],
+              description: "Section for dialog/model update",
+            },
+            dialogId: {
+              type: "string",
+              nullable: true,
+              description: "Dialog ID to set for section",
+            },
             sectionModelId: { type: "string", description: "Model ID to set for section" },
           },
         },
@@ -638,25 +688,26 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const { gptModelId, section, dialogId, sectionModelId } = request.body;
+      const { userId } = request as AuthRequest;
+      const { gptModelId, section, dialogId, sectionModelId } = request.body;
 
-    if (gptModelId !== undefined) {
-      await userStateService.setGptModel(userId, gptModelId);
-    }
-    if (section !== undefined && dialogId !== undefined) {
-      await userStateService.setDialogForSection(userId, section as Section, dialogId);
-    }
-    if (section !== undefined && sectionModelId !== undefined) {
-      await userStateService.setModelForSection(
-        userId,
-        section as "design" | "audio" | "video",
-        sectionModelId,
-      );
-    }
+      if (gptModelId !== undefined) {
+        await userStateService.setGptModel(userId, gptModelId);
+      }
+      if (section !== undefined && dialogId !== undefined) {
+        await userStateService.setDialogForSection(userId, section as Section, dialogId);
+      }
+      if (section !== undefined && sectionModelId !== undefined) {
+        await userStateService.setModelForSection(
+          userId,
+          section as "design" | "audio" | "video",
+          sectionModelId,
+        );
+      }
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   /** POST /state/activate — set model for section and send Telegram notification */
   fastify.post<{
@@ -668,7 +719,11 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
         body: {
           type: "object",
           properties: {
-            section: { type: "string", enum: ["gpt", "design", "audio", "video"], description: "Section to activate" },
+            section: {
+              type: "string",
+              enum: ["gpt", "design", "audio", "video"],
+              description: "Section to activate",
+            },
             modelId: { type: "string", description: "Model ID to activate" },
           },
           required: ["section", "modelId"],
@@ -685,66 +740,67 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const { section, modelId } = request.body;
+      const { userId } = request as AuthRequest;
+      const { section, modelId } = request.body;
 
-    // Persist the chosen model. GPT хранится в отдельном поле `gptModelId` —
-    // у `setModelForSection` нет ветки для "gpt" (sectionModelField падает в
-    // no-op), поэтому раньше gpt-активация молча не сохраняла модель.
-    if (section === "gpt") {
-      await userStateService.setGptModel(userId, modelId);
-    } else {
-      await userStateService.setModelForSection(
-        userId,
-        section as "design" | "audio" | "video",
-        modelId,
-      );
-    }
+      // Persist the chosen model. GPT хранится в отдельном поле `gptModelId` —
+      // у `setModelForSection` нет ветки для "gpt" (sectionModelField падает в
+      // no-op), поэтому раньше gpt-активация молча не сохраняла модель.
+      if (section === "gpt") {
+        await userStateService.setGptModel(userId, modelId);
+      } else {
+        await userStateService.setModelForSection(
+          userId,
+          section as "design" | "audio" | "video",
+          modelId,
+        );
+      }
 
-    // Voice-clone activated through the management UI → drop any pending
-    // HeyGen-return marker, otherwise a clone started here would silently
-    // throw the user back into HeyGen instead of staying in audio.
-    if (modelId === "voice-clone") {
-      await getRedis()
-        .del(voiceCloneReturnRedisKey(userId))
-        .catch(() => void 0);
-    }
+      // Voice-clone activated through the management UI → drop any pending
+      // HeyGen-return marker, otherwise a clone started here would silently
+      // throw the user back into HeyGen instead of staying in audio.
+      if (modelId === "voice-clone") {
+        await getRedis()
+          .del(voiceCloneReturnRedisKey(userId))
+          .catch(() => void 0);
+      }
 
-    // Synchronously switch the bot state + section so the very next user message
-    // is routed to the newly-activated section (avoids a race with the async
-    // notification send). sendModelActivatedNotification will only send the
-    // optional section-switch keyboard message.
-    //
-    // Для gpt: GPT_ACTIVE если у юзера есть активный диалог, иначе GPT_SECTION.
-    // Без этого state.state оставался прежним (IDLE / *_ACTIVE прошлой секции),
-    // и `bot.on('message')` падал в handleNoTool → юзер видел `noToolGpt`
-    // несмотря на свежее «модель активирована».
-    let newState: Parameters<typeof userStateService.setState>[1] | undefined;
-    if (section === "audio") newState = "AUDIO_ACTIVE";
-    else if (section === "design") newState = "DESIGN_ACTIVE";
-    else if (section === "video") newState = "VIDEO_ACTIVE";
-    else if (section === "gpt") {
-      const prev = await userStateService.get(userId);
-      newState = prev?.gptDialogId ? "GPT_ACTIVE" : "GPT_SECTION";
-    }
+      // Synchronously switch the bot state + section so the very next user message
+      // is routed to the newly-activated section (avoids a race with the async
+      // notification send). sendModelActivatedNotification will only send the
+      // optional section-switch keyboard message.
+      //
+      // Для gpt: GPT_ACTIVE если у юзера есть активный диалог, иначе GPT_SECTION.
+      // Без этого state.state оставался прежним (IDLE / *_ACTIVE прошлой секции),
+      // и `bot.on('message')` падал в handleNoTool → юзер видел `noToolGpt`
+      // несмотря на свежее «модель активирована».
+      let newState: Parameters<typeof userStateService.setState>[1] | undefined;
+      if (section === "audio") newState = "AUDIO_ACTIVE";
+      else if (section === "design") newState = "DESIGN_ACTIVE";
+      else if (section === "video") newState = "VIDEO_ACTIVE";
+      else if (section === "gpt") {
+        const prev = await userStateService.get(userId);
+        newState = prev?.gptDialogId ? "GPT_ACTIVE" : "GPT_SECTION";
+      }
 
-    // Always overwrite the FSM state, even when the section is unchanged.
-    // Skipping the write on same-section leaks transient sub-states like
-    // HEYGEN_AVATAR_PHOTO or HIGGSFIELD_SOUL_PHOTO across model activation
-    // — e.g. user clicks "Create avatar" in HeyGen (state = HEYGEN_AVATAR_PHOTO,
-    // section = video), then activates Kling 3 Pro (still video) without
-    // tapping ❌ Cancel. With the old guard the bot stayed in
-    // HEYGEN_AVATAR_PHOTO, so the next photo dropped into a Kling media slot
-    // got captured by the avatar-creation handler instead.
-    let sectionSwitched = false;
-    if (newState) {
-      const prev = await userStateService.get(userId);
-      sectionSwitched = prev?.section !== section;
-      await userStateService.setState(userId, newState, section as Section);
-    }
+      // Always overwrite the FSM state, even when the section is unchanged.
+      // Skipping the write on same-section leaks transient sub-states like
+      // HEYGEN_AVATAR_PHOTO or HIGGSFIELD_SOUL_PHOTO across model activation
+      // — e.g. user clicks "Create avatar" in HeyGen (state = HEYGEN_AVATAR_PHOTO,
+      // section = video), then activates Kling 3 Pro (still video) without
+      // tapping ❌ Cancel. With the old guard the bot stayed in
+      // HEYGEN_AVATAR_PHOTO, so the next photo dropped into a Kling media slot
+      // got captured by the avatar-creation handler instead.
+      let sectionSwitched = false;
+      if (newState) {
+        const prev = await userStateService.get(userId);
+        sectionSwitched = prev?.section !== section;
+        await userStateService.setState(userId, newState, section as Section);
+      }
 
-    await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
+      await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 };

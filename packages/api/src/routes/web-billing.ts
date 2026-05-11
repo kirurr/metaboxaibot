@@ -70,7 +70,11 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
                     name: { type: "string", description: "Package name" },
                     tokens: { type: "number", description: "Number of tokens" },
                     priceRub: { type: "string", description: "Price in RUB" },
-                    badge: { type: "string", nullable: true, description: "Badge (e.g., 'Popular')" },
+                    badge: {
+                      type: "string",
+                      nullable: true,
+                      description: "Badge (e.g., 'Popular')",
+                    },
                   },
                   required: ["id", "name", "tokens", "priceRub"],
                 },

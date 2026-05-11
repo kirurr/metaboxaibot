@@ -28,7 +28,10 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         querystring: {
           type: "object",
           properties: {
-            provider: { type: "string", description: "Filter by provider (heygen, higgsfield_soul)" },
+            provider: {
+              type: "string",
+              description: "Filter by provider (heygen, higgsfield_soul)",
+            },
           },
         },
         response: {
@@ -45,34 +48,43 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
                 status: { type: "string", description: "Avatar status" },
                 createdAt: { type: "string", description: "Creation timestamp" },
               },
-              required: ["id", "provider", "name", "externalId", "previewUrl", "status", "createdAt"],
+              required: [
+                "id",
+                "provider",
+                "name",
+                "externalId",
+                "previewUrl",
+                "status",
+                "createdAt",
+              ],
             },
           },
         },
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const { provider } = request.query;
-    const avatars = await userAvatarService.list(userId, provider);
-    return Promise.all(
-      avatars.map(async (a) => {
-        let previewUrl = a.previewUrl;
-        if (previewUrl && !previewUrl.startsWith("http")) {
-          previewUrl = await getFileUrl(previewUrl).catch(() => null);
-        }
-        return {
-          id: a.id,
-          provider: a.provider,
-          name: a.name,
-          externalId: a.externalId,
-          previewUrl,
-          status: a.status,
-          createdAt: a.createdAt.toISOString(),
-        };
-      }),
-    );
-  });
+      const { userId } = request as AuthRequest;
+      const { provider } = request.query;
+      const avatars = await userAvatarService.list(userId, provider);
+      return Promise.all(
+        avatars.map(async (a) => {
+          let previewUrl = a.previewUrl;
+          if (previewUrl && !previewUrl.startsWith("http")) {
+            previewUrl = await getFileUrl(previewUrl).catch(() => null);
+          }
+          return {
+            id: a.id,
+            provider: a.provider,
+            name: a.name,
+            externalId: a.externalId,
+            previewUrl,
+            status: a.status,
+            createdAt: a.createdAt.toISOString(),
+          };
+        }),
+      );
+    },
+  );
 
   /**
    * POST /user-avatars/start-creation
@@ -85,7 +97,11 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         body: {
           type: "object",
           properties: {
-            provider: { type: "string", enum: ["heygen", "higgsfield_soul"], description: "Avatar provider" },
+            provider: {
+              type: "string",
+              enum: ["heygen", "higgsfield_soul"],
+              description: "Avatar provider",
+            },
           },
           required: ["provider"],
         },
@@ -240,10 +256,11 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
-    const ok = await userAvatarService.delete(id, userId);
-    if (!ok) return reply.status(404).send({ error: "Avatar not found" });
-    return { ok: true };
-  });
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
+      const ok = await userAvatarService.delete(id, userId);
+      if (!ok) return reply.status(404).send({ error: "Avatar not found" });
+      return { ok: true };
+    },
+  );
 };

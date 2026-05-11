@@ -2,10 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
-import {
-  constructOpenAPIonRouteHook,
-  forbiddenResponse,
-} from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook, forbiddenResponse } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -73,7 +70,15 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
                     isBlocked: { type: "boolean", description: "Whether user is blocked" },
                     createdAt: { type: "string", description: "Account creation timestamp" },
                   },
-                  required: ["id", "username", "firstName", "tokenBalance", "role", "isBlocked", "createdAt"],
+                  required: [
+                    "id",
+                    "username",
+                    "firstName",
+                    "tokenBalance",
+                    "role",
+                    "isBlocked",
+                    "createdAt",
+                  ],
                 },
               },
               total: { type: "number", description: "Total number of users matching the filter" },
@@ -84,7 +89,9 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           },
           403: {
             type: "object",
-            properties: { error: { type: "string", description: "Forbidden - admin access required" } },
+            properties: {
+              error: { type: "string", description: "Forbidden - admin access required" },
+            },
           },
         },
       },
@@ -274,7 +281,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           type: "object",
           properties: {
             userId: { type: "string", description: "Target user's ID" },
-            role: { type: "string", enum: ["USER", "MODERATOR", "ADMIN"], description: "New role to assign" },
+            role: {
+              type: "string",
+              enum: ["USER", "MODERATOR", "ADMIN"],
+              description: "New role to assign",
+            },
           },
           required: ["userId", "role"],
         },

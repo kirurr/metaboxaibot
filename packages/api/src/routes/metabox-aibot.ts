@@ -51,14 +51,15 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (_request, reply) => {
-    try {
-      const products = await getAiBotProducts();
-      return products;
-    } catch (e) {
-      fastify.log.error(e, "[metabox-aibot/products]");
-      return reply.code(503).send({ error: "Metabox products unavailable" });
-    }
-  });
+      try {
+        const products = await getAiBotProducts();
+        return products;
+      } catch (e) {
+        fastify.log.error(e, "[metabox-aibot/products]");
+        return reply.code(503).send({ error: "Metabox products unavailable" });
+      }
+    },
+  );
 
   /**
    * POST /metabox-aibot/buy
@@ -116,32 +117,33 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { productId } = request.body as { productId?: string };
+      const { userId } = request as AuthRequest;
+      const { productId } = request.body as { productId?: string };
 
-    if (!productId) {
-      return reply.code(400).send({ error: "productId is required" });
-    }
+      if (!productId) {
+        return reply.code(400).send({ error: "productId is required" });
+      }
 
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true },
-    });
-
-    if (!user?.metaboxUserId) {
-      return reply.code(409).send({ error: "Metabox account not linked" });
-    }
-
-    try {
-      const result = await createAiBotInvoice({
-        metaboxUserId: user.metaboxUserId,
-        productId,
-        telegramId: userId,
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { metaboxUserId: true },
       });
-      return { paymentUrl: result.paymentUrl };
-    } catch (e) {
-      fastify.log.error(e, "[metabox-aibot/buy]");
-      return reply.code(502).send({ error: "Failed to create payment invoice" });
-    }
-  });
+
+      if (!user?.metaboxUserId) {
+        return reply.code(409).send({ error: "Metabox account not linked" });
+      }
+
+      try {
+        const result = await createAiBotInvoice({
+          metaboxUserId: user.metaboxUserId,
+          productId,
+          telegramId: userId,
+        });
+        return { paymentUrl: result.paymentUrl };
+      } catch (e) {
+        fastify.log.error(e, "[metabox-aibot/buy]");
+        return reply.code(502).send({ error: "Failed to create payment invoice" });
+      }
+    },
+  );
 };

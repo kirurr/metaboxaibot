@@ -61,11 +61,13 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/models",
     {
       schema: {
-        
         querystring: {
           type: "object",
           properties: {
-            section: { type: "string", description: "Filter models by section (e.g., 'image', 'video')" },
+            section: {
+              type: "string",
+              description: "Filter models by section (e.g., 'image', 'video')",
+            },
           },
         },
         response: {
@@ -81,7 +83,11 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 provider: { type: "string", description: "Provider name (anthropic/openai/etc)" },
                 familyId: { type: "string", nullable: true, description: "Family ID" },
                 familyName: { type: "string", nullable: true, description: "Family name" },
-                familyDefaultModelId: { type: "string", nullable: true, description: "Default model ID in family" },
+                familyDefaultModelId: {
+                  type: "string",
+                  nullable: true,
+                  description: "Default model ID in family",
+                },
                 versionLabel: { type: "string", nullable: true, description: "Version label" },
                 variantLabel: { type: "string", nullable: true, description: "Variant label" },
                 supportsImages: { type: "boolean", description: "Supports image input" },
@@ -107,20 +113,26 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/balance",
     {
       schema: {
-        
         response: {
           200: {
             type: "object",
             properties: {
               tokenBalance: { type: "string", description: "Purchased token balance" },
-              subscriptionTokenBalance: { type: "string", description: "Subscription token balance" },
+              subscriptionTokenBalance: {
+                type: "string",
+                description: "Subscription token balance",
+              },
               subscription: {
                 type: "object",
                 nullable: true,
                 properties: {
                   planName: { type: "string", description: "Subscription plan name" },
                   period: { type: "string", description: "Billing period (monthly/yearly)" },
-                  endDate: { type: "string", format: "date-time", description: "Subscription end date" },
+                  endDate: {
+                    type: "string",
+                    format: "date-time",
+                    description: "Subscription end date",
+                  },
                   tokensGranted: { type: "number", description: "Monthly tokens granted" },
                 },
               },
@@ -167,7 +179,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs",
     {
       schema: {
-        
         querystring: {
           type: "object",
           properties: {
@@ -184,8 +195,16 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 section: { type: "string", description: "Dialog section" },
                 modelId: { type: "string", description: "Model ID used in dialog" },
                 title: { type: "string", nullable: true, description: "Dialog title" },
-                createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
-                updatedAt: { type: "string", format: "date-time", description: "Last update timestamp" },
+                createdAt: {
+                  type: "string",
+                  format: "date-time",
+                  description: "Creation timestamp",
+                },
+                updatedAt: {
+                  type: "string",
+                  format: "date-time",
+                  description: "Last update timestamp",
+                },
               },
               required: ["id", "section", "modelId", "createdAt", "updatedAt"],
             },
@@ -215,7 +234,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs",
     {
       schema: {
-        
         body: {
           type: "object",
           properties: {
@@ -273,7 +291,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs/:id",
     {
       schema: {
-        
         params: {
           type: "object",
           properties: {
@@ -299,12 +316,12 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
           },
           400: badRequestResponse,
           404: {
-						description: "Dialog not found",
+            description: "Dialog not found",
             type: "object",
             properties: { error: { type: "string" } },
           },
           403: {
-						description: "Forbidden",
+            description: "Forbidden",
             type: "object",
             properties: { error: { type: "string" } },
           },
@@ -331,7 +348,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs/:id",
     {
       schema: {
-        
         params: {
           type: "object",
           properties: {
@@ -348,12 +364,12 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             required: ["success"],
           },
           404: {
-						description: "Dialog not found",
+            description: "Dialog not found",
             type: "object",
             properties: { error: { type: "string" } },
           },
           403: {
-						description: "Forbidden",
+            description: "Forbidden",
             type: "object",
             properties: { error: { type: "string" } },
           },
@@ -377,7 +393,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs/:id/messages",
     {
       schema: {
-        
         params: {
           type: "object",
           properties: {
@@ -395,19 +410,27 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 role: { type: "string", description: "Message role (user/assistant)" },
                 content: { type: "string", description: "Message content" },
                 mediaUrl: { type: "string", nullable: true, description: "Media URL if present" },
-                mediaType: { type: "string", nullable: true, description: "Media type (image/audio/etc)" },
-                createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
+                mediaType: {
+                  type: "string",
+                  nullable: true,
+                  description: "Media type (image/audio/etc)",
+                },
+                createdAt: {
+                  type: "string",
+                  format: "date-time",
+                  description: "Creation timestamp",
+                },
               },
               required: ["id", "role", "content", "createdAt"],
             },
           },
           404: {
-						description: "Dialog not found",
+            description: "Dialog not found",
             type: "object",
             properties: { error: { type: "string" } },
           },
           403: {
-						description: "Forbidden",
+            description: "Forbidden",
             type: "object",
             properties: { error: { type: "string" } },
           },
@@ -465,7 +488,6 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     "/web/dialogs/:id/send",
     {
       schema: {
-        
         params: {
           type: "object",
           properties: {
@@ -489,12 +511,12 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             properties: { error: { type: "string" } },
           },
           403: {
-						description: "Forbidden",
+            description: "Forbidden",
             type: "object",
             properties: { error: { type: "string" } },
           },
           404: {
-						description: "Dialog not found",
+            description: "Dialog not found",
             type: "object",
             properties: { error: { type: "string" } },
           },

@@ -196,12 +196,32 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
                     },
                   },
                 },
-                familyId: { type: "string", nullable: true, description: "Family ID this model belongs to" },
+                familyId: {
+                  type: "string",
+                  nullable: true,
+                  description: "Family ID this model belongs to",
+                },
                 familyName: { type: "string", nullable: true, description: "Family display name" },
-                familyDefaultModelId: { type: "string", nullable: true, description: "Default model ID for family" },
-                versionLabel: { type: "string", nullable: true, description: "Version label within family" },
-                variantLabel: { type: "string", nullable: true, description: "Variant label within family" },
-                descriptionOverride: { type: "string", nullable: true, description: "Per-variant description" },
+                familyDefaultModelId: {
+                  type: "string",
+                  nullable: true,
+                  description: "Default model ID for family",
+                },
+                versionLabel: {
+                  type: "string",
+                  nullable: true,
+                  description: "Version label within family",
+                },
+                variantLabel: {
+                  type: "string",
+                  nullable: true,
+                  description: "Variant label within family",
+                },
+                descriptionOverride: {
+                  type: "string",
+                  nullable: true,
+                  description: "Per-variant description",
+                },
                 id: { type: "string", description: "Model ID" },
                 name: { type: "string", description: "Model name" },
                 description: { type: "string", description: "Model description" },
@@ -212,21 +232,57 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
                 supportsVoice: { type: "boolean", description: "Supports voice input" },
                 supportsWeb: { type: "boolean", description: "Supports web search" },
                 isAsync: { type: "boolean", description: "Uses async generation" },
-                supportedAspectRatios: { type: "array", nullable: true, description: "Supported aspect ratios" },
-                supportedDurations: { type: "array", nullable: true, description: "Supported video durations" },
-                durationRange: { type: "object", nullable: true, description: "Video duration range" },
-                tokenCostPerRequest: { type: "number", description: "Fixed cost per request in tokens" },
-                tokenCostApproxMsg: { type: "number", description: "Estimated cost per message in tokens (LLM only)" },
+                supportedAspectRatios: {
+                  type: "array",
+                  nullable: true,
+                  description: "Supported aspect ratios",
+                },
+                supportedDurations: {
+                  type: "array",
+                  nullable: true,
+                  description: "Supported video durations",
+                },
+                durationRange: {
+                  type: "object",
+                  nullable: true,
+                  description: "Video duration range",
+                },
+                tokenCostPerRequest: {
+                  type: "number",
+                  description: "Fixed cost per request in tokens",
+                },
+                tokenCostApproxMsg: {
+                  type: "number",
+                  description: "Estimated cost per message in tokens (LLM only)",
+                },
                 tokenCostPerMPixel: { type: "number", description: "Cost per megapixel in tokens" },
-                tokenCostPerMVideoToken: { type: "number", description: "Cost per 1M video tokens" },
+                tokenCostPerMVideoToken: {
+                  type: "number",
+                  description: "Cost per 1M video tokens",
+                },
                 videoFps: { type: "number", description: "FPS used in video token calculation" },
                 tokenCostPerSecond: { type: "number", description: "Cost per second in tokens" },
-                tokenCostPerKChar: { type: "number", description: "Cost per 1K characters in tokens" },
+                tokenCostPerKChar: {
+                  type: "number",
+                  description: "Cost per 1K characters in tokens",
+                },
                 isLLM: { type: "boolean", description: "Whether model is an LLM" },
                 settings: { type: "array", description: "Configurable generation parameters" },
-                costMatrix: { type: "object", nullable: true, description: "Multi-dimensional cost table" },
-                tokenCostVariants: { type: "object", nullable: true, description: "Token cost per variant" },
-                tokenCostAddons: { type: "array", nullable: true, description: "Additive token cost per setting" },
+                costMatrix: {
+                  type: "object",
+                  nullable: true,
+                  description: "Multi-dimensional cost table",
+                },
+                tokenCostVariants: {
+                  type: "object",
+                  nullable: true,
+                  description: "Token cost per variant",
+                },
+                tokenCostAddons: {
+                  type: "array",
+                  nullable: true,
+                  description: "Additive token cost per setting",
+                },
               },
             },
           },
@@ -234,17 +290,18 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequestM;
-    const { section } = request.query;
-    const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
-    const lang = (user?.language ?? "en") as Language;
+      const { userId } = request as AuthRequestM;
+      const { section } = request.query;
+      const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
+      const lang = (user?.language ?? "en") as Language;
 
-    const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
-    // Скрытые модели (например, `grok-imagine-extend`) активируются только
-    // через спец-сценарии (кнопка «Продлить») и не должны показываться в
-    // обычном webapp-списке моделей.
-    const models = allModels.filter((m) => !m.hiddenFromCarousel);
+      const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
+      // Скрытые модели (например, `grok-imagine-extend`) активируются только
+      // через спец-сценарии (кнопка «Продлить») и не должны показываться в
+      // обычном webapp-списке моделей.
+      const models = allModels.filter((m) => !m.hiddenFromCarousel);
 
-    return models.map((m) => serializeModel(m, lang));
-  });
+      return models.map((m) => serializeModel(m, lang));
+    },
+  );
 };

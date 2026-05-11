@@ -81,11 +81,12 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-    const { userId } = request as AuthRequest;
-    const { type } = request.query;
-    const uploads = await userUploadsService.list(userId, type);
-    return Promise.all(uploads.map(toDTO));
-  });
+      const { userId } = request as AuthRequest;
+      const { type } = request.query;
+      const uploads = await userUploadsService.list(userId, type);
+      return Promise.all(uploads.map(toDTO));
+    },
+  );
 
   /** PATCH /uploads/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
@@ -174,10 +175,11 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
-    const ok = await userUploadsService.delete(id, userId);
-    if (!ok) return reply.status(404).send({ error: "Upload not found" });
-    return { success: true };
-  });
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
+      const ok = await userUploadsService.delete(id, userId);
+      if (!ok) return reply.status(404).send({ error: "Upload not found" });
+      return { success: true };
+    },
+  );
 };

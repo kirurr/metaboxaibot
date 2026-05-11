@@ -44,13 +44,14 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    try {
-      await initiateAccountDeletion(userId);
-      return { ok: true };
-    } catch (err) {
-      logger.error({ err, userId: userId.toString() }, "[/account/delete-initiate] failed");
-      return reply.status(500).send({ error: "Failed to initiate account deletion" });
-    }
-  });
+      const { userId } = request as AuthRequest;
+      try {
+        await initiateAccountDeletion(userId);
+        return { ok: true };
+      } catch (err) {
+        logger.error({ err, userId: userId.toString() }, "[/account/delete-initiate] failed");
+        return reply.status(500).send({ error: "Failed to initiate account deletion" });
+      }
+    },
+  );
 };

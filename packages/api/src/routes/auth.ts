@@ -5,9 +5,7 @@ import { verifyWebToken, config } from "@metabox/shared";
 import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["auth"]),
-  );
+  fastify.addHook("onRoute", (routeOptions) => constructOpenAPIonRouteHook(routeOptions, ["auth"]));
 
   /**
    * POST /auth/verify
@@ -60,33 +58,34 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { initData } = request.body;
-    if (!initData) return reply.code(400).send({ error: "initData is required" });
+      const { initData } = request.body;
+      if (!initData) return reply.code(400).send({ error: "initData is required" });
 
-    let userId: bigint;
-    try {
-      userId = verifyTelegramInitData(initData);
-    } catch {
-      return reply.code(401).send({ error: "Invalid initData" });
-    }
+      let userId: bigint;
+      try {
+        userId = verifyTelegramInitData(initData);
+      } catch {
+        return reply.code(401).send({ error: "Invalid initData" });
+      }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return reply
-        .code(404)
-        .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
-    }
-    if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
+      const user = await db.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return reply
+          .code(404)
+          .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
+      }
+      if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
 
-    return {
-      id: user.id.toString(),
-      username: user.username ?? null,
-      firstName: user.firstName ?? null,
-      language: user.language,
-      tokenBalance: user.tokenBalance.toString(),
-      referredById: user.referredById?.toString() ?? null,
-    };
-  });
+      return {
+        id: user.id.toString(),
+        username: user.username ?? null,
+        firstName: user.firstName ?? null,
+        language: user.language,
+        tokenBalance: user.tokenBalance.toString(),
+        referredById: user.referredById?.toString() ?? null,
+      };
+    },
+  );
 
   /**
    * POST /auth/webtoken
@@ -139,31 +138,32 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-    const { token } = request.body;
-    if (!token) return reply.code(400).send({ error: "token is required" });
+      const { token } = request.body;
+      if (!token) return reply.code(400).send({ error: "token is required" });
 
-    let userId: bigint;
-    try {
-      userId = verifyWebToken(token, config.bot.token);
-    } catch {
-      return reply.code(401).send({ error: "Invalid or expired token" });
-    }
+      let userId: bigint;
+      try {
+        userId = verifyWebToken(token, config.bot.token);
+      } catch {
+        return reply.code(401).send({ error: "Invalid or expired token" });
+      }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return reply
-        .code(404)
-        .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
-    }
-    if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
+      const user = await db.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return reply
+          .code(404)
+          .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
+      }
+      if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
 
-    return {
-      id: user.id.toString(),
-      username: user.username ?? null,
-      firstName: user.firstName ?? null,
-      language: user.language,
-      tokenBalance: user.tokenBalance.toString(),
-      referredById: user.referredById?.toString() ?? null,
-    };
-  });
+      return {
+        id: user.id.toString(),
+        username: user.username ?? null,
+        firstName: user.firstName ?? null,
+        language: user.language,
+        tokenBalance: user.tokenBalance.toString(),
+        referredById: user.referredById?.toString() ?? null,
+      };
+    },
+  );
 };

@@ -185,19 +185,19 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── POST /auth/web-signup ────────────────────────────────────────────────
-fastify.post<{
-      Body: {
-        email?: string;
-        password?: string;
-        firstName?: string;
-        referralCode?: string;
-      };
-    }>(
-      "/auth/web-signup",
-      {
-        schema: {
-          security: [],
-          description: "Register a new web account",
+  fastify.post<{
+    Body: {
+      email?: string;
+      password?: string;
+      firstName?: string;
+      referralCode?: string;
+    };
+  }>(
+    "/auth/web-signup",
+    {
+      schema: {
+        security: [],
+        description: "Register a new web account",
         body: {
           type: "object",
           properties: {
@@ -214,7 +214,10 @@ fastify.post<{
             properties: {
               user: { type: "object", description: "User profile object" },
               accessToken: { type: "string", description: "JWT access token" },
-              accessTokenExpiresAt: { type: "number", description: "Access token expiry timestamp" },
+              accessTokenExpiresAt: {
+                type: "number",
+                description: "Access token expiry timestamp",
+              },
               csrfToken: { type: "string", description: "CSRF token" },
             },
           },
@@ -242,70 +245,71 @@ fastify.post<{
       },
     },
     async (request, reply) => {
-    try {
-      const { email = "", password = "", firstName = "", referralCode } = request.body ?? {};
-      const emailNorm = email.toLowerCase().trim();
-      const firstNameNorm = firstName.trim();
-
-      if (!isValidEmail(emailNorm)) return reply.code(400).send({ error: "Некорректный email" });
-      if (!isStrongPassword(password))
-        return reply.code(400).send({ error: "Пароль должен быть не короче 8 символов" });
-      if (firstNameNorm.length < 1 || firstNameNorm.length > 100)
-        return reply.code(400).send({ error: "Укажите имя" });
-
-      // MX-проверка домена. Опечатки внутри валидных доменов
-      // (gmail.co и т.п.) ловит фронт через suggestEmailTypo.
-      const emailCheck = await validateEmail(emailNorm);
-      if (!emailCheck.ok) {
-        return reply.code(400).send({
-          error:
-            emailCheck.reason === "syntax"
-              ? "Некорректный email"
-              : "Указан несуществующий email-домен. Проверьте адрес и попробуйте снова.",
-        });
-      }
-
-      let registered;
       try {
-        registered = await webRegister({
-          email: emailNorm,
-          password,
-          firstName: firstNameNorm,
-          referralCode,
-        });
-      } catch (err) {
-        if (err instanceof MetaboxApiError) {
-          if (err.status === 409)
-            return reply.code(409).send({ error: "Email уже зарегистрирован" });
-          if (err.status === 400) return reply.code(400).send({ error: err.message });
+        const { email = "", password = "", firstName = "", referralCode } = request.body ?? {};
+        const emailNorm = email.toLowerCase().trim();
+        const firstNameNorm = firstName.trim();
+
+        if (!isValidEmail(emailNorm)) return reply.code(400).send({ error: "Некорректный email" });
+        if (!isStrongPassword(password))
+          return reply.code(400).send({ error: "Пароль должен быть не короче 8 символов" });
+        if (firstNameNorm.length < 1 || firstNameNorm.length > 100)
+          return reply.code(400).send({ error: "Укажите имя" });
+
+        // MX-проверка домена. Опечатки внутри валидных доменов
+        // (gmail.co и т.п.) ловит фронт через suggestEmailTypo.
+        const emailCheck = await validateEmail(emailNorm);
+        if (!emailCheck.ok) {
+          return reply.code(400).send({
+            error:
+              emailCheck.reason === "syntax"
+                ? "Некорректный email"
+                : "Указан несуществующий email-домен. Проверьте адрес и попробуйте снова.",
+          });
         }
-        logger.error({ err }, "web-signup: metabox register failed");
-        return reply.code(502).send({ error: "Не удалось создать аккаунт" });
+
+        let registered;
+        try {
+          registered = await webRegister({
+            email: emailNorm,
+            password,
+            firstName: firstNameNorm,
+            referralCode,
+          });
+        } catch (err) {
+          if (err instanceof MetaboxApiError) {
+            if (err.status === 409)
+              return reply.code(409).send({ error: "Email уже зарегистрирован" });
+            if (err.status === 400) return reply.code(400).send({ error: err.message });
+          }
+          logger.error({ err }, "web-signup: metabox register failed");
+          return reply.code(502).send({ error: "Не удалось создать аккаунт" });
+        }
+
+        const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
+          metaboxUserId: registered.metaboxUserId,
+          aibUserId: null, // регистрация на вебе не создаёт AI Box User
+          email: registered.email,
+          firstName: registered.firstName,
+          rememberMe: true,
+          userAgent: request.headers["user-agent"],
+          ip: request.ip,
+        });
+
+        const user = await buildWebUserResponse({
+          metaboxUserId: registered.metaboxUserId,
+          email: registered.email,
+          firstName: registered.firstName,
+          lastName: registered.lastName,
+        });
+
+        return reply.send({ user, accessToken, accessTokenExpiresAt, csrfToken });
+      } catch (err) {
+        logger.error({ err, path: "/auth/web-signup" }, "web-signup: uncaught error");
+        return reply.code(500).send({ error: "Внутренняя ошибка. Попробуйте позже." });
       }
-
-      const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
-        metaboxUserId: registered.metaboxUserId,
-        aibUserId: null, // регистрация на вебе не создаёт AI Box User
-        email: registered.email,
-        firstName: registered.firstName,
-        rememberMe: true,
-        userAgent: request.headers["user-agent"],
-        ip: request.ip,
-      });
-
-      const user = await buildWebUserResponse({
-        metaboxUserId: registered.metaboxUserId,
-        email: registered.email,
-        firstName: registered.firstName,
-        lastName: registered.lastName,
-      });
-
-      return reply.send({ user, accessToken, accessTokenExpiresAt, csrfToken });
-    } catch (err) {
-      logger.error({ err, path: "/auth/web-signup" }, "web-signup: uncaught error");
-      return reply.code(500).send({ error: "Внутренняя ошибка. Попробуйте позже." });
-    }
-  });
+    },
+  );
 
   // ── POST /auth/web-login ─────────────────────────────────────────────────
   fastify.post<{
@@ -331,7 +335,10 @@ fastify.post<{
             properties: {
               user: { type: "object", description: "User profile object" },
               accessToken: { type: "string", description: "JWT access token" },
-              accessTokenExpiresAt: { type: "number", description: "Access token expiry timestamp" },
+              accessTokenExpiresAt: {
+                type: "number",
+                description: "Access token expiry timestamp",
+              },
               csrfToken: { type: "string", description: "CSRF token" },
             },
           },
@@ -360,52 +367,53 @@ fastify.post<{
       },
     },
     async (request, reply) => {
-    try {
-      const { email = "", password = "", rememberMe = true } = request.body ?? {};
-      const emailNorm = email.toLowerCase().trim();
-
-      if (!isValidEmail(emailNorm) || !password)
-        return reply.code(400).send({ error: "Email и пароль обязательны" });
-
-      let validated;
       try {
-        validated = await webValidateCredentials({ email: emailNorm, password });
-      } catch (err) {
-        if (err instanceof MetaboxApiError) {
-          if (err.status === 401)
-            return reply.code(401).send({ error: "Неверный email или пароль" });
-          if (err.status === 403)
-            return reply.code(403).send({ error: err.message || "Вход запрещён" });
+        const { email = "", password = "", rememberMe = true } = request.body ?? {};
+        const emailNorm = email.toLowerCase().trim();
+
+        if (!isValidEmail(emailNorm) || !password)
+          return reply.code(400).send({ error: "Email и пароль обязательны" });
+
+        let validated;
+        try {
+          validated = await webValidateCredentials({ email: emailNorm, password });
+        } catch (err) {
+          if (err instanceof MetaboxApiError) {
+            if (err.status === 401)
+              return reply.code(401).send({ error: "Неверный email или пароль" });
+            if (err.status === 403)
+              return reply.code(403).send({ error: err.message || "Вход запрещён" });
+          }
+          logger.error({ err }, "web-login: metabox validate failed");
+          return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
         }
-        logger.error({ err }, "web-login: metabox validate failed");
-        return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
+
+        const aib = await findAibUser(validated.metaboxUserId);
+
+        const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
+          metaboxUserId: validated.metaboxUserId,
+          aibUserId: aib?.id.toString() ?? null,
+          email: validated.email,
+          firstName: validated.firstName,
+          rememberMe,
+          userAgent: request.headers["user-agent"],
+          ip: request.ip,
+        });
+
+        const user = await buildWebUserResponse({
+          metaboxUserId: validated.metaboxUserId,
+          email: validated.email,
+          firstName: validated.firstName,
+          lastName: validated.lastName,
+        });
+
+        return reply.send({ user, accessToken, accessTokenExpiresAt, csrfToken });
+      } catch (err) {
+        logger.error({ err, path: "/auth/web-login" }, "web-login: uncaught error");
+        return reply.code(500).send({ error: "Внутренняя ошибка. Попробуйте позже." });
       }
-
-      const aib = await findAibUser(validated.metaboxUserId);
-
-      const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
-        metaboxUserId: validated.metaboxUserId,
-        aibUserId: aib?.id.toString() ?? null,
-        email: validated.email,
-        firstName: validated.firstName,
-        rememberMe,
-        userAgent: request.headers["user-agent"],
-        ip: request.ip,
-      });
-
-      const user = await buildWebUserResponse({
-        metaboxUserId: validated.metaboxUserId,
-        email: validated.email,
-        firstName: validated.firstName,
-        lastName: validated.lastName,
-      });
-
-      return reply.send({ user, accessToken, accessTokenExpiresAt, csrfToken });
-    } catch (err) {
-      logger.error({ err, path: "/auth/web-login" }, "web-login: uncaught error");
-      return reply.code(500).send({ error: "Внутренняя ошибка. Попробуйте позже." });
-    }
-  });
+    },
+  );
 
   // ── POST /auth/web-refresh ───────────────────────────────────────────────
   fastify.post(
@@ -419,38 +427,44 @@ fastify.post<{
             type: "object",
             properties: {
               accessToken: { type: "string", description: "New JWT access token" },
-              accessTokenExpiresAt: { type: "number", description: "Access token expiry timestamp" },
+              accessTokenExpiresAt: {
+                type: "number",
+                description: "Access token expiry timestamp",
+              },
               csrfToken: { type: "string", description: "CSRF token" },
             },
           },
           401: {
             type: "object",
-            properties: { error: { type: "string", description: "No refresh token or session expired" } },
+            properties: {
+              error: { type: "string", description: "No refresh token or session expired" },
+            },
           },
         },
       },
     },
     async (request, reply) => {
-    const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
-    if (!refreshToken) return reply.code(401).send({ error: "No refresh token" });
+      const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
+      if (!refreshToken) return reply.code(401).send({ error: "No refresh token" });
 
-    const session = await getRefreshSession(refreshToken);
-    if (!session) return reply.code(401).send({ error: "Session expired" });
+      const session = await getRefreshSession(refreshToken);
+      if (!session) return reply.code(401).send({ error: "Session expired" });
 
-    // Рестартуем: может быть, юзер привязал TG между рефрешами — проверяем
-    const aib = await findAibUser(session.metaboxUserId);
-    session.aibUserId = aib?.id.toString() ?? null;
+      // Рестартуем: может быть, юзер привязал TG между рефрешами — проверяем
+      const aib = await findAibUser(session.metaboxUserId);
+      session.aibUserId = aib?.id.toString() ?? null;
 
-    const { csrfToken } = await touchRefreshSession(refreshToken, session);
+      const { csrfToken } = await touchRefreshSession(refreshToken, session);
 
-    const { token: accessToken, expiresAt: accessTokenExpiresAt } = signAccessToken({
-      sub: session.metaboxUserId,
-      aib: session.aibUserId ?? undefined,
-      sid: sessionIdFromRefresh(refreshToken),
-    });
+      const { token: accessToken, expiresAt: accessTokenExpiresAt } = signAccessToken({
+        sub: session.metaboxUserId,
+        aib: session.aibUserId ?? undefined,
+        sid: sessionIdFromRefresh(refreshToken),
+      });
 
-    return reply.send({ accessToken, accessTokenExpiresAt, csrfToken });
-  });
+      return reply.send({ accessToken, accessTokenExpiresAt, csrfToken });
+    },
+  );
 
   // ── POST /auth/web-logout ────────────────────────────────────────────────
   fastify.post(
@@ -470,14 +484,15 @@ fastify.post<{
       },
     },
     async (request, reply) => {
-    const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
-    if (refreshToken) await revokeRefreshSession(refreshToken);
-    reply.clearCookie(REFRESH_COOKIE_NAME, {
-      path: "/",
-      domain: config.web.cookieDomain,
-    });
-    return reply.send({ ok: true });
-  });
+      const refreshToken = (request as any).cookies?.[REFRESH_COOKIE_NAME];
+      if (refreshToken) await revokeRefreshSession(refreshToken);
+      reply.clearCookie(REFRESH_COOKIE_NAME, {
+        path: "/",
+        domain: config.web.cookieDomain,
+      });
+      return reply.send({ ok: true });
+    },
+  );
 
   // ── GET /auth/web-me ─────────────────────────────────────────────────────
   fastify.get(
@@ -769,7 +784,11 @@ fastify.post<{
             type: "object",
             properties: {
               linked: { type: "boolean", description: "Whether Telegram is now linked" },
-              telegramUsername: { type: "string", nullable: true, description: "Telegram username if linked" },
+              telegramUsername: {
+                type: "string",
+                nullable: true,
+                description: "Telegram username if linked",
+              },
             },
           },
           400: badRequestResponse,
