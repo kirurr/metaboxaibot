@@ -53,6 +53,10 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
             required: ["ok"],
           },
           400: badRequestResponse,
+          401: {
+            type: "object",
+            properties: { error: { type: "string", description: "Unauthorized - invalid internal key" } },
+          },
         },
       },
     },
