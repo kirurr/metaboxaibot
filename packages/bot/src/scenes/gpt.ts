@@ -39,6 +39,13 @@ interface MediaGroupEntry {
 }
 const mediaGroupBuffer = new Map<string, MediaGroupEntry>();
 
+/**
+ * Dedup для предупреждения «модель не поддерживает фото» при альбоме: Telegram
+ * шлёт по одному update на фото, без дедупа юзер получил бы N одинаковых
+ * предупреждений. Хранится 10 секунд, потом сам очищается.
+ */
+const noImageWarningBuffer = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
+
 /** Separate buffer for document media groups — Telegram disallows mixing docs & photos. */
 interface DocumentGroupEntry {
   dialogId: string;
@@ -635,6 +642,45 @@ export async function handleGptPhoto(ctx: BotContext): Promise<void> {
 
   const chatId = ctx.chat?.id;
   if (!chatId) return;
+
+  // Активная модель диалога без vision-режима (o3-mini, deepseek и т.п.) —
+  // не имеет смысла гнать фото в провайдера: OpenAI/Anthropic вернут 400
+  // («model does not support image inputs»), юзер получит generic ошибку и
+  // мы зря потратим попытку. Зеркало design.ts:643.
+  const dialog = await dialogService.findById(gptDialogId);
+  const model = dialog ? AI_MODELS[dialog.modelId] : undefined;
+  if (model && !model.supportsImages) {
+    const mediaGroupId = ctx.message?.media_group_id;
+    // Альбом: один update на фото, дедупим предупреждение через буфер.
+    if (mediaGroupId) {
+      const key = `${ctx.user.id}__${mediaGroupId}`;
+      if (noImageWarningBuffer.has(key)) {
+        // Caption обрабатываем только на первом фото — игнорируем последующие.
+        return;
+      }
+      noImageWarningBuffer.set(key, {
+        timer: setTimeout(() => noImageWarningBuffer.delete(key), 10_000),
+      });
+    }
+    await ctx.reply(
+      ctx.t.errors.modelDoesNotSupportImages.replace("{modelName}", model.name ?? dialog!.modelId),
+    );
+    // Caption — это полноценный пользовательский промпт; прогоняем как обычный текст.
+    const captionText = ctx.message?.caption?.trim();
+    if (captionText) {
+      await streamGptResponse(
+        ctx,
+        chatId,
+        gptDialogId,
+        captionText,
+        undefined,
+        undefined,
+        undefined,
+        ctx.message?.message_id,
+      );
+    }
+    return;
+  }
 
   // Resolve file ID — photo (compressed) or document (original file)
   let fileId: string;
