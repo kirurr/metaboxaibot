@@ -196,6 +196,16 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let outputTokens = 0;
     let cachedInputTokens = 0;
     let incompleteReason: string | undefined;
+    // <think>...</think> обёртка вокруг thinking_delta. extended_thinking —
+    // отдельный opt-in флаг (см. body.thinkingFlag); thinking_delta события
+    // приходят только когда он включён. showReasoning без extended_thinking
+    // = тогл «показывать» при выключенной «думалке» — правомерное no-op.
+    let inThinkBlock = false;
+    const closeThink = (): string => {
+      if (!inThinkBlock) return "";
+      inThinkBlock = false;
+      return "</think>";
+    };
     // Диагностика пустых стримов (KIE-прокси иногда висит и закрывает
     // соединение без терминального message_delta — юзер видит generic
     // "модель отдыхает", в логах нет ни stop_reason, ни тайминга. Считаем
@@ -227,10 +237,24 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           const evt = parseSseEvent(raw);
           if (!evt?.data) continue;
 
-          const text = handleEvent(evt.data, (delta) => delta);
-          if (text) {
+          // text_delta → visible (закрываем reasoning-обёртку если открыта).
+          // thinking_delta → reasoning (открываем `<think>` если ещё не открыт)
+          // и yield'им сырой текст внутри.
+          const visibleText = handleVisibleDelta(evt.data);
+          if (visibleText) {
+            const close = closeThink();
+            if (close) yield close;
             visibleChunks++;
-            yield text;
+            yield visibleText;
+          } else if (input.showReasoning) {
+            const reasoningText = handleThinkingDelta(evt.data);
+            if (reasoningText) {
+              if (!inThinkBlock) {
+                inThinkBlock = true;
+                yield "<think>";
+              }
+              yield reasoningText;
+            }
           }
 
           // Извлекаем токены из служебных событий.
@@ -264,6 +288,11 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     } finally {
       reader.releaseLock();
     }
+
+    // Стрим завершился внутри thinking-блока (visible не пришёл) — закрываем
+    // тег, иначе stripThinkingBlocks выкинет хвост сообщения у юзера.
+    const tail = closeThink();
+    if (tail) yield tail;
 
     // Триггер ровно совпадает с empty-guard'ом в chat.service.ts:
     // там тоже "0 visible chunks → пустой ответ юзеру". Если ужесточить
@@ -348,7 +377,9 @@ interface SseUsage {
 }
 interface SseData {
   type: string;
-  delta?: { type?: string; text?: string; stop_reason?: string };
+  // delta может быть text_delta (visible) или thinking_delta (reasoning).
+  // Оба идут внутри content_block_delta, отличает их поле type.
+  delta?: { type?: string; text?: string; thinking?: string; stop_reason?: string };
   message?: { usage?: SseUsage };
   usage?: SseUsage;
 }
@@ -372,9 +403,16 @@ function parseSseEvent(raw: string): { event?: string; data?: SseData } | null {
   return { event, data };
 }
 
-function handleEvent(d: SseData, pickText: (s: string) => string): string | null {
+function handleVisibleDelta(d: SseData): string | null {
   if (d.type === "content_block_delta" && d.delta?.type === "text_delta" && d.delta.text) {
-    return pickText(d.delta.text);
+    return d.delta.text;
+  }
+  return null;
+}
+
+function handleThinkingDelta(d: SseData): string | null {
+  if (d.type === "content_block_delta" && d.delta?.type === "thinking_delta" && d.delta.thinking) {
+    return d.delta.thinking;
   }
   return null;
 }

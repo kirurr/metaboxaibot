@@ -82,10 +82,33 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let incompleteReason: string | undefined;
+    // Состояние <think>...</think> обёртки. Открываем на первом thinking_delta,
+    // закрываем на первом text_delta или в конце стрима. extended_thinking —
+    // отдельный opt-in флаг; thinking_delta события приходят только когда он on.
+    let inThinkBlock = false;
+    const closeThink = function* (): Generator<string> {
+      if (inThinkBlock) {
+        yield "</think>";
+        inThinkBlock = false;
+      }
+    };
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        yield* closeThink();
         yield event.delta.text;
+      } else if (
+        input.showReasoning &&
+        event.type === "content_block_delta" &&
+        (event.delta as { type?: string; thinking?: string }).type === "thinking_delta"
+      ) {
+        const text = (event.delta as { thinking?: string }).thinking ?? "";
+        if (!text) continue;
+        if (!inThinkBlock) {
+          inThinkBlock = true;
+          yield "<think>";
+        }
+        yield text;
       } else if (event.type === "message_start") {
         inputTokens = event.message.usage.input_tokens;
       } else if (event.type === "message_delta") {
@@ -101,6 +124,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
         }
       }
     }
+
+    yield* closeThink();
 
     return {
       inputTokensUsed: inputTokens,

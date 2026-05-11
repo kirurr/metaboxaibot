@@ -71,6 +71,8 @@ export default {
       filesWarning:
         "\n<blockquote>💡Text neural networks don't generate images or create files.</blockquote>",
     },
+    reasoningHeader: "🧠 Model reasoning",
+    reasoningPartLabel: "part {index}/{total}",
   },
   design: {
     sectionTitle: "🎨 AI Design",

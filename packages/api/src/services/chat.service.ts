@@ -280,6 +280,7 @@ export const chatService = {
         ? { enableThinking: ms.enable_thinking as boolean }
         : {}),
       ...(ms.thinking_budget !== undefined ? { thinkingBudget: ms.thinking_budget as number } : {}),
+      ...(ms.show_reasoning !== undefined ? { showReasoning: ms.show_reasoning as boolean } : {}),
       ...(ms.seed != null ? { seed: ms.seed as number } : {}),
       ...(ms.context_window != null ? { contextWindowOverride: ms.context_window as number } : {}),
     };

@@ -60,6 +60,8 @@ export interface Translations {
       thinkingWarning: string;
       filesWarning: string;
     };
+    reasoningHeader: string;
+    reasoningPartLabel: string;
   };
   design: {
     sectionTitle: string;

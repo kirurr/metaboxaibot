@@ -64,7 +64,19 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       ...(!isReasoning && input.maxTokens !== undefined
         ? { max_output_tokens: input.maxTokens }
         : {}),
-      ...(input.reasoningEffort ? { reasoning: { effort: input.reasoningEffort } } : {}),
+      // `reasoning.summary: "auto"` просим только когда юзер включил
+      // showReasoning — это бесплатный summary-вывод (не увеличивает
+      // reasoning_tokens billing'а), но добавляет SSE event-типы
+      // `response.reasoning_summary_text.delta` в стрим. Без этого OpenAI
+      // молчит про CoT и юзер не увидит ничего даже при включенном тогле.
+      ...(input.reasoningEffort || (isReasoning && input.showReasoning)
+        ? {
+            reasoning: {
+              ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {}),
+              ...(isReasoning && input.showReasoning ? { summary: "auto" } : {}),
+            },
+          }
+        : {}),
       ...(input.verbosity ? { text: { verbosity: input.verbosity } } : {}),
     };
   }
@@ -109,6 +121,18 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     let incompleteReason: string | undefined;
     let sawTerminalEvent = false;
     let deltaCount = 0;
+    // Состояние `<think>...</think>` обёртки. OpenAI шлёт reasoning_summary
+    // дельты ДО visible-чанков. На первой reasoning-дельте открываем `<think>`,
+    // при первом visible-чанке (или конце стрима) — закрываем `</think>`.
+    // Если showReasoning=false — reasoning-дельты вообще не приходят (мы не
+    // запрашивали summary в buildParams), так что обёртка остаётся неактивна.
+    let inThinkBlock = false;
+    const closeThink = function* (): Generator<string> {
+      if (inThinkBlock) {
+        yield "</think>";
+        inThinkBlock = false;
+      }
+    };
 
     const captureUsage = (response: OpenAI.Responses.Response): void => {
       newResponseId = response.id;
@@ -138,7 +162,28 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       for await (const event of stream) {
         if (event.type === "response.output_text.delta") {
           deltaCount++;
+          // Visible-чанк → закрываем reasoning-обёртку если она открыта.
+          yield* closeThink();
           yield event.delta;
+        } else if (
+          input.showReasoning &&
+          (event.type === "response.reasoning_summary_text.delta" ||
+            event.type === "response.reasoning.delta")
+        ) {
+          // На первой reasoning-дельте открываем `<think>`. Дальнейшие
+          // дельты (включая событие `reasoning_summary_part.added` между
+          // несколькими summary-частями) идут как сырой текст внутри.
+          const evDelta = (event as { delta?: string }).delta ?? "";
+          if (!evDelta) continue;
+          if (!inThinkBlock) {
+            inThinkBlock = true;
+            yield "<think>";
+          }
+          yield evDelta;
+        } else if (event.type === "response.reasoning_summary_part.added" && inThinkBlock) {
+          // Граница между двумя summary-частями: вставляем перенос строки,
+          // чтобы части не слипались в одну строку при рендеринге у юзера.
+          yield "\n\n";
         } else if (event.type === "response.completed") {
           sawTerminalEvent = true;
           captureUsage(event.response);
@@ -200,6 +245,11 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       }
       throw err;
     }
+
+    // Стрим завершился внутри <think> блока (visible так и не пришёл) —
+    // закрываем тег, иначе stripThinkingBlocks на bot/web стороне выкинет
+    // весь хвост сообщения.
+    yield* closeThink();
 
     if (!sawTerminalEvent) {
       logger.warn(
