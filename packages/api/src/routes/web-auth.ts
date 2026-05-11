@@ -185,18 +185,19 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── POST /auth/web-signup ────────────────────────────────────────────────
-  fastify.post<{
-    Body: {
-      email?: string;
-      password?: string;
-      firstName?: string;
-      referralCode?: string;
-    };
-  }>(
-    "/auth/web-signup",
-    {
-      schema: {
-        description: "Register a new web account",
+fastify.post<{
+      Body: {
+        email?: string;
+        password?: string;
+        firstName?: string;
+        referralCode?: string;
+      };
+    }>(
+      "/auth/web-signup",
+      {
+        schema: {
+          security: [],
+          description: "Register a new web account",
         body: {
           type: "object",
           properties: {
@@ -313,6 +314,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/web-login",
     {
       schema: {
+        security: [],
         description: "Login with email and password",
         body: {
           type: "object",
@@ -410,6 +412,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/web-refresh",
     {
       schema: {
+        security: [],
         description: "Refresh access token using refresh cookie",
         response: {
           200: {
@@ -454,6 +457,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/web-logout",
     {
       schema: {
+        security: [],
         description: "Logout and clear refresh cookie",
         response: {
           200: {
@@ -537,6 +541,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/web-forgot-password",
     {
       schema: {
+        security: [],
         description: "Request password reset email",
         body: {
           type: "object",
@@ -583,6 +588,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     "/auth/web-reset-password",
     {
       schema: {
+        security: [],
         description: "Reset password with token",
         body: {
           type: "object",
