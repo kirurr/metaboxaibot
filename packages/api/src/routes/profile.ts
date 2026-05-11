@@ -8,6 +8,14 @@ import {
 } from "../services/metabox-bridge.service.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
+import {
+  conflictResponse,
+  badRequestResponse,
+  rateLimitResponse,
+  metaboxApiErrorResponse,
+  gatewayErrorResponse,
+  constructOpenAPIonRouteHook,
+} from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & {
   userId: bigint;
@@ -112,90 +120,316 @@ function resetResendLimit(userId: bigint): void {
 
 export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["profile"]),
+  );
 
   /** GET /profile — balance + last 20 transactions */
-  fastify.get("/profile", async (request) => {
-    const { userId } = request as AuthRequest;
+  fastify.get(
+    "/profile",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "object",
 
-    const [user, transactions] = await Promise.all([
-      db.user.findUnique({ where: { id: userId } }),
-      db.tokenTransaction.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-    ]);
+            properties: {
+              id: {
+                type: "string",
+              },
 
-    // Referral count from Metabox (includes site referrals, not just bot)
-    let referralCount = 0;
-    try {
-      const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
-      const partnerData = await getPartnerBalance(userId);
-      referralCount = partnerData?.referralCount ?? 0;
-    } catch {
-      // Fallback to local count
-      referralCount = await db.user.count({ where: { referredById: userId } });
-    }
+              username: {
+                type: "string",
+                nullable: true,
+              },
 
-    if (!user) throw new Error("User not found");
+              firstName: {
+                type: "string",
+                nullable: true,
+              },
 
-    // Subscription info from LocalSubscription (single source of truth)
-    let subscription: {
-      planName: string;
-      period: string;
-      daysLeft: number;
-      totalDays: number;
-      endDate: string;
-    } | null = null;
+              lastName: {
+                type: "string",
+                nullable: true,
+              },
 
-    const localSub = await db.localSubscription.findUnique({ where: { userId } });
-    if (localSub && localSub.isActive && localSub.endDate > new Date()) {
-      const daysLeft = Math.max(0, Math.ceil((localSub.endDate.getTime() - Date.now()) / 86400000));
-      const totalDays = Math.max(
-        1,
-        Math.ceil((localSub.endDate.getTime() - localSub.startDate.getTime()) / 86400000),
-      );
-      subscription = {
-        planName: localSub.planName,
-        period: localSub.period,
-        daysLeft,
-        totalDays,
-        endDate: localSub.endDate.toISOString(),
+              language: {
+                type: "string",
+              },
+
+              role: {
+                type: "string",
+              },
+
+              metaboxUserId: {
+                type: "string",
+                nullable: true,
+              },
+
+              metaboxReferralCode: {
+                type: "string",
+                nullable: true,
+              },
+
+              finishedOnboarding: {
+                type: "boolean",
+              },
+
+              confirmBeforeGenerate: {
+                type: "boolean",
+              },
+
+              tokenBalance: {
+                type: "string",
+              },
+
+              purchasedTokenBalance: {
+                type: "string",
+              },
+
+              subscriptionTokenBalance: {
+                type: "string",
+              },
+
+              referralCount: {
+                type: "integer",
+              },
+
+              createdAt: {
+                type: "string",
+                format: "date-time",
+              },
+
+              subscription: {
+                type: "object",
+                nullable: true,
+
+                properties: {
+                  planName: {
+                    type: "string",
+                  },
+
+                  period: {
+                    type: "string",
+                  },
+
+                  daysLeft: {
+                    type: "number",
+                  },
+
+                  totalDays: {
+                    type: "number",
+                  },
+
+                  endDate: {
+                    type: "string",
+                    format: "date-time",
+                  },
+                },
+
+                required: ["planName", "period", "daysLeft", "totalDays", "endDate"],
+              },
+
+              transactions: {
+                type: "array",
+
+                items: {
+                  type: "object",
+
+                  properties: {
+                    id: {
+                      type: "string",
+                    },
+
+                    amount: {
+                      type: "string",
+                    },
+
+                    type: {
+                      type: "string",
+                    },
+
+                    reason: {
+                      type: "string",
+                    },
+
+                    description: {
+                      type: "string",
+                      nullable: true,
+                    },
+
+                    modelId: {
+                      type: "string",
+                      nullable: true,
+                    },
+
+                    createdAt: {
+                      type: "string",
+                      format: "date-time",
+                    },
+                  },
+
+                  required: [
+                    "id",
+                    "amount",
+                    "type",
+                    "reason",
+                    "description",
+                    "modelId",
+                    "createdAt",
+                  ],
+                },
+              },
+            },
+
+            required: [
+              "id",
+              "username",
+              "firstName",
+              "lastName",
+              "language",
+              "role",
+              "metaboxUserId",
+              "metaboxReferralCode",
+              "finishedOnboarding",
+              "confirmBeforeGenerate",
+              "tokenBalance",
+              "purchasedTokenBalance",
+              "subscriptionTokenBalance",
+              "referralCount",
+              "createdAt",
+              "subscription",
+              "transactions",
+            ],
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequest;
+
+      const [user, transactions] = await Promise.all([
+        db.user.findUnique({ where: { id: userId } }),
+        db.tokenTransaction.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+        }),
+      ]);
+
+      // Referral count from Metabox (includes site referrals, not just bot)
+      let referralCount = 0;
+      try {
+        const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
+        const partnerData = await getPartnerBalance(userId);
+        referralCount = partnerData?.referralCount ?? 0;
+      } catch {
+        // Fallback to local count
+        referralCount = await db.user.count({ where: { referredById: userId } });
+      }
+
+      if (!user) throw new Error("User not found");
+
+      // Subscription info from LocalSubscription (single source of truth)
+      let subscription: {
+        planName: string;
+        period: string;
+        daysLeft: number;
+        totalDays: number;
+        endDate: string;
+      } | null = null;
+
+      const localSub = await db.localSubscription.findUnique({ where: { userId } });
+      if (localSub && localSub.isActive && localSub.endDate > new Date()) {
+        const daysLeft = Math.max(
+          0,
+          Math.ceil((localSub.endDate.getTime() - Date.now()) / 86400000),
+        );
+        const totalDays = Math.max(
+          1,
+          Math.ceil((localSub.endDate.getTime() - localSub.startDate.getTime()) / 86400000),
+        );
+        subscription = {
+          planName: localSub.planName,
+          period: localSub.period,
+          daysLeft,
+          totalDays,
+          endDate: localSub.endDate.toISOString(),
+        };
+      }
+
+      return {
+        id: user.id.toString(),
+        username: user.username ?? null,
+        firstName: user.firstName ?? null,
+        lastName: user.lastName ?? null,
+        language: user.language,
+        role: user.role,
+        metaboxUserId: user.metaboxUserId ?? null,
+        metaboxReferralCode: user.metaboxReferralCode ?? null,
+        finishedOnboarding: user.finishedOnboarding,
+        confirmBeforeGenerate: user.confirmBeforeGenerate,
+        tokenBalance: (
+          Number(user.tokenBalance) + Number(user.subscriptionTokenBalance)
+        ).toString(),
+        purchasedTokenBalance: Number(user.tokenBalance).toString(),
+        subscriptionTokenBalance: Number(user.subscriptionTokenBalance).toString(),
+        referralCount,
+        createdAt: user.createdAt.toISOString(),
+        subscription,
+        transactions: transactions.map((t) => ({
+          id: t.id,
+          amount: t.amount.toString(),
+          type: t.type,
+          reason: t.reason,
+          description: t.description ?? null,
+          modelId: t.modelId ?? null,
+          createdAt: t.createdAt.toISOString(),
+        })),
       };
-    }
-
-    return {
-      id: user.id.toString(),
-      username: user.username ?? null,
-      firstName: user.firstName ?? null,
-      lastName: user.lastName ?? null,
-      language: user.language,
-      role: user.role,
-      metaboxUserId: user.metaboxUserId ?? null,
-      metaboxReferralCode: user.metaboxReferralCode ?? null,
-      finishedOnboarding: user.finishedOnboarding,
-      confirmBeforeGenerate: user.confirmBeforeGenerate,
-      tokenBalance: (Number(user.tokenBalance) + Number(user.subscriptionTokenBalance)).toString(),
-      purchasedTokenBalance: Number(user.tokenBalance).toString(),
-      subscriptionTokenBalance: Number(user.subscriptionTokenBalance).toString(),
-      referralCount,
-      createdAt: user.createdAt.toISOString(),
-      subscription,
-      transactions: transactions.map((t) => ({
-        id: t.id,
-        amount: t.amount.toString(),
-        type: t.type,
-        reason: t.reason,
-        description: t.description ?? null,
-        modelId: t.modelId ?? null,
-        createdAt: t.createdAt.toISOString(),
-      })),
-    };
-  });
+    },
+  );
 
   /** PATCH /profile/preferences — update per-user UX flags (low-iq mode toggle, …) */
   fastify.patch<{ Body: { confirmBeforeGenerate?: boolean } }>(
     "/profile/preferences",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+
+          properties: {
+            confirmBeforeGenerate: {
+              type: "boolean",
+            },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: {
+                type: "boolean",
+              },
+              confirmBeforeGenerate: {
+                type: "boolean",
+              },
+            },
+            required: ["ok", "confirmBeforeGenerate"],
+          },
+          400: {
+            type: "object",
+            description: "Body is empty error",
+            properties: {
+              error: {
+                type: "string",
+              },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const body = request.body ?? {};
@@ -216,20 +450,81 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /profile/partner-balance — Metabox partner balance for "Партнёрка" tab */
-  fastify.get("/profile/partner-balance", async (request) => {
-    const { userId } = request as AuthRequest;
-    try {
-      const { url, key } = (() => {
-        const u = config.metabox.apiUrl;
-        const k = config.metabox.internalKey;
-        if (!u || !k) throw new Error("METABOX not configured");
-        return { url: u, key: k };
-      })();
-      const res = await fetch(
-        `${url}/api/internal/partner-balance?telegramId=${userId.toString()}`,
-        { headers: { "X-Internal-Key": key } },
-      );
-      if (!res.ok)
+  fastify.get("/profile/partner-balance", {
+    schema: {
+      response: {
+        200: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                balance: { type: "number" },
+                totalEarned: { type: "number" },
+                totalWithdrawn: { type: "number" },
+                userStatus: { type: "string" },
+                referralCode: { type: "string", const: null, nullable: true },
+              },
+              required: ["balance", "totalEarned", "totalWithdrawn", "userStatus", "referralCode"],
+            },
+            {
+              type: "object",
+              properties: {
+                balance: { type: "number" },
+                totalEarned: { type: "number" },
+                totalWithdrawn: { type: "number" },
+                userStatus: { type: "string" },
+                referralCode: { type: "string" },
+                referralCount: { type: "number" },
+                email: { type: "string", nullable: true },
+                mentor: {
+                  type: "object",
+                  nullable: true,
+                  properties: {
+                    name: { type: "string" },
+                    email: { type: "string", nullable: true },
+                    telegramUsername: { type: "string", nullable: true },
+                    telegramPhone: { type: "string", nullable: true },
+                  },
+                },
+              },
+              required: [
+                "balance",
+                "totalEarned",
+                "totalWithdrawn",
+                "userStatus",
+                "referralCode",
+                "referralCount",
+                "email",
+                "mentor",
+              ],
+            },
+          ],
+        },
+      },
+    },
+    handler: async (request) => {
+      const { userId } = request as AuthRequest;
+      try {
+        const { url, key } = (() => {
+          const u = config.metabox.apiUrl;
+          const k = config.metabox.internalKey;
+          if (!u || !k) throw new Error("METABOX not configured");
+          return { url: u, key: k };
+        })();
+        const res = await fetch(
+          `${url}/api/internal/partner-balance?telegramId=${userId.toString()}`,
+          { headers: { "X-Internal-Key": key } },
+        );
+        if (!res.ok)
+          return {
+            balance: 0,
+            totalEarned: 0,
+            totalWithdrawn: 0,
+            userStatus: "REGISTERED",
+            referralCode: null,
+          };
+        return res.json();
+      } catch {
         return {
           balance: 0,
           totalEarned: 0,
@@ -237,16 +532,8 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           userStatus: "REGISTERED",
           referralCode: null,
         };
-      return res.json();
-    } catch {
-      return {
-        balance: 0,
-        totalEarned: 0,
-        totalWithdrawn: 0,
-        userStatus: "REGISTERED",
-        referralCode: null,
-      };
-    }
+      }
+    },
   });
 
   /**
@@ -258,40 +545,64 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
    * вместо попытки авто-логина [который всё равно отвалится из-за
    * проверки emailVerified в SSO-провайдере metabox].
    */
-  fastify.get("/profile/metabox-sso", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true },
-    });
-    if (!user?.metaboxUserId) {
-      return reply.code(409).send({ error: "Metabox account not linked" });
-    }
-
-    const { getMetaboxUserStatus } = await import("../services/metabox-bridge.service.js");
-    try {
-      const status = await getMetaboxUserStatus(user.metaboxUserId);
-      if (!status.emailVerified) {
-        return {
-          requiresVerification: true,
-          email: status.email,
-        };
+  fastify.get("/profile/metabox-sso", {
+    schema: {
+      response: {
+        200: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                ssoUrl: { type: "string" },
+              },
+              required: ["ssoUrl"],
+            },
+            {
+              type: "object",
+              properties: {
+                requiresVerification: { type: "boolean", const: true },
+                email: { type: "string" },
+              },
+              required: ["requiresVerification", "email"],
+            },
+          ],
+        },
+        409: conflictResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId } = request as AuthRequest;
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { metaboxUserId: true },
+      });
+      if (!user?.metaboxUserId) {
+        return reply.code(409).send({ error: "Metabox account not linked" });
       }
-    } catch (err) {
-      // Если статус вытащить не удалось — продолжим как раньше [SSO
-      // провайдер metabox сам отрежет невалидированных].
-      console.error("[metabox-sso] failed to check user status:", err);
-    }
 
-    const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
-    let ssoToken: string;
-    if (config.metabox.ssoSecret) {
-      ssoToken = issueSsoToken(user.metaboxUserId);
-    } else {
-      const result = await issueSsoTokenRemote(user.metaboxUserId);
-      ssoToken = result.ssoToken;
-    }
-    return { ssoUrl: `${metaboxUrl}/auth/sso?token=${ssoToken}` };
+      const { getMetaboxUserStatus } = await import("../services/metabox-bridge.service.js");
+      try {
+        const status = await getMetaboxUserStatus(user.metaboxUserId);
+        if (!status.emailVerified) {
+          return {
+            requiresVerification: true,
+            email: status.email,
+          };
+        }
+      } catch (err) {
+        console.error("[metabox-sso] failed to check user status:", err);
+      }
+
+      const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
+      let ssoToken: string;
+      if (config.metabox.ssoSecret) {
+        ssoToken = issueSsoToken(user.metaboxUserId);
+      } else {
+        const result = await issueSsoTokenRemote(user.metaboxUserId);
+        ssoToken = result.ssoToken;
+      }
+      return { ssoUrl: `${metaboxUrl}/auth/sso?token=${ssoToken}` };
+    },
   });
 
   /**
@@ -299,27 +610,54 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
    * Используется UI чтобы понять — показывать pending-экран или открывать
    * полный профиль.
    */
-  fastify.get("/profile/metabox-status", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true },
-    });
-    if (!user?.metaboxUserId) {
-      return { linked: false };
-    }
-    const { getMetaboxUserStatus } = await import("../services/metabox-bridge.service.js");
-    try {
-      const status = await getMetaboxUserStatus(user.metaboxUserId);
-      return {
-        linked: true,
-        emailVerified: status.emailVerified,
-        email: status.email,
-      };
-    } catch (err) {
-      console.error("[metabox-status] failed:", err);
-      return reply.code(502).send({ error: "Failed to fetch status" });
-    }
+  fastify.get("/profile/metabox-status", {
+    schema: {
+      response: {
+        200: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                linked: { type: "boolean", const: false },
+              },
+              required: ["linked"],
+            },
+            {
+              type: "object",
+              properties: {
+                linked: { type: "boolean", const: true },
+                emailVerified: { type: "boolean" },
+                email: { type: "string" },
+              },
+              required: ["linked", "emailVerified", "email"],
+            },
+          ],
+        },
+        502: gatewayErrorResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId } = request as AuthRequest;
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { metaboxUserId: true },
+      });
+      if (!user?.metaboxUserId) {
+        return { linked: false };
+      }
+      const { getMetaboxUserStatus } = await import("../services/metabox-bridge.service.js");
+      try {
+        const status = await getMetaboxUserStatus(user.metaboxUserId);
+        return {
+          linked: true,
+          emailVerified: status.emailVerified,
+          email: status.email,
+        };
+      } catch (err) {
+        console.error("[metabox-status] failed:", err);
+        return reply.code(502).send({ error: "Failed to fetch status" });
+      }
+    },
   });
 
   /**
@@ -331,46 +669,66 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
    * на стороне бота — иначе юзер мог бы задрачить кнопку и завалить
    * SMTP-провайдера / попасть в спам-листы.
    */
-  fastify.post("/profile/metabox-resend-verification", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true },
-    });
-    if (!user?.metaboxUserId) {
-      return reply.code(409).send({ error: "Metabox account not linked" });
-    }
-
-    const check = checkResendLimit(userId);
-    if (!check.allowed) {
-      return reply.code(429).send({
-        code: "RATE_LIMITED",
-        error: check.reason,
-        retryAfterSec: check.retryAfterSec,
-        attemptsLeft: check.attemptsLeft,
+  fastify.post("/profile/metabox-resend-verification", {
+    schema: {
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            email: { type: "string" },
+            alreadyVerified: { type: "boolean" },
+            attemptsLeft: { type: "number" },
+            cooldownSec: { type: "number" },
+          },
+        },
+        409: conflictResponse,
+        429: rateLimitResponse,
+        502: metaboxApiErrorResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId } = request as AuthRequest;
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { metaboxUserId: true },
       });
-    }
+      if (!user?.metaboxUserId) {
+        return reply.code(409).send({ error: "Metabox account not linked" });
+      }
 
-    const { resendMetaboxVerification } = await import("../services/metabox-bridge.service.js");
-    try {
-      const result = await resendMetaboxVerification(user.metaboxUserId);
-      // Если main-app сказал что email уже подтверждён — лимит не списываем.
-      if (!result.alreadyVerified) {
-        recordResendAttempt(userId);
+      const check = checkResendLimit(userId);
+      if (!check.allowed) {
+        return reply.code(429).send({
+          code: "RATE_LIMITED",
+          error: check.reason,
+          retryAfterSec: check.retryAfterSec,
+          attemptsLeft: check.attemptsLeft,
+        });
       }
-      return {
-        ...result,
-        attemptsLeft: result.alreadyVerified
-          ? RESEND_MAX_ATTEMPTS
-          : Math.max(0, RESEND_MAX_ATTEMPTS - getResendAttempts(userId)),
-        cooldownSec: RESEND_COOLDOWN_SEC,
-      };
-    } catch (err) {
-      if (err instanceof MetaboxApiError) {
-        return reply.code(err.status).send({ error: err.body, code: err.code });
+
+      const { resendMetaboxVerification } = await import("../services/metabox-bridge.service.js");
+      try {
+        const result = await resendMetaboxVerification(user.metaboxUserId);
+        if (!result.alreadyVerified) {
+          recordResendAttempt(userId);
+        }
+        return {
+          ...result,
+          attemptsLeft: result.alreadyVerified
+            ? RESEND_MAX_ATTEMPTS
+            : Math.max(0, RESEND_MAX_ATTEMPTS - getResendAttempts(userId)),
+          cooldownSec: RESEND_COOLDOWN_SEC,
+        };
+      } catch (err) {
+        if (err instanceof MetaboxApiError) {
+          return reply
+            .code(err.status as 200 | 502 | 409 | 429)
+            .send({ error: err.body, code: err.code });
+        }
+        throw err;
       }
-      throw err;
-    }
+    },
   });
 
   /**
@@ -378,157 +736,247 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
    * [когда юзер ошибся при регистрации] и переотправить верификацию.
    * Body: { newEmail: string }
    */
-  fastify.post("/profile/metabox-change-email", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { newEmail } = request.body as { newEmail?: string };
-    if (!newEmail) {
-      return reply.code(400).send({ error: "newEmail is required" });
-    }
-    const emailCheck = await validateEmail(newEmail);
-    if (!emailCheck.ok) {
-      return reply.code(400).send({
-        code: emailCheck.reason === "syntax" ? "INVALID_EMAIL" : "EMAIL_DOMAIN_INVALID",
-        error:
-          emailCheck.reason === "syntax"
-            ? "Некорректный формат email"
-            : "Указан несуществующий email-домен",
-      });
-    }
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true },
-    });
-    if (!user?.metaboxUserId) {
-      return reply.code(409).send({ error: "Metabox account not linked" });
-    }
-    const { changeMetaboxEmailPending } = await import("../services/metabox-bridge.service.js");
-    try {
-      const result = await changeMetaboxEmailPending(user.metaboxUserId, newEmail);
-      // Сбрасываем resend-лимит — у юзера новый адрес, начинаем счётчик
-      // заново [иначе он бы сразу упёрся в потолок старых попыток].
-      resetResendLimit(userId);
-      return result;
-    } catch (err) {
-      if (err instanceof MetaboxApiError) {
-        return reply.code(err.status).send({ error: err.body, code: err.code });
+  fastify.post("/profile/metabox-change-email", {
+    schema: {
+      body: {
+        type: "object",
+        properties: {
+          newEmail: { type: "string" },
+        },
+        required: ["newEmail"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            email: { type: "string" },
+            warning: { type: "string" },
+          },
+        },
+        400: badRequestResponse,
+        409: conflictResponse,
+        502: metaboxApiErrorResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId } = request as AuthRequest;
+      const { newEmail } = request.body as { newEmail?: string };
+      if (!newEmail) {
+        return reply.code(400).send({ error: "newEmail is required" });
       }
-      throw err;
-    }
+      const emailCheck = await validateEmail(newEmail);
+      if (!emailCheck.ok) {
+        return reply.code(400).send({
+          code: emailCheck.reason === "syntax" ? "INVALID_EMAIL" : "EMAIL_DOMAIN_INVALID",
+          error:
+            emailCheck.reason === "syntax"
+              ? "Некорректный формат email"
+              : "Указан несуществующий email-домен",
+        });
+      }
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { metaboxUserId: true },
+      });
+      if (!user?.metaboxUserId) {
+        return reply.code(409).send({ error: "Metabox account not linked" });
+      }
+      const { changeMetaboxEmailPending } = await import("../services/metabox-bridge.service.js");
+      try {
+        const result = await changeMetaboxEmailPending(user.metaboxUserId, newEmail);
+        resetResendLimit(userId);
+        return result;
+      } catch (err) {
+        if (err instanceof MetaboxApiError) {
+          return reply
+            .code(err.status as 200 | 400 | 502 | 409)
+            .send({ error: err.body, code: err.code });
+        }
+        throw err;
+      }
+    },
   });
 
   /**
    * POST /profile/metabox-register — register a new Metabox account from the bot mini-app.
    * Body: { email, password, firstName? }
    */
-  fastify.post("/profile/metabox-register", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { email, password, firstName, lastName, username } = request.body as {
-      email: string;
-      password: string;
-      firstName?: string;
-      lastName?: string;
-      username?: string;
-    };
-    if (!email || !password) {
-      return reply.code(400).send({ error: "email and password are required" });
-    }
-    const emailCheck = await validateEmail(email);
-    if (!emailCheck.ok) {
-      return reply.code(400).send({
-        code: emailCheck.reason === "syntax" ? "INVALID_EMAIL" : "EMAIL_DOMAIN_INVALID",
-        error:
-          emailCheck.reason === "syntax" ? "Invalid email format" : "Email domain does not exist",
-      });
-    }
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { metaboxUserId: true, referredById: true },
-    });
-    if (user?.metaboxUserId) {
-      return reply.code(409).send({ error: "Metabox account already linked" });
-    }
-    const { registerFromBot } = await import("../services/metabox-bridge.service.js");
-    try {
-      const result = await registerFromBot({
-        email,
-        password,
-        telegramId: userId,
-        firstName,
-        lastName,
-        username,
-        referrerTelegramId: user?.referredById ?? undefined,
-      });
-      await db.user.update({
+  fastify.post("/profile/metabox-register", {
+    schema: {
+      body: {
+        type: "object",
+        properties: {
+          email: { type: "string" },
+          password: { type: "string" },
+          firstName: { type: "string" },
+          lastName: { type: "string" },
+          username: { type: "string" },
+        },
+        required: ["email", "password"],
+      },
+      response: {
+        200: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                ssoUrl: { type: "string" },
+              },
+              required: ["ssoUrl"],
+            },
+            {
+              type: "object",
+              properties: {
+                requiresVerification: { type: "boolean", const: true },
+                email: { type: "string" },
+              },
+              required: ["requiresVerification", "email"],
+            },
+          ],
+        },
+        400: badRequestResponse,
+        409: conflictResponse,
+        502: metaboxApiErrorResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId } = request as AuthRequest;
+      const { email, password, firstName, lastName, username } = request.body as {
+        email: string;
+        password: string;
+        firstName?: string;
+        lastName?: string;
+        username?: string;
+      };
+      if (!email || !password) {
+        return reply.code(400).send({ error: "email and password are required" });
+      }
+      const emailCheck = await validateEmail(email);
+      if (!emailCheck.ok) {
+        return reply.code(400).send({
+          code: emailCheck.reason === "syntax" ? "INVALID_EMAIL" : "EMAIL_DOMAIN_INVALID",
+          error:
+            emailCheck.reason === "syntax" ? "Invalid email format" : "Email domain does not exist",
+        });
+      }
+      const user = await db.user.findUnique({
         where: { id: userId },
-        data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },
+        select: { metaboxUserId: true, referredById: true },
       });
-
-      // Если на сайте email НЕ подтверждён — не выдаём ssoUrl. Юзер
-      // должен сначала кликнуть по верификационной ссылке в письме и
-      // затем войти на сайте вручную. Иначе любой, кто получил bot-
-      // session, сразу логинился бы в metabox без верификации почты.
-      if (result.requiresVerification) {
-        return {
-          requiresVerification: true,
-          email: result.email ?? email,
-        };
+      if (user?.metaboxUserId) {
+        return reply.code(409).send({ error: "Metabox account already linked" });
       }
+      const { registerFromBot } = await import("../services/metabox-bridge.service.js");
+      try {
+        const result = await registerFromBot({
+          email,
+          password,
+          telegramId: userId,
+          firstName,
+          lastName,
+          username,
+          referrerTelegramId: user?.referredById ?? undefined,
+        });
+        await db.user.update({
+          where: { id: userId },
+          data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },
+        });
 
-      const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
-      return { ssoUrl: `${metaboxUrl}/auth/sso?token=${result.ssoToken}` };
-    } catch (err) {
-      if (err instanceof MetaboxApiError) {
-        return reply.code(err.status).send({ error: err.body, code: err.code });
+        if (result.requiresVerification) {
+          return {
+            requiresVerification: true,
+            email: result.email ?? email,
+          };
+        }
+
+        const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
+        return { ssoUrl: `${metaboxUrl}/auth/sso?token=${result.ssoToken}` };
+      } catch (err) {
+        if (err instanceof MetaboxApiError) {
+          return reply
+            .code(err.status as 200 | 400 | 502 | 409)
+            .send({ error: err.body, code: err.code });
+        }
+        throw err;
       }
-      throw err;
-    }
+    },
   });
 
   /**
    * POST /profile/metabox-login — link existing Metabox account to the bot.
    * Body: { email, password }
    */
-  fastify.post("/profile/metabox-login", async (request, reply) => {
-    const { userId, user } = request as AuthRequest;
-    const { email, password } = request.body as { email: string; password: string };
-    if (!email || !password) {
-      return reply.code(400).send({ error: "email and password are required" });
-    }
-    const { loginAndLink } = await import("../services/metabox-bridge.service.js");
-    try {
-      const botPurchase = await db.tokenTransaction.findFirst({
-        where: { userId, type: "credit", reason: "purchase" },
-        select: { id: true },
-      });
-      const result = await loginAndLink({
-        email,
-        password,
-        telegramId: userId,
-        telegramUsername: user.username,
-        firstName: user.firstName ?? undefined,
-        lastName: user.lastName ?? undefined,
-        referrerTelegramId: user.referredById,
-        botHasPurchase: !!botPurchase,
-        botCreatedAt: user.createdAt,
-      });
-      await db.user.update({
-        where: { id: userId },
-        data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },
-      });
-      const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
-      return {
-        ssoUrl: `${metaboxUrl}/auth/sso?token=${result.ssoToken}`,
-        mergedFrom: result.mergedFrom ?? null,
-      };
-    } catch (err) {
-      if (err instanceof MetaboxApiError) {
-        // Parse JSON body for rich error info (e.g. TELEGRAM_LINKED with linkedTo)
-        const responseData = err.data ?? {};
-        return reply
-          .code(err.status)
-          .send({ ...responseData, code: err.code ?? responseData.code });
+  fastify.post("/profile/metabox-login", {
+    schema: {
+      body: {
+        type: "object",
+        properties: {
+          email: { type: "string" },
+          password: { type: "string" },
+        },
+        required: ["email", "password"],
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            ssoUrl: { type: "string" },
+            mergedFrom: {
+              type: "object",
+              nullable: true,
+              properties: {
+                email: { type: "string" },
+                telegramId: { type: "string" },
+              },
+            },
+          },
+        },
+        400: badRequestResponse,
+        502: metaboxApiErrorResponse,
+      },
+    },
+    handler: async function (request, reply) {
+      const { userId, user } = request as AuthRequest;
+      const { email, password } = request.body as { email: string; password: string };
+      if (!email || !password) {
+        return reply.code(400).send({ error: "email and password are required" });
       }
-      throw err;
-    }
+      const { loginAndLink } = await import("../services/metabox-bridge.service.js");
+      try {
+        const botPurchase = await db.tokenTransaction.findFirst({
+          where: { userId, type: "credit", reason: "purchase" },
+          select: { id: true },
+        });
+        const result = await loginAndLink({
+          email,
+          password,
+          telegramId: userId,
+          telegramUsername: user.username,
+          firstName: user.firstName ?? undefined,
+          lastName: user.lastName ?? undefined,
+          referrerTelegramId: user.referredById,
+          botHasPurchase: !!botPurchase,
+          botCreatedAt: user.createdAt,
+        });
+        await db.user.update({
+          where: { id: userId },
+          data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },
+        });
+        const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
+        return {
+          ssoUrl: `${metaboxUrl}/auth/sso?token=${result.ssoToken}`,
+          mergedFrom: result.mergedFrom ?? null,
+        };
+      } catch (err) {
+        if (err instanceof MetaboxApiError) {
+          const responseData = err.data ?? {};
+          return reply
+            .code(err.status as 200 | 400 | 502)
+            .send({ ...responseData, code: err.code ?? responseData.code });
+        }
+        throw err;
+      }
+    },
   });
 };
