@@ -383,6 +383,8 @@ export default {
       "❌ Audio length does not match video length. Please check your input files.",
     heygenAvatarNotFound: "❌ Avatar not found. Please select a different avatar in settings.",
     heygenVoiceNotFound: "❌ Voice not found. Please select a different voice in settings.",
+    ttsVoiceUnavailable:
+      "❌ Selected voice is unavailable. Open Management → model settings and pick a voice again.",
     heygenVoicePremium: "❌ The selected voice is only available for HeyGen premium accounts.",
     heygenTtsLanguage: "❌ TTS language error. Please check your voice settings.",
     heygenTrialLimit:
