@@ -54,28 +54,30 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   }
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
-    input = this.truncateInput(input);
-    const messages = this.buildMessages(input);
-    logCall(this.apiModel, "chatStream", {
-      temperature: input.temperature,
-      max_tokens: input.maxTokens,
-      messages_count: messages.length,
-      extended_thinking: input.extendedThinking,
-    });
     // Anthropic Messages API требует `max_tokens` всегда. Если юзер не включил
-    // тогл «Ограничить длину ответа» — подставляем безопасный потолок
-    // `min(16K, contextWindow * 0.2)`. См. claude-anthropic-proxy.adapter для
-    // полного обоснования. При включённом тогле — ровно его значение.
+    // тогл «Ограничить длину ответа» — подставляем щедрый потолок
+    // `min(modelCap, ctx * 0.4)`. См. claude-anthropic-proxy.adapter для
+    // полного обоснования. Hint `adapterOutputReservation` синхронизирует
+    // truncate'овый резерв с реально отправляемым `max_tokens` — иначе на
+    // длинных диалогах Anthropic вернёт 400 «prompt is too long».
     const userContextWindow =
       input.contextWindowOverride && input.contextWindowOverride > 0
         ? input.contextWindowOverride
         : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
-    const ANTHROPIC_OFF_DEFAULT = Math.min(16_384, Math.floor(userContextWindow * 0.2));
     const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
     const maxTokens =
       input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
         ? input.maxTokens
-        : Math.min(modelCap, ANTHROPIC_OFF_DEFAULT);
+        : Math.min(modelCap, Math.floor(userContextWindow * 0.4));
+    input = { ...input, adapterOutputReservation: maxTokens };
+    input = this.truncateInput(input);
+    const messages = this.buildMessages(input);
+    logCall(this.apiModel, "chatStream", {
+      temperature: input.temperature,
+      max_tokens: maxTokens,
+      messages_count: messages.length,
+      extended_thinking: input.extendedThinking,
+    });
     const stream = (
       this.client.messages.stream as (p: unknown) => ReturnType<typeof this.client.messages.stream>
     )({

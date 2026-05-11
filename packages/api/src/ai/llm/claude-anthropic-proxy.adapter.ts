@@ -115,31 +115,31 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
   }
 
   async *chatStream(input: LLMInput): AsyncGenerator<string, StreamResult, unknown> {
-    input = this.truncateInput(input);
-    const messages = this.buildMessages(input);
-
-    // Anthropic Messages API требует `max_tokens` всегда (без него 400). Когда
-    // юзер не включал тогл «Ограничить длину ответа», подставляем безопасный
-    // потолок ОТДЕЛЬНО от `model.maxOutputTokens`. Anthropic enforces
-    // `input_tokens + max_tokens ≤ context_window`. Если мы пошлём modelCap=64k,
-    // то на длинных диалогах (или при пользовательском `context_window` override
-    // вниз к 32K) запрос упрётся в окно и упадёт `prompt is too long`.
+    // Anthropic Messages API требует `max_tokens` ВСЕГДА (без него 400). Когда
+    // юзер не включал тогл «Ограничить длину ответа», подставляем щедрый
+    // потолок `min(modelCap, ctx * 0.4)` — это эффективный «безлимит» для
+    // дефолтных context window (Opus/Sonnet 200K → 64K cap = весь modelCap),
+    // и достаточно для extended_thinking чтобы reasoning не задушил visible.
     //
-    // Cap = `min(16K, contextWindow * 0.2)`. 16K хватает на 99% ответов,
-    // 20% от context_window согласовано с `truncate.reservedOutput` который
-    // при toggle OFF держит ~10% — остаётся головной запас под входной prompt.
+    // Чтобы НЕ упереться в Anthropic-инвариант `input_tokens + max_tokens ≤
+    // context_window`, прокидываем `adapterOutputReservation` в truncate —
+    // оно зарезервирует ровно то значение, которое мы пошлём в API. Иначе
+    // на длинных диалогах было бы `prompt is too long` 400.
     //
     // При включённом тогле — ровно значение юзера, без silent-override.
     const userContextWindow =
       input.contextWindowOverride && input.contextWindowOverride > 0
         ? input.contextWindowOverride
         : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
-    const ANTHROPIC_OFF_DEFAULT = Math.min(16_384, Math.floor(userContextWindow * 0.2));
     const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
     const maxTokens =
       input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
         ? input.maxTokens
-        : Math.min(modelCap, ANTHROPIC_OFF_DEFAULT);
+        : Math.min(modelCap, Math.floor(userContextWindow * 0.4));
+    // Hint в truncate — должен идти ДО `this.truncateInput`.
+    input = { ...input, adapterOutputReservation: maxTokens };
+    input = this.truncateInput(input);
+    const messages = this.buildMessages(input);
 
     const body: Record<string, unknown> = {
       model: this.apiModel,

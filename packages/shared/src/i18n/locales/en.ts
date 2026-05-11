@@ -338,11 +338,11 @@ export default {
     generationTimedOut24h:
       "❌ {modelName}: generation did not finish within 24 hours and was cancelled. Please try again.",
     modelTemporarilyUnavailable:
-      "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you.",
+      "❌ {modelName} decided to take a break. We didn't approve, but it didn't ask. We're already on it. Meanwhile, plenty of other AI models in the bot are happy to see you. Tokens for this request were not charged.",
     modelReasoningCapExhaustedOpenai:
-      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth».",
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth». Tokens for this request were not charged.",
     modelReasoningCapExhaustedAnthropic:
-      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management and turn off «Extended thinking» — or try shortening the prompt.",
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management and turn off «Extended thinking» — or try shortening the prompt. Tokens for this request were not charged.",
     outputLimitReached:
       "✂️ {modelName} hit your set limit of {limit} tokens. Open ⚙ Management → model and disable «Limit response length» or raise the slider. Tokens for this request were not charged.",
     outputLimitOnlyThinking:

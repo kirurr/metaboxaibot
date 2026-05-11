@@ -60,6 +60,19 @@ export interface LLMInput {
    * тогл «Ограничить длину ответа», default OFF.
    */
   maxTokensLimitEnabled?: boolean;
+  /**
+   * Adapter-level подсказка для `truncate.reservedOutput`: «адаптер ВСЕГДА
+   * пошлёт провайдеру max_tokens = N». Используется адаптерами Anthropic
+   * (которые обязаны передавать поле даже при toggle OFF) чтобы truncate
+   * зарезервировал ровно то, что мы реально отправим — иначе на длинных
+   * диалогах `input_tokens + max_tokens` превысит context_window и Anthropic
+   * вернёт 400 «prompt is too long».
+   *
+   * Адаптер устанавливает поле ПЕРЕД вызовом `truncate` через side-effect:
+   * `input = { ...input, adapterOutputReservation: N }`. На семантику
+   * `maxTokens` / `maxTokensLimitEnabled` не влияет — отдельная подсказка.
+   */
+  adapterOutputReservation?: number;
   /** Perplexity: restrict search results to a time window (month/week/day/hour). */
   searchRecencyFilter?: string;
   /** Perplexity: depth of web search context (low/medium/high). */
