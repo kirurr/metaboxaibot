@@ -648,7 +648,34 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
    * profile.ts fallback). Поэтому на стороне бота мы НЕ создаём stub'ов
    * для несвязанных менторов — просто храним null, пока тот не запустит бота.
    */
-  fastify.post("/set-referrer", async (request, reply) => {
+  fastify.post(
+    "/set-referrer",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            metaboxUserId: { type: "string", description: "Metabox user ID of the mentee" },
+            newMentorMetaboxUserId: { type: "string", nullable: true, description: "Metabox user ID of the new mentor (null to remove)" },
+          },
+          required: ["metaboxUserId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              applied: { type: "boolean", description: "Whether referral was applied" },
+              referredById: { type: "string", nullable: true, description: "Bot user ID of the mentor (null if not found)" },
+              reason: { type: "string", description: "Reason when not applied (e.g. mentee_not_in_bot)" },
+            },
+            required: ["ok", "applied"],
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
     const { metaboxUserId, newMentorMetaboxUserId } = request.body as {
       metaboxUserId?: string;
       newMentorMetaboxUserId?: string | null;
