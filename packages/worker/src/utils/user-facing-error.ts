@@ -56,15 +56,17 @@ export function getOpsAlertDedupKey(err: unknown): string | null {
 /**
  * Resolve a sub-job error в form для virtual batch'а.
  *
- *   - userText: что показываем пользователю в footer'е batchPartialFooter /
- *     batchAllFailed. Сначала пробуем `resolveUserFacingMessage` (mapping
- *     UserFacingError → локализованный текст, hardcoded provider helpers,
- *     плюс AI-classified errors через UserFacingError("aiClassifiedError")).
- *     Если ничего не подошло — generic шаблон t.errors.generationFailed.
+ *   - userText: показывается юзеру только в K=0 user-fault ветке
+ *     (image.processor: «есть user-facing ошибка → выводим её, чтобы юзер
+ *     понимал что фиксить»). На partial-success и K=0 not-user-fault путях
+ *     userText не используется — там идёт обобщённое batchSubJobFailedMessage
+ *     или pickGenerationFailedMessage. Сначала пробуем `resolveUserFacingMessage`
+ *     (mapping UserFacingError → локализованный текст, hardcoded provider helpers,
+ *     AI-classified errors). Если ничего не подошло — generic шаблон.
  *   - rawText: сырое err.message для логов и notifyTechError.
  *   - isUserFacing: true если userText резолвился из UserFacingError /
  *     provider-helper'а; false если упали на generic шаблон. Помогает
- *     решить надо ли алертить ops (генерик = unknown тех ошибка).
+ *     решить надо ли алертить ops + триггерить K=0 user-fault ветку.
  *
  * Mirror'ит поведение single-shot path'а (см. catch в processImageJob /
  * processVideoJob), просто формализованное в helper для batch контекста.

@@ -89,15 +89,38 @@ export class QwenAdapter extends BaseLLMAdapter {
 
     let inputTokensUsed = 0;
     let outputTokensUsed = 0;
+    // <think>...</think> обёртка вокруг reasoning_content.
+    // Qwen thinking режимы шлют reasoning в delta.reasoning_content параллельно
+    // delta.content. enable_thinking — отдельный opt-in флаг (см. body выше);
+    // если он false — reasoning_content просто не приходит.
+    let inThinkBlock = false;
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) yield delta;
+      const delta = chunk.choices[0]?.delta as
+        | { content?: string; reasoning_content?: string }
+        | undefined;
+      const reasoning = input.showReasoning ? (delta?.reasoning_content ?? "") : "";
+      const visible = delta?.content ?? "";
+      if (reasoning) {
+        if (!inThinkBlock) {
+          inThinkBlock = true;
+          yield "<think>";
+        }
+        yield reasoning;
+      }
+      if (visible) {
+        if (inThinkBlock) {
+          inThinkBlock = false;
+          yield "</think>";
+        }
+        yield visible;
+      }
       if (chunk.usage) {
         inputTokensUsed = chunk.usage.prompt_tokens;
         outputTokensUsed = chunk.usage.completion_tokens;
       }
     }
+    if (inThinkBlock) yield "</think>";
 
     return { inputTokensUsed, outputTokensUsed };
   }

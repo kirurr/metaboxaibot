@@ -246,19 +246,16 @@ const THINKING_BUDGET_REQUIRED: ModelSettingDef = {
 /**
  * Settings for reasoning models (gpt-5 family, o-series) — no temperature.
  * Temperature is unsupported by these models via the Responses API.
+ *
+ * Слайдер `max_tokens` намеренно убран. На reasoning-моделях OpenAI Responses
+ * API считает `max_output_tokens` как ОБЩИЙ бюджет на reasoning + visible.
+ * Юзер думал что слайдер ограничивает длину ответа, а на деле reasoning мог
+ * съесть весь cap до последнего токена — юзер получал пустой ответ. Длиной
+ * видимого ответа управляет `verbosity` (low/medium/high) — это правильный
+ * API-параметр для этой задачи. Reasoning-моделям лимит снаружи не задаём:
+ * адаптер не передаёт `max_output_tokens`, модель сама решает когда хватит.
  */
 const REASONING_MODEL_SETTINGS: ModelSettingDef[] = [
-  {
-    key: "max_tokens",
-    label: "Макс. длина ответа",
-    description:
-      "Максимальное количество слов, которые ИИ может написать за один ответ. Увеличьте для длинных текстов.",
-    type: "slider",
-    min: 256,
-    max: 8192,
-    step: 256,
-    default: 2048,
-  },
   {
     key: "system_prompt",
     label: "Системный промпт",
@@ -290,6 +287,21 @@ function contextWindowSetting(modelMaxTokens: number): ModelSettingDef {
     advanced: true,
   };
 }
+
+/**
+ * Показывать reasoning (chain-of-thought) пользователю отдельными
+ * `<blockquote expandable>` сообщениями. Применяется ко всем моделям из
+ * `THINKING_MODEL_IDS` (см. ниже). Default false — текущий UX, мысли
+ * отбрасываются. Юзер включает явно когда хочет видеть «куда уходят токены».
+ */
+const SHOW_REASONING_SETTING: ModelSettingDef = {
+  key: "show_reasoning",
+  label: "Показывать размышления",
+  description:
+    "Если включено — сообщения с внутренними рассуждениями модели придут отдельно (свёрнутые, можно раскрыть). Помогает понять, на что ушли токены.",
+  type: "toggle",
+  default: false,
+};
 
 /** Reasoning effort for Grok 3 Mini — only supports low/high (no medium). */
 const GROK_MINI_REASONING: ModelSettingDef = {
@@ -1018,6 +1030,19 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
       ? TEMPERATURE_SETTING_ANTHROPIC
       : TEMPERATURE_SETTING;
   model.settings = [temp, ...LLM_SETTINGS.slice(1), ...extras];
+}
+
+// ── Append "Показывать размышления" toggle to every thinking model ──────────
+// Толгл универсальный: дёшево включить/выключить рендеринг chain-of-thought.
+// Не запрашивает thinking у провайдеров где он opt-in (Claude extended_thinking,
+// Gemini thinking_budget) — для тех моделей сначала надо включить «думалку»,
+// потом — отдельно — этот тогл, чтобы её увидеть. У моделей с unconditional
+// reasoning (OpenAI o-series, GPT-5.x с effort != none, DeepSeek R1, Grok 4)
+// тогл достаточен сам по себе. Default false — текущее поведение сохраняется.
+for (const [id, model] of Object.entries(GPT_MODELS)) {
+  if (!THINKING_MODEL_IDS.has(id)) continue;
+  if (!model.settings) model.settings = [];
+  model.settings.push(SHOW_REASONING_SETTING);
 }
 
 // ── Append context window slider to every text model ────────────────────────

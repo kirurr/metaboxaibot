@@ -443,6 +443,16 @@ export class KieVideoAdapter implements VideoAdapter {
       const failMsg = task.failMsg ?? "unknown error";
       const failCode = task.failCode;
       const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${failMsg}`;
+      // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
+      // их backend в трауре, но мы передали валидный taskId. Бросаем plain Error
+      // (НЕ UserFacingError) чтобы BullMQ ретрайнул и на последней попытке
+      // processor через `isKieTransientError` триггернул re-submit на fallback.
+      // Без этой ветки ошибка проваливалась в classifyAIError-фолбек, который
+      // галлюцинировал юзеру "заполните идентификатор задачи" и спамил ops.
+      // См. kie-error.ts:isKieTransientError.
+      if (failCode === "422" && /playground failed|task id is blank/i.test(failMsg)) {
+        throw new Error(technicalMessage);
+      }
       const isCopyright = failCode === "501" || /copyright/i.test(failMsg);
       // KIE/evolink content moderation: "Request blocked: ... prominent public figure"
       const isPublicFigure = /public figure|public person|prominent figure|celebrity/i.test(

@@ -7,6 +7,7 @@ import {
 } from "./base.adapter.js";
 import { config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { logger } from "../../logger.js";
 
 /**
  * Anthropic Messages API-совместимые прокси (KIE, Evolink, etc.) — все
@@ -195,6 +196,27 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let outputTokens = 0;
     let cachedInputTokens = 0;
     let incompleteReason: string | undefined;
+    // <think>...</think> обёртка вокруг thinking_delta. extended_thinking —
+    // отдельный opt-in флаг (см. body.thinkingFlag); thinking_delta события
+    // приходят только когда он включён. showReasoning без extended_thinking
+    // = тогл «показывать» при выключенной «думалке» — правомерное no-op.
+    let inThinkBlock = false;
+    const closeThink = (): string => {
+      if (!inThinkBlock) return "";
+      inThinkBlock = false;
+      return "</think>";
+    };
+    // Диагностика пустых стримов (KIE-прокси иногда висит и закрывает
+    // соединение без терминального message_delta — юзер видит generic
+    // "модель отдыхает", в логах нет ни stop_reason, ни тайминга. Считаем
+    // event-типы и фиксируем стоп-причину/usage-флаг, чтобы при пустом
+    // ответе понять: стрим оборвался / Claude вернул end_turn без контента
+    // / message_delta пришёл без usage. См. warn-блок ниже.
+    const streamStartedAt = Date.now();
+    let visibleChunks = 0;
+    let lastStopReason: string | undefined;
+    let messageDeltaWithUsage = false;
+    const eventTypeCounts: Record<string, number> = {};
 
     // Stream parser: SSE events delimited by "\n\n"; each event has
     // `event: <name>\ndata: <json>` lines (Anthropic-compatible).
@@ -215,11 +237,29 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           const evt = parseSseEvent(raw);
           if (!evt?.data) continue;
 
-          const text = handleEvent(evt.data, (delta) => delta);
-          if (text) yield text;
+          // text_delta → visible (закрываем reasoning-обёртку если открыта).
+          // thinking_delta → reasoning (открываем `<think>` если ещё не открыт)
+          // и yield'им сырой текст внутри.
+          const visibleText = handleVisibleDelta(evt.data);
+          if (visibleText) {
+            const close = closeThink();
+            if (close) yield close;
+            visibleChunks++;
+            yield visibleText;
+          } else if (input.showReasoning) {
+            const reasoningText = handleThinkingDelta(evt.data);
+            if (reasoningText) {
+              if (!inThinkBlock) {
+                inThinkBlock = true;
+                yield "<think>";
+              }
+              yield reasoningText;
+            }
+          }
 
           // Извлекаем токены из служебных событий.
           const t = evt.data.type;
+          if (typeof t === "string") eventTypeCounts[t] = (eventTypeCounts[t] ?? 0) + 1;
           if (t === "message_start") {
             const u = evt.data.message?.usage;
             if (u) {
@@ -228,14 +268,18 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
             }
           } else if (t === "message_delta") {
             const u = evt.data.usage;
-            if (u) outputTokens = u.output_tokens ?? outputTokens;
+            if (u) {
+              outputTokens = u.output_tokens ?? outputTokens;
+              messageDeltaWithUsage = true;
+            }
             // stop_reason → incompleteReason: позволяет chat.service показать
-            // адресный мессадж юзеру (modelReasoningCapExhausted vs generic
-            // modelTemporarilyUnavailable) когда стрим завершился без visible
-            // text. Anthropic шлёт `max_tokens` когда reasoning + text не
-            // уложились в max_output_tokens; `refusal` — content moderation
+            // адресный мессадж юзеру (modelReasoningCapExhaustedAnthropic vs
+            // generic modelTemporarilyUnavailable) когда стрим завершился без
+            // visible text. Anthropic шлёт `max_tokens` когда reasoning + text
+            // не уложились в max_output_tokens; `refusal` — content moderation
             // зарубила ответ ещё до первого text-блока. См. также openai.adapter.
             const stopReason = evt.data.delta?.stop_reason;
+            if (typeof stopReason === "string") lastStopReason = stopReason;
             if (stopReason === "max_tokens") incompleteReason = "max_output_tokens";
             else if (stopReason === "refusal") incompleteReason = "content_filter";
           }
@@ -243,6 +287,34 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       }
     } finally {
       reader.releaseLock();
+    }
+
+    // Стрим завершился внутри thinking-блока (visible не пришёл) — закрываем
+    // тег, иначе stripThinkingBlocks выкинет хвост сообщения у юзера.
+    const tail = closeThink();
+    if (tail) yield tail;
+
+    // Триггер ровно совпадает с empty-guard'ом в chat.service.ts:
+    // там тоже "0 visible chunks → пустой ответ юзеру". Если ужесточить
+    // условие (например AND outputTokens===0), потеряем кейс когда Claude
+    // потратил токены на thinking-блоки, но не выдал ни одного visible
+    // дельта-чанка — а это как раз самый интересный случай для диагностики.
+    if (visibleChunks === 0) {
+      logger.warn(
+        {
+          modelId: this.modelId,
+          apiModel: this.apiModel,
+          provider: this.proxyConfig.providerLabel,
+          streamDurationMs: Date.now() - streamStartedAt,
+          inputTokens,
+          outputTokens,
+          eventTypeCounts,
+          lastStopReason,
+          messageDeltaWithUsage,
+          incompleteReason,
+        },
+        "claude-anthropic-proxy: stream ended with no visible text",
+      );
     }
 
     return {
@@ -305,7 +377,9 @@ interface SseUsage {
 }
 interface SseData {
   type: string;
-  delta?: { type?: string; text?: string; stop_reason?: string };
+  // delta может быть text_delta (visible) или thinking_delta (reasoning).
+  // Оба идут внутри content_block_delta, отличает их поле type.
+  delta?: { type?: string; text?: string; thinking?: string; stop_reason?: string };
   message?: { usage?: SseUsage };
   usage?: SseUsage;
 }
@@ -329,9 +403,16 @@ function parseSseEvent(raw: string): { event?: string; data?: SseData } | null {
   return { event, data };
 }
 
-function handleEvent(d: SseData, pickText: (s: string) => string): string | null {
+function handleVisibleDelta(d: SseData): string | null {
   if (d.type === "content_block_delta" && d.delta?.type === "text_delta" && d.delta.text) {
-    return pickText(d.delta.text);
+    return d.delta.text;
+  }
+  return null;
+}
+
+function handleThinkingDelta(d: SseData): string | null {
+  if (d.type === "content_block_delta" && d.delta?.type === "thinking_delta" && d.delta.thinking) {
+    return d.delta.thinking;
   }
   return null;
 }

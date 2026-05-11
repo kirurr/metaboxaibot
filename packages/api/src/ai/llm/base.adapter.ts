@@ -72,6 +72,19 @@ export interface LLMInput {
    * Used by token-aware history truncation.
    */
   contextWindowOverride?: number;
+  /**
+   * Когда true — адаптер оборачивает приходящие от провайдера reasoning-чанки
+   * (chain-of-thought) в маркеры `<think>...</think>` и yield'ит их в общий
+   * стрим вместе с visible-чанками. Когда false/undefined — reasoning чанки
+   * либо не запрашиваются у провайдера (если он требует явный opt-in), либо
+   * молча отбрасываются. Дефолт false — отвечает текущему UX.
+   *
+   * Consumer (bot/web) сам решает что делать с `<think>` блоками: бот шлёт
+   * их отдельными `<blockquote expandable>` сообщениями, web — пока просто
+   * показывает inline (см. routes/web-chat.ts). Сохраняем в БД всегда без
+   * thinking — `stripThinkBlocks` в chat.service выкидывает их перед save.
+   */
+  showReasoning?: boolean;
 }
 
 export interface LLMOutput {

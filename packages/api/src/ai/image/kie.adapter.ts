@@ -1,5 +1,5 @@
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -265,21 +265,70 @@ export class KieImageAdapter implements ImageAdapter {
     const task = data.data;
 
     if (task.state === "fail") {
-      const failMsg = task.failMsg ?? "unknown error";
+      const rawFailMsg = task.failMsg ?? "unknown error";
       const failCode = task.failCode;
-      const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${failMsg}`;
-      const isCopyright = failCode === "501" || /copyright/i.test(failMsg);
+      // KIE upstream иногда возвращает chat-style ответ с подробным rationale,
+      // code-блоками и альтернативным промптом (особенно gpt-image-2 при
+      // отказе). Без обрезки 1-2 КБ текста утекают в логи, ops-алёрты и в
+      // technicalMessage внутри UserFacingError. Sanitize ТОЛЬКО для
+      // technicalMessage; детекция работает по rawFailMsg, иначе ключевые
+      // слова (identity / reference photo / copyright) внутри code-блока
+      // окажутся за границей среза и regex не сматчатся.
+      const sanitizedFailMsg = (() => {
+        const codeFenceIdx = rawFailMsg.indexOf("```");
+        const cut = codeFenceIdx >= 0 ? rawFailMsg.slice(0, codeFenceIdx) : rawFailMsg;
+        const oneLine = cut.replace(/\s+/g, " ").trim();
+        return oneLine.length > 400 ? `${oneLine.slice(0, 400)}…` : oneLine;
+      })();
+      const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${sanitizedFailMsg}`;
+      // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
+      // их backend в трауре, но мы передали валидный taskId. Бросаем plain Error
+      // (НЕ UserFacingError) чтобы BullMQ ретрайнул и на последней попытке
+      // processor через `isKieTransientError` триггернул re-submit на fallback
+      // (для моделей с зарегистрированным fallback'ом). Без этой ветки ошибка
+      // проваливалась в classifyAIError-фолбек, который галлюцинировал юзеру
+      // абсурд про "заполните идентификатор задачи" и спамил ops через
+      // notifyOps:true. См. kie-error.ts:isKieTransientError.
+      if (failCode === "422" && /playground failed|task id is blank/i.test(rawFailMsg)) {
+        throw new Error(technicalMessage);
+      }
+      const isCopyright = failCode === "501" || /copyright/i.test(rawFailMsg);
       // KIE/evolink content moderation: "Request blocked: ... prominent public figure"
       // → отдельный мессадж про публичные лица (юзер часто пытается грузить фото
       // знаменитостей или просит их в промпте — copyright-сообщение неточно).
       const isPublicFigure = /public figure|public person|prominent figure|celebrity/i.test(
-        failMsg,
+        rawFailMsg,
       );
+      // gpt-image-2 (KIE) часто отказывает с chat-style refusal'ом, когда юзер
+      // просит «сохранить лицо» с референса. Виды формулировок:
+      //   "I can't generate/edit that image ... identity preservation ... real people ... reference photos"
+      //   "I can't generate or transform an image of a real child from the provided photos"
+      //   "I cannot create ... real person ... uploaded image"
+      //   "I can't make ... real face ... face reference"
+      // Существующие regex (policy/publicFigure) такие фразы не ловят, и юзеру
+      // прилетал сырой длинный текст или галлюцинация classifier'а с notifyOps:true.
+      // Маппим на отдельный ключ с подсказкой переключиться на модель,
+      // которая лучше работает с face reference.
+      //
+      // Часть 1 — глагол-«I can't»: добавлен `transform` (OpenAI использует на
+      // edit-режиме). Часть 2 — расширена номенклатура «real X»: помимо
+      // people/person/face добавлены child/children/kid/baby/infant/minor/
+      // individual/human (минор-кейсы провайдеры режут особенно жёстко).
+      // Также добавлен `provided (photo|image|reference)s?` рядом с
+      // `uploaded` — OpenAI варьирует «uploaded photos» / «provided photos»
+      // / «the provided images».
+      const isIdentityPreservation =
+        /\bI (?:can(?:'|’)?t|cannot) (?:generate|edit|create|produce|make|transform)\b/i.test(
+          rawFailMsg,
+        ) &&
+        /identity|real (?:people|person|faces?|child|children|kid|baby|infant|minor|individual|human)|reference (?:photo|image)|uploaded (?:photo|image|reference)|provided (?:photo|image|reference)s?|face (?:reference|swap)|likeness/i.test(
+          rawFailMsg,
+        );
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
         /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
-          failMsg,
+          rawFailMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE
       // nano-banana backend) и подобные шлют 500 с message типа
@@ -293,11 +342,17 @@ export class KieImageAdapter implements ImageAdapter {
       // возвращает chat-style ответ ассистента ("Вот несколько вариантов на
       // английском..."). Легитимные upstream-ошибки KIE всегда на английском,
       // поэтому кириллица в failMsg = модель ушла в clarification-режим.
-      const hasCyrillic = /[Ѐ-ӿ]/.test(failMsg);
+      const hasCyrillic = /[Ѐ-ӿ]/.test(rawFailMsg);
       const isNoResult =
         /could not generate (an? )?(image|video|result)|failed to generate|no image (was )?generated|unable to generate/i.test(
-          failMsg,
+          rawFailMsg,
         ) || hasCyrillic;
+      // identityPreservation проверяем РАНЬШЕ noResult: если OpenAI ответит
+      // "could not generate ... due to identity preservation" — оба триггера
+      // сработают, но конкретная подсказка про face reference полезнее
+      // generic "переформулируйте промпт".
+      if (isIdentityPreservation)
+        throw new UserFacingError(technicalMessage, { key: "identityPreservationNotAllowed" });
       if (isNoResult) {
         throw new UserFacingError(technicalMessage, { key: "generationNoResult" });
       }
@@ -305,8 +360,26 @@ export class KieImageAdapter implements ImageAdapter {
         throw new UserFacingError(technicalMessage, { key: "publicFigureViolation" });
       if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
       if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
+      // Midjourney syntax detector: KIE при 400 от провайдера часто эхает
+      // обратно сам промпт юзера в `failMsg`. Если в нём видны характерные
+      // Midjourney-маркеры (`/imagine prompt:`, флаги `--ar`/`--stylize`/
+      // `--niji`/`--seed`/`--chaos`/`--quality`/`--v` и т.п.) — юзер скопировал
+      // промпт из MJ-туториала, а отправил в gpt-image-2/nano-banana/grok-imagine
+      // которые такой синтаксис не понимают. Бросаем user-facing подсказку без
+      // notifyOps (это user-fault, не наша инфра). Иначе ошибка падала в
+      // classifier-фолбек, юзер получал generic «модель устала».
+      const isMidjourneySyntax =
+        /\/imagine\s+prompt:|--(ar|stylize|niji|seed|chaos|quality|weird|tile|repeat|style|sref|cref|v)\b/i.test(
+          rawFailMsg,
+        );
+      if (isMidjourneySyntax) {
+        throw new UserFacingError(technicalMessage, {
+          key: "midjourneySyntaxNotSupported",
+          params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+        });
+      }
 
-      const classified = await classifyAIError(`${failCode ?? ""} ${failMsg}`.trim());
+      const classified = await classifyAIError(`${failCode ?? ""} ${sanitizedFailMsg}`.trim());
       if (classified?.shouldShow) {
         throw new UserFacingError(technicalMessage, {
           key: "aiClassifiedError",

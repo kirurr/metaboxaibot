@@ -55,24 +55,6 @@ import {
 export { ContextOverflowError } from "../ai/llm/truncate.js";
 
 /**
- * Минимальный `max_tokens` для каждого уровня `reasoning_effort` на gpt-5/
- * o-series. Меньше — заведомо пустой ответ: reasoning не уложится в общий
- * `max_output_tokens` (Responses API считает reasoning + visible вместе).
- *
- * Числа лояльные: блокируем только явно несовместимые комбо (high+маленький
- * лимит). На промежуточных значениях даём шанс — если всё-таки не уложится,
- * runtime-guard в конце потока поймает с тем же сообщением.
- */
-const REASONING_MIN_MAX_TOKENS: Record<string, number> = {
-  none: 0,
-  minimal: 0,
-  low: 0,
-  medium: 0,
-  high: 768,
-  xhigh: 1536,
-};
-
-/**
  * Per-request memoiser for `extractTextFromS3Cached` calls. Eliminates the
  * N+1 pattern when the same s3Key appears in multiple history messages
  * (e.g. a CSV re-attached every turn). Lives only for the duration of one
@@ -238,23 +220,6 @@ export const chatService = {
       if (def !== undefined) ms.reasoning_effort = def;
     }
 
-    // Pre-валидация: для reasoning-моделей `max_output_tokens` в Responses API
-    // считает reasoning + visible вместе. Если юзер выбрал тесные настройки
-    // (high effort + маленький max_tokens), reasoning гарантированно съест весь
-    // бюджет → пустой ответ. Лучше отклонить запрос ДО списания токенов и до
-    // вызова OpenAI с понятной подсказкой что поправить.
-    if (
-      typeof ms.reasoning_effort === "string" &&
-      typeof ms.max_tokens === "number" &&
-      ms.max_tokens < REASONING_MIN_MAX_TOKENS[ms.reasoning_effort]
-    ) {
-      throw new UserFacingError("Reasoning effort incompatible with max_tokens", {
-        key: "modelReasoningCapExhausted",
-        section: "gpt",
-        params: { modelName: model?.name ?? dialog.modelId },
-      });
-    }
-
     const extractCache: ExtractCache = new Map();
 
     // Check balance > 0 cause we dont know how much outputTokens will be generated
@@ -315,6 +280,7 @@ export const chatService = {
         ? { enableThinking: ms.enable_thinking as boolean }
         : {}),
       ...(ms.thinking_budget !== undefined ? { thinkingBudget: ms.thinking_budget as number } : {}),
+      ...(ms.show_reasoning !== undefined ? { showReasoning: ms.show_reasoning as boolean } : {}),
       ...(ms.seed != null ? { seed: ms.seed as number } : {}),
       ...(ms.context_window != null ? { contextWindowOverride: ms.context_window as number } : {}),
     };
@@ -802,9 +768,19 @@ export const chatService = {
       //  - всё остальное (network drop / silent end_turn / unknown) — generic
       //    «временно недоступен», алёртим — причина непрозрачна.
       const isContentFilter = incompleteReason === "content_filter";
+      // Подсказка для `max_output_tokens` зависит от провайдера: у OpenAI
+      // reasoning-моделей единственный рычаг — снизить `reasoning_effort`
+      // (слайдер max_tokens мы убрали — на reasoning он только мешал). У
+      // Claude можно либо отключить extended_thinking, либо поднять
+      // max_tokens-слайдер. Дефолт на Anthropic-вариант — он более общий
+      // и сработает в случае незнакомого провайдера.
+      const isOpenai = model?.provider === "openai";
+      const reasoningKey = isOpenai
+        ? "modelReasoningCapExhaustedOpenai"
+        : "modelReasoningCapExhaustedAnthropic";
       const messageKey =
         incompleteReason === "max_output_tokens"
-          ? "modelReasoningCapExhausted"
+          ? reasoningKey
           : isContentFilter
             ? "contentPolicyViolation"
             : "modelTemporarilyUnavailable";

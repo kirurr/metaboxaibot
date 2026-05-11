@@ -39,6 +39,13 @@ interface MediaGroupEntry {
 }
 const mediaGroupBuffer = new Map<string, MediaGroupEntry>();
 
+/**
+ * Dedup для предупреждения «модель не поддерживает фото» при альбоме: Telegram
+ * шлёт по одному update на фото, без дедупа юзер получил бы N одинаковых
+ * предупреждений. Хранится 10 секунд, потом сам очищается.
+ */
+const noImageWarningBuffer = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
+
 /** Separate buffer for document media groups — Telegram disallows mixing docs & photos. */
 interface DocumentGroupEntry {
   dialogId: string;
@@ -129,6 +136,126 @@ function stripThinkingBlocks(text: string): string {
   const openIdx = result.indexOf("<think>");
   if (openIdx !== -1) result = result.slice(0, openIdx);
   return result.trim();
+}
+
+/** Telegram HTML — escape only the four chars that break parser inside text nodes. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Extract content of every closed <think>...</think> block, in order. */
+function extractThinkingBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const re = /<think>([\s\S]*?)<\/think>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const body = m[1]?.trim();
+    if (body) blocks.push(body);
+  }
+  return blocks;
+}
+
+/**
+ * Размер чанка reasoning-сообщения. Telegram-лимит 4096 на сообщение, и
+ * HTML-escape `<` → `&lt;`, `&` → `&amp;` инфлирует длину до ~4× в худшем
+ * случае (когда reasoning содержит код/JSON с обилием спецсимволов).
+ * 3000 даёт ~1000 chars запаса под escape + заголовок + `<blockquote>` теги.
+ * При обычном prose-reasoning escape добавляет <5%, лимит почти никогда
+ * не достигается — это safety margin от MESSAGE_TOO_LONG, не таргет.
+ */
+const REASONING_CHUNK_MAX = 3000;
+
+/** Split reasoning text into chunks ≤ max, preferring newline boundaries. */
+function splitReasoning(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const parts: string[] = [];
+  let remaining = text;
+  while (remaining.length > max) {
+    const newlineIdx = remaining.lastIndexOf("\n", max);
+    const splitAt = newlineIdx > max / 2 ? newlineIdx + 1 : max;
+    parts.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+  if (remaining) parts.push(remaining);
+  return parts;
+}
+
+/** Максимум попыток на одно reasoning-сообщение перед тем как сдаться и идти
+ *  к следующей части. На 429 ждём ровно `retry_after` от Telegram и пробуем
+ *  снова; не-429 ошибки (parse, network) не ретраим — повтор не поможет. */
+const REASONING_SEND_MAX_ATTEMPTS = 3;
+
+/**
+ * Шлёт reasoning-блоки модели юзеру отдельными сообщениями с
+ * `<blockquote expandable>` (по умолчанию свёрнуты). Несколько <think>
+ * блоков в стриме объединяются переводом строки, режутся на ≤3000 симв.
+ * чанки и каждый идёт отдельным сообщением — Telegram-лимит 4096 на сообщение
+ * не позволяет ужать длинный reasoning в одно.
+ *
+ * Rate-limit: на 429 ждём ровно `retry_after` и пробуем до 3 раз. Между
+ * чанками помним cooldown через `blockedUntil` — если Telegram попросил
+ * подождать на части N, то перед отправкой части N+1 ждём остаток интервала
+ * сразу (а не идём к новому 429). Видимый ответ к этому моменту уже в чате
+ * (reasoning шлётся ПОСЛЕ finalizeMessage), так что задержка не ломает UX.
+ */
+async function sendReasoningMessages(
+  ctx: BotContext,
+  chatId: number,
+  rawAccumulated: string,
+): Promise<void> {
+  const blocks = extractThinkingBlocks(rawAccumulated);
+  if (blocks.length === 0) return;
+  const merged = blocks.join("\n\n");
+  const parts = splitReasoning(merged, REASONING_CHUNK_MAX);
+
+  // Closure-scoped: cooldown переносится между чанками внутри одного вызова,
+  // но не между разными юзерами (sendReasoningMessages вызывается per-request).
+  let blockedUntil = 0;
+
+  const sendOne = async (body: string): Promise<void> => {
+    for (let attempt = 1; attempt <= REASONING_SEND_MAX_ATTEMPTS; attempt++) {
+      const waitMs = blockedUntil - Date.now();
+      if (waitMs > 0) await sleep(waitMs);
+      try {
+        await ctx.api.sendMessage(chatId, body, { parse_mode: "HTML" });
+        return;
+      } catch (err) {
+        const retryMs = parseRetryAfterMs(err);
+        if (retryMs === null) {
+          // Не-429 ошибка (parse error, network drop) — повтор не поможет,
+          // выходим сразу.
+          logger.warn(err, "GPT reasoning: send failed");
+          return;
+        }
+        // Запоминаем cooldown — следующая итерация (этого же чанка либо
+        // следующего) подождёт нужное время через pre-wait check.
+        blockedUntil = Date.now() + retryMs + 100;
+        if (attempt === REASONING_SEND_MAX_ATTEMPTS) {
+          logger.warn(
+            { retryMs, attempts: attempt },
+            "GPT reasoning: send still 429 after max attempts",
+          );
+        }
+      }
+    }
+  };
+
+  for (let i = 0; i < parts.length; i++) {
+    const header =
+      parts.length > 1
+        ? `${ctx.t.gpt.reasoningHeader} (${ctx.t.gpt.reasoningPartLabel
+            .replace("{index}", String(i + 1))
+            .replace("{total}", String(parts.length))})`
+        : ctx.t.gpt.reasoningHeader;
+    const body = `<b>${escapeHtml(header)}</b>\n<blockquote expandable>${escapeHtml(
+      parts[i]!,
+    )}</blockquote>`;
+    await sendOne(body);
+  }
 }
 
 // ── Shared streaming helper ───────────────────────────────────────────────────
@@ -370,6 +497,10 @@ async function streamGptResponse(
     } else {
       await ctx.api.deleteMessage(chatId, placeholder.message_id).catch(() => void 0);
     }
+    // Reasoning-сообщения шлём ПОСЛЕ финализации основного ответа. Если юзер
+    // выключил тогл show_reasoning — адаптеры не yield'ят `<think>` маркеров,
+    // extractThinkingBlocks вернёт [] и эта функция тихо ничего не пошлёт.
+    await sendReasoningMessages(ctx, chatId, accumulated);
   } catch (err: unknown) {
     logger.error(err, "GPT message error");
     await ctx.api.deleteMessage(chatId, placeholder.message_id).catch(() => void 0);
@@ -511,6 +642,45 @@ export async function handleGptPhoto(ctx: BotContext): Promise<void> {
 
   const chatId = ctx.chat?.id;
   if (!chatId) return;
+
+  // Активная модель диалога без vision-режима (o3-mini, deepseek и т.п.) —
+  // не имеет смысла гнать фото в провайдера: OpenAI/Anthropic вернут 400
+  // («model does not support image inputs»), юзер получит generic ошибку и
+  // мы зря потратим попытку. Зеркало design.ts:643.
+  const dialog = await dialogService.findById(gptDialogId);
+  const model = dialog ? AI_MODELS[dialog.modelId] : undefined;
+  if (model && !model.supportsImages) {
+    const mediaGroupId = ctx.message?.media_group_id;
+    // Альбом: один update на фото, дедупим предупреждение через буфер.
+    if (mediaGroupId) {
+      const key = `${ctx.user.id}__${mediaGroupId}`;
+      if (noImageWarningBuffer.has(key)) {
+        // Caption обрабатываем только на первом фото — игнорируем последующие.
+        return;
+      }
+      noImageWarningBuffer.set(key, {
+        timer: setTimeout(() => noImageWarningBuffer.delete(key), 10_000),
+      });
+    }
+    await ctx.reply(
+      ctx.t.errors.modelDoesNotSupportImages.replace("{modelName}", model.name ?? dialog!.modelId),
+    );
+    // Caption — это полноценный пользовательский промпт; прогоняем как обычный текст.
+    const captionText = ctx.message?.caption?.trim();
+    if (captionText) {
+      await streamGptResponse(
+        ctx,
+        chatId,
+        gptDialogId,
+        captionText,
+        undefined,
+        undefined,
+        undefined,
+        ctx.message?.message_id,
+      );
+    }
+    return;
+  }
 
   // Resolve file ID — photo (compressed) or document (original file)
   let fileId: string;
