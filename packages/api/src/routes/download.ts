@@ -1,45 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { verifyDownloadToken } from "../utils/download-token.js";
 import { getFileUrl } from "../services/s3.service.js";
-import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 export async function downloadRoutes(fastify: FastifyInstance) {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["download"]),
-  );
-
   // Use wildcard to avoid dot-in-param routing issues (token contains "payload.hmac")
   fastify.get<{ Params: { "*": string } }>(
     "/download/*",
-    {
-      schema: {
-        description: "Download file via signed token",
-        params: {
-          type: "object",
-          properties: {
-            "*": { type: "string", description: "Signed download token" },
-          },
-          required: ["*"],
-        },
-        response: {
-          302: {
-            description: "Redirect to presigned S3 URL",
-          },
-          400: {
-            type: "object",
-            properties: {
-              error: { type: "string", description: "Invalid or expired token" },
-            },
-          },
-          404: {
-            type: "object",
-            properties: {
-              error: { type: "string", description: "File not found or S3 not configured" },
-            },
-          },
-        },
-      },
-    },
+    { schema: { hide: true } },
     async (request, reply) => {
       const token = request.params["*"];
 
