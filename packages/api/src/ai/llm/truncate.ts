@@ -23,7 +23,13 @@ export class ContextOverflowError extends Error {
 }
 
 function reservedOutput(input: LLMInput, contextWindow: number): number {
-  if (input.maxTokens && input.maxTokens > 0) return input.maxTokens;
+  // Резерв под output применяется только когда юзер ЯВНО включил тогл
+  // «Ограничить длину ответа». Иначе резервируем дефолтные 10% окна (не
+  // больше 4096) — иначе на default=max выходные у длинных диалогов
+  // история отрезалась бы агрессивно ещё до отправки.
+  if (input.maxTokensLimitEnabled === true && input.maxTokens && input.maxTokens > 0) {
+    return input.maxTokens;
+  }
   return Math.min(4096, Math.floor(contextWindow * 0.1));
 }
 

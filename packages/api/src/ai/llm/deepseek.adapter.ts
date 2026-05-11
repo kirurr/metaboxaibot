@@ -73,7 +73,9 @@ export class DeepSeekAdapter extends BaseLLMAdapter {
       stream: true,
       stream_options: { include_usage: true },
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-      ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}),
+      ...(input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? { max_tokens: input.maxTokens }
+        : {}),
     });
 
     let inputTokensUsed = 0;

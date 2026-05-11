@@ -6,7 +6,7 @@ import {
   type MessageRecord,
   type StreamResult,
 } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { AI_MODELS, config } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 
 const MODEL_MAP: Record<string, string> = {
@@ -62,10 +62,20 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       messages_count: messages.length,
       extended_thinking: input.extendedThinking,
     });
-    // Extended thinking requires a higher max_tokens budget (must exceed budget_tokens).
-    const maxTokens = input.extendedThinking
-      ? Math.max(input.maxTokens ?? 16000, 16000)
-      : (input.maxTokens ?? 4096);
+    // Anthropic Messages API требует `max_tokens` всегда. Если юзер не включил
+    // тогл «Ограничить длину ответа» — подставляем безопасный потолок
+    // `min(16K, contextWindow * 0.2)`. См. claude-anthropic-proxy.adapter для
+    // полного обоснования. При включённом тогле — ровно его значение.
+    const userContextWindow =
+      input.contextWindowOverride && input.contextWindowOverride > 0
+        ? input.contextWindowOverride
+        : (AI_MODELS[this.modelId]?.contextWindow ?? 200_000);
+    const ANTHROPIC_OFF_DEFAULT = Math.min(16_384, Math.floor(userContextWindow * 0.2));
+    const modelCap = AI_MODELS[this.modelId]?.maxOutputTokens ?? 64_000;
+    const maxTokens =
+      input.maxTokensLimitEnabled === true && input.maxTokens !== undefined
+        ? input.maxTokens
+        : Math.min(modelCap, ANTHROPIC_OFF_DEFAULT);
     const stream = (
       this.client.messages.stream as (p: unknown) => ReturnType<typeof this.client.messages.stream>
     )({
@@ -82,55 +92,66 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     let inputTokens = 0;
     let outputTokens = 0;
     let incompleteReason: string | undefined;
-    // Состояние <think>...</think> обёртки. Открываем на первом thinking_delta,
-    // закрываем на первом text_delta или в конце стрима. extended_thinking —
-    // отдельный opt-in флаг; thinking_delta события приходят только когда он on.
-    let inThinkBlock = false;
-    const closeThink = function* (): Generator<string> {
-      if (inThinkBlock) {
-        yield "</think>";
-        inThinkBlock = false;
-      }
-    };
+    let lastStopReason: string | undefined;
+    let visibleChunks = 0;
+    // Reasoning буферизуется и yield'ится только перед первым text_delta
+    // (если showReasoning=true) ИЛИ перед return при non-refusal stop_reason
+    // с visibleChunks=0 (всегда, чтобы юзер понял что произошло). Симметрично
+    // claude-anthropic-proxy.adapter — гарантирует что mid-stream обрыв на
+    // reasoning ОСТАВЛЯЕТ `chunks.length === 0` в chat.service и retry/fallback
+    // реально срабатывает.
+    let thinkingBuffer = "";
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        yield* closeThink();
+        if (thinkingBuffer.length > 0) {
+          if (input.showReasoning) {
+            yield "<think>";
+            yield thinkingBuffer;
+            yield "</think>";
+          }
+          thinkingBuffer = "";
+        }
+        visibleChunks++;
         yield event.delta.text;
       } else if (
-        input.showReasoning &&
         event.type === "content_block_delta" &&
         (event.delta as { type?: string; thinking?: string }).type === "thinking_delta"
       ) {
         const text = (event.delta as { thinking?: string }).thinking ?? "";
-        if (!text) continue;
-        if (!inThinkBlock) {
-          inThinkBlock = true;
-          yield "<think>";
-        }
-        yield text;
+        if (text) thinkingBuffer += text;
       } else if (event.type === "message_start") {
         inputTokens = event.message.usage.input_tokens;
       } else if (event.type === "message_delta") {
         outputTokens = event.usage.output_tokens;
+        const stopReason = event.delta.stop_reason;
+        if (typeof stopReason === "string") lastStopReason = stopReason;
         // stop_reason → incompleteReason: позволяет chat.service отличить
-        // legit empty-response (max_tokens) от generic provider error. Без
-        // этого юзер при reasoning-cap получает «временно недоступен» вместо
-        // адресного «снизьте Глубину рассуждений / поднимите Макс. длину».
-        // SDK 0.39 знает только 4 stop_reason'а; «refusal» добавили в более
-        // новых API-версиях — пока не покрываем (см. proxy-адаптер для него).
-        if (event.delta.stop_reason === "max_tokens") {
+        // legit empty-response (max_tokens) от generic provider error.
+        if (stopReason === "max_tokens") {
           incompleteReason = "max_output_tokens";
         }
       }
     }
 
-    yield* closeThink();
+    // Финальный flush буфера: при любом non-refusal завершении с visible=0 —
+    // показываем thinking, иначе chat.service увидит пустой ответ.
+    if (
+      visibleChunks === 0 &&
+      thinkingBuffer.length > 0 &&
+      lastStopReason !== undefined &&
+      lastStopReason !== "refusal"
+    ) {
+      yield "<think>";
+      yield thinkingBuffer;
+      yield "</think>";
+    }
 
     return {
       inputTokensUsed: inputTokens,
       outputTokensUsed: outputTokens,
       ...(incompleteReason ? { incompleteReason } : {}),
+      ...(lastStopReason ? { lastStopReason } : {}),
     };
   }
 

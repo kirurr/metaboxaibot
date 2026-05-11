@@ -48,6 +48,18 @@ export interface LLMInput {
   temperature?: number;
   /** Max output tokens. Provider default when omitted. */
   maxTokens?: number;
+  /**
+   * Жёсткое opt-in для `maxTokens`. Когда `false`/undefined — адаптеры
+   * игнорируют `maxTokens` целиком (для провайдеров с обязательным полем —
+   * Anthropic — подставляют `AI_MODELS[id].maxOutputTokens` как «без
+   * ограничения»). Когда `true` — `maxTokens` идёт в провайдер as-is.
+   *
+   * Введено чтобы легаси-значения в `user_state.modelSettings.*.max_tokens`
+   * молча игнорировались: исторически они попадали в провайдер и приводили
+   * к пустым ответам на reasoning-моделях (см. fix 3066172). Источник — UI
+   * тогл «Ограничить длину ответа», default OFF.
+   */
+  maxTokensLimitEnabled?: boolean;
   /** Perplexity: restrict search results to a time window (month/week/day/hour). */
   searchRecencyFilter?: string;
   /** Perplexity: depth of web search context (low/medium/high). */
@@ -120,6 +132,14 @@ export interface StreamResult {
    * OpenAI Responses API: `'max_output_tokens' | 'content_filter'`.
    */
   incompleteReason?: string;
+  /**
+   * Raw provider-level stop reason. Сохраняем сырое значение даже когда
+   * `incompleteReason` остался undefined — chat.service использует его для
+   * различения «модель завершила нормально с пустым ответом» (`end_turn`,
+   * `stop_sequence`, `tool_use`) от инфраструктурных сбоев. Anthropic:
+   * `end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal`.
+   */
+  lastStopReason?: string;
 }
 
 export interface LLMAdapter {
