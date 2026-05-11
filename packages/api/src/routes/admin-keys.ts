@@ -41,7 +41,6 @@ type KeyCreateBody = {
   notes?: string;
 };
 
-
 const VALID_PROTOCOLS = new Set(["http", "https", "socks5"]);
 
 function serializeProxy(p: {
