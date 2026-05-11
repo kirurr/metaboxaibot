@@ -464,7 +464,7 @@ export const SETTING_TRANSLATIONS_EN: Record<string, SettingTranslation> = {
   extended_thinking: {
     label: "Extended thinking",
     description:
-      "Model thinks longer before responding — more accurate for complex tasks but slower. When enabled, the max response length setting is ignored — responses can reach ~16 000 tokens.",
+      "Model thinks longer before responding — more accurate for complex tasks but slower.",
   },
   enable_thinking: {
     label: "Thinking mode",

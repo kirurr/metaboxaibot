@@ -342,7 +342,7 @@ export default {
     modelReasoningCapExhaustedOpenai:
       "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and lower «Reasoning depth».",
     modelReasoningCapExhaustedAnthropic:
-      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management, pick the model and disable «Extended thinking» or raise «Max response length».",
+      "🧠 {modelName} got so deep in thought that there's no room left for an answer. Open ⚙ Management and turn off «Extended thinking» — or try shortening the prompt.",
     outputLimitReached:
       "✂️ {modelName} hit your set limit of {limit} tokens. Open ⚙ Management → model and disable «Limit response length» or raise the slider. Tokens for this request were not charged.",
     outputLimitOnlyThinking:

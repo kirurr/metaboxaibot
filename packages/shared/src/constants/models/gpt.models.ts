@@ -239,8 +239,7 @@ const VERBOSITY_SETTING: ModelSettingDef = {
 const EXTENDED_THINKING: ModelSettingDef = {
   key: "extended_thinking",
   label: "Расширенное мышление",
-  description:
-    "Модель думает дольше перед ответом — точнее для сложных задач, но медленнее. При включении настройка «Макс. длина ответа» игнорируется: ответ может занять до ~16 000 токенов.",
+  description: "Модель думает дольше перед ответом — точнее для сложных задач, но медленнее.",
   type: "toggle",
   default: false,
 };
@@ -1143,13 +1142,21 @@ for (const [id, model] of Object.entries(GPT_MODELS)) {
 // не передаёт `max_tokens` провайдеру (для Anthropic — подставляет потолок
 // модели, т.к. поле обязательное). Размещён перед context_window — оба
 // относятся к управлению объёмом запроса/ответа, идут вместе в конце листа.
-for (const model of Object.values(GPT_MODELS)) {
-  if (!model.maxOutputTokens) continue;
-  if (!model.settings) model.settings = [];
-  model.settings.push(
-    ...buildOutputLimitSettings(model.maxOutputTokens, model.supportsThinking === true),
-  );
-}
+//
+// ВРЕМЕННО СКРЫТО: настройка пока не выводится в UI — решили вернуть всем
+// юзерам чистый «безлимит» до уточнения UX. Адаптеры остаются opt-in (тогл
+// нигде не сохранён → cap не передаётся; Anthropic подставляет свой ctx-aware
+// default). Чтобы вернуть в UI: раскомментировать append-loop ниже.
+// Сохранённый код и i18n-ключи (`outputLimit*`, `modelOnlyThinking`) лежат как
+// готовая инфраструктура — никаких миграций при возврате не понадобится.
+// for (const model of Object.values(GPT_MODELS)) {
+//   if (!model.maxOutputTokens) continue;
+//   if (!model.settings) model.settings = [];
+//   model.settings.push(
+//     ...buildOutputLimitSettings(model.maxOutputTokens, model.supportsThinking === true),
+//   );
+// }
+void buildOutputLimitSettings; // keep helper referenced — иначе unused-import.
 
 // ── Append context window slider to every text model ────────────────────────
 // Slider is rendered last so it appears at the bottom of the settings sheet.
