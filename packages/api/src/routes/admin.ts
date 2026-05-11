@@ -82,6 +82,10 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
             },
             required: ["users", "total", "page", "limit"],
           },
+          403: {
+            type: "object",
+            properties: { error: { type: "string", description: "Forbidden - admin access required" } },
+          },
         },
       },
     },
