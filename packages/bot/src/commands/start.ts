@@ -47,6 +47,67 @@ async function syncMetaboxGrants(userId: bigint): Promise<void> {
 }
 
 /**
+ * Отправляет «полный пакет» приветственных сообщений (welcome с дисклеймером
+ * и picker'ом языка → tokensGranted/balance → onboarding/main-menu) в указанном
+ * языке. Используется в /start и при смене языка через picker — чтобы юзер
+ * получил тот же набор сообщений на новом языке без редактирования старых
+ * (они остаются в истории как есть).
+ */
+async function sendStartMessages(
+  ctx: BotContext,
+  lang: Language,
+  opts: { isNew: boolean; tokenBalance: number },
+): Promise<void> {
+  const t = getT(lang);
+
+  // Welcome — для RU юзеров шлём bilingual (RU + EN), для остальных только
+  // в целевом языке. {landingUrl} встречается многократно (ссылка на каждый
+  // юр. документ) — replaceAll обязателен.
+  const landingUrl = config.metabox.landingUrl;
+  let welcome: string;
+  if (lang === "ru") {
+    const divider = "________________________";
+    const ruWelcome = getT("ru").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    const enWelcome = getT("en").start.welcome.replaceAll("{landingUrl}", landingUrl);
+    welcome = `${ruWelcome}\n\n${divider}\n\n${enWelcome}`;
+  } else {
+    welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
+  }
+  await ctx.reply(welcome, {
+    reply_markup: buildLanguageKeyboard("langset_"),
+    parse_mode: "HTML",
+  });
+
+  // Inline-кнопка профиля в мини-аппе (если webappUrl настроен).
+  const webappUrl = config.bot.webappUrl;
+  const profileKb = webappUrl
+    ? new InlineKeyboard().webApp(t.menu.profile, `${webappUrl}?page=profile`)
+    : undefined;
+
+  if (opts.isNew) {
+    await ctx.reply(t.start.tokensGranted, profileKb ? { reply_markup: profileKb } : undefined);
+  } else {
+    const balance = opts.tokenBalance.toFixed(2);
+    const balanceText = t.start.yourBalance.replace("{balance}", balance);
+    await ctx.reply(balanceText, profileKb ? { reply_markup: profileKb } : undefined);
+  }
+
+  if (opts.isNew) {
+    const onboardingKb = new InlineKeyboard().text(t.start.onboardingGotIt, "onboarding_ok");
+    await ctx.reply(t.start.onboarding, {
+      parse_mode: "HTML",
+      reply_markup: onboardingKb,
+    });
+  } else {
+    // Возвращающимся юзерам сразу персистентная reply-клавиатура — со свежими
+    // wtoken'ами в webApp-кнопках, протухшие URL'ы заменяются.
+    await ctx.reply(t.start.mainMenuTitle, {
+      reply_markup: buildMainMenuKeyboard(t, ctx.user!.id),
+    });
+  }
+}
+
+/**
  * /start — handles deep link params, resets FSM state, shows language selection.
  *
  * Supported deep link params:
@@ -399,58 +460,10 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     await userService.creditWelcomeBonus(ctx.user.id);
   }
 
-  // Welcome-сообщение (с дисклеймером и ссылками на документы) идёт отдельным
-  // сообщением, без кнопок — чтобы при смене языка не удалялся весь текст с
-  // юр. ссылками (handleLanguageChangeSelect делает deleteMessage на сообщении
-  // с picker'ом). Для RU-пользователей шлём bilingual (RU + EN) — аудитория
-  // двуязычная, приветствие показываем на двух языках. Для всех остальных
-  // (включая en и неподдерживаемые → fallback "en") — только в целевом языке.
-  // Шаблон welcome содержит {landingUrl} многократно (по ссылке на каждый
-  // документ) — нужен replaceAll, иначе остаются битые href.
-  const landingUrl = config.metabox.landingUrl;
-  let welcome: string;
-  if (inferredLang === "ru") {
-    // Разделитель из подчёркиваний — Telegram не поддерживает <hr>/markdown HR,
-    // визуальная черта только символами.
-    const divider = "________________________";
-    const ruWelcome = getT("ru").start.welcome.replaceAll("{landingUrl}", landingUrl);
-    const enWelcome = getT("en").start.welcome.replaceAll("{landingUrl}", landingUrl);
-    welcome = `${ruWelcome}\n\n${divider}\n\n${enWelcome}`;
-  } else {
-    welcome = t.start.welcome.replaceAll("{landingUrl}", landingUrl);
-  }
-  await ctx.reply(welcome, { reply_markup: buildLanguageKeyboard("langset_"), parse_mode: "HTML" });
-
-  // Inline button to open Profile in mini app
-  const webappUrl = config.bot.webappUrl;
-  const profileKb = webappUrl
-    ? new InlineKeyboard().webApp(t.menu.profile, `${webappUrl}?page=profile`)
-    : undefined;
-
-  // New users: show tokens credited; returning users: show current balance
-  if (isNew) {
-    await ctx.reply(t.start.tokensGranted, profileKb ? { reply_markup: profileKb } : undefined);
-  } else {
-    const balance = (updatedUser.tokenBalance as number).toFixed(2);
-    const balanceText = t.start.yourBalance.replace("{balance}", balance);
-    await ctx.reply(balanceText, profileKb ? { reply_markup: profileKb } : undefined);
-  }
-
-  if (isNew) {
-    // Onboarding message with "Got it" button — main menu opens after
-    const onboardingKb = new InlineKeyboard().text(t.start.onboardingGotIt, "onboarding_ok");
-    await ctx.reply(t.start.onboarding, {
-      parse_mode: "HTML",
-      reply_markup: onboardingKb,
-    });
-  } else {
-    // Returning users get the main menu immediately. buildMainMenuKeyboard
-    // ставит persistent reply-keyboard со свежими wtoken'ами — старые
-    // протухшие webApp-URL'ы заменяются.
-    await ctx.reply(t.start.mainMenuTitle, {
-      reply_markup: buildMainMenuKeyboard(t, ctx.user.id),
-    });
-  }
+  await sendStartMessages(ctx, inferredLang, {
+    isNew,
+    tokenBalance: updatedUser.tokenBalance as number,
+  });
 
   // Set per-chat bot commands in user's language
   if (ctx.chat?.id) {
@@ -514,13 +527,27 @@ export async function handleLanguageChangeSelect(ctx: BotContext): Promise<void>
     return;
   }
 
+  // Short-circuit на повторный клик по той же кнопке: язык фактически не
+  // изменился — переотправлять welcome/balance/menu не нужно, иначе будем
+  // спамить пакетом /start-сообщений на каждый идентичный клик в picker'е.
+  if (ctx.user.language === lang) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
   await ctx.answerCallbackQuery();
 
   const updatedUser = await userService.setLanguage(ctx.user.id, lang);
   const t = getT(lang);
 
-  await ctx.reply(t.menu.languageChanged, {
-    reply_markup: buildMainMenuKeyboard(t, ctx.user.id),
+  // Перевыкатываем тот же набор сообщений, что и /start, в новом языке —
+  // старые сообщения остаются в чате нетронутыми (вариант 3 из обсуждения:
+  // не пытаемся редактировать/удалять, чтобы не зависеть от 48ч-окна и
+  // edge-cases с уже нажатыми inline-кнопками). Welcome здесь служит
+  // имплицитным подтверждением «язык переключился».
+  await sendStartMessages(ctx, lang, {
+    isNew: updatedUser.isNew,
+    tokenBalance: updatedUser.tokenBalance as number,
   });
 
   if (ctx.chat?.id) {

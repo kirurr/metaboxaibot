@@ -382,9 +382,11 @@ textarea::placeholder {
   padding: 0 24px;
   margin-top: 4px;
 }
-.splash__cta {
-  /* override .btn { flex: 1 } — без этого в splash (flex-column на 100dvh)
-     кнопка раздувается на всю свободную высоту и превращается в гигантский pill. */
+/* `.btn { flex: 1 }` объявлен ниже в файле и при равной специфичности
+   побеждает по cascade-order — кнопка в splash (flex-column на 100dvh)
+   раздувалась на всю свободную высоту. Поднимаем специфичность через
+   .btn.splash__cta, чтобы override сработал независимо от порядка. */
+.btn.splash__cta {
   flex: 0 0 auto;
   width: auto;
   min-width: 200px;
