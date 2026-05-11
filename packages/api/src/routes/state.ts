@@ -21,6 +21,7 @@ import {
 import type { Language } from "@metabox/shared";
 import { getRedis } from "../redis.js";
 import { logger } from "../logger.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -517,9 +518,37 @@ async function sendModelActivatedNotification(
 
 export const stateRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["state"]),
+  );
 
   /** GET /state — current bot state with per-section active dialogs */
-  fastify.get("/state", async (request) => {
+  fastify.get(
+    "/state",
+    {
+      schema: {
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              state: { type: "string", description: "Current FSM state (e.g., IDLE, GPT_ACTIVE)" },
+              section: { type: "string", nullable: true, description: "Active section (gpt, design, audio, video)" },
+              gptModelId: { type: "string", nullable: true, description: "Selected GPT model ID" },
+              gptDialogId: { type: "string", nullable: true, description: "Active GPT dialog ID" },
+              designDialogId: { type: "string", nullable: true, description: "Active design dialog ID" },
+              audioDialogId: { type: "string", nullable: true, description: "Active audio dialog ID" },
+              videoDialogId: { type: "string", nullable: true, description: "Active video dialog ID" },
+              designModelId: { type: "string", nullable: true, description: "Selected design model ID" },
+              audioModelId: { type: "string", nullable: true, description: "Selected audio model ID" },
+              videoModelId: { type: "string", nullable: true, description: "Selected video model ID" },
+              selectedModes: { type: "object", description: "Selected mode per model" },
+            },
+            required: ["state", "section", "gptModelId", "gptDialogId", "designDialogId", "audioDialogId", "videoDialogId", "designModelId", "audioModelId", "videoModelId", "selectedModes"],
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const state = await userStateService.get(userId);
     const selectedModes = await userStateService.getSelectedModes(userId);
@@ -542,7 +571,30 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
   /** POST /state/selected-mode — persist user's chosen mode for a model */
   fastify.post<{
     Body: { modelId: string; modeId: string };
-  }>("/state/selected-mode", async (request) => {
+  }>(
+    "/state/selected-mode",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            modelId: { type: "string", description: "Model identifier" },
+            modeId: { type: "string", description: "Mode identifier to persist" },
+          },
+          required: ["modelId", "modeId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean", description: "Whether mode was saved" },
+            },
+            required: ["success"],
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const { modelId, modeId } = request.body;
     const model = AI_MODELS[modelId];
@@ -561,7 +613,31 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       dialogId?: string | null;
       sectionModelId?: string;
     };
-  }>("/state", async (request) => {
+  }>(
+    "/state",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            gptModelId: { type: "string", description: "GPT model ID to set" },
+            section: { type: "string", enum: ["gpt", "design", "audio", "video"], description: "Section for dialog/model update" },
+            dialogId: { type: "string", nullable: true, description: "Dialog ID to set for section" },
+            sectionModelId: { type: "string", description: "Model ID to set for section" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+            required: ["success"],
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const { gptModelId, section, dialogId, sectionModelId } = request.body;
 
@@ -585,7 +661,30 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
   /** POST /state/activate — set model for section and send Telegram notification */
   fastify.post<{
     Body: { section: string; modelId: string };
-  }>("/state/activate", async (request) => {
+  }>(
+    "/state/activate",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            section: { type: "string", enum: ["gpt", "design", "audio", "video"], description: "Section to activate" },
+            modelId: { type: "string", description: "Model ID to activate" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+            },
+            required: ["success"],
+          },
+        },
+      },
+    },
+    async (request) => {
     const { userId } = request as AuthRequest;
     const { section, modelId } = request.body;
 
