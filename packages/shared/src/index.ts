@@ -57,6 +57,8 @@ export {
   resolveUserFacingError,
   ProviderInputIncompatibleError,
 } from "./errors.js";
+export { GENERATION_ERROR_CODES, classifyUserFacingError } from "./error-codes.js";
+export type { GenerationErrorCode } from "./error-codes.js";
 
 // Web token (URL-based auth for KeyboardButtonWebApp where initData is unavailable)
 export { generateWebToken, verifyWebToken } from "./webtoken.js";

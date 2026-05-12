@@ -1,6 +1,7 @@
 import { UnrecoverableError, DelayedError, type Job } from "bullmq";
 import { delayJob } from "../utils/delay-job.js";
 import { withRetry } from "../utils/with-retry.js";
+import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 import { Api, InputFile } from "grammy";
 import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
@@ -546,7 +547,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         if (interval === null) {
           await db.generationJob.update({
             where: { id: dbJobId },
-            data: { status: "failed", error: "poll timeout (24h)" },
+            data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
           await telegram
             .sendMessage(
@@ -737,7 +738,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "audio");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg },
+        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
       await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       throw new UnrecoverableError(msg);
@@ -817,7 +818,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Audio job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: providerMsg },
+        data: { status: "failed", error: providerMsg, errorCode: classifyError(err) },
       });
       if (shouldNotifyOps(err)) {
         const ctx = {
@@ -929,7 +930,7 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
       });
 
       if (tokensSpent > 0) {
