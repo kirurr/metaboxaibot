@@ -7,7 +7,6 @@ import { config, getT } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
 import { db } from "../db.js";
 import { usdToTokens } from "../services/token.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 /** Должна совпадать со значениями в bot/scenes/video.ts и worker/processors/avatar.processor.ts. */
 const SOUL_COST_USD = 2.5;
@@ -16,64 +15,30 @@ type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["user-avatars"]),
-  );
 
   /** GET /user-avatars?provider=heygen — list user avatars */
-  fastify.get<{ Querystring: { provider?: string } }>(
-    "/user-avatars",
-    {
-      schema: {
-        description: "List user avatars, optionally filtered by provider",
-        querystring: {
-          type: "object",
-          properties: {
-            provider: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                id: { type: "string" },
-                provider: { type: "string" },
-                name: { type: "string" },
-                externalId: { type: "string", nullable: true },
-                previewUrl: { type: "string", nullable: true },
-                status: { type: "string" },
-                createdAt: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-    },
-    async (request) => {
-      const { userId } = request as AuthRequest;
-      const { provider } = request.query;
-      const avatars = await userAvatarService.list(userId, provider);
-      return Promise.all(
-        avatars.map(async (a) => {
-          let previewUrl = a.previewUrl;
-          if (previewUrl && !previewUrl.startsWith("http")) {
-            previewUrl = await getFileUrl(previewUrl).catch(() => null);
-          }
-          return {
-            id: a.id,
-            provider: a.provider,
-            name: a.name,
-            externalId: a.externalId,
-            previewUrl,
-            status: a.status,
-            createdAt: a.createdAt.toISOString(),
-          };
-        }),
-      );
-    },
-  );
+  fastify.get<{ Querystring: { provider?: string } }>("/user-avatars", async (request) => {
+    const { userId } = request as AuthRequest;
+    const { provider } = request.query;
+    const avatars = await userAvatarService.list(userId, provider);
+    return Promise.all(
+      avatars.map(async (a) => {
+        let previewUrl = a.previewUrl;
+        if (previewUrl && !previewUrl.startsWith("http")) {
+          previewUrl = await getFileUrl(previewUrl).catch(() => null);
+        }
+        return {
+          id: a.id,
+          provider: a.provider,
+          name: a.name,
+          externalId: a.externalId,
+          previewUrl,
+          status: a.status,
+          createdAt: a.createdAt.toISOString(),
+        };
+      }),
+    );
+  });
 
   /**
    * POST /user-avatars/start-creation
@@ -81,27 +46,6 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Body: { provider: string } }>(
     "/user-avatars/start-creation",
-    {
-      schema: {
-        description: "Start avatar creation by setting FSM state and sending a Telegram prompt",
-        body: {
-          type: "object",
-          properties: {
-            provider: { type: "string" },
-          },
-          required: ["provider"],
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              ok: { type: "boolean" },
-            },
-          },
-          400: badRequestResponse,
-        },
-      },
-    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { provider } = request.body ?? {};
@@ -164,33 +108,6 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /user-avatars/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { name: string } }>(
     "/user-avatars/:id",
-    {
-      schema: {
-        description: "Rename an avatar by ID",
-        params: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-          },
-        },
-        body: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              ok: { type: "boolean" },
-            },
-          },
-          400: badRequestResponse,
-          404: badRequestResponse,
-        },
-      },
-    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -203,34 +120,11 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /user-avatars/:id */
-  fastify.delete<{ Params: { id: string } }>(
-    "/user-avatars/:id",
-    {
-      schema: {
-        description: "Delete an avatar by ID",
-        params: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              ok: { type: "boolean" },
-            },
-          },
-          404: badRequestResponse,
-        },
-      },
-    },
-    async (request, reply) => {
-      const { userId } = request as AuthRequest;
-      const { id } = request.params;
-      const ok = await userAvatarService.delete(id, userId);
-      if (!ok) return reply.status(404).send({ error: "Avatar not found" });
-      return { ok: true };
-    },
-  );
+  fastify.delete<{ Params: { id: string } }>("/user-avatars/:id", async (request, reply) => {
+    const { userId } = request as AuthRequest;
+    const { id } = request.params;
+    const ok = await userAvatarService.delete(id, userId);
+    if (!ok) return reply.status(404).send({ error: "Avatar not found" });
+    return { ok: true };
+  });
 };

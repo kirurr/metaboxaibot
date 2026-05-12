@@ -1,14 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { verifyDownloadToken } from "../utils/download-token.js";
 import { getFileUrl } from "../services/s3.service.js";
-import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 export async function downloadRoutes(fastify: FastifyInstance) {
   // Use wildcard to avoid dot-in-param routing issues (token contains "payload.hmac")
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["download"]),
-  );
-
   fastify.get<{ Params: { "*": string } }>(
     "/download/*",
     { schema: { hide: true } },
