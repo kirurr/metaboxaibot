@@ -1111,9 +1111,10 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
     });
     debounceSlotReply(userId, mediaGroupId, async () => {
       const tracked = consumeDistribution(userId, mediaGroupId);
-      const overflowText =
-        tracked && tracked.overflowCount > 0 ? buildOverflowMessage(model, ctx.t) : "";
-      await sendVideoMediaInputStatus(ctx, { prependText: overflowText });
+      if (tracked && tracked.overflowCount > 0) {
+        await ctx.reply(buildOverflowMessage(model, ctx.t));
+      }
+      await sendVideoMediaInputStatus(ctx);
       if (tracked?.caption) {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
@@ -1471,9 +1472,10 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
     });
     debounceSlotReply(userId, mediaGroupId, async () => {
       const tracked = consumeDistribution(userId, mediaGroupId);
-      const overflowText =
-        tracked && tracked.overflowCount > 0 ? buildOverflowMessage(model, ctx.t) : "";
-      await sendVideoMediaInputStatus(ctx, { prependText: overflowText });
+      if (tracked && tracked.overflowCount > 0) {
+        await ctx.reply(buildOverflowMessage(model, ctx.t));
+      }
+      await sendVideoMediaInputStatus(ctx);
       if (tracked?.caption) {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
