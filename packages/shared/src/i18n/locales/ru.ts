@@ -34,7 +34,7 @@ export default {
     storage: "📁 Хранилище медиа",
     help: "❓ Помощь",
     knowledgeBase: "📖 База знаний",
-    language: "🌐 Язык",
+    language: "🌐 Language",
     chooseLanguage: "Выберите язык:",
     languageChanged: "✅ Язык изменён.",
   },
