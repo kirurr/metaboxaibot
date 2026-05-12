@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./ws": {
+      "types": "./dist/ws/index.d.ts",
+      "default": "./dist/ws/index.js"
     }
   },
   "scripts": {
@@ -16,12 +20,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^3.24.1"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "zod": "catalog:"
   }
 }

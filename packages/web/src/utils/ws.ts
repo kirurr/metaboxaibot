@@ -1,5 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, ServerToClientEvents } from "@metabox/shared-browser";
+import type { ClientToServerEvents, ServerToClientEvents } from "@metabox/shared-browser/ws";
 
 export const ws: Socket<ServerToClientEvents, ClientToServerEvents> = io("http://localhost:3001");
 

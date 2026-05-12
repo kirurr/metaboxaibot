@@ -9,8 +9,11 @@ COPY packages/shared-browser/package.json  ./packages/shared-browser/
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
+COPY --from=deps /app/node_modules                         ./node_modules
+COPY --from=deps /app/packages/web/node_modules            ./packages/web/node_modules
+# shared-browser имеет runtime-dep zod (для WS-схем в sub-export `/ws`).
+# Без node_modules tsc упадёт на `import z from "zod"` в ws/schemas.ts.
+COPY --from=deps /app/packages/shared-browser/node_modules ./packages/shared-browser/node_modules
 COPY . .
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL

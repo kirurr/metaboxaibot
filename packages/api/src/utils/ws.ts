@@ -1,5 +1,5 @@
 import type { Server as SocketIOServer, Socket as SocketIOSocket } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@metabox/shared-browser";
+import type { ClientToServerEvents, ServerToClientEvents } from "@metabox/shared-browser/ws";
 
 export interface SocketData {
   webUser: {
