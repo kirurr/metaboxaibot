@@ -12,10 +12,25 @@ export const videoSettingsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** GET /video-settings — returns { [modelId]: { aspectRatio?, duration? } } */
-  fastify.get("/video-settings", async (request) => {
-    const { userId } = request as AuthRequest;
-    return userStateService.getVideoSettings(userId);
-  });
+  fastify.get(
+    "/video-settings",
+    {
+      schema: {
+        description: "Get user's video settings (aspect ratio and duration per model)",
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            description: "Map of modelId to { aspectRatio?, duration? }",
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      return userStateService.getVideoSettings(userId);
+    },
+  );
 
   /** PATCH /video-settings — save aspect ratio and/or duration for a model */
   fastify.patch<{ Body: { modelId: string; aspectRatio?: string; duration?: number } }>(

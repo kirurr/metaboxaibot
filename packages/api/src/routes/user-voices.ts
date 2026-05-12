@@ -172,8 +172,9 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Resolve a playable URL for a voice by ID",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Voice ID" },
           },
         },
         response: {
@@ -213,8 +214,9 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Rename a voice by ID",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Voice ID" },
           },
         },
         body: {
@@ -277,8 +279,9 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Delete a voice by ID",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Voice ID" },
           },
         },
         response: {
@@ -297,26 +300,27 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
 
-    const voice = await db.userVoice.findFirst({ where: { id, userId } });
-    if (!voice) return reply.status(404).send({ error: "Voice not found" });
+      const voice = await db.userVoice.findFirst({ where: { id, userId } });
+      if (!voice) return reply.status(404).send({ error: "Voice not found" });
 
-    // Delete from ElevenLabs on the SAME key the voice was created on — voice_id
-    // живёт per-account, env-ключ может его не видеть. Если ключ уже удалён из
-    // пула — acquireById fallback'ается на env (best-effort). Failure не блокирует
-    // удаление из БД.
-    if (voice.externalId) {
-      try {
-        const acquired = await acquireById(voice.providerKeyId, "elevenlabs");
-        await ElevenLabsAdapter.deleteVoice(voice.externalId, acquired.apiKey);
-      } catch (err) {
-        logger.warn(
-          { voiceId: voice.id, externalId: voice.externalId, err },
-          "user-voices DELETE: ElevenLabs cleanup failed (continuing with DB delete)",
-        );
+      // Delete from ElevenLabs on the SAME key the voice was created on — voice_id
+      // живёт per-account, env-ключ может его не видеть. Если ключ уже удалён из
+      // пула — acquireById fallback'ается на env (best-effort). Failure не блокирует
+      // удаление из БД.
+      if (voice.externalId) {
+        try {
+          const acquired = await acquireById(voice.providerKeyId, "elevenlabs");
+          await ElevenLabsAdapter.deleteVoice(voice.externalId, acquired.apiKey);
+        } catch (err) {
+          logger.warn(
+            { voiceId: voice.id, externalId: voice.externalId, err },
+            "user-voices DELETE: ElevenLabs cleanup failed (continuing with DB delete)",
+          );
+        }
       }
-    }
 
-    await db.userVoice.delete({ where: { id } });
-    return { success: true };
-  });
+      await db.userVoice.delete({ where: { id } });
+      return { success: true };
+    },
+  );
 };

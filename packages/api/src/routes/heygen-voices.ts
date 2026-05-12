@@ -26,7 +26,8 @@ export const heygenVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["voices"]));
 
   /** GET /heygen-voices — proxy to HeyGen v2/voices, returns simplified voice list */
-  fastify.get("/heygen-voices",
+  fastify.get(
+    "/heygen-voices",
     {
       schema: {
         description: "Get list of HeyGen voices (cached for 1 hour)",
@@ -50,42 +51,43 @@ export const heygenVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         },
       },
     },
-              async (_request, reply) => {
-    if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-      return voicesCache.data;
-    }
-
-    let apiKey: string;
-    try {
-      apiKey = (await acquireKey("heygen")).apiKey;
-    } catch (err) {
-      if (err instanceof PoolExhaustedError) {
-        return reply.status(503).send({ error: "HeyGen API key not configured" });
+    async (_request, reply) => {
+      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
+        return voicesCache.data;
       }
-      throw err;
-    }
 
-    const res = await fetch("https://api.heygen.com/v2/voices", {
-      headers: { "X-Api-Key": apiKey, Accept: "application/json" },
-    });
+      let apiKey: string;
+      try {
+        apiKey = (await acquireKey("heygen")).apiKey;
+      } catch (err) {
+        if (err instanceof PoolExhaustedError) {
+          return reply.status(503).send({ error: "HeyGen API key not configured" });
+        }
+        throw err;
+      }
 
-    if (!res.ok) {
-      const text = await res.text();
-      return reply.status(502).send({ error: `HeyGen error: ${res.status} ${text}` });
-    }
+      const res = await fetch("https://api.heygen.com/v2/voices", {
+        headers: { "X-Api-Key": apiKey, Accept: "application/json" },
+      });
 
-    const json = (await res.json()) as HeyGenVoicesResponse;
-    const voices = json.data?.voices ?? [];
+      if (!res.ok) {
+        const text = await res.text();
+        return reply.status(502).send({ error: `HeyGen error: ${res.status} ${text}` });
+      }
 
-    const data = voices.map((v) => ({
-      voice_id: v.voice_id,
-      name: v.name,
-      language: v.language ?? "",
-      gender: v.gender ?? "",
-      preview_audio: v.preview_audio ?? null,
-    }));
+      const json = (await res.json()) as HeyGenVoicesResponse;
+      const voices = json.data?.voices ?? [];
 
-    voicesCache = { data, at: Date.now() };
-    return data;
-  });
+      const data = voices.map((v) => ({
+        voice_id: v.voice_id,
+        name: v.name,
+        language: v.language ?? "",
+        gender: v.gender ?? "",
+        preview_audio: v.preview_audio ?? null,
+      }));
+
+      voicesCache = { data, at: Date.now() };
+      return data;
+    },
+  );
 };

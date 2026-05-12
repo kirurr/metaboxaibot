@@ -9,11 +9,26 @@ export const imageSettingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["settings"]));
 
   /** GET /image-settings — returns { [modelId]: { aspectRatio } } */
-  fastify.get("/image-settings", async (request) => {
-    const { userId } = request as AuthRequest;
-    const settings = await userStateService.getImageSettings(userId);
-    return settings;
-  });
+  fastify.get(
+    "/image-settings",
+    {
+      schema: {
+        description: "Get user's image settings (aspect ratio per model)",
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            description: "Map of modelId to { aspectRatio }",
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const settings = await userStateService.getImageSettings(userId);
+      return settings;
+    },
+  );
 
   /** PATCH /image-settings — save aspect ratio for a model */
   fastify.patch<{ Body: { modelId: string; aspectRatio: string } }>(

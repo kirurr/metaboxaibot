@@ -260,32 +260,58 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // ── PUT /admin/pricing/global — override targetMargin ────────────────────
-  // ── PUT /admin/pricing/global — override targetMargin ────────────────────
-  fastify.put<{ Body: SetMultiplierBody }>("/admin/pricing/global", async (request, reply) => {
-    const value = validateMultiplier(request.body?.multiplier);
-    if (value === null) {
-      await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
-      return;
-    }
-    const updatedBy = await resolveUpdatedBy(request);
-    await db.pricingOverride.upsert({
-      where: { scope_key: { scope: "global", key: "targetMargin" } },
-      create: {
-        scope: "global",
-        key: "targetMargin",
-        multiplier: value,
-        note: request.body?.note ?? null,
-        updatedBy,
+  fastify.put<{ Body: SetMultiplierBody }>(
+    "/admin/pricing/global",
+    {
+      schema: {
+        description: "Set global price multiplier override",
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            multiplier: { type: "number", description: "Price multiplier (must be > 0 and <= 10)" },
+            note: { type: "string", nullable: true, description: "Optional admin note" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              global: { type: "number", nullable: true },
+              configDefault: { type: "number" },
+            },
+          },
+          400: badRequestResponse,
+        },
       },
-      update: {
-        multiplier: value,
-        note: request.body?.note ?? null,
-        updatedBy,
-      },
-    });
-    await broadcastInvalidation();
-    return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
-  });
+    },
+    async (request, reply) => {
+      const value = validateMultiplier(request.body?.multiplier);
+      if (value === null) {
+        await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
+        return;
+      }
+      const updatedBy = await resolveUpdatedBy(request);
+      await db.pricingOverride.upsert({
+        where: { scope_key: { scope: "global", key: "targetMargin" } },
+        create: {
+          scope: "global",
+          key: "targetMargin",
+          multiplier: value,
+          note: request.body?.note ?? null,
+          updatedBy,
+        },
+        update: {
+          multiplier: value,
+          note: request.body?.note ?? null,
+          updatedBy,
+        },
+      });
+      await broadcastInvalidation();
+      return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
+    },
+  );
 
   // ── DELETE /admin/pricing/global ─────────────────────────────────────────
   fastify.delete(

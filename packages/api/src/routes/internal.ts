@@ -41,8 +41,10 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-additionalProperties: true,
-            type: "object", properties: { ok: { type: "boolean" } } },
+            additionalProperties: true,
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+          },
           400: badRequestResponse,
         },
       },

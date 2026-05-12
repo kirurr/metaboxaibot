@@ -206,31 +206,80 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  fastify.post<{ Body: ProxyCreateBody }>("/admin/proxies", async (request, reply) => {
-    const b = request.body;
-    if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
-      await reply.status(400).send({ error: "label, protocol, host, port required" });
-      return;
-    }
-    if (!VALID_PROTOCOLS.has(b.protocol)) {
-      await reply.status(400).send({ error: "protocol must be http|https|socks5" });
-      return;
-    }
-    const proxy = await db.proxy.create({
-      data: {
-        label: b.label,
-        protocol: b.protocol,
-        host: b.host,
-        port: b.port,
-        username: b.username ? encryptSecret(b.username) : null,
-        passwordCipher: b.password ? encryptSecret(b.password) : null,
-        isActive: b.isActive ?? true,
-        notes: b.notes ?? null,
+  fastify.post<{ Body: ProxyCreateBody }>(
+    "/admin/proxies",
+    {
+      schema: {
+        description: "Create a new proxy",
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            label: { type: "string", description: "Human-readable label" },
+            protocol: { type: "string", description: "Protocol: http, https, or socks5" },
+            host: { type: "string", description: "Proxy hostname or IP" },
+            port: { type: "number", description: "Proxy port" },
+            username: { type: "string", description: "Optional username for auth" },
+            password: { type: "string", description: "Optional password for auth" },
+            isActive: { type: "boolean", description: "Whether proxy is active (default true)" },
+            notes: { type: "string", description: "Optional admin notes" },
+          },
+          required: ["label", "protocol", "host", "port"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              proxy: {
+                type: "object",
+                additionalProperties: true,
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  protocol: { type: "string" },
+                  host: { type: "string" },
+                  port: { type: "number" },
+                  hasUsername: { type: "boolean" },
+                  hasPassword: { type: "boolean" },
+                  isActive: { type: "boolean" },
+                  notes: { type: "string", nullable: true },
+                  createdAt: { type: "string" },
+                  updatedAt: { type: "string" },
+                },
+              },
+            },
+          },
+          400: badRequestResponse,
+        },
       },
-    });
-    invalidatePoolCache();
-    return { proxy: serializeProxy(proxy) };
-  });
+    },
+    async (request, reply) => {
+      const b = request.body;
+      if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
+        await reply.status(400).send({ error: "label, protocol, host, port required" });
+        return;
+      }
+      if (!VALID_PROTOCOLS.has(b.protocol)) {
+        await reply.status(400).send({ error: "protocol must be http|https|socks5" });
+        return;
+      }
+      const proxy = await db.proxy.create({
+        data: {
+          label: b.label,
+          protocol: b.protocol,
+          host: b.host,
+          port: b.port,
+          username: b.username ? encryptSecret(b.username) : null,
+          passwordCipher: b.password ? encryptSecret(b.password) : null,
+          isActive: b.isActive ?? true,
+          notes: b.notes ?? null,
+        },
+      });
+      invalidatePoolCache();
+      return { proxy: serializeProxy(proxy) };
+    },
+  );
 
   fastify.patch<{ Params: { id: string }; Body: ProxyUpdateBody }>(
     "/admin/proxies/:id",
@@ -239,6 +288,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         description: "Update an existing proxy",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: { id: { type: "string", description: "Proxy ID" } },
           required: ["id"],
         },
@@ -301,6 +351,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         description: "Delete a proxy",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: { id: { type: "string", description: "Proxy ID" } },
           required: ["id"],
         },
@@ -499,6 +550,43 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.patch<{ Params: { id: string }; Body: KeyUpdateBody }>(
     "/admin/provider-keys/:id",
+    {
+      schema: {
+        description: "Update a provider key",
+        params: {
+          type: "object",
+          additionalProperties: true,
+          properties: { id: { type: "string", description: "Key ID" } },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            label: { type: "string", description: "Human-readable label" },
+            keyValue: { type: "string", description: "New API key value" },
+            proxyId: { type: "string", nullable: true, description: "Proxy ID to attach" },
+            priority: { type: "number", description: "Priority (higher = used first)" },
+            isActive: { type: "boolean", description: "Whether key is active" },
+            notes: { type: "string", description: "Optional admin notes" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { key: { type: "object", additionalProperties: true } },
+            required: ["key"],
+          },
+          400: badRequestResponse,
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const b = request.body;
       const existing = await db.providerKey.findUnique({ where: { id: request.params.id } });

@@ -171,8 +171,9 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Rename an avatar by ID",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Avatar ID" },
           },
         },
         body: {
@@ -213,8 +214,9 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Delete an avatar by ID",
         params: {
           type: "object",
+          additionalProperties: true,
           properties: {
-            id: { type: "string" },
+            id: { type: "string", description: "Avatar ID" },
           },
         },
         response: {
