@@ -599,7 +599,7 @@ export default {
       'Send 1–4 photos for "{slot}". First photo = frontal view; the rest (up to 3) = reference views.',
     imageSaved: "✅ {slot}: image {n}/{max} saved.",
     tooManyMedia:
-      "<b>❌ You uploaded extra files — they were skipped.</b>\n\n{modelName} accepts up to {totalMax} files:\n{breakdown}.\n\nTap the buttons below to view the contents.",
+      "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} files:\n{breakdown}.\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",
