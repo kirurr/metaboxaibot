@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import { ArrowRight, Download, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
 import clsx from "clsx";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useAuthStore } from "@/stores/authStore";
+import { useTransactions } from "@/hooks/useTransactions";
+import { formatTokenDelta, formatTokens, formatTxnTime, parseTokens } from "@/utils/format";
+import type { TransactionDto } from "@/api/auth";
 
 type Pack = {
   amount: string;
@@ -19,111 +23,32 @@ const packs: Pack[] = [
   { amount: "100M", price: 629, rate: "$0.0063 / 1k", bonus: "+35%" },
 ];
 
-type Txn = {
-  kind: "use" | "topup" | "bonus" | "refund";
-  model?: string;
-  desc: string;
-  amount: number;
-  date: string;
-  time: string;
-  usd?: number;
-};
+type UiKind = "use" | "topup" | "bonus" | "refund";
 
-const txns: Txn[] = [
-  {
-    kind: "use",
-    model: "GPT-5",
-    desc: "Chat · Restructure launch announcement",
-    amount: -2140,
-    date: "Today",
-    time: "14:02",
-  },
-  {
-    kind: "use",
-    model: "Sonnet 4.5",
-    desc: "Chat · Q3 OKR review",
-    amount: -3812,
-    date: "Today",
-    time: "11:47",
-  },
-  {
-    kind: "use",
-    model: "nano-banana-pro",
-    desc: "Image · 4 generations · 1024×1024",
-    amount: -10800,
-    date: "Today",
-    time: "09:18",
-  },
-  {
-    kind: "use",
-    model: "Sonnet 4.5",
-    desc: "Chat · Cohort retention SQL",
-    amount: -5240,
-    date: "Yesterday",
-    time: "18:21",
-  },
-  {
-    kind: "use",
-    model: "heygen",
-    desc: "Video · 28s avatar render",
-    amount: -7200,
-    date: "Yesterday",
-    time: "16:04",
-  },
-  {
-    kind: "use",
-    model: "Sonnet 4.5",
-    desc: "Chat · Translate contract clauses",
-    amount: -1940,
-    date: "Yesterday",
-    time: "10:03",
-  },
-  {
-    kind: "use",
-    model: "tts-cartesia",
-    desc: "Audio · 1m 12s voiceover",
-    amount: -190,
-    date: "Yesterday",
-    time: "08:42",
-  },
-  {
-    kind: "topup",
-    desc: "Top-up · 10M pack",
-    amount: 12000000,
-    date: "May 1",
-    time: "—",
-    usd: 79,
-  },
-  { kind: "bonus", desc: "Welcome bonus", amount: 7500, date: "Apr 29", time: "—" },
-  {
-    kind: "use",
-    model: "GPT-5",
-    desc: "Chat · Pricing experiment brainstorm",
-    amount: -4410,
-    date: "Apr 28",
-    time: "16:30",
-  },
-  {
-    kind: "refund",
-    model: "Sonnet 4.5",
-    desc: "Refund · failed generation",
-    amount: 840,
-    date: "Apr 27",
-    time: "12:11",
-  },
-];
-
-const FILTERS = [
+const FILTERS: { id: "all" | UiKind; label: string }[] = [
   { id: "all", label: "All" },
   { id: "use", label: "AI usage" },
   { id: "topup", label: "Top-ups" },
   { id: "bonus", label: "Bonuses" },
   { id: "refund", label: "Refunds" },
-] as const;
+];
 
 type FilterId = (typeof FILTERS)[number]["id"];
 
-function txIcon(kind: Txn["kind"]) {
+/**
+ * Маппит транзакцию из API в UI-категорию (по шаблону из дизайн-заглушки).
+ * Refund'ы у нас сейчас приходят с `reason` вида `ai_image_undelivered` /
+ * `ai_video_undelivered` / `ai_audio_undelivered` (см. worker processors,
+ * refundTokens). Отдельного reason="refund" нет.
+ */
+function categorize(t: TransactionDto): UiKind {
+  if (t.reason === "purchase" || t.reason === "metabox_purchase") return "topup";
+  if (t.reason.endsWith("_undelivered") || t.reason.startsWith("refund")) return "refund";
+  if (t.type === "debit") return "use";
+  return "bonus";
+}
+
+function txIcon(kind: UiKind) {
   if (kind === "use") return <Sparkles size={18} />;
   if (kind === "topup") return <Plus size={18} />;
   if (kind === "bonus") return <Star size={18} />;
@@ -131,18 +56,42 @@ function txIcon(kind: Txn["kind"]) {
   return <Sparkles size={18} />;
 }
 
-function fmtTokens(n: number) {
-  const sign = n < 0 ? "−" : "+";
-  const abs = Math.abs(n);
-  return sign + abs.toLocaleString("en-US");
+/** Человекочитаемый текст транзакции: `description` или fallback по reason. */
+function txTitle(t: TransactionDto): string {
+  if (t.description?.trim()) return t.description;
+  switch (t.reason) {
+    case "ai_usage":
+      return "AI генерация";
+    case "purchase":
+    case "metabox_purchase":
+      return "Покупка токенов";
+    case "welcome_bonus":
+      return "Приветственный бонус";
+    case "referral_bonus":
+      return "Реферальный бонус";
+    case "admin":
+      return "Начисление администратором";
+    default:
+      if (t.reason.endsWith("_undelivered")) return "Возврат за неуспешную генерацию";
+      return t.reason;
+  }
 }
 
 export default function Tokens() {
   const isMobile = useIsMobile();
+  const user = useAuthStore((s) => s.user);
+  const { transactions, loading, error } = useTransactions();
+
   const [sel, setSel] = useState(2);
   const [custom, setCustom] = useState("");
   const [filter, setFilter] = useState<FilterId>("all");
 
+  const totalBalanceRaw = user
+    ? String(parseTokens(user.tokenBalance) + parseTokens(user.subscriptionTokenBalance))
+    : "0";
+  const totalBalance = formatTokens(totalBalanceRaw);
+
+  // Декоративный sparkline — реальных дневных агрегатов нет, оставляем псевдо-данные.
   const spark = useMemo(
     () =>
       Array.from(
@@ -153,9 +102,14 @@ export default function Tokens() {
   );
   const max = Math.max(...spark);
 
-  const filtered = filter === "all" ? txns : txns.filter((t) => t.kind === filter);
-  const counts = FILTERS.reduce<Record<string, number>>((acc, f) => {
-    acc[f.id] = f.id === "all" ? txns.length : txns.filter((t) => t.kind === f.id).length;
+  const categorized = useMemo(
+    () => transactions.map((t) => ({ tx: t, kind: categorize(t) })),
+    [transactions],
+  );
+  const filtered = filter === "all" ? categorized : categorized.filter((x) => x.kind === filter);
+  const counts: Record<string, number> = FILTERS.reduce<Record<string, number>>((acc, f) => {
+    acc[f.id] =
+      f.id === "all" ? categorized.length : categorized.filter((x) => x.kind === f.id).length;
     return acc;
   }, {});
 
@@ -189,7 +143,7 @@ export default function Tokens() {
               marginTop: 6,
             }}
           >
-            1,247,330{" "}
+            {totalBalance}{" "}
             <span
               style={{
                 fontSize: 18,
@@ -202,10 +156,12 @@ export default function Tokens() {
               tokens
             </span>
           </div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 14 }}>
-            ~ 31 days at your current pace. Next refill recommended{" "}
-            <span style={{ color: "var(--text)" }}>around June 9</span>.
-          </div>
+          {user?.subscriptionTokenBalance && parseTokens(user.subscriptionTokenBalance) > 0 && (
+            <div className="muted" style={{ marginTop: 6, fontSize: 14 }}>
+              включая <span className="mono">{formatTokens(user.subscriptionTokenBalance)}</span> по
+              подписке
+            </div>
+          )}
           <div className="spark">
             {spark.map((v, i) => (
               <span
@@ -281,37 +237,49 @@ export default function Tokens() {
               className={clsx("tx-filter", filter === f.id && "on")}
               onClick={() => setFilter(f.id)}
             >
-              {f.label} <span className="count">{counts[f.id]}</span>
+              {f.label} <span className="count">{counts[f.id] ?? 0}</span>
             </button>
           ))}
         </div>
 
-        <div className="tx-list" style={{ marginTop: 12 }}>
-          {filtered.map((t, i) => (
-            <div key={i} className="tx-row">
-              <div className={"tx-ico " + t.kind}>{txIcon(t.kind)}</div>
-              <div style={{ minWidth: 0 }}>
-                <div className="tx-title">{t.desc}</div>
-                <div className="tx-sub">
-                  {t.model && <span className="model-tag">{t.model}</span>}
-                  <span>
-                    {t.date}
-                    {t.time && t.time !== "—" ? ` · ${t.time}` : ""}
-                  </span>
-                  {t.usd != null && <span>· ${t.usd}.00 charged</span>}
-                </div>
-              </div>
-              {!isMobile && <span className="tx-time" />}
-              <span className={"tx-amount " + (t.amount < 0 ? "neg" : "pos")}>
-                {fmtTokens(t.amount)}
-              </span>
-            </div>
-          ))}
-        </div>
-        {filtered.length === 0 && (
+        {loading && (
           <div className="empty-illu" style={{ marginTop: 12 }}>
-            No transactions in this filter.
+            Загрузка…
           </div>
+        )}
+        {error && !loading && (
+          <div className="empty-illu" style={{ marginTop: 12, color: "var(--danger)" }}>
+            {error}
+          </div>
+        )}
+        {!loading && !error && (
+          <>
+            <div className="tx-list" style={{ marginTop: 12 }}>
+              {filtered.map(({ tx, kind }) => (
+                <div key={tx.id} className="tx-row">
+                  <div className={"tx-ico " + kind}>{txIcon(kind)}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="tx-title">{txTitle(tx)}</div>
+                    <div className="tx-sub">
+                      {tx.modelId && <span className="model-tag">{tx.modelId}</span>}
+                      <span>{formatTxnTime(tx.createdAt)}</span>
+                    </div>
+                  </div>
+                  {!isMobile && <span className="tx-time" />}
+                  <span className={"tx-amount " + (parseTokens(tx.amount) < 0 ? "neg" : "pos")}>
+                    {formatTokenDelta(tx.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {filtered.length === 0 && (
+              <div className="empty-illu" style={{ marginTop: 12 }}>
+                {transactions.length === 0
+                  ? "Транзакций пока нет."
+                  : "Нет транзакций в этом фильтре."}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

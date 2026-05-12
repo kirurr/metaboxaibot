@@ -548,6 +548,69 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  // ── GET /auth/web-transactions ───────────────────────────────────────────
+  // Последние 20 транзакций токенового баланса для авторизованного web-юзера.
+  // Используется на странице Tokens (история операций) + Profile (краткая лента).
+  //
+  // Если юзер не привязал Telegram (aibUserId === null) — AI Box User'а ещё нет,
+  // транзакций тоже нет → возвращаем пустой массив. UI должен это обработать
+  // (показать призыв привязать TG, чтобы начать пользоваться).
+  fastify.get(
+    "/auth/web-transactions",
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Last 20 token transactions for the current web user",
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              transactions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    id: { type: "string" },
+                    amount: { type: "string" },
+                    type: { type: "string" },
+                    reason: { type: "string" },
+                    description: { type: "string", nullable: true },
+                    modelId: { type: "string", nullable: true },
+                    createdAt: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      if (aibUserId === null) {
+        return reply.send({ transactions: [] });
+      }
+      const txns = await db.tokenTransaction.findMany({
+        where: { userId: aibUserId },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      });
+      return reply.send({
+        transactions: txns.map((t) => ({
+          id: t.id,
+          amount: t.amount.toString(),
+          type: t.type,
+          reason: t.reason,
+          description: t.description ?? null,
+          modelId: t.modelId ?? null,
+          createdAt: t.createdAt.toISOString(),
+        })),
+      });
+    },
+  );
+
   // ── POST /auth/web-forgot-password ──────────────────────────────────────
   fastify.post<{ Body: { email?: string } }>(
     "/auth/web-forgot-password",

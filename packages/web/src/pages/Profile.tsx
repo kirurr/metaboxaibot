@@ -1,11 +1,20 @@
-import { useState } from "react";
 import { ChevronDown, Download, Trash2 } from "lucide-react";
+import { useAuthStore } from "@/stores/authStore";
+import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
 
 export default function Profile() {
-  const [name, setName] = useState("Alex Morgan");
-  const [emailAddr, setEmailAddr] = useState("alex@northbound.co");
-  const [sendOnEnter, setSendOnEnter] = useState(true);
-  const [quiet, setQuiet] = useState(true);
+  const user = useAuthStore((s) => s.user);
+
+  const displayName = user ? fullName(user.firstName, user.lastName, user.email) : "—";
+  const displayEmail = user?.email ?? "—";
+  const displayInitials = user ? initials(user.firstName, user.lastName, user.email) : "··";
+  const purchasedBalance = formatTokens(user?.tokenBalance ?? "0");
+  const subscriptionBalance = formatTokens(user?.subscriptionTokenBalance ?? "0");
+  const totalBalance = user
+    ? formatTokens(
+        String(parseTokens(user.tokenBalance) + parseTokens(user.subscriptionTokenBalance)),
+      )
+    : "0";
 
   return (
     <div className="page">
@@ -20,59 +29,83 @@ export default function Profile() {
         <div className="card" style={{ padding: 26 }}>
           <h3 className="section-title">Account</h3>
           <div className="row" style={{ gap: 18, marginBottom: 12 }}>
-            <div className="avatar lg">AM</div>
+            <div className="avatar lg">{displayInitials}</div>
             <div>
-              <div style={{ fontWeight: 600 }}>{name}</div>
+              <div style={{ fontWeight: 600 }}>{displayName}</div>
               <div className="muted" style={{ fontSize: 13 }}>
-                {emailAddr}
-              </div>
-              <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                <button className="btn btn-secondary btn-sm">Change photo</button>
-                <button className="btn btn-ghost btn-sm">Remove</button>
+                {displayEmail}
               </div>
             </div>
           </div>
           <div className="divider" style={{ margin: "12px 0 4px" }} />
           <div className="field-row">
-            <span className="lbl">Display name</span>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-            <button className="btn btn-ghost btn-sm">Save</button>
+            <span className="lbl">First name</span>
+            <span className="val">{user?.firstName?.trim() || "—"}</span>
+            <span />
+          </div>
+          <div className="field-row">
+            <span className="lbl">Last name</span>
+            <span className="val">{user?.lastName?.trim() || "—"}</span>
+            <span />
           </div>
           <div className="field-row">
             <span className="lbl">Email</span>
-            <input
-              className="input"
-              value={emailAddr}
-              onChange={(e) => setEmailAddr(e.target.value)}
-            />
-            <span className="chip success">Verified</span>
+            <span className="val">{displayEmail}</span>
+            <span />
           </div>
           <div className="field-row">
-            <span className="lbl">Password</span>
-            <span className="val muted">Last changed 4 months ago</span>
-            <button className="btn btn-secondary btn-sm">Change</button>
-          </div>
-          <div className="field-row">
-            <span className="lbl">Two-factor auth</span>
-            <span className="val">Authenticator app</span>
-            <span className="chip success">Enabled</span>
+            <span className="lbl">Telegram</span>
+            <span className="val">
+              {user?.isTelegramLinked
+                ? user.telegramUsername
+                  ? `@${user.telegramUsername}`
+                  : `id ${user.telegramId}`
+                : "Не привязан"}
+            </span>
+            {user?.isTelegramLinked ? (
+              <span className="chip success">Linked</span>
+            ) : (
+              <span className="chip warning">Not linked</span>
+            )}
           </div>
         </div>
 
         <div className="col" style={{ gap: 18 }}>
           <div className="card" style={{ padding: 22 }}>
-            <h3 className="section-title">Preferences</h3>
+            <h3 className="section-title">Balance</h3>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
-                <div style={{ fontSize: 14 }}>Default model</div>
+                <div style={{ fontSize: 14 }}>Всего токенов</div>
                 <div className="muted" style={{ fontSize: 12.5 }}>
-                  Used when starting a new chat
+                  Купленные + по подписке
                 </div>
               </div>
-              <div className="model-picker">
-                Sonnet 4.5 <ChevronDown size={14} />
-              </div>
+              <span className="mono" style={{ fontWeight: 600, fontSize: 18 }}>
+                {totalBalance}
+              </span>
             </div>
+            <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
+              <div>
+                <div style={{ fontSize: 14 }}>Купленные</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Не сгорают
+                </div>
+              </div>
+              <span className="mono">{purchasedBalance}</span>
+            </div>
+            <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
+              <div>
+                <div style={{ fontSize: 14 }}>По подписке</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Списываются при истечении периода
+                </div>
+              </div>
+              <span className="mono">{subscriptionBalance}</span>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 22 }}>
+            <h3 className="section-title">Preferences</h3>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
                 <div style={{ fontSize: 14 }}>Response language</div>
@@ -81,32 +114,8 @@ export default function Profile() {
                 </div>
               </div>
               <div className="model-picker">
-                English <ChevronDown size={14} />
+                {user?.language === "en" ? "English" : "Русский"} <ChevronDown size={14} />
               </div>
-            </div>
-            <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
-              <div>
-                <div style={{ fontSize: 14 }}>Send on Enter</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>
-                  Shift+Enter for newline
-                </div>
-              </div>
-              <button
-                className={"toggle" + (sendOnEnter ? " on" : "")}
-                onClick={() => setSendOnEnter(!sendOnEnter)}
-              />
-            </div>
-            <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
-              <div>
-                <div style={{ fontSize: 14 }}>Quiet hours</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>
-                  Mute notifications 22:00 – 08:00
-                </div>
-              </div>
-              <button
-                className={"toggle" + (quiet ? " on" : "")}
-                onClick={() => setQuiet(!quiet)}
-              />
             </div>
           </div>
 

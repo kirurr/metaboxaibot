@@ -13,6 +13,8 @@ import {
   User,
 } from "lucide-react";
 import clsx from "clsx";
+import { useAuthStore } from "@/stores/authStore";
+import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
 
 const CAPABILITIES = [
   { id: "text", label: "Text" },
@@ -25,6 +27,8 @@ type CapabilityId = (typeof CAPABILITIES)[number]["id"];
 
 export function TopNav() {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const [capability, setCapability] = useState<CapabilityId>("text");
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -39,6 +43,18 @@ export function TopNav() {
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open]);
+
+  // Баланс: сумма покупного + подписочного — единая цифра, как у бота.
+  const totalBalanceRaw = user
+    ? String(parseTokens(user.tokenBalance) + parseTokens(user.subscriptionTokenBalance))
+    : "0";
+  const displayBalance = formatTokens(totalBalanceRaw);
+  const displayName = user ? fullName(user.firstName, user.lastName, user.email) : "Гость";
+  const displayInitials = user ? initials(user.firstName, user.lastName, user.email) : "··";
+  const displayEmail = user?.email ?? "";
+  const firstNameOnly =
+    user?.firstName?.trim() ||
+    (displayName.includes(" ") ? displayName.split(" ")[0] : displayName);
 
   return (
     <header className="topnav">
@@ -67,7 +83,7 @@ export function TopNav() {
           title="Tokens balance"
         >
           <span className="b-dot" />
-          <span className="b-val mono">28,450</span>
+          <span className="b-val mono">{displayBalance}</span>
           <span className="b-lbl">tokens</span>
           <span className="b-plus">
             <Plus size={12} />
@@ -80,17 +96,17 @@ export function TopNav() {
 
         <div ref={menuRef} style={{ position: "relative" }}>
           <button className="account-btn" onClick={() => setOpen(!open)}>
-            <div className="avatar">AM</div>
-            <span className="a-name">Alex</span>
+            <div className="avatar">{displayInitials}</div>
+            <span className="a-name">{firstNameOnly}</span>
             <ChevronDown size={14} />
           </button>
           {open && (
             <div className="menu-pop">
               <div className="menu-head">
-                <div className="avatar">AM</div>
+                <div className="avatar">{displayInitials}</div>
                 <div className="who">
-                  <div className="name">Alex Morgan</div>
-                  <div className="mail">alex@northbound.co</div>
+                  <div className="name">{displayName}</div>
+                  <div className="mail">{displayEmail}</div>
                 </div>
               </div>
               <MenuLink to="/app/profile" icon={<User size={16} />} onSelect={() => setOpen(false)}>
@@ -120,9 +136,10 @@ export function TopNav() {
               <div className="menu-sep" />
               <button
                 className="menu-item danger"
-                onClick={() => {
+                onClick={async () => {
                   setOpen(false);
-                  navigate("/login");
+                  await logout();
+                  navigate("/login", { replace: true });
                 }}
               >
                 <LogOut size={16} /> Sign out
