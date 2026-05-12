@@ -235,12 +235,28 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
           type: "object",
           properties: {
             telegramId: { type: "string" },
-            tokens: { type: "number" },
+            subscriptionTokenBalance: { type: "number" },
+            tokenBalance: { type: "number" },
+            orderGrants: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  orderId: { type: "string" },
+                  tokens: { type: "number" },
+                  description: { type: "string" },
+                },
+                required: ["orderId", "tokens"],
+              },
+            },
             endDate: { type: "string" },
             planName: { type: "string" },
-            subscriptionId: { type: "string" },
+            period: { type: "string" },
+            startDate: { type: "string" },
+            tokensGranted: { type: "number" },
+            metaboxSubscriptionId: { type: "string" },
           },
-          required: ["telegramId", "tokens", "endDate", "planName"],
+          required: ["telegramId"],
         },
         response: {
           200: {
