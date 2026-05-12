@@ -3,21 +3,33 @@
  * Намеренно не подключаем тяжёлые i18n-либы — данных и форматов мало.
  */
 
-/** Полное имя или fallback на email-prefix / "User". */
-export function fullName(firstName: string | null, lastName: string | null, email: string): string {
+/**
+ * Полное имя или fallback на email-prefix / "User".
+ * email допускает null/undefined: на проде встречались юзеры без e-mail'а в
+ * ответе `web-me` (хотя тип говорит `string`), а падать на `.split` нельзя.
+ */
+export function fullName(
+  firstName: string | null | undefined,
+  lastName: string | null | undefined,
+  email: string | null | undefined,
+): string {
   const parts = [firstName, lastName].filter((s): s is string => !!s && s.trim().length > 0);
   if (parts.length > 0) return parts.join(" ");
-  const localPart = email.split("@")[0];
+  const localPart = typeof email === "string" ? email.split("@")[0] : "";
   return localPart || "User";
 }
 
 /** До 2 символов в верхнем регистре — для круглой аватарки. */
-export function initials(firstName: string | null, lastName: string | null, email: string): string {
+export function initials(
+  firstName: string | null | undefined,
+  lastName: string | null | undefined,
+  email: string | null | undefined,
+): string {
   const first = firstName?.trim()?.[0];
   const last = lastName?.trim()?.[0];
   if (first && last) return (first + last).toUpperCase();
   if (first) return first.toUpperCase();
-  const localPart = email.split("@")[0] ?? "";
+  const localPart = typeof email === "string" ? (email.split("@")[0] ?? "") : "";
   return (localPart.slice(0, 2) || "U").toUpperCase();
 }
 
