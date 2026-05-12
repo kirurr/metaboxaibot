@@ -1,12 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
-import type { Server as SocketIOServer, Socket as SocketIOSocket } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@metabox/shared-browser";
+import type { Server, Socket } from "../utils/ws.js";
 import socketioPlugin from "fastify-socket.io";
 import { logger } from "../logger.js";
+import { wsAuthMiddleware } from "../middlewares/ws-auth.js";
 
-type Server = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
-type Socket = SocketIOSocket<ClientToServerEvents, ServerToClientEvents>;
-
+// Module redeclarations for websocket type safety
 declare module "fastify" {
   interface FastifyInstance {
     io: Server;
@@ -20,8 +18,10 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
     cors: { origin: true, credentials: true },
   });
 
+  fastify.io.use(wsAuthMiddleware);
+
   fastify.io.on("connection", (socket: Socket) => {
-    logger.info("connection established");
+    logger.info({ metaboxUserId: socket.data.webUser.metaboxUserId }, "ws connection established");
 
     socket.on("example:send", (msg) => {
       logger.info("we recieved message from client: " + msg.text);
@@ -29,6 +29,7 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
+  // just example of how to emit message to client
   fastify.get("/ws/hello", { schema: { hide: true } }, async (_request, reply) => {
     fastify.io.emit("example:recieve", { text: "callback message from server" });
     return reply.status(200).send({ ok: true });
