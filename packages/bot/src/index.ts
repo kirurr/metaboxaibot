@@ -6,6 +6,7 @@ import { preloadLocales, SUPPORTED_LANGUAGES, config } from "@metabox/shared";
 import { logger } from "./logger.js";
 import { run } from "@grammyjs/runner";
 import { closeRedis } from "@metabox/api/redis";
+import { initPricingConfig } from "@metabox/api/services/pricing-config";
 import { closeDb } from "./db.js";
 
 /**
@@ -19,6 +20,14 @@ const SHUTDOWN_TIMEOUT_MS = 4 * 60 * 1000;
 async function main() {
   logger.info("Loading i18n locales...");
   await preloadLocales(SUPPORTED_LANGUAGES);
+
+  // Загружаем per-model price multipliers + подписываемся на pubsub
+  // инвалидацию. Без этого `costPreviewService` в bot-процессе считает
+  // `getModelMultiplier === 1.0` и показывает юзеру предварительную цену
+  // без коэффициента — расходится с фактическим списанием (worker/API
+  // инициализируют этот кеш у себя). См. pricing-config.service.ts.
+  logger.info("Initializing pricing config cache...");
+  await initPricingConfig();
 
   const bot = createBot(config.bot.token);
 
