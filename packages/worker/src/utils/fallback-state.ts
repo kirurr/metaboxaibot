@@ -10,6 +10,12 @@ export interface SubJobLike {
   status: "pending" | "succeeded" | "failed";
   providerJobId?: string | null;
   effectiveProvider?: string;
+  /**
+   * Структурированная категория ошибки failed sub-job'а — нужна, чтобы
+   * на K=0 batch-failure aggregate'е иметь представительный код для записи
+   * в GenerationJob.errorCode. Значения из `GenerationErrorCode`.
+   */
+  errorCode?: string;
 }
 
 /** Минимальная shape `inputData.fallback` для single-shot detect. */
@@ -78,4 +84,33 @@ export function detectUsedFallback(opts: {
   const usedFallback =
     !!effectiveProviderForBilling && effectiveProviderForBilling !== opts.primaryProvider;
   return { effectiveProviderForBilling, usedFallback };
+}
+
+/**
+ * Aggregator: представительный errorCode для batch K=0 failure.
+ * Логика: выбираем самый частый ненулевой `errorCode` среди failed sub-job'ов.
+ * Ties (равная частота) — берём первый по порядку. Если ни у одного нет
+ * code — возвращает "UNKNOWN" (caller всё равно должен подставить дефолт).
+ *
+ * Зачем не "первый failed": в virtual batch sub-job'ы прогоняются по очереди;
+ * если первый sub-job упал на 5xx (PROVIDER_UNAVAILABLE), а остальные — на
+ * content_policy (INPUT_MODERATION), картина в статистике должна отражать
+ * доминирующую причину, а не case номер 0.
+ */
+export function pickBatchErrorCode(subJobs: SubJobLike[]): string {
+  const counts = new Map<string, number>();
+  for (const s of subJobs) {
+    if (s.status !== "failed" || !s.errorCode) continue;
+    counts.set(s.errorCode, (counts.get(s.errorCode) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "UNKNOWN";
+  let bestCode = "UNKNOWN";
+  let bestCount = 0;
+  for (const [code, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      bestCode = code;
+    }
+  }
+  return bestCode;
 }

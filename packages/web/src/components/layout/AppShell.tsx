@@ -1,39 +1,34 @@
 import { Outlet } from "react-router-dom";
-import { Sidebar } from "./Sidebar";
-import { MobileNav } from "./MobileNav";
+import clsx from "clsx";
+import { TopNav } from "./TopNav";
+import { MobileTop } from "./MobileTop";
+import { BottomNav } from "./BottomNav";
 import { ToastContainer } from "@/components/common/ToastContainer";
 import { TelegramLinkModal } from "@/components/TelegramLinkModal";
 import { useUIStore } from "@/stores/uiStore";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 /**
- * Общий контейнер защищённой зоны. Desktop: sidebar слева + main справа.
- * Mobile: bottom nav + main на всю ширину.
+ * Каркас защищённой зоны. Desktop: top nav + main под ним.
+ * Mobile: mobile top + main + bottom nav.
  */
 export function AppShell() {
+  const isMobile = useIsMobile();
   const telegramLinkModal = useUIStore((s) => s.telegramLinkModal);
   const closeTelegramLinkModal = useUIStore((s) => s.closeTelegramLinkModal);
 
   return (
-    <div className="h-screen flex bg-bg text-text">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-[260px] shrink-0 border-r border-border bg-bg-card">
-        <Sidebar />
-      </aside>
+    <div className={clsx("app", isMobile && "mobile")}>
+      {isMobile ? <MobileTop /> : <TopNav />}
 
-      {/* Main */}
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-hidden pad-safe-bottom lg:pb-0">
-          <Outlet />
-        </div>
+      <main className="main">
+        <Outlet />
       </main>
 
-      {/* Mobile bottom nav */}
-      <MobileNav />
+      {isMobile && <BottomNav />}
 
-      {/* Глобальные тосты */}
       <ToastContainer />
 
-      {/* Модалка «Привяжите Telegram» */}
       <TelegramLinkModal
         open={telegramLinkModal.open}
         onClose={closeTelegramLinkModal}

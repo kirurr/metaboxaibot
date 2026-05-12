@@ -69,6 +69,7 @@ import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
 import { deferIfRateLimitOverload } from "../utils/defer-rate-limit.js";
 import { withRetry } from "../utils/with-retry.js";
 import { UserFacingError } from "@metabox/shared";
+import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
 
@@ -547,7 +548,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         if (interval === null) {
           await db.generationJob.update({
             where: { id: dbJobId },
-            data: { status: "failed", error: "poll timeout (24h)" },
+            data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
           await telegram
             .sendMessage(
@@ -892,7 +893,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg },
+        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
       await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       throw new UnrecoverableError(msg);
@@ -1044,7 +1045,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: "PROVIDER_INSUFFICIENT_CREDIT" },
       });
       await notifyTechError(err, {
         jobId: dbJobId,
@@ -1061,7 +1062,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Video job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg },
+        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
       });
       if (shouldNotifyOps(err)) {
         await notifyTechError(err, {
@@ -1219,7 +1220,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
       });
 
       if (tokensSpent > 0) {
