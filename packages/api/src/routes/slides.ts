@@ -54,6 +54,7 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { slides: { type: "array", items: { type: "object" } } },
           },
         },
@@ -146,7 +147,13 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
         schema: {
           description: "Update a banner slide by ID",
           params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
-          response: { 404: { type: "object", properties: { error: { type: "string" } } } },
+          response: {
+            404: {
+              type: "object",
+              additionalProperties: true,
+              properties: { error: { type: "string" } },
+            },
+          },
         },
       },
       async (request, reply) => {
@@ -215,9 +222,14 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
           description: "Delete a banner slide by ID",
           params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
           response: {
-            200: { type: "object", properties: { success: { type: "boolean" } } },
+            200: {
+              type: "object",
+              additionalProperties: true,
+              properties: { success: { type: "boolean" } },
+            },
             404: {
               type: "object",
+              additionalProperties: true,
               properties: { error: { type: "string" } },
               description: "Slide not found",
             },
@@ -246,23 +258,55 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     );
 
     /** POST /admin/slides/reorder */
-    admin.post("/admin/slides/reorder", async (request, reply) => {
-      const { slideIds } = request.body as { slideIds: string[] };
-      if (!Array.isArray(slideIds) || slideIds.length === 0) {
-        await reply.status(400).send({ error: "slideIds array required" });
-        return;
-      }
+    admin.post(
+      "/admin/slides/reorder",
+      {
+        schema: {
+          description: "Reorder slides by providing new sort order",
+          body: {
+            type: "object",
+            properties: {
+              slideIds: {
+                type: "array",
+                items: { type: "string" },
+                description: "Array of slide IDs in desired order",
+              },
+            },
+            required: ["slideIds"],
+            additionalProperties: true,
+          },
+          response: {
+            200: {
+              type: "object",
+              additionalProperties: true,
+              properties: { success: { type: "boolean" } },
+            },
+            400: {
+              type: "object",
+              additionalProperties: true,
+              properties: { error: { type: "string" } },
+            },
+          },
+        },
+      },
+      async (request, reply) => {
+        const { slideIds } = request.body as { slideIds: string[] };
+        if (!Array.isArray(slideIds) || slideIds.length === 0) {
+          await reply.status(400).send({ error: "slideIds array required" });
+          return;
+        }
 
-      await db.$transaction(
-        slideIds.map((id, index) =>
-          db.bannerSlide.update({
-            where: { id },
-            data: { sortOrder: index },
-          }),
-        ),
-      );
+        await db.$transaction(
+          slideIds.map((id, index) =>
+            db.bannerSlide.update({
+              where: { id },
+              data: { sortOrder: index },
+            }),
+          ),
+        );
 
-      return { success: true };
-    });
+        return { success: true };
+      },
+    );
   });
 }

@@ -60,8 +60,10 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "array",
+            additionalProperties: true,
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 voice_id: { type: "string", description: "Voice ID" },
                 name: { type: "string", description: "Voice name" },
@@ -154,10 +156,26 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "string", contentEncoding: "binary" },
-          404: { type: "object", properties: { error: { type: "string" } } },
-          502: { type: "object", properties: { error: { type: "string" } } },
-          503: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "string",
+            additionalProperties: true,
+            contentEncoding: "binary",
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          503: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

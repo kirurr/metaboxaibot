@@ -37,6 +37,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 provider: { type: "string" },
@@ -94,6 +95,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -182,6 +184,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -217,6 +220,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },

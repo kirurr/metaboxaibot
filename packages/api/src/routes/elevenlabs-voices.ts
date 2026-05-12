@@ -36,6 +36,7 @@ export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 voice_id: { type: "string", description: "Voice ID" },
                 name: { type: "string", description: "Voice name" },

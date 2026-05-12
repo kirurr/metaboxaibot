@@ -119,11 +119,13 @@ export const heygenAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               items: {
                 type: "array",
                 items: {
                   type: "object",
+                  additionalProperties: true,
                   properties: {
                     avatar_id: { type: "string" },
                     avatar_name: { type: "string" },

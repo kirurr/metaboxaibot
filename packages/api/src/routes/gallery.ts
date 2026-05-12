@@ -178,6 +178,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               items: { type: "array", items: { type: "object" } },
               total: { type: "number" },
@@ -301,11 +302,31 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { ok: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
-          422: { type: "object", properties: { error: { type: "string" } } },
-          502: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          422: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -653,10 +674,26 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { url: { type: "string" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
-          422: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { url: { type: "string" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          422: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -700,10 +737,26 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { url: { type: "string" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
-          422: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { url: { type: "string" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          422: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -746,9 +799,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -793,7 +858,24 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         description: "Get user's gallery folders",
-        response: { 200: { type: "array", items: { type: "object" } } },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                id: { type: "string" },
+                name: { type: "string" },
+                isDefault: { type: "boolean" },
+                isPinned: { type: "boolean" },
+                pinnedAt: { type: "string", nullable: true },
+                itemCount: { type: "number" },
+                createdAt: { type: "string" },
+              },
+            },
+          },
+        },
       },
     },
     async (request) => {
@@ -837,7 +919,19 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["name"],
         },
         response: {
-          200: { type: "object" },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              isDefault: { type: "boolean" },
+              isPinned: { type: "boolean" },
+              pinnedAt: { type: "string", nullable: true },
+              itemCount: { type: "number" },
+              createdAt: { type: "string" },
+            },
+          },
           400: badRequestResponse,
         },
       },
@@ -889,10 +983,30 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
         response: {
-          200: { type: "object" },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              id: { type: "string" },
+              name: { type: "string" },
+              isDefault: { type: "boolean" },
+              isPinned: { type: "boolean" },
+              pinnedAt: { type: "string", nullable: true },
+              itemCount: { type: "number" },
+              createdAt: { type: "string" },
+            },
+          },
           400: badRequestResponse,
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -945,10 +1059,22 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["folderId"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
           400: badRequestResponse,
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -989,9 +1115,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["jobId"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -1039,9 +1177,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["folderId", "jobId"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -1074,9 +1224,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["jobId"],
         },
         response: {
-          200: { type: "object", properties: { folderId: { type: "string" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { folderId: { type: "string" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -1123,8 +1285,16 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["jobId"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

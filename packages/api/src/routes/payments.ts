@@ -41,17 +41,23 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
             period: { type: "string", description: "Subscription period (M1, M3, M6, M12)" },
             planId: { type: "string", description: "Legacy plan ID" },
           },
-          required: ["id"],
+          required: ["type", "id"],
         },
         response: {
-          200: { type: "object", properties: { invoiceUrl: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { invoiceUrl: { type: "string" } },
+          },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" } },
             description: "type and id are required, or invalid type/subscription period",
           },
           404: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" } },
             description: "Product not found or Subscription plan not found",
           },
@@ -205,10 +211,22 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["type", "id"],
         },
         response: {
-          200: { type: "object", properties: { paymentUrl: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { paymentUrl: { type: "string" } },
+          },
           400: badRequestResponse,
-          409: { type: "object", properties: { error: { type: "string" } } },
-          502: { type: "object", properties: { error: { type: "string" } } },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

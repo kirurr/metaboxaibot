@@ -50,7 +50,11 @@ export const imageSettingsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["modelId", "aspectRatio"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
           400: badRequestResponse,
         },
       },

@@ -27,6 +27,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -34,6 +35,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
           },
           500: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: { type: "string" },
             },

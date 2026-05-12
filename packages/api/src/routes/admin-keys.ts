@@ -162,6 +162,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               proxies: {
                 type: "array",
@@ -214,6 +215,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         description: "Create a new proxy",
         body: {
           type: "object",
+          additionalProperties: true,
           properties: {
             label: { type: "string", description: "Human-readable label" },
             protocol: {
@@ -233,6 +235,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               proxy: { type: "object" },
             },
@@ -297,7 +300,12 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           },
         },
         response: {
-          200: { type: "object", properties: { proxy: { type: "object" } }, required: ["proxy"] },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { proxy: { type: "object" } },
+            required: ["proxy"],
+          },
           400: badRequestResponse,
         },
       },
@@ -339,10 +347,15 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" } },
             required: ["success"],
           },
-          409: { type: "object", properties: { error: { type: "string" } } },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -374,12 +387,18 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { ok: { type: "boolean" }, ip: { type: "string" } },
             required: ["ok", "ip"],
           },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
           502: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
               status: { type: "number" },
@@ -436,6 +455,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { keys: { type: "array", items: { type: "object" } } },
             required: ["keys"],
           },
@@ -472,7 +492,12 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           required: ["provider", "label", "keyValue"],
         },
         response: {
-          200: { type: "object", properties: { key: { type: "object" } }, required: ["key"] },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { key: { type: "object" } },
+            required: ["key"],
+          },
           400: badRequestResponse,
         },
       },
@@ -521,10 +546,15 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" } },
             required: ["success"],
           },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -550,6 +580,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               providers: {
                 type: "array",

@@ -32,6 +32,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string", description: "User ID" },
               username: { type: "string", nullable: true, description: "Telegram username" },
@@ -44,12 +45,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
           400: badRequestResponse,
           401: {
             type: "object",
+            additionalProperties: true,
             description: "Invalid initData hash or timing validation failed",
             properties: { error: { type: "string" } },
           },
           403: userIsBlockedResponse,
           404: {
             type: "object",
+            additionalProperties: true,
             description: "User not found — open the bot first",
             properties: {
               error: { type: "string" },
@@ -110,6 +113,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string", description: "User ID" },
               username: { type: "string", nullable: true, description: "Telegram username" },
@@ -122,12 +126,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
           400: badRequestResponse,
           401: {
             type: "object",
+            additionalProperties: true,
             description: "Invalid or expired token",
             properties: { error: { type: "string" } },
           },
           403: userIsBlockedResponse,
           404: {
             type: "object",
+            additionalProperties: true,
             description: "User not found — open the bot first",
             properties: {
               error: { type: "string" },

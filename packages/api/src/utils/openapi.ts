@@ -3,6 +3,7 @@ import { type RouteOptions } from "fastify";
 export const unauthorizedResponse = {
   description: "Unauthorized",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },
@@ -11,6 +12,7 @@ export const unauthorizedResponse = {
 export const userNotFoundResponse = {
   description: "User not found",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },
@@ -19,6 +21,7 @@ export const userNotFoundResponse = {
 export const userIsBlockedResponse = {
   description: "User is blocked",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },
@@ -27,6 +30,7 @@ export const userIsBlockedResponse = {
 export const forbiddenResponse = {
   description: "Forbidden",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },
@@ -35,6 +39,7 @@ export const forbiddenResponse = {
 export const conflictResponse = {
   description: "Conflict",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },
@@ -43,6 +48,7 @@ export const conflictResponse = {
 export const badRequestResponse = {
   description: "Bad request",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
     code: { type: "string" },
@@ -52,6 +58,7 @@ export const badRequestResponse = {
 export const rateLimitResponse = {
   description: "Rate limit exceeded",
   type: "object",
+  additionalProperties: true,
   properties: {
     code: { type: "string" },
     error: { type: "string" },
@@ -63,6 +70,7 @@ export const rateLimitResponse = {
 export const metaboxApiErrorResponse = {
   description: "Metabox API error",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
     code: { type: "string" },
@@ -72,6 +80,7 @@ export const metaboxApiErrorResponse = {
 export const gatewayErrorResponse = {
   description: "Gateway error",
   type: "object",
+  additionalProperties: true,
   properties: {
     error: { type: "string" },
   },

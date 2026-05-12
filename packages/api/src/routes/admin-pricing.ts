@@ -144,10 +144,11 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               configDefault: { type: "number", description: "Default target margin" },
               global: { type: "number", nullable: true, description: "Global multiplier override" },
-              models: { type: "array", items: { type: "object" } },
+              models: { type: "array", items: { type: "object", additionalProperties: true } },
             },
             required: ["configDefault", "global", "models"],
           },
@@ -186,7 +187,12 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
           },
         },
         response: {
-          200: { type: "object", properties: { model: { type: "object" } }, required: ["model"] },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { model: { type: "object", additionalProperties: true } },
+            required: ["model"],
+          },
           400: badRequestResponse,
         },
       },
@@ -237,7 +243,11 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
         response: {
           200: {
             type: "object",
-            properties: { success: { type: "boolean" }, model: { type: "object" } },
+            additionalProperties: true,
+            properties: {
+              success: { type: "boolean" },
+              model: { type: "object", additionalProperties: true },
+            },
             required: ["success", "model"],
           },
         },
@@ -271,6 +281,7 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               global: { type: "number", nullable: true },
               configDefault: { type: "number" },
@@ -317,6 +328,7 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" }, configDefault: { type: "number" } },
             required: ["success", "configDefault"],
           },

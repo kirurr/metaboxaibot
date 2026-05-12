@@ -211,6 +211,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               user: { type: "object" },
               accessToken: { type: "string" },
@@ -220,6 +221,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: {
                 type: "string",
@@ -229,10 +231,12 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           },
           409: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Email already registered" } },
           },
           502: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Failed to create account" } },
           },
         },
@@ -326,6 +330,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               user: { type: "object" },
               accessToken: { type: "string" },
@@ -335,20 +340,24 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: { type: "string", description: "Email and password are required" },
             },
           },
           401: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Invalid email or password" } },
           },
           403: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Access denied" } },
           },
           502: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: { type: "string", description: "Temporary error. Try again later." },
             },
@@ -415,6 +424,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               accessToken: { type: "string" },
               accessTokenExpiresAt: { type: "number" },
@@ -423,6 +433,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           },
           401: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: { type: "string", description: "Missing or expired refresh token" },
             },
@@ -462,6 +473,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -490,6 +502,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               user: { type: "object" },
               csrfToken: { type: "string" },
@@ -554,6 +567,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -602,16 +616,19 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
           },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Invalid or expired token" } },
           },
           502: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Failed to reset password" } },
           },
         },
@@ -653,12 +670,14 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
           },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: {
               error: {
                 type: "string",
@@ -668,10 +687,12 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           },
           401: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Old password is incorrect" } },
           },
           502: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string", description: "Failed to change password" } },
           },
         },
@@ -742,6 +763,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               deepLinkUrl: { type: "string" },
               state: { type: "string" },
@@ -779,6 +801,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               linked: { type: "boolean" },
               telegramUsername: { type: "string", nullable: true },

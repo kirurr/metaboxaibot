@@ -32,6 +32,7 @@ export const soulStylesRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string", description: "Style ID" },
                 name: { type: "string", description: "Style name" },

@@ -63,11 +63,12 @@ export const didVoicesRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string", description: "Voice ID" },
                 name: { type: "string", description: "Voice name" },
                 gender: { type: "string", description: "Voice gender" },
-                languages: { type: "array", items: { type: "object" } },
+                languages: { type: "array", items: { type: "object", additionalProperties: true } },
                 provider: { type: "string", description: "Voice provider" },
                 styles: { type: "array", items: { type: "string" } },
                 description: { type: "string", description: "Voice description" },

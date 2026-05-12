@@ -34,11 +34,13 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               subscriptions: {
                 type: "array",
                 items: {
                   type: "object",
+                  additionalProperties: true,
                   properties: {
                     id: { type: "string" },
                     name: { type: "string" },
@@ -47,6 +49,7 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
                       type: "object",
                       additionalProperties: {
                         type: "object",
+                        additionalProperties: true,
                         properties: {
                           priceRub: { type: "string" },
                           stars: { type: "number" },
@@ -60,6 +63,7 @@ export const tariffsRoutes: FastifyPluginAsync = async (fastify) => {
                 type: "array",
                 items: {
                   type: "object",
+                  additionalProperties: true,
                   properties: {
                     id: { type: "string" },
                     name: { type: "string" },

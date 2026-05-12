@@ -531,6 +531,7 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               state: { type: "string" },
               section: { type: "string", nullable: true },
@@ -542,7 +543,10 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
               designModelId: { type: "string", nullable: true },
               audioModelId: { type: "string", nullable: true },
               videoModelId: { type: "string", nullable: true },
-              selectedModes: { type: "object" },
+              selectedModes: {
+                type: "object",
+                additionalProperties: true,
+              },
             },
           },
         },

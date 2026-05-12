@@ -17,7 +17,7 @@ export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         description: "Get user's model settings",
-        response: { 200: { type: "object" } },
+        response: { 200: { type: "object", additionalProperties: true } },
       },
     },
     async (request) => {
@@ -52,7 +52,11 @@ export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["modelId", "settings"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
           400: badRequestResponse,
         },
       },
@@ -83,7 +87,7 @@ export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
           properties: { dialogId: { type: "string", description: "Dialog ID" } },
           required: ["dialogId"],
         },
-        response: { 200: { type: "object" } },
+        response: { 200: { type: "object", additionalProperties: true } },
       },
     },
     async (request) => {
@@ -110,7 +114,11 @@ export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["settings"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
           400: badRequestResponse,
         },
       },

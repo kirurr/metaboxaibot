@@ -32,6 +32,7 @@ export const higgsfieldMotionsRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string", description: "Motion ID" },
                 name: { type: "string", description: "Motion name" },

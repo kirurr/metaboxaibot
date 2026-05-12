@@ -123,7 +123,55 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
     {
       schema: {
         description: "Get user profile with balance and recent transactions",
-        response: { 200: { type: "object" } },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              id: { type: "string" },
+              username: { type: "string", nullable: true },
+              firstName: { type: "string", nullable: true },
+              lastName: { type: "string", nullable: true },
+              language: { type: "string" },
+              role: { type: "string" },
+              metaboxUserId: { type: "string", nullable: true },
+              metaboxReferralCode: { type: "string", nullable: true },
+              finishedOnboarding: { type: "boolean" },
+              confirmBeforeGenerate: { type: "boolean" },
+              tokenBalance: { type: "string" },
+              purchasedTokenBalance: { type: "string" },
+              subscriptionTokenBalance: { type: "string" },
+              referralCount: { type: "number" },
+              createdAt: { type: "string" },
+              subscription: {
+                type: "object",
+                nullable: true,
+                properties: {
+                  planName: { type: "string" },
+                  period: { type: "string" },
+                  daysLeft: { type: "number" },
+                  totalDays: { type: "number" },
+                  endDate: { type: "string" },
+                },
+              },
+              transactions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    amount: { type: "string" },
+                    type: { type: "string" },
+                    reason: { type: "string" },
+                    description: { type: "string", nullable: true },
+                    modelId: { type: "string", nullable: true },
+                    createdAt: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
     async (request) => {
@@ -221,6 +269,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { ok: { type: "boolean" }, confirmBeforeGenerate: { type: "boolean" } },
           },
           400: badRequestResponse,
@@ -255,6 +304,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               balance: { type: "number" },
               totalEarned: { type: "number" },
@@ -315,9 +365,35 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         description: "Get SSO redirect URL for linked Metabox account",
         response: {
-          200: { type: "object", properties: { ssoUrl: { type: "string" } } },
-          409: { type: "object", properties: { error: { type: "string" } } },
-          502: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            oneOf: [
+              {
+                properties: {
+                  ssoUrl: { type: "string" },
+                },
+                required: ["ssoUrl"],
+              },
+              {
+                properties: {
+                  requiresVerification: { type: "boolean" },
+                  email: { type: "string" },
+                },
+                required: ["requiresVerification", "email"],
+              },
+            ],
+          },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -371,13 +447,18 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               linked: { type: "boolean" },
               emailVerified: { type: "boolean" },
               email: { type: "string" },
             },
           },
-          502: { type: "object", properties: { error: { type: "string" } } },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -420,10 +501,19 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         description: "Resend verification email to current address",
         response: {
-          200: { type: "object", properties: { ok: { type: "boolean" } } },
-          409: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" } },
+          },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
           429: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" }, retryAfterSec: { type: "number" } },
           },
         },
@@ -489,9 +579,13 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["newEmail"],
         },
         response: {
-          200: { type: "object" },
+          200: { type: "object", additionalProperties: true },
           400: badRequestResponse,
-          409: { type: "object", properties: { error: { type: "string" } } },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -555,7 +649,28 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           },
           required: ["email", "password"],
         },
-        response: { 200: { type: "object" }, 400: badRequestResponse },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            oneOf: [
+              {
+                properties: {
+                  ssoUrl: { type: "string" },
+                },
+                required: ["ssoUrl"],
+              },
+              {
+                properties: {
+                  requiresVerification: { type: "boolean" },
+                  email: { type: "string" },
+                },
+                required: ["requiresVerification", "email"],
+              },
+            ],
+          },
+          400: badRequestResponse,
+        },
       },
     },
     async (request, reply) => {
@@ -642,7 +757,17 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           },
           required: ["email", "password"],
         },
-        response: { 200: { type: "object" }, 400: badRequestResponse },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              ssoUrl: { type: "string" },
+              mergedFrom: { type: "string", nullable: true },
+            },
+          },
+          400: badRequestResponse,
+        },
       },
     },
     async (request, reply) => {

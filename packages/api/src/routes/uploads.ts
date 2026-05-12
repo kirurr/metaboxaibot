@@ -67,6 +67,7 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 type: { type: "string" },
@@ -109,6 +110,7 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string" },
               type: { type: "string" },
@@ -120,11 +122,13 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
           },
           400: {
             type: "object",
+            additionalProperties: true,
             description: "Name is required",
             properties: { error: { type: "string" } },
           },
           404: {
             type: "object",
+            additionalProperties: true,
             description: "Not found",
             properties: { error: { type: "string" } },
           },
@@ -159,11 +163,16 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               success: { type: "boolean" },
             },
           },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

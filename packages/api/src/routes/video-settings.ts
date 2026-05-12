@@ -55,6 +55,7 @@ export const videoSettingsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               success: { type: "boolean" },
             },

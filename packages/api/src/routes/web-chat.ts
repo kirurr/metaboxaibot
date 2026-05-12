@@ -73,6 +73,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 name: { type: "string" },
@@ -110,12 +111,14 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               tokenBalance: { type: "string" },
               subscriptionTokenBalance: { type: "string" },
               subscription: {
                 type: "object",
                 nullable: true,
+                additionalProperties: true,
                 properties: {
                   planName: { type: "string" },
                   period: { type: "string" },
@@ -177,6 +180,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 section: { type: "string" },
@@ -225,6 +229,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string" },
               section: { type: "string" },
@@ -286,6 +291,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string" },
               title: { type: "string" },
@@ -293,16 +299,19 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
           },
           400: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" } },
             description: "Title is required",
           },
           403: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" } },
             description: "Forbidden",
           },
           404: {
             type: "object",
+            additionalProperties: true,
             properties: { error: { type: "string" } },
             description: "Not found",
           },
@@ -339,12 +348,21 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               success: { type: "boolean" },
             },
           },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -377,6 +395,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 role: { type: "string" },
@@ -387,8 +406,16 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
               },
             },
           },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

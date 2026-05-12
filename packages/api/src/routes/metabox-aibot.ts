@@ -26,8 +26,12 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         description: "Get available token packages for purchase",
         response: {
-          200: { type: "array", items: { type: "object" } },
-          503: { type: "object", properties: { error: { type: "string" } } },
+          200: { type: "array", items: { type: "object", additionalProperties: true } },
+          503: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -59,10 +63,22 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["productId"],
         },
         response: {
-          200: { type: "object", properties: { paymentUrl: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { paymentUrl: { type: "string" } },
+          },
           400: badRequestResponse,
-          409: { type: "object", properties: { error: { type: "string" } } },
-          502: { type: "object", properties: { error: { type: "string" } } },
+          409: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

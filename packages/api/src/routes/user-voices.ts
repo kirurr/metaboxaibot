@@ -41,6 +41,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 provider: { type: "string" },
@@ -102,6 +103,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               ok: { type: "boolean" },
             },
@@ -177,6 +179,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               url: { type: "string" },
             },
@@ -223,6 +226,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string" },
               provider: { type: "string" },
@@ -280,6 +284,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               success: { type: "boolean" },
             },

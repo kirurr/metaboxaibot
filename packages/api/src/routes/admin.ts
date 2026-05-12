@@ -57,8 +57,24 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
-              users: { type: "array", items: { type: "object" } },
+              users: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    id: { type: "string" },
+                    username: { type: "string", nullable: true },
+                    firstName: { type: "string", nullable: true },
+                    tokenBalance: { type: "string" },
+                    role: { type: "string" },
+                    isBlocked: { type: "boolean" },
+                    createdAt: { type: "string" },
+                  },
+                },
+              },
               total: { type: "number" },
               page: { type: "number" },
               limit: { type: "number" },
@@ -133,11 +149,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" }, newBalance: { type: "string" } },
             required: ["success", "newBalance"],
           },
           400: badRequestResponse,
-          404: { type: "object", properties: { error: { type: "string" } } },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -187,11 +208,16 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" }, isBlocked: { type: "boolean" } },
             required: ["success", "isBlocked"],
           },
           400: badRequestResponse,
-          404: { type: "object", properties: { error: { type: "string" } } },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -231,12 +257,21 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { success: { type: "boolean" } },
             required: ["success"],
           },
           400: badRequestResponse,
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

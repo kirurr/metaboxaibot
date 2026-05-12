@@ -40,6 +40,7 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 section: { type: "string" },
@@ -87,6 +88,7 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               id: { type: "string" },
               section: { type: "string" },
@@ -145,11 +147,20 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: { id: { type: "string" }, title: { type: "string" } },
           },
           400: badRequestResponse,
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -182,9 +193,21 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -214,9 +237,21 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ["id"],
         },
         response: {
-          200: { type: "object", properties: { success: { type: "boolean" } } },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },
@@ -259,19 +294,41 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: true,
               properties: {
                 id: { type: "string" },
                 role: { type: "string" },
                 content: { type: "string" },
                 mediaUrl: { type: "string", nullable: true },
                 mediaType: { type: "string", nullable: true },
-                attachments: { type: "array", items: { type: "object" } },
+                attachments: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: {
+                      s3Key: { type: "string" },
+                      mimeType: { type: "string" },
+                      name: { type: "string" },
+                      size: { type: "number" },
+                      previewUrl: { type: "string" },
+                    },
+                  },
+                },
                 createdAt: { type: "string" },
               },
             },
           },
-          403: { type: "object", properties: { error: { type: "string" } } },
-          404: { type: "object", properties: { error: { type: "string" } } },
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
         },
       },
     },

@@ -32,11 +32,13 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               subscriptions: {
                 type: "array",
                 items: {
                   type: "object",
+                  additionalProperties: true,
                   properties: {
                     id: { type: "string" },
                     name: { type: "string" },
@@ -45,6 +47,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
                       type: "object",
                       additionalProperties: {
                         type: "object",
+                        additionalProperties: true,
                         properties: {
                           priceRub: { type: "string" },
                           discountPct: { type: "number" },
@@ -58,6 +61,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
                 type: "array",
                 items: {
                   type: "object",
+                  additionalProperties: true,
                   properties: {
                     id: { type: "string" },
                     name: { type: "string" },
@@ -143,6 +147,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               orderId: { type: "string" },
               paymentUrl: { type: "string" },
@@ -197,6 +202,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               orderId: { type: "string" },
               paymentUrl: { type: "string" },
@@ -250,6 +256,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "object",
+            additionalProperties: true,
             properties: {
               status: { type: "string" },
             },
