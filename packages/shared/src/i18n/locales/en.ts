@@ -598,8 +598,10 @@ export default {
     uploadPromptElement:
       'Send 1–4 photos for "{slot}". First photo = frontal view; the rest (up to 3) = reference views.',
     imageSaved: "✅ {slot}: image {n}/{max} saved.",
-    tooManyMedia:
-      "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} files:\n{breakdown}.\n\nTap the buttons below to view the contents.",
+    tooManyMediaSingleSlot:
+      "❌ You uploaded extra files — they were skipped.\n\n{modelName} only accepts {totalMax} {fileNoun} — {slotLabel}.\n\nTap the buttons below to view the contents.",
+    tooManyMediaMultiSlot:
+      "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} {fileNoun}:\n{breakdown}\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",

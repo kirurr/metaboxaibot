@@ -317,16 +317,38 @@ export function consumeDistribution(
 }
 
 /**
- * Builds the overflow reply body. Caller composes it into the slot status
- * message (so the user sees the breakdown alongside the current slot menu).
+ * Builds the overflow reply body. Single-slot models get a compact one-line
+ * description; multi-slot models get the bullet breakdown.
  */
 export function buildOverflowMessage(model: AIModel, t: Translations): string {
   if (!model.mediaInputs?.length) return "";
   const { totalMax, lines } = formatSlotBreakdown(model.mediaInputs, t);
-  return t.mediaInput.tooManyMedia
+  const fileNoun = pluralFileNoun(totalMax, t);
+
+  if (lines.length === 1) {
+    const slot = model.mediaInputs[0];
+    const slotLabel = t.mediaInput[slot.labelKey as keyof typeof t.mediaInput] ?? slot.labelKey;
+    return t.mediaInput.tooManyMediaSingleSlot
+      .replace("{modelName}", model.name)
+      .replace("{totalMax}", String(totalMax))
+      .replace("{fileNoun}", fileNoun)
+      .replace("{slotLabel}", String(slotLabel));
+  }
+
+  return t.mediaInput.tooManyMediaMultiSlot
     .replace("{modelName}", model.name)
     .replace("{totalMax}", String(totalMax))
+    .replace("{fileNoun}", fileNoun)
     .replace("{breakdown}", lines.join("\n"));
+}
+
+function pluralFileNoun(count: number, t: Translations): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return t.confirmGeneration.mediaFileNounOne;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14))
+    return t.confirmGeneration.mediaFileNounFew;
+  return t.confirmGeneration.mediaFileNounMany;
 }
 
 /**
