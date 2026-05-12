@@ -13,6 +13,7 @@ import { calculateCost, usdToTokens } from "../services/token.service.js";
 import { getModelMultiplier } from "../services/pricing-config.service.js";
 import { db } from "../db.js";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 /** USD → tokens с применением per-model multiplier (единый шаблон с calculateCost). */
 function modelUsdToTokens(modelId: string, usd: number): number {
@@ -156,20 +157,38 @@ function serializeModel(m: AIModel, lang: Language) {
 
 export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["models"]),
+  );
 
   /** GET /models?section=gpt — list all models or filter by section */
-  fastify.get<{ Querystring: { section?: string } }>("/models", async (request) => {
-    const { userId } = request as AuthRequestM;
-    const { section } = request.query;
-    const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
-    const lang = (user?.language ?? "en") as Language;
+  fastify.get<{ Querystring: { section?: string } }>(
+    "/models",
+    {
+      schema: {
+        description: "Get all models or filter by section",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "Filter by section (e.g., gpt, image)" },
+          },
+        },
+        response: { 200: { type: "array", items: { type: "object" } } },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequestM;
+      const { section } = request.query;
+      const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
+      const lang = (user?.language ?? "en") as Language;
 
-    const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
-    // Скрытые модели (например, `grok-imagine-extend`) активируются только
-    // через спец-сценарии (кнопка «Продлить») и не должны показываться в
-    // обычном webapp-списке моделей.
-    const models = allModels.filter((m) => !m.hiddenFromCarousel);
+      const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
+      // Скрытые модели (например, `grok-imagine-extend`) активируются только
+      // через спец-сценарии (кнопка «Продлить») и не должны показываться в
+      // обычном webapp-списке моделей.
+      const models = allModels.filter((m) => !m.hiddenFromCarousel);
 
-    return models.map((m) => serializeModel(m, lang));
-  });
+      return models.map((m) => serializeModel(m, lang));
+    },
+  );
 };

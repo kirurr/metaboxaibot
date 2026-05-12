@@ -13,31 +13,93 @@ import {
   type Section,
 } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["dialogs"]),
+  );
 
   /** GET /dialogs?section=gpt — list active dialogs */
-  fastify.get<{ Querystring: { section?: string } }>("/dialogs", async (request) => {
-    const { userId } = request as AuthRequest;
-    const section = request.query.section as Section | undefined;
+  fastify.get<{ Querystring: { section?: string } }>(
+    "/dialogs",
+    {
+      schema: {
+        description: "List active dialogs for user",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "Filter by section (e.g., gpt, image)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                section: { type: "string" },
+                modelId: { type: "string" },
+                title: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { userId } = request as AuthRequest;
+      const section = request.query.section as Section | undefined;
 
-    const dialogs = await dialogService.listByUser(userId, section);
-    return dialogs.map((d) => ({
-      id: d.id,
-      section: d.section,
-      modelId: d.modelId,
-      title: d.title ?? null,
-      createdAt: d.createdAt.toISOString(),
-      updatedAt: d.updatedAt.toISOString(),
-    }));
-  });
+      const dialogs = await dialogService.listByUser(userId, section);
+      return dialogs.map((d) => ({
+        id: d.id,
+        section: d.section,
+        modelId: d.modelId,
+        title: d.title ?? null,
+        createdAt: d.createdAt.toISOString(),
+        updatedAt: d.updatedAt.toISOString(),
+      }));
+    },
+  );
 
   /** POST /dialogs — create new dialog */
   fastify.post<{ Body: { section: string; modelId: string; title?: string } }>(
     "/dialogs",
+    {
+      schema: {
+        description: "Create a new dialog",
+        body: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "Section (e.g., gpt, image)" },
+            modelId: { type: "string", description: "Model ID to use" },
+            title: { type: "string", description: "Optional dialog title" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              section: { type: "string" },
+              modelId: { type: "string" },
+              title: { type: "string", nullable: true },
+              createdAt: { type: "string" },
+              updatedAt: { type: "string" },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { section, modelId, title } = request.body;
@@ -67,6 +129,30 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   /** PATCH /dialogs/:id — rename */
   fastify.patch<{ Params: { id: string }; Body: { title: string } }>(
     "/dialogs/:id",
+    {
+      schema: {
+        description: "Rename a dialog",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Dialog ID" } },
+          required: ["id"],
+        },
+        body: {
+          type: "object",
+          properties: { title: { type: "string", description: "New dialog title" } },
+          required: ["title"],
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { id: { type: "string" }, title: { type: "string" } },
+          },
+          400: badRequestResponse,
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const { id } = request.params;
@@ -85,88 +171,156 @@ export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** DELETE /dialogs/:id — soft delete */
-  fastify.delete<{ Params: { id: string } }>("/dialogs/:id", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+  fastify.delete<{ Params: { id: string } }>(
+    "/dialogs/:id",
+    {
+      schema: {
+        description: "Soft delete a dialog",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Dialog ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    await dialogService.softDelete(id, userId);
+      await dialogService.softDelete(id, userId);
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   /** POST /dialogs/:id/activate — set as active dialog */
-  fastify.post<{ Params: { id: string } }>("/dialogs/:id/activate", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+  fastify.post<{ Params: { id: string } }>(
+    "/dialogs/:id/activate",
+    {
+      schema: {
+        description: "Set dialog as active",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Dialog ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const state = await userStateService.get(userId);
+      const state = await userStateService.get(userId);
 
-    if (state?.gptDialogId === dialog.id && state.state === "GPT_ACTIVE") {
+      if (state?.gptDialogId === dialog.id && state.state === "GPT_ACTIVE") {
+        return { success: true };
+      }
+
+      await userStateService.setDialogForSection(userId, dialog.section as Section, id);
+
+      // Notify user in chat (fire-and-forget)
+      sendDialogSelectedNotification(userId, dialog.title, dialog.modelId).catch(() => void 0);
+
       return { success: true };
-    }
-
-    await userStateService.setDialogForSection(userId, dialog.section as Section, id);
-
-    // Notify user in chat (fire-and-forget)
-    sendDialogSelectedNotification(userId, dialog.title, dialog.modelId).catch(() => void 0);
-
-    return { success: true };
-  });
+    },
+  );
 
   /** GET /dialogs/:id/messages — message history */
-  fastify.get<{ Params: { id: string } }>("/dialogs/:id/messages", async (request, reply) => {
-    const { userId } = request as AuthRequest;
-    const { id } = request.params;
+  fastify.get<{ Params: { id: string } }>(
+    "/dialogs/:id/messages",
+    {
+      schema: {
+        description: "Get message history for a dialog",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Dialog ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                role: { type: "string" },
+                content: { type: "string" },
+                mediaUrl: { type: "string", nullable: true },
+                mediaType: { type: "string", nullable: true },
+                attachments: { type: "array", items: { type: "object" } },
+                createdAt: { type: "string" },
+              },
+            },
+          },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { id } = request.params;
 
-    const dialog = await dialogService.findById(id);
-    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-    if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const dialog = await dialogService.findById(id);
+      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+      if (dialog.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const messages = await dialogService.getMessages(id);
+      const messages = await dialogService.getMessages(id);
 
-    // Resolve S3 keys to presigned URLs (S3 keys don't start with "http")
-    const resolvedMessages = await Promise.all(
-      messages.map(async (m) => {
-        let mediaUrl = m.mediaUrl ?? null;
-        if (mediaUrl && !mediaUrl.startsWith("http")) {
-          mediaUrl = (await getFileUrl(mediaUrl)) ?? mediaUrl;
-        }
-        const rawAttachments = Array.isArray(m.attachments)
-          ? (m.attachments as unknown as Array<{
-              s3Key: string;
-              mimeType: string;
-              name: string;
-              size?: number;
-            }>)
-          : [];
-        const attachments = await Promise.all(
-          rawAttachments.map(async (a) => ({
-            ...a,
-            previewUrl: (await getFileUrl(a.s3Key)) ?? undefined,
-          })),
-        );
-        return {
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          mediaUrl,
-          mediaType: m.mediaType ?? null,
-          attachments: attachments.length ? attachments : undefined,
-          createdAt: m.createdAt.toISOString(),
-        };
-      }),
-    );
+      // Resolve S3 keys to presigned URLs (S3 keys don't start with "http")
+      const resolvedMessages = await Promise.all(
+        messages.map(async (m) => {
+          let mediaUrl = m.mediaUrl ?? null;
+          if (mediaUrl && !mediaUrl.startsWith("http")) {
+            mediaUrl = (await getFileUrl(mediaUrl)) ?? mediaUrl;
+          }
+          const rawAttachments = Array.isArray(m.attachments)
+            ? (m.attachments as unknown as Array<{
+                s3Key: string;
+                mimeType: string;
+                name: string;
+                size?: number;
+              }>)
+            : [];
+          const attachments = await Promise.all(
+            rawAttachments.map(async (a) => ({
+              ...a,
+              previewUrl: (await getFileUrl(a.s3Key)) ?? undefined,
+            })),
+          );
+          return {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            mediaUrl,
+            mediaType: m.mediaType ?? null,
+            attachments: attachments.length ? attachments : undefined,
+            createdAt: m.createdAt.toISOString(),
+          };
+        }),
+      );
 
-    return resolvedMessages;
-  });
+      return resolvedMessages;
+    },
+  );
 };
 
 async function sendDialogSelectedNotification(

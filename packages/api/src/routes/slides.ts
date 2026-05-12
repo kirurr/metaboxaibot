@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, unlink, mkdir } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -40,14 +41,32 @@ function serialize(slide: {
 }
 
 export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["slides"]),
+  );
+
   /** GET /slides — public, returns active slides */
-  fastify.get("/slides", async () => {
-    const slides = await db.bannerSlide.findMany({
-      where: { active: true },
-      orderBy: { sortOrder: "asc" },
-    });
-    return { slides: slides.map(serialize) };
-  });
+  fastify.get(
+    "/slides",
+    {
+      schema: {
+        description: "Get active banner slides",
+        response: {
+          200: {
+            type: "object",
+            properties: { slides: { type: "array", items: { type: "object" } } },
+          },
+        },
+      },
+    },
+    async () => {
+      const slides = await db.bannerSlide.findMany({
+        where: { active: true },
+        orderBy: { sortOrder: "asc" },
+      });
+      return { slides: slides.map(serialize) };
+    },
+  );
 
   /** Admin slides management */
   await fastify.register(async (admin) => {
@@ -121,83 +140,110 @@ export async function slidesRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     /** PATCH /admin/slides/:id — update slide */
-    admin.patch<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
-      const { id } = request.params;
-      const existing = await db.bannerSlide.findUnique({ where: { id } });
-      if (!existing) {
-        await reply.status(404).send({ error: "Slide not found" });
-        return;
-      }
-
-      const contentType = request.headers["content-type"] || "";
-      const updateData: Record<string, unknown> = {};
-
-      if (contentType.includes("multipart")) {
-        await ensureUploadsDir();
-        const data = await request.file();
-
-        if (data) {
-          // New image uploaded — save and delete old
-          const buffer = await data.toBuffer();
-          const ext = extname(data.filename || ".png") || ".png";
-          const filename = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
-          const filepath = join(UPLOADS_DIR, filename);
-          await writeFile(filepath, buffer);
-          updateData.imageUrl = `/uploads/banners/${filename}`;
-
-          // Delete old file
-          try {
-            const oldPath = join(__dirname, "..", "..", existing.imageUrl.replace(/^\//, ""));
-            await unlink(oldPath);
-          } catch {
-            // Old file may not exist
-          }
-
-          const fields = data.fields as Record<string, { value?: string } | undefined>;
-          if (fields.linkUrl)
-            updateData.linkUrl = (fields.linkUrl as { value?: string }).value || null;
-          if (fields.displaySeconds) {
-            const ds = parseInt((fields.displaySeconds as { value?: string }).value || "4", 10);
-            if (!isNaN(ds)) updateData.displaySeconds = ds;
-          }
-          if (fields.active)
-            updateData.active = (fields.active as { value?: string }).value !== "false";
+    admin.patch<{ Params: { id: string } }>(
+      "/admin/slides/:id",
+      {
+        schema: {
+          description: "Update a banner slide by ID",
+          params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+          response: { 404: { type: "object", properties: { error: { type: "string" } } } },
+        },
+      },
+      async (request, reply) => {
+        const { id } = request.params;
+        const existing = await db.bannerSlide.findUnique({ where: { id } });
+        if (!existing) {
+          await reply.status(404).send({ error: "Slide not found" });
+          return;
         }
-      } else {
-        // JSON body update
-        const body = request.body as Record<string, unknown>;
-        if ("linkUrl" in body) updateData.linkUrl = body.linkUrl;
-        if ("displaySeconds" in body) updateData.displaySeconds = body.displaySeconds;
-        if ("active" in body) updateData.active = body.active;
-      }
 
-      const slide = await db.bannerSlide.update({
-        where: { id },
-        data: updateData,
-      });
-      return serialize(slide);
-    });
+        const contentType = request.headers["content-type"] || "";
+        const updateData: Record<string, unknown> = {};
+
+        if (contentType.includes("multipart")) {
+          await ensureUploadsDir();
+          const data = await request.file();
+
+          if (data) {
+            // New image uploaded — save and delete old
+            const buffer = await data.toBuffer();
+            const ext = extname(data.filename || ".png") || ".png";
+            const filename = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
+            const filepath = join(UPLOADS_DIR, filename);
+            await writeFile(filepath, buffer);
+            updateData.imageUrl = `/uploads/banners/${filename}`;
+
+            // Delete old file
+            try {
+              const oldPath = join(__dirname, "..", "..", existing.imageUrl.replace(/^\//, ""));
+              await unlink(oldPath);
+            } catch {
+              // Old file may not exist
+            }
+
+            const fields = data.fields as Record<string, { value?: string } | undefined>;
+            if (fields.linkUrl)
+              updateData.linkUrl = (fields.linkUrl as { value?: string }).value || null;
+            if (fields.displaySeconds) {
+              const ds = parseInt((fields.displaySeconds as { value?: string }).value || "4", 10);
+              if (!isNaN(ds)) updateData.displaySeconds = ds;
+            }
+            if (fields.active)
+              updateData.active = (fields.active as { value?: string }).value !== "false";
+          }
+        } else {
+          // JSON body update
+          const body = request.body as Record<string, unknown>;
+          if ("linkUrl" in body) updateData.linkUrl = body.linkUrl;
+          if ("displaySeconds" in body) updateData.displaySeconds = body.displaySeconds;
+          if ("active" in body) updateData.active = body.active;
+        }
+
+        const slide = await db.bannerSlide.update({
+          where: { id },
+          data: updateData,
+        });
+        return serialize(slide);
+      },
+    );
 
     /** DELETE /admin/slides/:id */
-    admin.delete<{ Params: { id: string } }>("/admin/slides/:id", async (request, reply) => {
-      const { id } = request.params;
-      const existing = await db.bannerSlide.findUnique({ where: { id } });
-      if (!existing) {
-        await reply.status(404).send({ error: "Slide not found" });
-        return;
-      }
+    admin.delete<{ Params: { id: string } }>(
+      "/admin/slides/:id",
+      {
+        schema: {
+          description: "Delete a banner slide by ID",
+          params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+          response: {
+            200: { type: "object", properties: { success: { type: "boolean" } } },
+            404: {
+              type: "object",
+              properties: { error: { type: "string" } },
+              description: "Slide not found",
+            },
+          },
+        },
+      },
+      async (request, reply) => {
+        const { id } = request.params;
+        const existing = await db.bannerSlide.findUnique({ where: { id } });
+        if (!existing) {
+          await reply.status(404).send({ error: "Slide not found" });
+          return;
+        }
 
-      // Delete file
-      try {
-        const filePath = join(__dirname, "..", "..", existing.imageUrl.replace(/^\//, ""));
-        await unlink(filePath);
-      } catch {
-        // File may not exist
-      }
+        // Delete file
+        try {
+          const filePath = join(__dirname, "..", "..", existing.imageUrl.replace(/^\//, ""));
+          await unlink(filePath);
+        } catch {
+          // File may not exist
+        }
 
-      await db.bannerSlide.delete({ where: { id } });
-      return { success: true };
-    });
+        await db.bannerSlide.delete({ where: { id } });
+        return { success: true };
+      },
+    );
 
     /** POST /admin/slides/reorder */
     admin.post("/admin/slides/reorder", async (request, reply) => {

@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 interface ElevenLabsVoiceRaw {
   voice_id: string;
@@ -20,45 +21,74 @@ let voicesCache: { data: object[]; at: number } | null = null;
 
 export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["elevenlabs-voices"]),
+  );
 
   /** GET /elevenlabs-voices — proxy to ElevenLabs /v1/voices, returns premade voices */
-  fastify.get("/elevenlabs-voices", async (_request, reply) => {
-    if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-      return voicesCache.data;
-    }
-
-    let apiKey: string;
-    try {
-      apiKey = (await acquireKey("elevenlabs")).apiKey;
-    } catch (err) {
-      if (err instanceof PoolExhaustedError) {
-        return reply.status(503).send({ error: "ElevenLabs API key not configured" });
+  fastify.get(
+    "/elevenlabs-voices",
+    {
+      schema: {
+        description: "Get list of premade ElevenLabs voices (cached for 1 hour)",
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                voice_id: { type: "string", description: "Voice ID" },
+                name: { type: "string", description: "Voice name" },
+                category: { type: "string", description: "Voice category" },
+                gender: { type: "string", nullable: true, description: "Voice gender" },
+                language: { type: "string", nullable: true, description: "Voice language" },
+                preview_url: { type: "string", nullable: true, description: "Preview audio URL" },
+              },
+            },
+          },
+          502: badRequestResponse,
+          503: badRequestResponse,
+        },
+      },
+    },
+    async (_request, reply) => {
+      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
+        return voicesCache.data;
       }
-      throw err;
-    }
 
-    const res = await fetch("https://api.elevenlabs.io/v1/voices?show_legacy=false", {
-      headers: { "xi-api-key": apiKey, Accept: "application/json" },
-    });
+      let apiKey: string;
+      try {
+        apiKey = (await acquireKey("elevenlabs")).apiKey;
+      } catch (err) {
+        if (err instanceof PoolExhaustedError) {
+          return reply.status(503).send({ error: "ElevenLabs API key not configured" });
+        }
+        throw err;
+      }
 
-    if (!res.ok) {
-      const text = await res.text();
-      return reply.status(502).send({ error: `ElevenLabs error: ${res.status} ${text}` });
-    }
+      const res = await fetch("https://api.elevenlabs.io/v1/voices?show_legacy=false", {
+        headers: { "xi-api-key": apiKey, Accept: "application/json" },
+      });
 
-    const json = (await res.json()) as ElevenLabsVoicesResponse;
-    const voices = (json.voices ?? []).filter((v) => v.category === "premade");
+      if (!res.ok) {
+        const text = await res.text();
+        return reply.status(502).send({ error: `ElevenLabs error: ${res.status} ${text}` });
+      }
 
-    const data = voices.map((v) => ({
-      voice_id: v.voice_id,
-      name: v.name,
-      category: v.category ?? "premade",
-      gender: v.labels?.gender ?? null,
-      language: v.labels?.language ?? null,
-      preview_url: v.preview_url ?? null,
-    }));
+      const json = (await res.json()) as ElevenLabsVoicesResponse;
+      const voices = (json.voices ?? []).filter((v) => v.category === "premade");
 
-    voicesCache = { data, at: Date.now() };
-    return data;
-  });
+      const data = voices.map((v) => ({
+        voice_id: v.voice_id,
+        name: v.name,
+        category: v.category ?? "premade",
+        gender: v.labels?.gender ?? null,
+        language: v.labels?.language ?? null,
+        preview_url: v.preview_url ?? null,
+      }));
+
+      voicesCache = { data, at: Date.now() };
+      return data;
+    },
+  );
 };

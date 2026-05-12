@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { getFileUrl, deleteFile, compressForTelegramPhoto } from "../services/s3.service.js";
 import { buildDownloadButton, generateDownloadToken } from "../utils/download-token.js";
 import { AI_MODELS, config, getT, buildResultCaption } from "@metabox/shared";
+import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
@@ -133,6 +134,9 @@ async function prepareImageBuffer(
 
 export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (routeOptions) =>
+    constructOpenAPIonRouteHook(routeOptions, ["gallery"]),
+  );
 
   /**
    * GET /gallery?section=image|audio|video&page=1&limit=20
@@ -149,91 +153,128 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
       modelIds?: string;
       folderId?: string;
     };
-  }>("/gallery", async (request) => {
-    const userId = (request as AuthRequest).userId;
-    const { section, page = "1", limit = "20", modelId, modelIds, folderId } = request.query;
-
-    const take = Math.min(parseInt(limit, 10) || 20, 100);
-    const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
-
-    const modelIdsArray = modelIds ? modelIds.split(",").filter(Boolean) : null;
-    const where = {
-      userId,
-      status: "done",
-      ...(section ? { section } : {}),
-      ...(modelIdsArray ? { modelId: { in: modelIdsArray } } : modelId ? { modelId } : {}),
-      ...(folderId ? { folderItems: { some: { folderId } } } : {}),
-    };
-
-    const [rawJobs, total] = await Promise.all([
-      db.generationJob.findMany({
-        where,
-        orderBy: { completedAt: "desc" },
-        take,
-        skip,
-        select: {
-          id: true,
-          section: true,
-          modelId: true,
-          prompt: true,
-          inputData: true,
-          tokensSpent: true,
-          completedAt: true,
-          folderItems: { select: { folderId: true } },
-          outputs: {
-            orderBy: { index: "asc" },
-            select: {
-              id: true,
-              s3Key: true,
-              thumbnailS3Key: true,
-              outputUrl: true,
+  }>(
+    "/gallery",
+    {
+      schema: {
+        description: "Get user's completed generation jobs",
+        querystring: {
+          type: "object",
+          properties: {
+            section: {
+              type: "string",
+              description: "Filter by section (image, audio, video, design)",
+            },
+            page: { type: "string", description: "Page number (default 1)" },
+            limit: { type: "string", description: "Items per page (default 20, max 100)" },
+            modelId: { type: "string", description: "Filter by single model ID" },
+            modelIds: {
+              type: "string",
+              description: "Filter by multiple model IDs (comma-separated)",
+            },
+            folderId: { type: "string", description: "Filter by folder ID" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              items: { type: "array", items: { type: "object" } },
+              total: { type: "number" },
+              page: { type: "number" },
+              limit: { type: "number" },
             },
           },
         },
-      }),
-      db.generationJob.count({ where }),
-    ]);
+      },
+    },
+    async (request) => {
+      const userId = (request as AuthRequest).userId;
+      const { section, page = "1", limit = "20", modelId, modelIds, folderId } = request.query;
 
-    const base = config.api.publicUrl;
-    const items = rawJobs.map((job) => {
-      const model = AI_MODELS[job.modelId];
-      const inputData = (job.inputData ?? {}) as Record<string, unknown>;
-      const modelSettings = (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
+      const take = Math.min(parseInt(limit, 10) || 20, 100);
+      const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
 
-      const outputs = job.outputs.map((output) => {
-        const previewUrl =
-          job.section !== "design" && output.s3Key && base
-            ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
-            : output.outputUrl;
-        const thumbnailUrl =
-          output.thumbnailS3Key && base
-            ? `${base}/download/${generateDownloadToken(output.thumbnailS3Key, userId)}`
-            : null;
+      const modelIdsArray = modelIds ? modelIds.split(",").filter(Boolean) : null;
+      const where = {
+        userId,
+        status: "done",
+        ...(section ? { section } : {}),
+        ...(modelIdsArray ? { modelId: { in: modelIdsArray } } : modelId ? { modelId } : {}),
+        ...(folderId ? { folderItems: { some: { folderId } } } : {}),
+      };
+
+      const [rawJobs, total] = await Promise.all([
+        db.generationJob.findMany({
+          where,
+          orderBy: { completedAt: "desc" },
+          take,
+          skip,
+          select: {
+            id: true,
+            section: true,
+            modelId: true,
+            prompt: true,
+            inputData: true,
+            tokensSpent: true,
+            completedAt: true,
+            folderItems: { select: { folderId: true } },
+            outputs: {
+              orderBy: { index: "asc" },
+              select: {
+                id: true,
+                s3Key: true,
+                thumbnailS3Key: true,
+                outputUrl: true,
+              },
+            },
+          },
+        }),
+        db.generationJob.count({ where }),
+      ]);
+
+      const base = config.api.publicUrl;
+      const items = rawJobs.map((job) => {
+        const model = AI_MODELS[job.modelId];
+        const inputData = (job.inputData ?? {}) as Record<string, unknown>;
+        const modelSettings =
+          (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
+
+        const outputs = job.outputs.map((output) => {
+          const previewUrl =
+            job.section !== "design" && output.s3Key && base
+              ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
+              : output.outputUrl;
+          const thumbnailUrl =
+            output.thumbnailS3Key && base
+              ? `${base}/download/${generateDownloadToken(output.thumbnailS3Key, userId)}`
+              : null;
+          return {
+            id: output.id,
+            s3Key: output.s3Key,
+            outputUrl: output.outputUrl,
+            previewUrl,
+            thumbnailUrl,
+          };
+        });
+
         return {
-          id: output.id,
-          s3Key: output.s3Key,
-          outputUrl: output.outputUrl,
-          previewUrl,
-          thumbnailUrl,
+          id: job.id,
+          section: job.section,
+          modelId: job.modelId,
+          modelName: model?.name ?? job.modelId,
+          prompt: job.prompt,
+          modelSettings,
+          tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
+          completedAt: job.completedAt,
+          folderIds: job.folderItems.map((fi) => fi.folderId),
+          outputs,
         };
       });
 
-      return {
-        id: job.id,
-        section: job.section,
-        modelId: job.modelId,
-        modelName: model?.name ?? job.modelId,
-        prompt: job.prompt,
-        modelSettings,
-        tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
-        completedAt: job.completedAt,
-        folderIds: job.folderItems.map((fi) => fi.folderId),
-        outputs,
-      };
-    });
-
-    return { items, total, page: parseInt(page, 10), limit: take };
-  });
+      return { items, total, page: parseInt(page, 10), limit: take };
+    },
+  );
 
   /**
    * POST /gallery/jobs/:id/send
@@ -249,264 +290,247 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    *   • size > 50 MB           → URL `/download/<token>` ("⬇️ Скачать")
    * Files > 20 MB without an S3 key are unreachable and skipped silently.
    */
-  fastify.post<{ Params: { id: string } }>("/gallery/jobs/:id/send", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { id } = request.params;
-
-    const job = await db.generationJob.findUnique({
-      where: { id },
-      select: {
-        userId: true,
-        section: true,
-        modelId: true,
-        prompt: true,
-        outputs: {
-          orderBy: { index: "asc" },
-          select: { id: true, s3Key: true, outputUrl: true },
+  fastify.post<{ Params: { id: string } }>(
+    "/gallery/jobs/:id/send",
+    {
+      schema: {
+        description: "Re-deliver job outputs to user's Telegram chat",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Job ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { ok: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+          422: { type: "object", properties: { error: { type: "string" } } },
+          502: { type: "object", properties: { error: { type: "string" } } },
         },
       },
-    });
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { id } = request.params;
 
-    if (!job) return reply.code(404).send({ error: "Not found" });
-    if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-    if (job.outputs.length === 0) return reply.code(422).send({ error: "No outputs" });
-
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { language: true },
-    });
-    const t = getT((user?.language ?? "ru") as Parameters<typeof getT>[0]);
-
-    // Telegram bot multipart-upload ceiling — что бот может re-deliver как document
-    // через `orig_` callback. Выше — только browser download link.
-    const TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024;
-
-    type ResolvedOutput = {
-      id: string;
-      s3Key: string | null;
-      buffer: Buffer;
-      size: number;
-      filename: string;
-    };
-
-    // Скачиваем КАЖДЫЙ output в буфер. S3 first, при failure — fallback на
-    // provider URL (короткоживущий, может уже не работать). Если оба не
-    // отдали — output skip'ается. Это как в воркере: Telegram'у мы файл
-    // ВСЕГДА заливаем multipart'ом, а не передаём URL — иначе на больших
-    // файлах ловим "failed to get HTTP URL content".
-    const resolved: ResolvedOutput[] = [];
-    for (let i = 0; i < job.outputs.length; i++) {
-      const out = job.outputs[i];
-      let buffer: Buffer | null = null;
-      if (out.s3Key) {
-        const s3Url = await getFileUrl(out.s3Key);
-        if (s3Url) buffer = await downloadBuffer(s3Url).catch(() => null);
-      }
-      if (!buffer && out.outputUrl) {
-        buffer = await downloadBuffer(out.outputUrl).catch(() => null);
-      }
-      if (!buffer) continue;
-      const filename = filenameFromS3Key(out.s3Key, defaultFilename(job.section, i));
-      resolved.push({
-        id: out.id,
-        s3Key: out.s3Key,
-        buffer,
-        size: buffer.byteLength,
-        filename,
+      const job = await db.generationJob.findUnique({
+        where: { id },
+        select: {
+          userId: true,
+          section: true,
+          modelId: true,
+          prompt: true,
+          outputs: {
+            orderBy: { index: "asc" },
+            select: { id: true, s3Key: true, outputUrl: true },
+          },
+        },
       });
-    }
-    if (resolved.length === 0) return reply.code(422).send({ error: "No deliverable outputs" });
 
-    // Caption формат идентичен worker'овскому — `<blockquote expandable>`
-    // c полным промптом + parse_mode: HTML на всех sendXxx-вызовах ниже.
-    const caption = buildResultCaption(t, AI_MODELS[job.modelId]?.name ?? job.modelId, job.prompt);
-    const botUrl = `https://api.telegram.org/bot${config.bot.token}`;
-    const isImageJob = job.section === "image";
+      if (!job) return reply.code(404).send({ error: "Not found" });
+      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      if (job.outputs.length === 0) return reply.code(422).send({ error: "No outputs" });
 
-    type InlineButton = {
-      text: string;
-      callback_data?: string;
-      url?: string;
-      web_app?: { url: string };
-    };
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { language: true },
+      });
+      const t = getT((user?.language ?? "ru") as Parameters<typeof getT>[0]);
 
-    /**
-     * Refine ("🔄 Доработать") — image-only, identical to worker payload.
-     * Multi-output cards prefix the label with the index so the user can
-     * tell which photo a button belongs to in a batch.
-     */
-    const buildRefineButton = (out: ResolvedOutput, n: number, multi: boolean): InlineButton => ({
-      text: multi ? `${n}. 🔄` : t.design.refine,
-      callback_data: `design_ref_${out.id}`,
-    });
+      // Telegram bot multipart-upload ceiling — что бот может re-deliver как document
+      // через `orig_` callback. Выше — только browser download link.
+      const TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024;
 
-    /**
-     * Action button — orig (callback) когда бот может перезалить как document
-     * (≤ 50 MB), иначе direct download URL если файл в S3, иначе null.
-     */
-    const buildActionButton = (
-      out: ResolvedOutput,
-      n: number,
-      multi: boolean,
-    ): InlineButton | null => {
-      if (out.size <= TELEGRAM_DOC_MAX_BYTES) {
-        return {
-          text: multi ? `${n}. 📎` : t.common.sendOriginal,
-          callback_data: `orig_${out.id}`,
-        };
-      }
-      if (out.s3Key) {
-        return buildDownloadButton(multi ? `${n}. ⬇️` : t.common.downloadFile, out.s3Key, userId);
-      }
-      return null;
-    };
+      type ResolvedOutput = {
+        id: string;
+        s3Key: string | null;
+        buffer: Buffer;
+        size: number;
+        filename: string;
+      };
 
-    // ── Image batch: media group + refine+action pairs follow-up ───────────
-    if (isImageJob && resolved.length > 1) {
-      // Каждое фото готовим под лимит sendPhoto multipart (10 MB) — компрессим
-      // если больше. Telegram не принимает media group из mixed types, поэтому
-      // выгоднее сжать чем переключаться на sendDocument для всей группы.
-      const items: Array<{ buffer: Buffer; filename: string; caption?: string }> = [];
-      for (let i = 0; i < resolved.length; i++) {
-        const out = resolved[i];
-        const prepared = await prepareImageBuffer(out.buffer, out.filename);
-        items.push({
-          buffer: prepared.buffer,
-          filename: prepared.filename,
-          ...(i === 0 ? { caption } : {}),
+      // Скачиваем КАЖДЫЙ output в буфер. S3 first, при failure — fallback на
+      // provider URL (короткоживущий, может уже не работать). Если оба не
+      // отдали — output skip'ается. Это как в воркере: Telegram'у мы файл
+      // ВСЕГДА заливаем multipart'ом, а не передаём URL — иначе на больших
+      // файлах ловим "failed to get HTTP URL content".
+      const resolved: ResolvedOutput[] = [];
+      for (let i = 0; i < job.outputs.length; i++) {
+        const out = job.outputs[i];
+        let buffer: Buffer | null = null;
+        if (out.s3Key) {
+          const s3Url = await getFileUrl(out.s3Key);
+          if (s3Url) buffer = await downloadBuffer(s3Url).catch(() => null);
+        }
+        if (!buffer && out.outputUrl) {
+          buffer = await downloadBuffer(out.outputUrl).catch(() => null);
+        }
+        if (!buffer) continue;
+        const filename = filenameFromS3Key(out.s3Key, defaultFilename(job.section, i));
+        resolved.push({
+          id: out.id,
+          s3Key: out.s3Key,
+          buffer,
+          size: buffer.byteLength,
+          filename,
         });
       }
+      if (resolved.length === 0) return reply.code(422).send({ error: "No deliverable outputs" });
 
-      const groupOk = await sendMediaGroupBuffers(userId, items).catch(() => false);
+      // Caption формат идентичен worker'овскому — `<blockquote expandable>`
+      // c полным промптом + parse_mode: HTML на всех sendXxx-вызовах ниже.
+      const caption = buildResultCaption(
+        t,
+        AI_MODELS[job.modelId]?.name ?? job.modelId,
+        job.prompt,
+      );
+      const botUrl = `https://api.telegram.org/bot${config.bot.token}`;
+      const isImageJob = job.section === "image";
 
-      if (!groupOk) {
-        // Group rejected (rare после compression) — шлём каждый файл отдельно
-        // как document. Per-output failures swallowed чтобы один bad file не
-        // блокировал остальные.
+      type InlineButton = {
+        text: string;
+        callback_data?: string;
+        url?: string;
+        web_app?: { url: string };
+      };
+
+      /**
+       * Refine ("🔄 Доработать") — image-only, identical to worker payload.
+       * Multi-output cards prefix the label with the index so the user can
+       * tell which photo a button belongs to in a batch.
+       */
+      const buildRefineButton = (out: ResolvedOutput, n: number, multi: boolean): InlineButton => ({
+        text: multi ? `${n}. 🔄` : t.design.refine,
+        callback_data: `design_ref_${out.id}`,
+      });
+
+      /**
+       * Action button — orig (callback) когда бот может перезалить как document
+       * (≤ 50 MB), иначе direct download URL если файл в S3, иначе null.
+       */
+      const buildActionButton = (
+        out: ResolvedOutput,
+        n: number,
+        multi: boolean,
+      ): InlineButton | null => {
+        if (out.size <= TELEGRAM_DOC_MAX_BYTES) {
+          return {
+            text: multi ? `${n}. 📎` : t.common.sendOriginal,
+            callback_data: `orig_${out.id}`,
+          };
+        }
+        if (out.s3Key) {
+          return buildDownloadButton(multi ? `${n}. ⬇️` : t.common.downloadFile, out.s3Key, userId);
+        }
+        return null;
+      };
+
+      // ── Image batch: media group + refine+action pairs follow-up ───────────
+      if (isImageJob && resolved.length > 1) {
+        // Каждое фото готовим под лимит sendPhoto multipart (10 MB) — компрессим
+        // если больше. Telegram не принимает media group из mixed types, поэтому
+        // выгоднее сжать чем переключаться на sendDocument для всей группы.
+        const items: Array<{ buffer: Buffer; filename: string; caption?: string }> = [];
         for (let i = 0; i < resolved.length; i++) {
           const out = resolved[i];
-          await sendBufferToUser(
-            userId,
-            "sendDocument",
-            out.buffer,
-            out.filename,
-            i === 0 ? caption : "",
-          ).catch(() => void 0);
+          const prepared = await prepareImageBuffer(out.buffer, out.filename);
+          items.push({
+            buffer: prepared.buffer,
+            filename: prepared.filename,
+            ...(i === 0 ? { caption } : {}),
+          });
         }
+
+        const groupOk = await sendMediaGroupBuffers(userId, items).catch(() => false);
+
+        if (!groupOk) {
+          // Group rejected (rare после compression) — шлём каждый файл отдельно
+          // как document. Per-output failures swallowed чтобы один bad file не
+          // блокировал остальные.
+          for (let i = 0; i < resolved.length; i++) {
+            const out = resolved[i];
+            await sendBufferToUser(
+              userId,
+              "sendDocument",
+              out.buffer,
+              out.filename,
+              i === 0 ? caption : "",
+            ).catch(() => void 0);
+          }
+        }
+
+        // Per-output: pair of {refine, action}. Mirrors the worker's batch
+        // payload (image.processor.ts) exactly so the user sees identical
+        // controls when re-sending an old generation.
+        const buttons: InlineButton[] = [];
+        for (let i = 0; i < resolved.length; i++) {
+          const out = resolved[i];
+          const n = i + 1;
+          buttons.push(buildRefineButton(out, n, true));
+          const action = buildActionButton(out, n, true);
+          if (action) buttons.push(action);
+        }
+
+        if (buttons.length > 0) {
+          // Worker layout: ≤3 outputs → 1 pair/row, even → 2 pairs/row, odd → 3
+          // pairs/row. Each pair is 2 buttons (refine + action), so chunkSize
+          // doubles the pairs-per-row count.
+          const totalPairs = resolved.length;
+          const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
+          const chunkSize = 2 * pairsPerRow;
+          const rows: InlineButton[][] = [];
+          for (let i = 0; i < buttons.length; i += chunkSize) {
+            rows.push(buttons.slice(i, i + chunkSize));
+          }
+          // Drop the "⬇️ Скачать" line from the legend when no output produced
+          // a download button — happens whenever every photo fits under 50 MB
+          // (the common case), so we don't tease a button the user can't see.
+          const hasDownloadButton = buttons.some((b) => b.url || b.web_app);
+          const hintText = hasDownloadButton
+            ? t.design.batchActions
+            : t.design.batchActionsNoDownload;
+          await fetch(`${botUrl}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: userId.toString(),
+              text: hintText,
+              reply_markup: { inline_keyboard: rows },
+            }),
+          });
+        }
+
+        return { success: true };
       }
 
-      // Per-output: pair of {refine, action}. Mirrors the worker's batch
-      // payload (image.processor.ts) exactly so the user sees identical
-      // controls when re-sending an old generation.
-      const buttons: InlineButton[] = [];
+      // ── Single output OR non-image batch (rare) ─────────────────────────────
+      // Per-output flow with refine + action stacked on the file message itself
+      // (refine is image-only; video/audio just get the action row).
       for (let i = 0; i < resolved.length; i++) {
         const out = resolved[i];
-        const n = i + 1;
-        buttons.push(buildRefineButton(out, n, true));
-        const action = buildActionButton(out, n, true);
-        if (action) buttons.push(action);
-      }
+        const isFirst = i === 0;
+        const sectionMethod = sectionToMethod(job.section);
 
-      if (buttons.length > 0) {
-        // Worker layout: ≤3 outputs → 1 pair/row, even → 2 pairs/row, odd → 3
-        // pairs/row. Each pair is 2 buttons (refine + action), so chunkSize
-        // doubles the pairs-per-row count.
-        const totalPairs = resolved.length;
-        const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
-        const chunkSize = 2 * pairsPerRow;
-        const rows: InlineButton[][] = [];
-        for (let i = 0; i < buttons.length; i += chunkSize) {
-          rows.push(buttons.slice(i, i + chunkSize));
-        }
-        // Drop the "⬇️ Скачать" line from the legend when no output produced
-        // a download button — happens whenever every photo fits under 50 MB
-        // (the common case), so we don't tease a button the user can't see.
-        const hasDownloadButton = buttons.some((b) => b.url || b.web_app);
-        const hintText = hasDownloadButton
-          ? t.design.batchActions
-          : t.design.batchActionsNoDownload;
-        await fetch(`${botUrl}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId.toString(),
-            text: hintText,
-            reply_markup: { inline_keyboard: rows },
-          }),
-        });
-      }
+        const refineRow: InlineButton[] | null = isImageJob
+          ? [buildRefineButton(out, i + 1, false)]
+          : null;
+        const actionBtn = buildActionButton(out, i + 1, false);
+        const actionRow: InlineButton[] | null = actionBtn ? [actionBtn] : null;
+        const inlineRows = [refineRow, actionRow].filter((r): r is InlineButton[] => r !== null);
+        const replyMarkup = inlineRows.length ? { inline_keyboard: inlineRows } : undefined;
 
-      return { success: true };
-    }
+        const downloadMarkup = out.s3Key
+          ? {
+              inline_keyboard: [[buildDownloadButton(t.common.downloadFile, out.s3Key, userId)]],
+            }
+          : undefined;
 
-    // ── Single output OR non-image batch (rare) ─────────────────────────────
-    // Per-output flow with refine + action stacked on the file message itself
-    // (refine is image-only; video/audio just get the action row).
-    for (let i = 0; i < resolved.length; i++) {
-      const out = resolved[i];
-      const isFirst = i === 0;
-      const sectionMethod = sectionToMethod(job.section);
+        // Multipart лимит для не-image — 50 MB. Выше — единственный путь
+        // download-link сообщением.
+        const tooLargeForMultipart =
+          sectionMethod !== "sendPhoto" && out.size > MEDIA_BUFFER_MAX_BYTES;
 
-      const refineRow: InlineButton[] | null = isImageJob
-        ? [buildRefineButton(out, i + 1, false)]
-        : null;
-      const actionBtn = buildActionButton(out, i + 1, false);
-      const actionRow: InlineButton[] | null = actionBtn ? [actionBtn] : null;
-      const inlineRows = [refineRow, actionRow].filter((r): r is InlineButton[] => r !== null);
-      const replyMarkup = inlineRows.length ? { inline_keyboard: inlineRows } : undefined;
-
-      const downloadMarkup = out.s3Key
-        ? {
-            inline_keyboard: [[buildDownloadButton(t.common.downloadFile, out.s3Key, userId)]],
-          }
-        : undefined;
-
-      // Multipart лимит для не-image — 50 MB. Выше — единственный путь
-      // download-link сообщением.
-      const tooLargeForMultipart =
-        sectionMethod !== "sendPhoto" && out.size > MEDIA_BUFFER_MAX_BYTES;
-
-      if (tooLargeForMultipart) {
-        await fetch(`${botUrl}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId.toString(),
-            text: `${isFirst ? caption : ""}\n\n${t.errors.fileTooLargeForTelegram}`,
-            parse_mode: "HTML",
-            ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
-          }),
-        });
-        continue;
-      }
-
-      // Image: компрессим если > 10 MB чтобы остаться в sendPhoto. Остальные
-      // секции — буфер as-is (мы уже знаем что он ≤ 50 MB по проверке выше).
-      let sendBuffer = out.buffer;
-      let sendFilename = out.filename;
-      if (sectionMethod === "sendPhoto") {
-        const prepared = await prepareImageBuffer(out.buffer, out.filename);
-        sendBuffer = prepared.buffer;
-        sendFilename = prepared.filename;
-      }
-
-      try {
-        await sendBufferToUser(
-          userId,
-          sectionMethod,
-          sendBuffer,
-          sendFilename,
-          isFirst ? caption : "",
-          replyMarkup,
-        );
-      } catch (err) {
-        const isTooLarge =
-          err instanceof Error &&
-          (err.message.includes("Request Entity Too Large") ||
-            err.message.includes("file is too big") ||
-            err.message.includes("wrong file identifier"));
-
-        if (isTooLarge) {
+        if (tooLargeForMultipart) {
           await fetch(`${botUrl}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -517,14 +541,55 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
               ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
             }),
           });
-        } else {
-          throw err;
+          continue;
+        }
+
+        // Image: компрессим если > 10 MB чтобы остаться в sendPhoto. Остальные
+        // секции — буфер as-is (мы уже знаем что он ≤ 50 MB по проверке выше).
+        let sendBuffer = out.buffer;
+        let sendFilename = out.filename;
+        if (sectionMethod === "sendPhoto") {
+          const prepared = await prepareImageBuffer(out.buffer, out.filename);
+          sendBuffer = prepared.buffer;
+          sendFilename = prepared.filename;
+        }
+
+        try {
+          await sendBufferToUser(
+            userId,
+            sectionMethod,
+            sendBuffer,
+            sendFilename,
+            isFirst ? caption : "",
+            replyMarkup,
+          );
+        } catch (err) {
+          const isTooLarge =
+            err instanceof Error &&
+            (err.message.includes("Request Entity Too Large") ||
+              err.message.includes("file is too big") ||
+              err.message.includes("wrong file identifier"));
+
+          if (isTooLarge) {
+            await fetch(`${botUrl}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: userId.toString(),
+                text: `${isFirst ? caption : ""}\n\n${t.errors.fileTooLargeForTelegram}`,
+                parse_mode: "HTML",
+                ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
+              }),
+            });
+          } else {
+            throw err;
+          }
         }
       }
-    }
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   /**
    * GET /gallery/model-counts?section=image|audio|video
@@ -533,50 +598,90 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{
     Querystring: { section?: string };
-  }>("/gallery/model-counts", async (request) => {
-    const userId = (request as AuthRequest).userId;
-    const { section } = request.query;
-
-    const rows = await db.generationJob.groupBy({
-      by: ["modelId"],
-      where: {
-        userId,
-        status: "done",
-        ...(section ? { section } : {}),
+  }>(
+    "/gallery/model-counts",
+    {
+      schema: {
+        description: "Get per-model generation counts for user",
+        querystring: {
+          type: "object",
+          properties: { section: { type: "string", description: "Filter by section" } },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { modelId: { type: "string" }, count: { type: "number" } },
+            },
+          },
+        },
       },
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
-    });
+    },
+    async (request) => {
+      const userId = (request as AuthRequest).userId;
+      const { section } = request.query;
 
-    return rows.map((r) => ({ modelId: r.modelId, count: r._count.id }));
-  });
+      const rows = await db.generationJob.groupBy({
+        by: ["modelId"],
+        where: {
+          userId,
+          status: "done",
+          ...(section ? { section } : {}),
+        },
+        _count: { id: true },
+        orderBy: { _count: { id: "desc" } },
+      });
+
+      return rows.map((r) => ({ modelId: r.modelId, count: r._count.id }));
+    },
+  );
 
   /**
    * GET /gallery/:id/preview-url
    * Returns a playable URL for the gallery item on demand.
    * :id is a GenerationJobOutput ID.
    */
-  fastify.get<{ Params: { id: string } }>("/gallery/:id/preview-url", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { id } = request.params;
+  fastify.get<{ Params: { id: string } }>(
+    "/gallery/:id/preview-url",
+    {
+      schema: {
+        description: "Get playable preview URL for gallery item",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Output ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { url: { type: "string" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+          422: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { id } = request.params;
 
-    const output = await db.generationJobOutput.findUnique({
-      where: { id },
-      include: { job: { select: { userId: true } } },
-    });
+      const output = await db.generationJobOutput.findUnique({
+        where: { id },
+        include: { job: { select: { userId: true } } },
+      });
 
-    if (!output) return reply.code(404).send({ error: "Not found" });
-    if (output.job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      if (!output) return reply.code(404).send({ error: "Not found" });
+      if (output.job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const base = config.api.publicUrl;
-    const url =
-      output.s3Key && base
-        ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
-        : output.outputUrl;
+      const base = config.api.publicUrl;
+      const url =
+        output.s3Key && base
+          ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
+          : output.outputUrl;
 
-    if (!url) return reply.code(422).send({ error: "File not available" });
-    return { url };
-  });
+      if (!url) return reply.code(422).send({ error: "File not available" });
+      return { url };
+    },
+  );
 
   /**
    * GET /gallery/outputs/:id/original-url
@@ -586,6 +691,22 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{ Params: { id: string } }>(
     "/gallery/outputs/:id/original-url",
+    {
+      schema: {
+        description: "Get original file download URL",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Output ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { url: { type: "string" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+          422: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { id } = request.params;
@@ -614,33 +735,51 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /gallery/jobs/:id
    * Removes the entire generation job — all its outputs and S3 artifacts.
    */
-  fastify.delete<{ Params: { id: string } }>("/gallery/jobs/:id", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { id } = request.params;
-
-    const job = await db.generationJob.findUnique({
-      where: { id },
-      select: {
-        userId: true,
-        outputs: { select: { s3Key: true, thumbnailS3Key: true } },
+  fastify.delete<{ Params: { id: string } }>(
+    "/gallery/jobs/:id",
+    {
+      schema: {
+        description: "Delete entire generation job and its outputs",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Job ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
-    });
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { id } = request.params;
 
-    if (!job) return reply.code(404).send({ error: "Not found" });
-    if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const job = await db.generationJob.findUnique({
+        where: { id },
+        select: {
+          userId: true,
+          outputs: { select: { s3Key: true, thumbnailS3Key: true } },
+        },
+      });
 
-    await Promise.all(
-      job.outputs.flatMap((o) => [
-        o.s3Key ? deleteFile(o.s3Key) : Promise.resolve(),
-        o.thumbnailS3Key ? deleteFile(o.thumbnailS3Key) : Promise.resolve(),
-      ]),
-    );
+      if (!job) return reply.code(404).send({ error: "Not found" });
+      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    // outputs cascade-delete via the FK on GenerationJobOutput
-    await db.generationJob.delete({ where: { id } });
+      await Promise.all(
+        job.outputs.flatMap((o) => [
+          o.s3Key ? deleteFile(o.s3Key) : Promise.resolve(),
+          o.thumbnailS3Key ? deleteFile(o.thumbnailS3Key) : Promise.resolve(),
+        ]),
+      );
 
-    return { success: true };
-  });
+      // outputs cascade-delete via the FK on GenerationJobOutput
+      await db.generationJob.delete({ where: { id } });
+
+      return { success: true };
+    },
+  );
 
   // ── Gallery Folders ──────────────────────────────────────────────────────────
 
@@ -649,50 +788,81 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * Returns all folders for the current user sorted: pinned first, then by name.
    * Includes item count per folder.
    */
-  fastify.get("/gallery/folders", async (request) => {
-    const userId = (request as AuthRequest).userId;
+  fastify.get(
+    "/gallery/folders",
+    {
+      schema: {
+        description: "Get user's gallery folders",
+        response: { 200: { type: "array", items: { type: "object" } } },
+      },
+    },
+    async (request) => {
+      const userId = (request as AuthRequest).userId;
 
-    const folders = await db.galleryFolder.findMany({
-      where: { userId },
-      include: { _count: { select: { items: true } } },
-      orderBy: [{ isPinned: "desc" }, { pinnedAt: "asc" }, { isDefault: "desc" }, { name: "asc" }],
-    });
+      const folders = await db.galleryFolder.findMany({
+        where: { userId },
+        include: { _count: { select: { items: true } } },
+        orderBy: [
+          { isPinned: "desc" },
+          { pinnedAt: "asc" },
+          { isDefault: "desc" },
+          { name: "asc" },
+        ],
+      });
 
-    return folders.map((f) => ({
-      id: f.id,
-      name: f.name,
-      isDefault: f.isDefault,
-      isPinned: f.isPinned,
-      pinnedAt: f.pinnedAt,
-      itemCount: f._count.items,
-      createdAt: f.createdAt,
-    }));
-  });
+      return folders.map((f) => ({
+        id: f.id,
+        name: f.name,
+        isDefault: f.isDefault,
+        isPinned: f.isPinned,
+        pinnedAt: f.pinnedAt,
+        itemCount: f._count.items,
+        createdAt: f.createdAt,
+      }));
+    },
+  );
 
   /**
    * POST /gallery/folders
    * Creates a new user folder.
    */
-  fastify.post<{ Body: { name: string } }>("/gallery/folders", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { name } = request.body;
+  fastify.post<{ Body: { name: string } }>(
+    "/gallery/folders",
+    {
+      schema: {
+        description: "Create a new gallery folder",
+        body: {
+          type: "object",
+          properties: { name: { type: "string", description: "Folder name" } },
+          required: ["name"],
+        },
+        response: {
+          200: { type: "object" },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { name } = request.body;
 
-    if (!name || !name.trim()) return reply.code(400).send({ error: "Name is required" });
+      if (!name || !name.trim()) return reply.code(400).send({ error: "Name is required" });
 
-    const folder = await db.galleryFolder.create({
-      data: { userId, name: name.trim() },
-    });
+      const folder = await db.galleryFolder.create({
+        data: { userId, name: name.trim() },
+      });
 
-    return {
-      id: folder.id,
-      name: folder.name,
-      isDefault: false,
-      isPinned: false,
-      pinnedAt: null,
-      itemCount: 0,
-      createdAt: folder.createdAt,
-    };
-  });
+      return {
+        id: folder.id,
+        name: folder.name,
+        isDefault: false,
+        isPinned: false,
+        pinnedAt: null,
+        itemCount: 0,
+        createdAt: folder.createdAt,
+      };
+    },
+  );
 
   /**
    * PATCH /gallery/folders/:folderId
@@ -701,38 +871,64 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.patch<{
     Params: { folderId: string };
     Body: { name?: string; isPinned?: boolean };
-  }>("/gallery/folders/:folderId", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { folderId } = request.params;
-    const { name, isPinned } = request.body;
-
-    const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-    if (!folder) return reply.code(404).send({ error: "Not found" });
-    if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-    if (name !== undefined && folder.isDefault)
-      return reply.code(400).send({ error: "Cannot rename default folder" });
-    if (name !== undefined && !name.trim())
-      return reply.code(400).send({ error: "Name is required" });
-
-    const updated = await db.galleryFolder.update({
-      where: { id: folderId },
-      data: {
-        ...(name !== undefined ? { name: name.trim() } : {}),
-        ...(isPinned !== undefined ? { isPinned, pinnedAt: isPinned ? new Date() : null } : {}),
+  }>(
+    "/gallery/folders/:folderId",
+    {
+      schema: {
+        description: "Update folder name or pin status",
+        params: {
+          type: "object",
+          properties: { folderId: { type: "string", description: "Folder ID" } },
+          required: ["folderId"],
+        },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "New folder name" },
+            isPinned: { type: "boolean", description: "Pin status" },
+          },
+        },
+        response: {
+          200: { type: "object" },
+          400: badRequestResponse,
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
       },
-      include: { _count: { select: { items: true } } },
-    });
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { folderId } = request.params;
+      const { name, isPinned } = request.body;
 
-    return {
-      id: updated.id,
-      name: updated.name,
-      isDefault: updated.isDefault,
-      isPinned: updated.isPinned,
-      pinnedAt: updated.pinnedAt,
-      itemCount: updated._count.items,
-      createdAt: updated.createdAt,
-    };
-  });
+      const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
+      if (!folder) return reply.code(404).send({ error: "Not found" });
+      if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      if (name !== undefined && folder.isDefault)
+        return reply.code(400).send({ error: "Cannot rename default folder" });
+      if (name !== undefined && !name.trim())
+        return reply.code(400).send({ error: "Name is required" });
+
+      const updated = await db.galleryFolder.update({
+        where: { id: folderId },
+        data: {
+          ...(name !== undefined ? { name: name.trim() } : {}),
+          ...(isPinned !== undefined ? { isPinned, pinnedAt: isPinned ? new Date() : null } : {}),
+        },
+        include: { _count: { select: { items: true } } },
+      });
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        isDefault: updated.isDefault,
+        isPinned: updated.isPinned,
+        pinnedAt: updated.pinnedAt,
+        itemCount: updated._count.items,
+        createdAt: updated.createdAt,
+      };
+    },
+  );
 
   /**
    * DELETE /gallery/folders/:folderId
@@ -740,6 +936,22 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.delete<{ Params: { folderId: string } }>(
     "/gallery/folders/:folderId",
+    {
+      schema: {
+        description: "Delete a gallery folder",
+        params: {
+          type: "object",
+          properties: { folderId: { type: "string", description: "Folder ID" } },
+          required: ["folderId"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          400: badRequestResponse,
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId } = request.params;
@@ -761,30 +973,53 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
     Params: { folderId: string };
     Body: { jobId: string };
-  }>("/gallery/folders/:folderId/items", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { folderId } = request.params;
-    const { jobId } = request.body;
+  }>(
+    "/gallery/folders/:folderId/items",
+    {
+      schema: {
+        description: "Add job to folder",
+        params: {
+          type: "object",
+          properties: { folderId: { type: "string", description: "Folder ID" } },
+          required: ["folderId"],
+        },
+        body: {
+          type: "object",
+          properties: { jobId: { type: "string", description: "Job ID" } },
+          required: ["jobId"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { folderId } = request.params;
+      const { jobId } = request.body;
 
-    const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-    if (!folder) return reply.code(404).send({ error: "Not found" });
-    if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
+      if (!folder) return reply.code(404).send({ error: "Not found" });
+      if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    const job = await db.generationJob.findUnique({
-      where: { id: jobId },
-      select: { userId: true },
-    });
-    if (!job) return reply.code(404).send({ error: "Job not found" });
-    if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+      const job = await db.generationJob.findUnique({
+        where: { id: jobId },
+        select: { userId: true },
+      });
+      if (!job) return reply.code(404).send({ error: "Job not found" });
+      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    await db.galleryFolderItem.upsert({
-      where: { folderId_jobId: { folderId, jobId } },
-      create: { folderId, jobId },
-      update: {},
-    });
+      await db.galleryFolderItem.upsert({
+        where: { folderId_jobId: { folderId, jobId } },
+        create: { folderId, jobId },
+        update: {},
+      });
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   /**
    * DELETE /gallery/folders/:folderId/items/:jobId
@@ -792,6 +1027,24 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.delete<{ Params: { folderId: string; jobId: string } }>(
     "/gallery/folders/:folderId/items/:jobId",
+    {
+      schema: {
+        description: "Remove job from folder",
+        params: {
+          type: "object",
+          properties: {
+            folderId: { type: "string", description: "Folder ID" },
+            jobId: { type: "string", description: "Job ID" },
+          },
+          required: ["folderId", "jobId"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId, jobId } = request.params;
@@ -810,32 +1063,50 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    * Ensures the Favorites folder exists for the user, then adds the job.
    * Returns the Favorites folder id.
    */
-  fastify.post<{ Body: { jobId: string } }>("/gallery/favorites", async (request, reply) => {
-    const userId = (request as AuthRequest).userId;
-    const { jobId } = request.body;
+  fastify.post<{ Body: { jobId: string } }>(
+    "/gallery/favorites",
+    {
+      schema: {
+        description: "Add job to Favorites folder",
+        body: {
+          type: "object",
+          properties: { jobId: { type: "string", description: "Job ID" } },
+          required: ["jobId"],
+        },
+        response: {
+          200: { type: "object", properties: { folderId: { type: "string" } } },
+          403: { type: "object", properties: { error: { type: "string" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = (request as AuthRequest).userId;
+      const { jobId } = request.body;
 
-    const job = await db.generationJob.findUnique({
-      where: { id: jobId },
-      select: { userId: true },
-    });
-    if (!job) return reply.code(404).send({ error: "Job not found" });
-    if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-    let favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
-    if (!favorites) {
-      favorites = await db.galleryFolder.create({
-        data: { userId, name: "Избранное", isDefault: true },
+      const job = await db.generationJob.findUnique({
+        where: { id: jobId },
+        select: { userId: true },
       });
-    }
+      if (!job) return reply.code(404).send({ error: "Job not found" });
+      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
 
-    await db.galleryFolderItem.upsert({
-      where: { folderId_jobId: { folderId: favorites.id, jobId } },
-      create: { folderId: favorites.id, jobId },
-      update: {},
-    });
+      let favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
+      if (!favorites) {
+        favorites = await db.galleryFolder.create({
+          data: { userId, name: "Избранное", isDefault: true },
+        });
+      }
 
-    return { folderId: favorites.id };
-  });
+      await db.galleryFolderItem.upsert({
+        where: { folderId_jobId: { folderId: favorites.id, jobId } },
+        create: { folderId: favorites.id, jobId },
+        update: {},
+      });
+
+      return { folderId: favorites.id };
+    },
+  );
 
   /**
    * DELETE /gallery/favorites/:jobId
@@ -843,6 +1114,20 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.delete<{ Params: { jobId: string } }>(
     "/gallery/favorites/:jobId",
+    {
+      schema: {
+        description: "Remove job from Favorites folder",
+        params: {
+          type: "object",
+          properties: { jobId: { type: "string", description: "Job ID" } },
+          required: ["jobId"],
+        },
+        response: {
+          200: { type: "object", properties: { success: { type: "boolean" } } },
+          404: { type: "object", properties: { error: { type: "string" } } },
+        },
+      },
+    },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { jobId } = request.params;
