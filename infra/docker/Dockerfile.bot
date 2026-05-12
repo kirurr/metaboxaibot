@@ -12,10 +12,13 @@ COPY prisma ./prisma
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
-COPY --from=deps /app/node_modules                 ./node_modules
-COPY --from=deps /app/packages/bot/node_modules    ./packages/bot/node_modules
-COPY --from=deps /app/packages/api/node_modules    ./packages/api/node_modules
-COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=deps /app/node_modules                         ./node_modules
+COPY --from=deps /app/packages/bot/node_modules            ./packages/bot/node_modules
+COPY --from=deps /app/packages/api/node_modules            ./packages/api/node_modules
+COPY --from=deps /app/packages/shared/node_modules         ./packages/shared/node_modules
+# shared-browser теперь имеет runtime-deps (zod) — без копии node_modules
+# tsc упадёт на `import z from "zod"` (см. shared-browser/src/ws/schemas.ts).
+COPY --from=deps /app/packages/shared-browser/node_modules ./packages/shared-browser/node_modules
 COPY . .
 RUN pnpm --filter @metabox/shared-browser build
 RUN pnpm --filter @metabox/shared build
