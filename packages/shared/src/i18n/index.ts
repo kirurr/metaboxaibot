@@ -421,7 +421,8 @@ export interface Translations {
     uploadPromptVideoRefAudios: string;
     imageSaved: string;
     imageSavedSingle: string;
-    tooManyMedia: string;
+    tooManyMediaSingleSlot: string;
+    tooManyMediaMultiSlot: string;
     slotRequired: string;
     replace: string;
     remove: string;
