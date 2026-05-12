@@ -72,6 +72,93 @@ interface EvolinkTaskResponse {
   error?: { code?: string; message?: string; type?: string };
 }
 
+/** Per Evolink docs for Gemini-3 family — prompt token limit (treat as char limit). */
+const NANO_BANANA_PROMPT_MAX_CHARS = 2000;
+/** Per Evolink errors.md — invalid_parameters "file size exceeds 10MB". */
+const NANO_BANANA_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+/** Per nanobanana{2,pro}.md image_urls notes — JPG/PNG/WebP supported (+ GIF tolerated). */
+const NANO_BANANA_SUPPORTED_FORMATS = "JPG, PNG, WebP";
+const NANO_BANANA_UNSUPPORTED_CT_RE = /^image\/(heic|heif|avif|tiff?)$/i;
+const NANO_BANANA_UNSUPPORTED_EXT_RE = /\.(heic|heif|avif|tiff?)(?:[?#]|$)/i;
+
+/**
+ * Pre-flight для nano-banana семейства через Evolink. Отсекает 3 из 4 sub-типов
+ * invalid_parameters до сабмита (per docs/schema/evolink/errors.md):
+ *  - prompt too long (>2000 chars) — string check, без сети
+ *  - unsupported file type (HEIC/AVIF/TIFF) — по Content-Type и URL extension
+ *  - file size exceeds 10MB — по Content-Length
+ *
+ * Dimensions (240..7680 px) НЕ проверяем — sharp-probe требует full download
+ * каждого ref'а (до 14 шт. × до 10 МБ = 140 МБ трафика на каждый submit). Их
+ * ловим post-flight через parsing error.message в handleTaskFailure.
+ *
+ * HEAD-запросы параллельно через Promise.all; если HEAD упал/не поддерживается
+ * (некоторые CDN'ы) — silent skip конкретного ref'а, не блокируем юзера ради
+ * нашей сетевой ошибки. Лучше дать Evolink сказать своё слово, чем зря отказать.
+ */
+async function validateNanoBananaInput(
+  prompt: string,
+  imageUrls: string[],
+  fetchFn: typeof globalThis.fetch | undefined,
+): Promise<void> {
+  if (prompt.length > NANO_BANANA_PROMPT_MAX_CHARS) {
+    throw new UserFacingError(
+      `Prompt is ${prompt.length} chars (max ${NANO_BANANA_PROMPT_MAX_CHARS})`,
+      { key: "promptTooLong", params: { limit: NANO_BANANA_PROMPT_MAX_CHARS } },
+    );
+  }
+  if (imageUrls.length === 0) return;
+
+  const fetcher = fetchFn ?? globalThis.fetch;
+  const checks = await Promise.all(
+    imageUrls.map(async (url) => {
+      // URL-extension check сначала — мгновенно, ловит HEIC/AVIF/TIFF из имени.
+      const urlExtMatch = url.match(NANO_BANANA_UNSUPPORTED_EXT_RE);
+      if (urlExtMatch) {
+        return { format: urlExtMatch[1].toLowerCase(), tooLarge: false } as const;
+      }
+      try {
+        const resp = await fetcher(url, { method: "HEAD" });
+        if (!resp.ok) return null;
+        const ct = resp.headers.get("content-type")?.toLowerCase() ?? "";
+        const ctMatch = ct.match(NANO_BANANA_UNSUPPORTED_CT_RE);
+        if (ctMatch) {
+          return { format: ctMatch[1].toLowerCase(), tooLarge: false } as const;
+        }
+        const cl = Number(resp.headers.get("content-length") ?? "0");
+        if (cl > NANO_BANANA_MAX_FILE_SIZE_BYTES) {
+          return { format: null, tooLarge: true, sizeBytes: cl } as const;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const formatViolation = checks.find((c) => c?.format);
+  if (formatViolation?.format) {
+    throw new UserFacingError(`Unsupported image format: ${formatViolation.format}`, {
+      key: "imageFormatUnsupported",
+      params: {
+        format: formatViolation.format.toUpperCase(),
+        supported: NANO_BANANA_SUPPORTED_FORMATS,
+      },
+    });
+  }
+  const sizeViolation = checks.find((c) => c?.tooLarge);
+  if (sizeViolation?.tooLarge && "sizeBytes" in sizeViolation) {
+    const actualMb = (sizeViolation.sizeBytes / (1024 * 1024)).toFixed(1);
+    throw new UserFacingError(
+      `Reference image too large: ${actualMb} MB (max ${NANO_BANANA_MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB)`,
+      {
+        key: "mediaSlotFileTooLarge",
+        params: { actualMb, maxMb: String(NANO_BANANA_MAX_FILE_SIZE_BYTES / (1024 * 1024)) },
+      },
+    );
+  }
+}
+
 /**
  * Evolink image adapter (provider="evolink") — fallback для nano-banana-* моделей.
  *
@@ -132,6 +219,16 @@ export class EvolinkImageAdapter implements ImageAdapter {
     const mi = input.mediaInputs ?? {};
     const editImages = mi.edit ?? [];
     const imageUrls = editImages.length > 0 ? editImages : input.imageUrl ? [input.imageUrl] : [];
+
+    // Pre-flight validation для nano-banana семейства (per docs/schema/evolink/
+    // nanobananapro.md + errors.md): отсекаем заранее, не жжём Evolink-квоту и не
+    // ждём queue-cycle на гарантированный fail. Проверяем длину промпта, формат
+    // и размер каждого ref'а через HEAD. Dimensions не проверяем (нужен full
+    // download через sharp — слишком дорого для preflight); их ловим post-flight
+    // через parsing error.message.
+    if (isNanoBanana) {
+      await validateNanoBananaInput(input.prompt!, imageUrls, this.fetchFn);
+    }
 
     const body: Record<string, unknown> = {
       model: evolinkModel,
@@ -298,15 +395,51 @@ export class EvolinkImageAdapter implements ImageAdapter {
       }
 
       case "invalid_parameters": {
-        // Скорее всего bug на нашей стороне (мы шлём что-то невалидное).
-        // Показываем user-facing + alert ops.
+        // Per Evolink docs (docs/schema/evolink/errors.md), invalid_parameters
+        // классифицирован как Client Error (Fixable by User) — не наш баг, а
+        // одна из 4 пользовательских проблем: prompt too long / image dimension /
+        // file too large / unsupported format. Pre-flight в submit() уже отсекает
+        // 3 из 4; сюда долетают в основном dimension-fail'ы и редкие случаи,
+        // которые pre-flight пропустил (HEAD без Content-Length, etc.). Парсим
+        // message → специфичная подсказка юзеру. notifyOps НЕ ставим — нашей
+        // вины тут нет, иначе ops-канал шумит ради пользовательских проблем.
+        if (/prompt is too long|prompt.*too long/i.test(message)) {
+          throw new UserFacingError(technicalMessage, {
+            key: "promptTooLong",
+            params: { limit: 2000 },
+          });
+        }
+        const sizeMatch = message.match(/file size (?:exceeds|over|larger than|>)\s*(\d+)\s*MB/i);
+        if (sizeMatch) {
+          throw new UserFacingError(technicalMessage, {
+            key: "mediaSlotFileTooLarge",
+            params: { actualMb: "—", maxMb: sizeMatch[1] },
+          });
+        }
+        const dimMatch = message.match(/dimensions?\s+must be between\s+(\d+)\s+and\s+(\d+)/i);
+        if (dimMatch) {
+          throw new UserFacingError(technicalMessage, {
+            key: "imageDimensionOutOfRange",
+            params: { min: dimMatch[1], max: dimMatch[2] },
+          });
+        }
+        if (/unsupported file type|unsupported (?:image )?format/i.test(message)) {
+          throw new UserFacingError(technicalMessage, {
+            key: "imageFormatUnsupported",
+            params: { format: "—", supported: "JPG, PNG, WebP" },
+          });
+        }
+        // Generic actionable fallback — не распознали под-тип. Без notifyOps:
+        // если pre-flight пропустил, узнаем из логов (плюс это всё равно client
+        // error). По мере появления новых патернов в логах — добавляем regex.
         throw new UserFacingError(technicalMessage, {
           key: "aiClassifiedError",
           params: {
-            messageRu: `Параметры запроса не подходят модели: ${message.slice(0, 200)}`,
-            messageEn: `Request parameters not accepted by model: ${message.slice(0, 200)}`,
+            messageRu:
+              "❌ Запрос не принят моделью. Возможные причины: слишком длинный промпт (более 2000 символов), размер изображения вне диапазона 240–7680 пикселей, файл больше 10 МБ или неподдерживаемый формат (нужен JPG/PNG/WebP). Попробуйте упростить запрос или сменить референсы.",
+            messageEn:
+              "❌ Request not accepted by model. Possible causes: prompt too long (>2000 chars), image dimensions outside 240–7680 px, file size >10 MB, or unsupported format (needs JPG/PNG/WebP). Try simplifying the prompt or replacing references.",
           },
-          notifyOps: true,
         });
       }
 
