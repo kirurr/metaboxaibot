@@ -83,7 +83,7 @@ await server.register(swagger, {
     },
     components: {
       securitySchemes: {
-        telegramAuth: {
+        auth: {
           type: "apiKey",
           in: "header",
           name: "Authorization",
