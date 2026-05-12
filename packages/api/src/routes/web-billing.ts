@@ -15,64 +15,14 @@ import {
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import { logger } from "../logger.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
 
 export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["web-billing"]),
-  );
 
   // ── GET /web/billing/catalog ────────────────────────────────────────────
   fastify.get(
     "/web/billing/catalog",
-    {
-      schema: {
-        description: "Get billing catalog with subscriptions and token packages",
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              subscriptions: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string" },
-                    name: { type: "string" },
-                    tokens: { type: "string" },
-                    periods: {
-                      type: "object",
-                      additionalProperties: {
-                        type: "object",
-                        properties: {
-                          priceRub: { type: "string" },
-                          discountPct: { type: "number" },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-              tokenPackages: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string" },
-                    name: { type: "string" },
-                    tokens: { type: "string" },
-                    priceRub: { type: "string" },
-                    badge: { type: "string" },
-                  },
-                },
-              },
-            },
-          },
-          502: badRequestResponse,
-        },
-      },
-    },
+    { schema: { hide: true } as any },
     async (_request, reply) => {
       try {
         const catalog = await getAiBotCatalog();
@@ -129,30 +79,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /web/billing/subscription-invoice ──────────────────────────────
   fastify.post<{ Body: { planId?: string; period?: string } }>(
     "/web/billing/subscription-invoice",
-    {
-      schema: {
-        description: "Create subscription invoice",
-        body: {
-          type: "object",
-          properties: {
-            planId: { type: "string" },
-            period: { type: "string" },
-          },
-          required: ["planId", "period"],
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              orderId: { type: "string" },
-              paymentUrl: { type: "string" },
-            },
-          },
-          400: badRequestResponse,
-          502: badRequestResponse,
-        },
-      },
-    },
+    { schema: { hide: true } as any },
     async (request, reply) => {
       const { aibUserId, metaboxUserId } = request.webUser!;
       const { planId, period } = request.body ?? {};
@@ -184,29 +111,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /web/billing/tokens-invoice ────────────────────────────────────
   fastify.post<{ Body: { productId?: string } }>(
     "/web/billing/tokens-invoice",
-    {
-      schema: {
-        description: "Create tokens invoice for token package purchase",
-        body: {
-          type: "object",
-          properties: {
-            productId: { type: "string" },
-          },
-          required: ["productId"],
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              orderId: { type: "string" },
-              paymentUrl: { type: "string" },
-            },
-          },
-          400: badRequestResponse,
-          502: badRequestResponse,
-        },
-      },
-    },
+    { schema: { hide: true } as any },
     async (request, reply) => {
       const { aibUserId, metaboxUserId } = request.webUser!;
       const { productId } = request.body ?? {};
@@ -238,26 +143,7 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   // со страницы /payment/pending.
   fastify.get<{ Params: { id: string } }>(
     "/web/billing/order/:id/status",
-    {
-      schema: {
-        description: "Get order status by ID (polling proxy to meta-box)",
-        params: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              status: { type: "string" },
-            },
-          },
-          502: badRequestResponse,
-        },
-      },
-    },
+    { schema: { hide: true } as any },
     async (request, reply) => {
       const { id } = request.params;
       const { config } = await import("@metabox/shared");
