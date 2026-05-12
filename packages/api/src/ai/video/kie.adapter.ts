@@ -449,8 +449,12 @@ export class KieVideoAdapter implements VideoAdapter {
       // processor через `isKieTransientError` триггернул re-submit на fallback.
       // Без этой ветки ошибка проваливалась в classifyAIError-фолбек, который
       // галлюцинировал юзеру "заполните идентификатор задачи" и спамил ops.
-      // См. kie-error.ts:isKieTransientError.
-      if (failCode === "422" && /playground failed|task id is blank/i.test(failMsg)) {
+      // Также покрывает 422 с обёрнутым "499 Client Closed Request" — апстрим
+      // разорвал коннект, classic transient. См. kie-error.ts:isKieTransientError.
+      if (
+        failCode === "422" &&
+        /playground failed|task id is blank|client closed request/i.test(failMsg)
+      ) {
         throw new Error(technicalMessage);
       }
       const isCopyright = failCode === "501" || /copyright/i.test(failMsg);

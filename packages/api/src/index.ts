@@ -48,6 +48,7 @@ import { elevenlabsVoicesRoutes } from "./routes/elevenlabs-voices.js";
 import { cartesiaVoicesRoutes } from "./routes/cartesia-voices.js";
 import { userVoicesRoutes } from "./routes/user-voices.js";
 import { downloadRoutes } from "./routes/download.js";
+import { wsRoutes } from "./routes/ws.js";
 import { startRateScheduler } from "./services/exchange-rate.service.js";
 import { startSubscriptionScheduler } from "./services/subscription.service.js";
 import { config, preloadLocales, SUPPORTED_LANGUAGES } from "@metabox/shared";
@@ -83,7 +84,7 @@ await server.register(swagger, {
     },
     components: {
       securitySchemes: {
-        telegramAuth: {
+        auth: {
           type: "apiKey",
           in: "header",
           name: "Authorization",
@@ -220,6 +221,7 @@ await server.register(elevenlabsVoicesRoutes);
 await server.register(cartesiaVoicesRoutes);
 await server.register(userVoicesRoutes);
 await server.register(downloadRoutes);
+await server.register(wsRoutes);
 
 // Start USDT/RUB exchange rate scheduler (fetches from Binance 4× daily)
 startRateScheduler();

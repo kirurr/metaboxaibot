@@ -38,11 +38,20 @@ export function isKieFiveXxError(err: unknown): boolean {
  * юзеров — массовый их инцидент. Трактуем как `5xx-эквивалент`: triggers
  * re-submit на fallback провайдера (если есть), retry'и BullMQ если нет.
  *
+ * Также покрывает `422` с обёрнутым `499 Client Closed Request` от апстрима
+ * (KIE→Google Vertex AI / Replicate): апстрим разорвал коннект до возврата
+ * результата — классический transient, не наша вина, retry/fallback должен
+ * сработать как при 5xx. Без этой ветки fallback пропускался на последней
+ * попытке, юзер получал generic «модель устала».
+ *
  * Используется в image/video processor'ах в качестве fallback-trigger'а.
  */
 export function isKieTransientError(err: unknown): boolean {
   if (isKieFiveXxError(err)) return true;
   const message = err instanceof Error ? err.message : String(err ?? "");
   if (!/^KIE\b/i.test(message)) return false;
-  return /\b422\b/.test(message) && /playground failed|task id is blank/i.test(message);
+  return (
+    /\b422\b/.test(message) &&
+    /playground failed|task id is blank|client closed request/i.test(message)
+  );
 }

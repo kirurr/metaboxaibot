@@ -234,8 +234,13 @@ export class KieVeoAdapter implements VideoAdapter {
       // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
       // их backend в трауре, plain Error чтобы processor через
       // `isKieTransientError` триггернул re-submit на fallback.
+      // Также покрывает 422 с обёрнутым "499 Client Closed Request" — апстрим
+      // разорвал коннект, classic transient.
       // См. kie-error.ts:isKieTransientError + kie.adapter.ts:image/video.
-      if (errorCode === "422" && /playground failed|task id is blank/i.test(errorMessage)) {
+      if (
+        errorCode === "422" &&
+        /playground failed|task id is blank|client closed request/i.test(errorMessage)
+      ) {
         throw new Error(technicalMessage);
       }
 

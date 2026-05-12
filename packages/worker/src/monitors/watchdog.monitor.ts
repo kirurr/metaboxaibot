@@ -95,7 +95,7 @@ export async function runWatchdog(): Promise<void> {
 
       await db.generationJob.update({
         where: { id: job.id },
-        data: { status: "failed", error: "watchdog: orphaned >24h" },
+        data: { status: "failed", error: "watchdog: orphaned >24h", errorCode: "POLL_TIMEOUT" },
       });
       killedJobIds.push(job.id);
 

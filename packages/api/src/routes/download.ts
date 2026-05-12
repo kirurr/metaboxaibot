@@ -6,7 +6,36 @@ export async function downloadRoutes(fastify: FastifyInstance) {
   // Use wildcard to avoid dot-in-param routing issues (token contains "payload.hmac")
   fastify.get<{ Params: { "*": string } }>(
     "/download/*",
-    { schema: { hide: true } },
+    {
+      schema: {
+        hide: true,
+        description: "Download file via signed token",
+        params: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            "*": {
+              type: "string",
+              description: "Encoded download token containing file key, user ID and expiry",
+            },
+          },
+          required: ["*"],
+        },
+        response: {
+          302: { type: "object", additionalProperties: true },
+          400: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const token = request.params["*"];
 

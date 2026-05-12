@@ -289,6 +289,10 @@ export default {
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
+    imageFormatUnsupported:
+      '❌ Image format "{format}" is not supported. Supported formats: {supported}. Convert the file and try again.',
+    imageDimensionOutOfRange:
+      "❌ Image dimensions are outside the allowed range. Each side must be between {min} and {max} pixels. Replace the reference and try again.",
     promptRequired:
       "❌ This model requires a text prompt — please describe what you want to generate and try again.",
     chatStreamInterrupted:

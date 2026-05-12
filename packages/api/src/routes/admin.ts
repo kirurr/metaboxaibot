@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -10,6 +11,7 @@ type AuthRequest = { userId: bigint };
  * or via legacy x-admin-secret header.
  */
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["admin"]));
   fastify.addHook("preHandler", async (request, reply) => {
     // Legacy: secret-based auth
     const secret = config.api.adminSecret;
@@ -38,6 +40,47 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** GET /admin/users?page=1&limit=50&search=john */
   fastify.get<{ Querystring: { page?: string; limit?: string; search?: string } }>(
     "/admin/users",
+    {
+      schema: {
+        description: "List users with pagination and search",
+        querystring: {
+          type: "object",
+          properties: {
+            page: { type: "string", description: "Page number (default 1)" },
+            limit: { type: "string", description: "Items per page (default 50, max 100)" },
+            search: { type: "string", description: "Search by username or name" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              users: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    id: { type: "string" },
+                    username: { type: "string", nullable: true },
+                    firstName: { type: "string", nullable: true },
+                    tokenBalance: { type: "string" },
+                    role: { type: "string" },
+                    isBlocked: { type: "boolean" },
+                    createdAt: { type: "string" },
+                  },
+                },
+              },
+              total: { type: "number" },
+              page: { type: "number" },
+              limit: { type: "number" },
+            },
+            required: ["users", "total", "page", "limit"],
+          },
+        },
+      },
+    },
     async (request) => {
       const page = Math.max(1, Number(request.query.page ?? 1));
       const limit = Math.min(100, Number(request.query.limit ?? 50));
@@ -88,6 +131,34 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** POST /admin/grant — grant tokens to a user */
   fastify.post<{ Body: { userId: string; amount: number; reason?: string } }>(
     "/admin/grant",
+    {
+      schema: {
+        description: "Grant tokens to a user",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            amount: { type: "number", description: "Token amount to grant (must be positive)" },
+            reason: { type: "string", description: "Optional reason for the grant" },
+          },
+          required: ["userId", "amount"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" }, newBalance: { type: "string" } },
+            required: ["success", "newBalance"],
+          },
+          400: badRequestResponse,
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, amount, reason } = request.body;
       if (!userId || !amount || amount <= 0) {
@@ -120,6 +191,33 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** POST /admin/block */
   fastify.post<{ Body: { userId: string; blocked: boolean } }>(
     "/admin/block",
+    {
+      schema: {
+        description: "Block or unblock a user",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            blocked: { type: "boolean", description: "Block status" },
+          },
+          required: ["userId", "blocked"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" }, isBlocked: { type: "boolean" } },
+            required: ["success", "isBlocked"],
+          },
+          400: badRequestResponse,
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, blocked } = request.body;
       if (!userId) {
@@ -142,6 +240,38 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   /** POST /admin/role — change user role (ADMIN only) */
   fastify.post<{ Body: { userId: string; role: string } }>(
     "/admin/role",
+    {
+      schema: {
+        description: "Change user role (ADMIN only)",
+        body: {
+          type: "object",
+          properties: {
+            userId: { type: "string", description: "User ID" },
+            role: { type: "string", enum: ["USER", "MODERATOR", "ADMIN"], description: "New role" },
+          },
+          required: ["userId", "role"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+            required: ["success"],
+          },
+          400: badRequestResponse,
+          403: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { userId, role } = request.body;
       if (!userId || !role) {

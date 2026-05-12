@@ -15,10 +15,12 @@ import {
 import {
   type Translations,
   type GenerationFailedSection,
+  type GenerationErrorCode,
   UserFacingError,
   resolveUserFacingErrorVariant,
   pickGenerationFailedMessage,
 } from "@metabox/shared";
+import { classifyError } from "./classify-error.js";
 
 export function resolveUserFacingMessage(err: unknown, t: Translations): string | null {
   if (err instanceof UserFacingError) return resolveUserFacingErrorVariant(err, t);
@@ -76,17 +78,25 @@ export function resolveSubJobError(
   t: Translations,
   modelName: string,
   section: GenerationFailedSection = "design",
-): { userText: string; rawText: string; isUserFacing: boolean } {
+): {
+  userText: string;
+  rawText: string;
+  isUserFacing: boolean;
+  /** Структурированная категория для агрегаций — пишется и в sub-job.errorCode,
+   *  и попадает в parent GenerationJob.errorCode через pickBatchErrorCode. */
+  errorCode: GenerationErrorCode;
+} {
   // rawText включает cause-chain — без этого undici-ошибки выглядят как
   // абстрактное "fetch failed" в notifyTechError. Видим: сообщение, code,
   // syscall/host из каждого уровня cause до 4 шагов.
   const rawText = formatErrorWithCauseChain(err);
+  const errorCode = classifyError(err);
   const mapped = resolveUserFacingMessage(err, t);
   if (mapped !== null) {
-    return { userText: mapped, rawText, isUserFacing: true };
+    return { userText: mapped, rawText, isUserFacing: true, errorCode };
   }
   const userText = pickGenerationFailedMessage(t, modelName, section);
-  return { userText, rawText, isUserFacing: false };
+  return { userText, rawText, isUserFacing: false, errorCode };
 }
 
 /**
