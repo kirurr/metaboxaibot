@@ -289,6 +289,10 @@ export default {
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
+    imageFormatUnsupported:
+      '❌ Image format "{format}" is not supported. Supported formats: {supported}. Convert the file and try again.',
+    imageDimensionOutOfRange:
+      "❌ Image dimensions are outside the allowed range. Each side must be between {min} and {max} pixels. Replace the reference and try again.",
     promptRequired:
       "❌ This model requires a text prompt — please describe what you want to generate and try again.",
     chatStreamInterrupted:
@@ -598,8 +602,10 @@ export default {
     uploadPromptElement:
       'Send 1–4 photos for "{slot}". First photo = frontal view; the rest (up to 3) = reference views.',
     imageSaved: "✅ {slot}: image {n}/{max} saved.",
-    tooManyMedia:
-      "<b>❌ You uploaded extra files — they were skipped.</b>\n\n{modelName} accepts up to {totalMax} files:\n{breakdown}.\n\nTap the buttons below to view the contents.",
+    tooManyMediaSingleSlot:
+      "❌ You uploaded extra files — they were skipped.\n\n{modelName} only accepts {totalMax} {fileNoun} — {slotLabel}.\n\nTap the buttons below to view the contents.",
+    tooManyMediaMultiSlot:
+      "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} {fileNoun}:\n{breakdown}\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",
@@ -626,6 +632,11 @@ export default {
     refineReadyForPrompt:
       "🖼 Your image is attached as a reference to {model}.\n✍️ Send text or a 🎤 voice message — what to refine.",
     refinePickSection: "Choose a section to refine in:",
+    refineSlotConflict:
+      "This slot already has images. Replace them with the new one or add alongside?",
+    refineSlotConflictFull: "Slot is full ({count}/{max}). You can only replace the content.",
+    refineReplaceBtn: "🔄 Replace",
+    refineAddBtn: "➕ Add",
   },
   confirmGeneration: {
     message:

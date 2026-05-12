@@ -861,9 +861,10 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
     });
     debounceSlotReply(userId, mediaGroupId, async () => {
       const tracked = consumeDistribution(userId, mediaGroupId);
-      const overflowText =
-        tracked && tracked.overflowCount > 0 ? buildOverflowMessage(model, ctx.t) : "";
-      await sendDesignMediaInputStatus(ctx, { prependText: overflowText });
+      if (tracked && tracked.overflowCount > 0) {
+        await ctx.reply(buildOverflowMessage(model, ctx.t));
+      }
+      await sendDesignMediaInputStatus(ctx);
       if (tracked?.caption) {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = activeModeSlots.find(

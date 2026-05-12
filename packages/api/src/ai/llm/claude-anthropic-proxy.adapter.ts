@@ -275,6 +275,38 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     let messageDeltaWithUsage = false;
     const eventTypeCounts: Record<string, number> = {};
 
+    // Diagnostic capture: последние N сырых SSE-событий + сэмпл yielded visible
+    // текста. Нужно чтобы при ambiguous-финале (KIE-прокси шлёт фейковый usage
+    // без content-блоков и без stop_reason; модель шлёт visible с whitespace
+    // или literal `<think>` тегом) можно было по логам понять что реально
+    // прислал провайдер, не воспроизводя руками. Включается ТОЛЬКО в
+    // warn-логе ниже — на горячий путь yield'ов не влияет.
+    const rawEventSamples: Array<{ event?: string; data: unknown }> = [];
+    const MAX_EVENT_SAMPLES = 50;
+    const captureRawEvent = (evt: { event?: string; data?: SseData }): void => {
+      if (rawEventSamples.length >= MAX_EVENT_SAMPLES) return;
+      const d = evt.data;
+      if (!d || typeof d !== "object") {
+        rawEventSamples.push({ event: evt.event, data: d });
+        return;
+      }
+      const out: Record<string, unknown> = { ...(d as unknown as Record<string, unknown>) };
+      if (d.delta && typeof d.delta === "object") {
+        const delta: Record<string, unknown> = { ...d.delta };
+        if (typeof delta.text === "string" && (delta.text as string).length > 200) {
+          delta.text = `${(delta.text as string).slice(0, 200)}…[+${(delta.text as string).length - 200}]`;
+        }
+        if (typeof delta.thinking === "string" && (delta.thinking as string).length > 200) {
+          delta.thinking = `${(delta.thinking as string).slice(0, 200)}…[+${(delta.thinking as string).length - 200}]`;
+        }
+        out.delta = delta;
+      }
+      rawEventSamples.push({ event: evt.event, data: out });
+    };
+    let visibleTextSample = "";
+    let visibleTextTotalLen = 0;
+    const MAX_VISIBLE_SAMPLE = 500;
+
     // Stream parser: SSE events delimited by "\n\n"; each event has
     // `event: <name>\ndata: <json>` lines (Anthropic-compatible).
     const reader = res.body.getReader();
@@ -293,6 +325,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           buffer = buffer.slice(sep + 2);
           const evt = parseSseEvent(raw);
           if (!evt?.data) continue;
+          captureRawEvent(evt);
 
           // text_delta → visible. Если в буфере накоплен reasoning И юзер
           //   хочет его видеть — yield `<think>...</think>` ПЕРЕД visible.
@@ -310,6 +343,13 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
               thinkingBuffer = "";
             }
             visibleChunks++;
+            visibleTextTotalLen += visibleText.length;
+            if (visibleTextSample.length < MAX_VISIBLE_SAMPLE) {
+              visibleTextSample += visibleText.slice(
+                0,
+                MAX_VISIBLE_SAMPLE - visibleTextSample.length,
+              );
+            }
             yield visibleText;
           } else {
             const reasoningText = handleThinkingDelta(evt.data);
@@ -407,12 +447,26 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       thinkingBuffer = "";
     }
 
-    // Триггер ровно совпадает с empty-guard'ом в chat.service.ts:
-    // там тоже "0 visible chunks → пустой ответ юзеру". Если ужесточить
-    // условие (например AND outputTokens===0), потеряем кейс когда Claude
-    // потратил токены на thinking-блоки, но не выдал ни одного visible
-    // дельта-чанка — а это как раз самый интересный случай для диагностики.
-    if (visibleChunks === 0) {
+    // Диагностический warn на «неоднозначный финал стрима». Расширен по
+    // сравнению с прежней проверкой `visibleChunks === 0`, чтобы также
+    // ловить кейс когда visible-чанки эмитились, но их содержимое
+    // chat.service выкинет как пустоту (whitespace-only ИЛИ literal
+    // `<think>...</think>` тег, который `stripThinkingBlocks` срежет). И
+    // отдельно — финал без `stop_reason` и без `incompleteReason`: это
+    // прокси-аномалия (KIE/Evolink), важно её ловить ДО того как
+    // chat.service выкатит юзеру generic «модель временно недоступна».
+    //
+    // Лог несёт `rawEventSamples` (до 50 последних событий с обрезанными
+    // text/thinking-полями) и `visibleTextSample` (первые ~500 символов
+    // всех yielded visible-чанков). Этого достаточно чтобы по логам понять
+    // что реально присылает прокси, не воспроизводя руками.
+    const trimmedVisibleSample = visibleTextSample.trim();
+    const finishLooksAmbiguous = !lastStopReason && !incompleteReason;
+    const visibleLooksEmpty =
+      visibleChunks === 0 || (visibleTextTotalLen > 0 && trimmedVisibleSample.length === 0);
+    const visibleLooksLikeThinkLiteral =
+      visibleChunks > 0 && trimmedVisibleSample.startsWith("<think>");
+    if (finishLooksAmbiguous || visibleLooksEmpty || visibleLooksLikeThinkLiteral) {
       logger.warn(
         {
           modelId: this.modelId,
@@ -421,12 +475,21 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           streamDurationMs: Date.now() - streamStartedAt,
           inputTokens,
           outputTokens,
+          cachedInputTokens,
+          visibleChunks,
+          visibleTextTotalLen,
+          visibleTextSample,
+          thinkingBufferLen: thinkingBuffer.length,
           eventTypeCounts,
           lastStopReason,
           messageDeltaWithUsage,
           incompleteReason,
+          finishLooksAmbiguous,
+          visibleLooksEmpty,
+          visibleLooksLikeThinkLiteral,
+          rawEventSamples,
         },
-        "claude-anthropic-proxy: stream ended with no visible text",
+        "claude-anthropic-proxy: stream-state diagnostic (raw events captured)",
       );
     }
 
