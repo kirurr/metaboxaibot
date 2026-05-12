@@ -64,6 +64,8 @@ import {
   handleRefineFamily,
   handleRefineModel,
   handleRefineSlot,
+  handleRefineReplace,
+  handleRefineAdd,
 } from "./scenes/refine.js";
 import {
   handleAudioSubSection,
@@ -271,6 +273,8 @@ export function createBot(token: string): Bot<BotContext> {
   bot.callbackQuery(/^ref_fam:/, handleRefineFamily);
   bot.callbackQuery(/^ref_mdl:/, handleRefineModel);
   bot.callbackQuery(/^ref_slt:/, handleRefineSlot);
+  bot.callbackQuery(/^ref_rep:/, handleRefineReplace);
+  bot.callbackQuery(/^ref_add:/, handleRefineAdd);
 
   // ── Video model selection callback ───────────────────────────────────────
   bot.callbackQuery(/^video_model_/, handleVideoModelSelect);

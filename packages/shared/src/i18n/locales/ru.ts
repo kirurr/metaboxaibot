@@ -624,6 +624,11 @@ export default {
     refineReadyForPrompt:
       "🖼 Ваше изображение прикреплено как референс к {model}.\n✍️ Отправьте текст или 🎤 голосовое — что нужно доработать.",
     refinePickSection: "Выберите раздел для доработки:",
+    refineSlotConflict: "В этом слоте уже есть изображения. Заменить их новым или добавить рядом?",
+    refineSlotConflictFull:
+      "Слот заполнен до конца ({count}/{max}). Можно только заменить содержимое.",
+    refineReplaceBtn: "🔄 Заменить",
+    refineAddBtn: "➕ Добавить",
   },
   confirmGeneration: {
     message:

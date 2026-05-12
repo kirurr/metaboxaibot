@@ -1,15 +1,13 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { userStateService } from "../services/user-state.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const modelSettingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["model-settings"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["settings"]));
 
   /** GET /model-settings — returns { [modelId]: { [key]: value } } */
   fastify.get(

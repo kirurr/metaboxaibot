@@ -15,12 +15,12 @@ import {
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import { logger } from "../logger.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
   fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["web-billing"]),
+    constructOpenAPIonRouteHook(routeOptions, ["billing"]),
   );
 
   // ── GET /web/billing/catalog ────────────────────────────────────────────

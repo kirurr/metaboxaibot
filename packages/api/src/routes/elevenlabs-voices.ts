@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface ElevenLabsVoiceRaw {
   voice_id: string;
@@ -21,9 +21,7 @@ let voicesCache: { data: object[]; at: number } | null = null;
 
 export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["elevenlabs-voices"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["voices"]));
 
   /** GET /elevenlabs-voices — proxy to ElevenLabs /v1/voices, returns premade voices */
   fastify.get(
@@ -52,6 +50,7 @@ export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
         },
       },
     },
+
     async (_request, reply) => {
       if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
         return voicesCache.data;

@@ -7,7 +7,7 @@ import { config, getT } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
 import { db } from "../db.js";
 import { usdToTokens } from "../services/token.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 /** Должна совпадать со значениями в bot/scenes/video.ts и worker/processors/avatar.processor.ts. */
 const SOUL_COST_USD = 2.5;

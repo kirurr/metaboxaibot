@@ -27,7 +27,7 @@ import {
   type Section,
   type AIModel,
 } from "@metabox/shared";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 function serializeModelCompact(m: AIModel) {
   return {
@@ -52,9 +52,7 @@ function serializeModelCompact(m: AIModel) {
 export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // Все роуты здесь требуют и авторизации, и привязанного Telegram.
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["web-chat"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-chat"]));
 
   // ── GET /web/models ─────────────────────────────────────────────────────
   fastify.get<{ Querystring: { section?: string } }>(
@@ -103,65 +101,36 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   // ── GET /web/balance ────────────────────────────────────────────────────
-  fastify.get(
-    "/web/balance",
-    {
-      schema: {
-        description: "Get user balance information",
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: true,
-            properties: {
-              tokenBalance: { type: "string" },
-              subscriptionTokenBalance: { type: "string" },
-              subscription: {
-                type: "object",
-                nullable: true,
-                additionalProperties: true,
-                properties: {
-                  planName: { type: "string" },
-                  period: { type: "string" },
-                  endDate: { type: "string" },
-                  tokensGranted: { type: "number" },
-                },
-              },
-            },
+  fastify.get("/web/balance", { schema: { hide: true } as any }, async (request) => {
+    const { aibUserId } = request.webUser!;
+    const user = await db.user.findUnique({
+      where: { id: aibUserId! },
+      select: {
+        tokenBalance: true,
+        subscriptionTokenBalance: true,
+        localSubscription: {
+          select: {
+            planName: true,
+            period: true,
+            endDate: true,
+            tokensGranted: true,
           },
         },
       },
-    },
-    async (request) => {
-      const { aibUserId } = request.webUser!;
-      const user = await db.user.findUnique({
-        where: { id: aibUserId! },
-        select: {
-          tokenBalance: true,
-          subscriptionTokenBalance: true,
-          localSubscription: {
-            select: {
-              planName: true,
-              period: true,
-              endDate: true,
-              tokensGranted: true,
-            },
-          },
-        },
-      });
-      return {
-        tokenBalance: user?.tokenBalance.toString() ?? "0",
-        subscriptionTokenBalance: user?.subscriptionTokenBalance.toString() ?? "0",
-        subscription: user?.localSubscription
-          ? {
-              planName: user.localSubscription.planName,
-              period: user.localSubscription.period,
-              endDate: user.localSubscription.endDate.toISOString(),
-              tokensGranted: user.localSubscription.tokensGranted,
-            }
-          : null,
-      };
-    },
-  );
+    });
+    return {
+      tokenBalance: user?.tokenBalance.toString() ?? "0",
+      subscriptionTokenBalance: user?.subscriptionTokenBalance.toString() ?? "0",
+      subscription: user?.localSubscription
+        ? {
+            planName: user.localSubscription.planName,
+            period: user.localSubscription.period,
+            endDate: user.localSubscription.endDate.toISOString(),
+            tokensGranted: user.localSubscription.tokensGranted,
+          }
+        : null,
+    };
+  });
 
   // ── GET /web/dialogs ────────────────────────────────────────────────────
   fastify.get<{ Querystring: { section?: string } }>(
@@ -468,34 +437,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Params: { id: string }; Body: { content?: string } }>(
     "/web/dialogs/:id/send",
-    {
-      schema: {
-        description: "Send message to dialog with SSE streaming response",
-        params: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-          },
-        },
-        body: {
-          type: "object",
-          properties: {
-            content: { type: "string" },
-          },
-          required: ["content"],
-        },
-        response: {
-          200: {
-            type: "string",
-            description:
-              "SSE stream. event: chunk (data: { text }), event: done (data: { tokensUsed, balance }), event: error (data: { code, message })",
-          },
-          400: badRequestResponse,
-          403: badRequestResponse,
-          404: badRequestResponse,
-        },
-      },
-    },
+    { schema: { hide: true } as any },
     async (request, reply) => {
       const { aibUserId } = request.webUser!;
       const { id } = request.params;

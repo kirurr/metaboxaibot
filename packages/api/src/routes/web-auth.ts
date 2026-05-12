@@ -38,7 +38,7 @@ import {
 import { extractWebUserFromRequest, webAuthPreHandler } from "../middlewares/web-auth.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 const REFRESH_COOKIE_NAME = "aibw_refresh";
 
@@ -156,10 +156,6 @@ async function issueSession(
 }
 
 export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["web-auth"]),
-  );
-
   // Fail-fast проверка конфигурации при регистрации плагина.
   // Если секретов нет — web-auth не запускается, но остальной API работает (бот, TG-миниапп).
   if (!config.web.jwtSecret) {
@@ -173,6 +169,8 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
       "[web-auth] METABOX_API_URL/INTERNAL_KEY не заданы — login/signup/reset работать не будут.",
     );
   }
+
+  fastify.addHook("onRoute", (routeOptions) => constructOpenAPIonRouteHook(routeOptions, ["auth"]));
 
   // Middleware: если базовая конфигурация неполная — возвращаем 503 вместо 500.
   fastify.addHook("preHandler", async (request, reply) => {
@@ -719,20 +717,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // ── POST /auth/web-unlink-telegram ──────────────────────────────────────
   fastify.post(
     "/auth/web-unlink-telegram",
-    {
-      preHandler: webAuthPreHandler,
-      schema: {
-        description: "Unlink Telegram from web account",
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              ok: { type: "boolean" },
-            },
-          },
-        },
-      },
-    },
+    { preHandler: webAuthPreHandler, schema: { hide: true } as any },
     async (request, reply) => {
       const { metaboxUserId } = request.webUser!;
       // На AI Box стороне зачищаем связь. Сам User остаётся — у него есть история.

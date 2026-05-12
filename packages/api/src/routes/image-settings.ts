@@ -1,39 +1,19 @@
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { userStateService } from "../services/user-state.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
-
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const imageSettingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["image-settings"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["settings"]));
 
   /** GET /image-settings — returns { [modelId]: { aspectRatio } } */
-  fastify.get(
-    "/image-settings",
-    {
-      schema: {
-        description: "Get user's image settings per model",
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: {
-              type: "object",
-              properties: { aspectRatio: { type: "string" } },
-            },
-          },
-        },
-      },
-    },
-    async (request) => {
-      const { userId } = request as AuthRequest;
-      const settings = await userStateService.getImageSettings(userId);
-      return settings;
-    },
-  );
+  fastify.get("/image-settings", async (request) => {
+    const { userId } = request as AuthRequest;
+    const settings = await userStateService.getImageSettings(userId);
+    return settings;
+  });
 
   /** PATCH /image-settings — save aspect ratio for a model */
   fastify.patch<{ Body: { modelId: string; aspectRatio: string } }>(

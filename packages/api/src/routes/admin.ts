@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -11,10 +11,7 @@ type AuthRequest = { userId: bigint };
  * or via legacy x-admin-secret header.
  */
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["admin"]),
-  );
-
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["admin"]));
   fastify.addHook("preHandler", async (request, reply) => {
     // Legacy: secret-based auth
     const secret = config.api.adminSecret;

@@ -209,6 +209,44 @@ export const chatService = {
 
     const ms = await userStateService.getEffectiveDialogSettings(userId, dialogId, dialog.modelId);
 
+    // Sanitize: пока тогл «Ограничить длину ответа» скрыт из каталога, любое
+    // `max_tokens_limit_enabled=true` в user_state — это легаси от прошлых
+    // тестов/dev-сессий, когда тогл показывался в UI. Юзер не может его
+    // выключить (контрола в UI нет) → adapter возьмёт его легаси `max_tokens`
+    // и Claude/OpenAI получат микро-cap, упрутся, юзер увидит пустой ответ.
+    // Архитектурный принцип: каталог — единственный источник истины о том,
+    // чем юзер может управлять. Если ключа нет в `model.settings` — он не
+    // должен попадать в LLMInput.
+    if (
+      (ms.max_tokens_limit_enabled !== undefined || ms.max_tokens !== undefined) &&
+      model?.settings
+    ) {
+      const toggleExposed = model.settings.some((s) => s.key === "max_tokens_limit_enabled");
+      if (!toggleExposed) {
+        // Логируем КАЖДЫЙ silent-drop (даже orphan max_tokens без enabled и
+        // явный enabled=false), чтобы видеть в логах сколько уникальных
+        // юзеров затронуто. Без этого orphan max_tokens вёл бы себя как
+        // невидимая утечка состояния — sanitize молча выкинул бы, никто
+        // не узнал бы что юзер не обновляется естественным путём.
+        logger.warn(
+          {
+            userId,
+            dialogId,
+            modelId: dialog.modelId,
+            staleEnabled: ms.max_tokens_limit_enabled,
+            staleMaxTokens: ms.max_tokens,
+          },
+          "chat: stale max_tokens_* in user_state but toggle hidden from UI — ignoring",
+        );
+        // Зануляем оба ключа — иначе truncate.reservedOutput по старой ветке
+        // (или гипотетически новый код, читающий `ms.max_tokens` напрямую) мог
+        // бы взять legacy 500. Чистим симметрично, без асимметрии по
+        // `_limit_enabled` vs `max_tokens` — оба связаны одной фичей.
+        ms.max_tokens_limit_enabled = undefined;
+        ms.max_tokens = undefined;
+      }
+    }
+
     // `getEffectiveDialogSettings` возвращает только то что юзер явно сохранил
     // — модельные `default`'ы из `AI_MODELS[id].settings[]` остаются хинтом для
     // UI и до сервера не доезжают. Для ключей где это критично (reasoning_effort

@@ -11,11 +11,11 @@ import { db } from "../db.js";
 import { config, encryptSecret, maskKey, decryptSecret } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { extractWebUserFromRequest } from "../middlewares/web-auth.js";
-import { invalidatePoolCache } from "../services/key-pool.service.js";
+import { invalidatePoolCache, getKeyStats } from "../services/key-pool.service.js";
 import { clearKeyThrottle } from "../services/throttle.service.js";
 import { logger } from "../logger.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -40,6 +40,7 @@ type KeyCreateBody = {
   isActive?: boolean;
   notes?: string;
 };
+type KeyUpdateBody = Partial<Omit<KeyCreateBody, "provider">>;
 
 const VALID_PROTOCOLS = new Set(["http", "https", "socks5"]);
 
@@ -110,10 +111,7 @@ function serializeKey(k: {
 }
 
 export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["admin-keys"]),
-  );
-
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["admin"]));
   fastify.addHook("preHandler", async (request, reply) => {
     const secret = config.api.adminSecret;
     const provided = request.headers["x-admin-secret"];
@@ -208,69 +206,31 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  fastify.post<{ Body: ProxyCreateBody }>(
-    "/admin/proxies",
-    {
-      schema: {
-        description: "Create a new proxy",
-        body: {
-          type: "object",
-          additionalProperties: true,
-          properties: {
-            label: { type: "string", description: "Human-readable label" },
-            protocol: {
-              type: "string",
-              enum: ["http", "https", "socks5"],
-              description: "Protocol",
-            },
-            host: { type: "string", description: "Proxy hostname or IP" },
-            port: { type: "number", description: "Proxy port" },
-            username: { type: "string", description: "Optional username for auth" },
-            password: { type: "string", description: "Optional password for auth" },
-            isActive: { type: "boolean", description: "Whether proxy is active (default true)" },
-            notes: { type: "string", description: "Optional admin notes" },
-          },
-          required: ["label", "protocol", "host", "port"],
-        },
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: true,
-            properties: {
-              proxy: { type: "object" },
-            },
-            required: ["proxy"],
-          },
-          400: badRequestResponse,
-        },
+  fastify.post<{ Body: ProxyCreateBody }>("/admin/proxies", async (request, reply) => {
+    const b = request.body;
+    if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
+      await reply.status(400).send({ error: "label, protocol, host, port required" });
+      return;
+    }
+    if (!VALID_PROTOCOLS.has(b.protocol)) {
+      await reply.status(400).send({ error: "protocol must be http|https|socks5" });
+      return;
+    }
+    const proxy = await db.proxy.create({
+      data: {
+        label: b.label,
+        protocol: b.protocol,
+        host: b.host,
+        port: b.port,
+        username: b.username ? encryptSecret(b.username) : null,
+        passwordCipher: b.password ? encryptSecret(b.password) : null,
+        isActive: b.isActive ?? true,
+        notes: b.notes ?? null,
       },
-    },
-    async (request, reply) => {
-      const b = request.body;
-      if (!b?.label || !b?.protocol || !b?.host || !b?.port) {
-        await reply.status(400).send({ error: "label, protocol, host, port required" });
-        return;
-      }
-      if (!VALID_PROTOCOLS.has(b.protocol)) {
-        await reply.status(400).send({ error: "protocol must be http|https|socks5" });
-        return;
-      }
-      const proxy = await db.proxy.create({
-        data: {
-          label: b.label,
-          protocol: b.protocol,
-          host: b.host,
-          port: b.port,
-          username: b.username ? encryptSecret(b.username) : null,
-          passwordCipher: b.password ? encryptSecret(b.password) : null,
-          isActive: b.isActive ?? true,
-          notes: b.notes ?? null,
-        },
-      });
-      invalidatePoolCache();
-      return { proxy: serializeProxy(proxy) };
-    },
-  );
+    });
+    invalidatePoolCache();
+    return { proxy: serializeProxy(proxy) };
+  });
 
   fastify.patch<{ Params: { id: string }; Body: ProxyUpdateBody }>(
     "/admin/proxies/:id",
@@ -359,6 +319,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
     },
+
     async (request, reply) => {
       const { id } = request.params;
       const inUse = await db.providerKey.count({ where: { proxyId: id } });
@@ -374,6 +335,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  /** Test connectivity through proxy — fetches https://api.ipify.org and returns IP. */
   fastify.post<{ Params: { id: string } }>(
     "/admin/proxies/:id/test",
     {
@@ -408,6 +370,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
     },
+
     async (request, reply) => {
       const proxy = await db.proxy.findUnique({ where: { id: request.params.id } });
       if (!proxy) {
@@ -462,6 +425,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
     },
+
     async (request) => {
       const where = request.query.provider ? { provider: request.query.provider } : {};
       const keys = await db.providerKey.findMany({
@@ -530,6 +494,84 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
       });
       invalidatePoolCache(b.provider);
       return { key: serializeKey(key) };
+    },
+  );
+
+  fastify.patch<{ Params: { id: string }; Body: KeyUpdateBody }>(
+    "/admin/provider-keys/:id",
+    async (request, reply) => {
+      const b = request.body;
+      const existing = await db.providerKey.findUnique({ where: { id: request.params.id } });
+      if (!existing) {
+        await reply.status(404).send({ error: "Key not found" });
+        return;
+      }
+      if (b.proxyId !== undefined && b.proxyId !== null) {
+        const proxy = await db.proxy.findUnique({ where: { id: b.proxyId } });
+        if (!proxy) {
+          await reply.status(400).send({ error: "proxyId not found" });
+          return;
+        }
+      }
+      const data: Record<string, unknown> = {};
+      if (b.label !== undefined) data.label = b.label;
+      if (b.keyValue !== undefined && b.keyValue !== "") {
+        data.keyCipher = encryptSecret(b.keyValue);
+        data.keyMask = maskKey(b.keyValue);
+      }
+      if (b.proxyId !== undefined) data.proxyId = b.proxyId;
+      if (b.priority !== undefined) data.priority = b.priority;
+      if (b.isActive !== undefined) data.isActive = b.isActive;
+      if (b.notes !== undefined) data.notes = b.notes;
+
+      const key = await db.providerKey.update({
+        where: { id: request.params.id },
+        data,
+        include: { proxy: { select: { id: true, label: true } } },
+      });
+      invalidatePoolCache(existing.provider);
+      return { key: serializeKey(key) };
+    },
+  );
+
+  fastify.delete<{ Params: { id: string } }>("/admin/provider-keys/:id", async (request, reply) => {
+    const existing = await db.providerKey.findUnique({ where: { id: request.params.id } });
+    if (!existing) {
+      await reply.status(404).send({ error: "Key not found" });
+      return;
+    }
+    await db.providerKey.delete({ where: { id: request.params.id } });
+    invalidatePoolCache(existing.provider);
+    return { success: true };
+  });
+
+  fastify.get<{ Params: { id: string } }>(
+    "/admin/provider-keys/:id/stats",
+    async (request, reply) => {
+      const k = await db.providerKey.findUnique({
+        where: { id: request.params.id },
+        select: {
+          requestCount: true,
+          errorCount: true,
+          lastUsedAt: true,
+          lastErrorAt: true,
+          lastErrorText: true,
+        },
+      });
+      if (!k) {
+        await reply.status(404).send({ error: "Key not found" });
+        return;
+      }
+      const live = await getKeyStats(request.params.id);
+      return {
+        requestCount: k.requestCount.toString(),
+        errorCount: k.errorCount.toString(),
+        lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
+        lastErrorAt: k.lastErrorAt?.toISOString() ?? null,
+        lastErrorText: k.lastErrorText,
+        currentCooldownMs: live.currentCooldownMs,
+        cooldownReason: live.cooldownReason,
+      };
     },
   );
 

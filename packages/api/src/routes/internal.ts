@@ -6,7 +6,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { db } from "../db.js";
 import { config } from "@metabox/shared";
 import { expireSubscription, grantMetaboxSubscription } from "../services/payment.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 function checkKey(request: FastifyRequest): boolean {
   const key = config.metabox.internalKey;
@@ -14,10 +14,7 @@ function checkKey(request: FastifyRequest): boolean {
 }
 
 export const internalRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["internal"]),
-  );
-
+  fastify.addHook("onRoute", (param) => constructOpenAPIonRouteHook(param, ["internal"]));
   fastify.addHook("preHandler", async (request, reply) => {
     if (!checkKey(request)) {
       await reply.code(401).send({ error: "Unauthorized" });
@@ -44,10 +41,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
-            additionalProperties: true,
-            properties: { ok: { type: "boolean" } },
-          },
+additionalProperties: true,
+            type: "object", properties: { ok: { type: "boolean" } } },
           400: badRequestResponse,
         },
       },
@@ -105,14 +100,14 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" }, granted: { type: "boolean" } },
           },
           400: badRequestResponse,
           404: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { error: { type: "string" } },
           },
         },
@@ -238,39 +233,23 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
           type: "object",
           properties: {
             telegramId: { type: "string" },
-            subscriptionTokenBalance: { type: "number" },
-            tokenBalance: { type: "number" },
-            orderGrants: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: true,
-                properties: {
-                  orderId: { type: "string" },
-                  tokens: { type: "number" },
-                  description: { type: "string" },
-                },
-              },
-            },
+            tokens: { type: "number" },
             endDate: { type: "string" },
             planName: { type: "string" },
-            period: { type: "string" },
-            startDate: { type: "string" },
-            tokensGranted: { type: "number" },
-            metaboxSubscriptionId: { type: "string" },
+            subscriptionId: { type: "string" },
           },
           required: ["telegramId", "tokens", "endDate", "planName"],
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" } },
           },
           400: badRequestResponse,
           404: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { error: { type: "string" } },
           },
         },
@@ -449,13 +428,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Unlink Metabox subscription from AI Box",
         body: {
           type: "object",
-          additionalProperties: true,
           properties: { telegramId: { type: "string" } },
+          required: ["telegramId"],
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" } },
           },
           400: badRequestResponse,
@@ -464,7 +443,6 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const { telegramId } = request.body as { telegramId: string };
-
       if (!telegramId) {
         return reply.code(400).send({ error: "telegramId is required" });
       }
@@ -496,13 +474,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         description: "Revoke subscription tokens from user",
         body: {
           type: "object",
-          additionalProperties: true,
           properties: { telegramId: { type: "string" } },
+          required: ["telegramId"],
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" } },
           },
           400: badRequestResponse,
@@ -555,8 +533,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: {
               ok: { type: "boolean" },
               deducted: { type: "number" },
@@ -652,8 +630,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: {
               ok: { type: "boolean" },
               deducted: { type: "number" },
@@ -749,8 +727,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" }, previousBalance: { type: "number" } },
           },
           400: badRequestResponse,
@@ -798,8 +776,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: {
               ok: { type: "boolean" },
               applied: { type: "boolean" },
@@ -873,8 +851,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" } },
           },
           400: badRequestResponse,
@@ -923,18 +901,14 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
-            properties: {
-              tokens: { type: "number" },
-              tokenBalance: { type: "number" },
-              subscriptionTokenBalance: { type: "number" },
-            },
+            type: "object",
+            properties: { tokens: { type: "number" } },
           },
           400: badRequestResponse,
           404: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { error: { type: "string" } },
           },
         },
@@ -977,9 +951,9 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
-            properties: { ok: { type: "boolean" } },
+            type: "object",
+            properties: { activated: { type: "boolean" } },
           },
           400: badRequestResponse,
         },
@@ -1023,8 +997,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
+            type: "object",
             properties: { ok: { type: "boolean" } },
           },
           400: badRequestResponse,
@@ -1089,23 +1063,9 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
-            properties: {
-              subscription: {
-                type: "object",
-                nullable: true,
-                properties: {
-                  planName: { type: "string" },
-                  period: { type: "string" },
-                  tokensGranted: { type: "number" },
-                  endDate: { type: "string" },
-                  startDate: { type: "string" },
-                  daysLeft: { type: "number" },
-                  metaboxSubscriptionId: { type: "string", nullable: true },
-                },
-              },
-            },
+
+            type: "object",
           },
           400: badRequestResponse,
         },
@@ -1157,21 +1117,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         },
         response: {
           200: {
-            type: "object",
             additionalProperties: true,
-            properties: {
-              subscription: {
-                type: "object",
-                nullable: true,
-                properties: {
-                  planName: { type: "string" },
-                  period: { type: "string" },
-                  tokensGranted: { type: "number" },
-                  endDate: { type: "string" },
-                  startDate: { type: "string" },
-                },
-              },
-            },
+            type: "object",
           },
           400: badRequestResponse,
         },

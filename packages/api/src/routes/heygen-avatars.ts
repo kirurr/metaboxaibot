@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface HeyGenLookItem {
   id: string;
@@ -78,9 +78,7 @@ function applyFilters(
 
 export const heygenAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["heygen-avatars"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["avatars"]));
 
   /**
    * GET /heygen-avatars — paginated public avatar list with server-side filtering.

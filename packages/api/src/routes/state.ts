@@ -557,21 +557,20 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       const state = await userStateService.get(userId);
       const selectedModes = await userStateService.getSelectedModes(userId);
 
-      return {
-        state: state?.state ?? "IDLE",
-        section: state?.section ?? null,
-        gptModelId: state?.gptModelId ?? null,
-        gptDialogId: state?.gptDialogId ?? null,
-        designDialogId: state?.designDialogId ?? null,
-        audioDialogId: state?.audioDialogId ?? null,
-        videoDialogId: state?.videoDialogId ?? null,
-        designModelId: state?.designModelId ?? null,
-        audioModelId: state?.audioModelId ?? null,
-        videoModelId: state?.videoModelId ?? null,
-        selectedModes,
-      };
-    },
-  );
+    return {
+      state: state?.state ?? "IDLE",
+      section: state?.section ?? null,
+      gptModelId: state?.gptModelId ?? null,
+      gptDialogId: state?.gptDialogId ?? null,
+      designDialogId: state?.designDialogId ?? null,
+      audioDialogId: state?.audioDialogId ?? null,
+      videoDialogId: state?.videoDialogId ?? null,
+      designModelId: state?.designModelId ?? null,
+      audioModelId: state?.audioModelId ?? null,
+      videoModelId: state?.videoModelId ?? null,
+      selectedModes,
+    };
+  });
 
   /** POST /state/selected-mode — persist user's chosen mode for a model */
   fastify.post<{

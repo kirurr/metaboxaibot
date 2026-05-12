@@ -65,6 +65,7 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
         response: {
           200: {
             type: "array",
+            additionalProperties: true,
             items: {
               type: "object",
               additionalProperties: true,

@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface CartesiaVoiceRaw {
   id: string;
@@ -38,9 +38,7 @@ async function getCartesiaApiKey(): Promise<string | null> {
 
 export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["cartesia-voices"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["voices"]));
 
   /**
    * GET /cartesia-voices — список официальных (public) Cartesia voices.
@@ -52,88 +50,60 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    * стабильно возвращал бы протухшие линки. Клиент получает только `has_preview`,
    * а сам URL запрашивается on-demand через `/cartesia-voices/:id/preview-url`.
    */
-  fastify.get(
-    "/cartesia-voices",
-    {
-      schema: {
-        description: "Get list of public Cartesia voices (cached for 1 hour)",
-        response: {
-          200: {
-            type: "array",
-            additionalProperties: true,
-            items: {
-              type: "object",
-              additionalProperties: true,
-              properties: {
-                voice_id: { type: "string", description: "Voice ID" },
-                name: { type: "string", description: "Voice name" },
-                description: { type: "string", nullable: true, description: "Voice description" },
-                gender: { type: "string", nullable: true, description: "Voice gender" },
-                language: { type: "string", nullable: true, description: "Voice language" },
-                has_preview: { type: "boolean", description: "Whether preview audio is available" },
-              },
-            },
-          },
-          502: badRequestResponse,
-          503: badRequestResponse,
+  fastify.get("/cartesia-voices", async (_request, reply) => {
+    if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
+      return voicesCache.data;
+    }
+
+    const apiKey = await getCartesiaApiKey();
+    if (!apiKey) {
+      return reply.status(503).send({ error: "Cartesia API key not configured" });
+    }
+
+    const all: CartesiaVoiceRaw[] = [];
+    let cursor: string | undefined;
+    // Cap pages at 50 — официальных голосов не должно быть >5000.
+    for (let page = 0; page < 50; page++) {
+      const url = new URL(`${CARTESIA_API}/voices`);
+      url.searchParams.set("limit", "100");
+      url.searchParams.set("is_owner", "false");
+      url.searchParams.append("expand[]", "preview_file_url");
+      if (cursor) url.searchParams.set("starting_after", cursor);
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Cartesia-Version": CARTESIA_VERSION,
+          Accept: "application/json",
         },
-      },
-    },
-    async (_request, reply) => {
-      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-        return voicesCache.data;
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        return reply.status(502).send({ error: `Cartesia error: ${res.status} ${text}` });
       }
 
-      const apiKey = await getCartesiaApiKey();
-      if (!apiKey) {
-        return reply.status(503).send({ error: "Cartesia API key not configured" });
-      }
+      const json = (await res.json()) as CartesiaVoicesResponse;
+      const data = json.data ?? [];
+      all.push(...data);
+      if (!json.has_more || data.length === 0) break;
+      cursor = data[data.length - 1].id;
+    }
 
-      const all: CartesiaVoiceRaw[] = [];
-      let cursor: string | undefined;
-      // Cap pages at 50 — официальных голосов не должно быть >5000.
-      for (let page = 0; page < 50; page++) {
-        const url = new URL(`${CARTESIA_API}/voices`);
-        url.searchParams.set("limit", "100");
-        url.searchParams.set("is_owner", "false");
-        url.searchParams.append("expand[]", "preview_file_url");
-        if (cursor) url.searchParams.set("starting_after", cursor);
+    const data = all
+      .filter((v) => v.is_public)
+      .map((v) => ({
+        voice_id: v.id,
+        name: v.name,
+        description: v.description ?? null,
+        gender: v.gender ?? null,
+        language: v.language ?? null,
+        has_preview: !!v.preview_file_url,
+      }));
 
-        const res = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Cartesia-Version": CARTESIA_VERSION,
-            Accept: "application/json",
-          },
-        });
-
-        if (!res.ok) {
-          const text = await res.text();
-          return reply.status(502).send({ error: `Cartesia error: ${res.status} ${text}` });
-        }
-
-        const json = (await res.json()) as CartesiaVoicesResponse;
-        const data = json.data ?? [];
-        all.push(...data);
-        if (!json.has_more || data.length === 0) break;
-        cursor = data[data.length - 1].id;
-      }
-
-      const data = all
-        .filter((v) => v.is_public)
-        .map((v) => ({
-          voice_id: v.id,
-          name: v.name,
-          description: v.description ?? null,
-          gender: v.gender ?? null,
-          language: v.language ?? null,
-          has_preview: !!v.preview_file_url,
-        }));
-
-      voicesCache = { data, at: Date.now() };
-      return data;
-    },
-  );
+    voicesCache = { data, at: Date.now() };
+    return data;
+  });
 
   /**
    * GET /cartesia-voices/:id/preview — стримит preview-аудио с Cartesia через

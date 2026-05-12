@@ -17,7 +17,7 @@ import {
   getModelMultiplier,
 } from "../services/pricing-config.service.js";
 import { calculateCost } from "../services/token.service.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = { userId: bigint };
 
@@ -77,10 +77,7 @@ function modelToDto(modelId: string): ModelPricingDto | null {
 }
 
 export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["admin-pricing"]),
-  );
-
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["admin"]));
   // ── Auth preHandler — копия из admin-keys.ts, чтобы не вводить общий хелпер
   //    ради двух мест (см. там же для деталей).
   fastify.addHook("preHandler", async (request, reply) => {
@@ -263,61 +260,32 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // ── PUT /admin/pricing/global — override targetMargin ────────────────────
-  fastify.put<{ Body: SetMultiplierBody }>(
-    "/admin/pricing/global",
-    {
-      schema: {
-        description: "Set or update global price multiplier override",
-        body: {
-          type: "object",
-          properties: {
-            multiplier: {
-              type: "number",
-              description: "Global multiplier (must be > 0 and <= 10)",
-            },
-            note: { type: "string", nullable: true, description: "Optional admin note" },
-          },
-        },
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: true,
-            properties: {
-              global: { type: "number", nullable: true },
-              configDefault: { type: "number" },
-            },
-            required: ["global", "configDefault"],
-          },
-          400: badRequestResponse,
-        },
+  // ── PUT /admin/pricing/global — override targetMargin ────────────────────
+  fastify.put<{ Body: SetMultiplierBody }>("/admin/pricing/global", async (request, reply) => {
+    const value = validateMultiplier(request.body?.multiplier);
+    if (value === null) {
+      await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
+      return;
+    }
+    const updatedBy = await resolveUpdatedBy(request);
+    await db.pricingOverride.upsert({
+      where: { scope_key: { scope: "global", key: "targetMargin" } },
+      create: {
+        scope: "global",
+        key: "targetMargin",
+        multiplier: value,
+        note: request.body?.note ?? null,
+        updatedBy,
       },
-    },
-    async (request, reply) => {
-      const value = validateMultiplier(request.body?.multiplier);
-      if (value === null) {
-        await reply.status(400).send({ error: "multiplier must be a number > 0 and <= 10" });
-        return;
-      }
-      const updatedBy = await resolveUpdatedBy(request);
-      await db.pricingOverride.upsert({
-        where: { scope_key: { scope: "global", key: "targetMargin" } },
-        create: {
-          scope: "global",
-          key: "targetMargin",
-          multiplier: value,
-          note: request.body?.note ?? null,
-          updatedBy,
-        },
-        update: {
-          multiplier: value,
-          note: request.body?.note ?? null,
-          updatedBy,
-        },
-      });
-      await broadcastInvalidation();
-      return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
-    },
-  );
+      update: {
+        multiplier: value,
+        note: request.body?.note ?? null,
+        updatedBy,
+      },
+    });
+    await broadcastInvalidation();
+    return { global: getAllOverrides().global, configDefault: config.billing.targetMargin };
+  });
 
   // ── DELETE /admin/pricing/global ─────────────────────────────────────────
   fastify.delete(

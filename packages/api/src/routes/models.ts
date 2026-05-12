@@ -157,9 +157,7 @@ function serializeModel(m: AIModel, lang: Language) {
 
 export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["models"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["models"]));
 
   /** GET /models?section=gpt — list all models or filter by section */
   fastify.get<{ Querystring: { section?: string } }>(
@@ -236,13 +234,12 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
       const user = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
       const lang = (user?.language ?? "en") as Language;
 
-      const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
-      // Скрытые модели (например, `grok-imagine-extend`) активируются только
-      // через спец-сценарии (кнопка «Продлить») и не должны показываться в
-      // обычном webapp-списке моделей.
-      const models = allModels.filter((m) => !m.hiddenFromCarousel);
+    const allModels = section ? (MODELS_BY_SECTION[section] ?? []) : Object.values(AI_MODELS);
+    // Скрытые модели (например, `grok-imagine-extend`) активируются только
+    // через спец-сценарии (кнопка «Продлить») и не должны показываться в
+    // обычном webapp-списке моделей.
+    const models = allModels.filter((m) => !m.hiddenFromCarousel);
 
-      return models.map((m) => serializeModel(m, lang));
-    },
-  );
+    return models.map((m) => serializeModel(m, lang));
+  });
 };

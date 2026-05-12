@@ -8,7 +8,7 @@ import {
 } from "../services/metabox-bridge.service.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & {
   userId: bigint;
@@ -555,7 +555,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         };
       } catch (err) {
         if (err instanceof MetaboxApiError) {
-          // @ts-expect-error number stuff
+          // @ts-expect-error status number
           return reply.code(err.status).send({ error: err.body, code: err.code });
         }
         throw err;
@@ -621,7 +621,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         return result;
       } catch (err) {
         if (err instanceof MetaboxApiError) {
-          // @ts-expect-error number stuff
+          // @ts-expect-error status number
           return reply.code(err.status).send({ error: err.body, code: err.code });
         }
         throw err;
@@ -698,7 +698,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         select: { metaboxUserId: true, referredById: true },
       });
       if (user?.metaboxUserId) {
-        // @ts-expect-error number stuff
+        // @ts-expect-error status number
         return reply.code(409).send({ error: "Metabox account already linked" });
       }
       const { registerFromBot } = await import("../services/metabox-bridge.service.js");
@@ -732,7 +732,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         return { ssoUrl: `${metaboxUrl}/auth/sso?token=${result.ssoToken}` };
       } catch (err) {
         if (err instanceof MetaboxApiError) {
-          // @ts-expect-error number stuff
+          // @ts-expect-error status number
           return reply.code(err.status).send({ error: err.body, code: err.code });
         }
         throw err;
@@ -808,7 +808,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           const responseData = err.data ?? {};
           return (
             reply
-              // @ts-expect-error number stuff
+              // @ts-expect-error status number
               .code(err.status)
               .send({ ...responseData, code: err.code ?? responseData.code })
           );

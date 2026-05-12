@@ -626,6 +626,11 @@ export default {
     refineReadyForPrompt:
       "🖼 Your image is attached as a reference to {model}.\n✍️ Send text or a 🎤 voice message — what to refine.",
     refinePickSection: "Choose a section to refine in:",
+    refineSlotConflict:
+      "This slot already has images. Replace them with the new one or add alongside?",
+    refineSlotConflictFull: "Slot is full ({count}/{max}). You can only replace the content.",
+    refineReplaceBtn: "🔄 Replace",
+    refineAddBtn: "➕ Add",
   },
   confirmGeneration: {
     message:

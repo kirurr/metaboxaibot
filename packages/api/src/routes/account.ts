@@ -2,7 +2,6 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { initiateAccountDeletion } from "../services/account-deletion.service.js";
 import { logger } from "../logger.js";
-
 import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
@@ -15,9 +14,7 @@ type AuthRequest = FastifyRequest & { userId: bigint };
  */
 export const accountRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["account"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["admin"]));
 
   fastify.post(
     "/account/delete-initiate",

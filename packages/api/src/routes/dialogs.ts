@@ -13,15 +13,13 @@ import {
   type Section,
 } from "@metabox/shared";
 import type { Language } from "@metabox/shared";
-import { constructOpenAPIonRouteHook, badRequestResponse } from "../utils/openapi.js";
+import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & { userId: bigint };
 
 export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
-  fastify.addHook("onRoute", (routeOptions) =>
-    constructOpenAPIonRouteHook(routeOptions, ["dialogs"]),
-  );
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["dialogs"]));
 
   /** GET /dialogs?section=gpt — list active dialogs */
   fastify.get<{ Querystring: { section?: string } }>(
