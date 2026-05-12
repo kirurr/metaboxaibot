@@ -288,8 +288,13 @@ export class KieImageAdapter implements ImageAdapter {
       // (для моделей с зарегистрированным fallback'ом). Без этой ветки ошибка
       // проваливалась в classifyAIError-фолбек, который галлюцинировал юзеру
       // абсурд про "заполните идентификатор задачи" и спамил ops через
-      // notifyOps:true. См. kie-error.ts:isKieTransientError.
-      if (failCode === "422" && /playground failed|task id is blank/i.test(rawFailMsg)) {
+      // notifyOps:true. Также покрывает 422 с обёрнутым "499 Client Closed
+      // Request" — апстрим (Google Vertex / Replicate) разорвал коннект,
+      // классический transient. Симметрично с kie-error.ts:isKieTransientError.
+      if (
+        failCode === "422" &&
+        /playground failed|task id is blank|client closed request/i.test(rawFailMsg)
+      ) {
         throw new Error(technicalMessage);
       }
       const isCopyright = failCode === "501" || /copyright/i.test(rawFailMsg);
