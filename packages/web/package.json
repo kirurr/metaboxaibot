@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite",
+    "dev:stage": "vite --mode stage",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -25,7 +27,8 @@
     "react-hook-form": "^7.54.2",
     "react-i18next": "^15.2.0",
     "react-router-dom": "^7.1.0",
-    "zod": "^3.24.1",
+    "socket.io-client": "^4.8.3",
+    "zod": "catalog:",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

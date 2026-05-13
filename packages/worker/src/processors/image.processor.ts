@@ -52,7 +52,12 @@ import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
-import { deriveLockedProvider, detectUsedFallback } from "../utils/fallback-state.js";
+import {
+  deriveLockedProvider,
+  detectUsedFallback,
+  pickBatchErrorCode,
+} from "../utils/fallback-state.js";
+import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 import { acquireForPoll } from "../utils/acquire-for-processor.js";
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
@@ -109,6 +114,13 @@ interface VirtualBatchSubJob {
    * userText был fallback'ом на t.errors.generationFailed).
    */
   errorRaw?: string;
+  /**
+   * Структурированная категория ошибки (`GenerationErrorCode`). Заполняется
+   * через `classifyError(err)` в `resolveSubJobError`. На batch K=0 failure
+   * aggregator `pickBatchErrorCode` берёт самую частую и пишет в parent
+   * `GenerationJob.errorCode`.
+   */
+  errorCode?: string;
 }
 interface VirtualBatchState {
   n: number;
@@ -788,6 +800,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               status: "failed",
               error: resolved.userText,
               errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorCode: resolved.errorCode,
             };
             await writeBatchState(state);
             continue;
@@ -939,6 +952,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               status: "failed",
               error: resolved.userText,
               errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorCode: resolved.errorCode,
             };
           }
           await writeBatchState(state);
@@ -995,7 +1009,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             });
             await db.generationJob.update({
               where: { id: dbJobId },
-              data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
+              data: {
+                status: "failed",
+                error: batchErrors.join("; ").slice(0, 1000),
+                errorCode: pickBatchErrorCode(state.subJobs),
+              },
             });
             // outputRecords остаётся пустым; Stage 3 обработает K=0 по footer-ветке.
           } else {
@@ -1207,6 +1225,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                   status: "failed",
                   error: resolved.userText,
                   errorRaw: resolved.rawText,
+                  errorCode: resolved.errorCode,
                 };
                 return;
               }
@@ -1224,6 +1243,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 status: "failed",
                 error: resolved.userText,
                 errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+                errorCode: resolved.errorCode,
               };
             }
           }),
@@ -1239,7 +1259,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             // 24h timeout — fail batch entirely.
             await db.generationJob.update({
               where: { id: dbJobId },
-              data: { status: "failed", error: "poll timeout (24h)" },
+              data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
             await telegram
               .sendMessage(
@@ -1301,7 +1321,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           });
           await db.generationJob.update({
             where: { id: dbJobId },
-            data: { status: "failed", error: batchErrors.join("; ").slice(0, 1000) },
+            data: {
+              status: "failed",
+              error: batchErrors.join("; ").slice(0, 1000),
+              errorCode: pickBatchErrorCode(state.subJobs),
+            },
           });
         } else {
           if (!(await finalizeResults(successResults, { chargeMultiplier: successResults.length })))
@@ -1336,7 +1360,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             // 24 h hard cap — cancel and notify.
             await db.generationJob.update({
               where: { id: dbJobId },
-              data: { status: "failed", error: "poll timeout (24h)" },
+              data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
             await telegram
               .sendMessage(
@@ -1617,7 +1641,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "design");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg },
+        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
       await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       throw new UnrecoverableError(msg);
@@ -1775,7 +1799,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Image job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg },
+        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
       });
       if (shouldNotifyOps(err)) {
         await notifyTechError(err, {
@@ -1934,7 +1958,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
       });
 
       if (tokensSpent > 0) {

@@ -50,6 +50,20 @@ export function me() {
   return apiClient<{ user: WebUser; csrfToken: string }>("/auth/web-me");
 }
 
+export interface TransactionDto {
+  id: string;
+  amount: string;
+  type: "credit" | "debit" | string;
+  reason: string;
+  description: string | null;
+  modelId: string | null;
+  createdAt: string;
+}
+
+export function getTransactions() {
+  return apiClient<{ transactions: TransactionDto[] }>("/auth/web-transactions");
+}
+
 export function forgotPassword(email: string) {
   return apiClient<{ ok: true }, { email: string }>("/auth/web-forgot-password", {
     method: "POST",

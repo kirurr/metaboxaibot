@@ -1,485 +1,447 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Plus, Trash2, Pencil, Check, X as CloseIcon, Sparkles } from "lucide-react";
-import clsx from "clsx";
+import { useEffect, useRef, useState } from "react";
 import {
-  listDialogs,
-  createDialog,
-  deleteDialog,
-  renameDialog,
-  getMessages,
-  listModels,
-  sendMessageStream,
-  type DialogDto,
-} from "@/api/chat";
-import { ApiError } from "@/api/client";
-import { useChatStore, type PendingMessage } from "@/stores/chatStore";
-import { useAuthStore } from "@/stores/authStore";
-import { useUIStore } from "@/stores/uiStore";
-import { MessageBubble } from "@/components/chat/MessageBubble";
-import { ChatInput } from "@/components/chat/ChatInput";
-import { ModelSelector } from "@/components/chat/ModelSelector";
-import { Button } from "@/components/common/Button";
+  ArrowRight,
+  ArrowUp,
+  BookOpen,
+  ChevronDown,
+  Code2,
+  Copy,
+  Download,
+  Image as ImageIcon,
+  MessageSquare,
+  Mic,
+  MoreHorizontal,
+  Paperclip,
+  Play,
+  RefreshCw,
+  Sparkles,
+  User as UserIcon,
+  AudioWaveform,
+} from "lucide-react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
-const DEFAULT_MODEL_ID = "gpt-4o"; // fallback, если история пустая — юзер переключит
+type Msg = { role: "user" | "ai"; text: string; meta?: string };
+
+const HOME_TOOLS = [
+  {
+    id: "chat",
+    name: "Chat",
+    desc: "Reasoning, writing, code. The everyday model.",
+    tag: "Sonnet 4.5",
+    icon: <MessageSquare size={22} />,
+  },
+  {
+    id: "image",
+    name: "Image",
+    desc: "Photoreal, illustration, product shots.",
+    tag: "nano-banana-pro",
+    icon: <ImageIcon size={22} />,
+  },
+  {
+    id: "video",
+    name: "Video",
+    desc: "Cinematic shots, motion, avatars.",
+    tag: "heygen · runway",
+    icon: <Play size={22} />,
+  },
+  {
+    id: "voice",
+    name: "Voice",
+    desc: "Text-to-speech, dubbing, narration.",
+    tag: "cartesia",
+    icon: <AudioWaveform size={22} />,
+  },
+  {
+    id: "avatar",
+    name: "Avatar",
+    desc: "Train a likeness once, generate forever.",
+    tag: "flux-lora",
+    icon: <UserIcon size={22} />,
+  },
+  {
+    id: "code",
+    name: "Code",
+    desc: "Refactor, debug, scaffold whole files.",
+    tag: "GPT-5",
+    icon: <Code2 size={22} />,
+  },
+];
+
+type Gen = {
+  span: "gc-3" | "gc-4" | "gc-5" | "gc-6" | "gc-7" | "gc-8";
+  media: "media-sq" | "media-port" | "media-land" | "media-wide";
+  kind: string;
+  model: string;
+  prompt: string;
+  credits: string;
+};
+
+const FEATURED_GENS: Gen[] = [
+  {
+    span: "gc-5",
+    media: "media-land",
+    kind: "Video",
+    model: "heygen",
+    prompt: "Founder explainer · 28s · clean studio lighting · soft B-roll cuts to product UI",
+    credits: "5.4k tok",
+  },
+  {
+    span: "gc-4",
+    media: "media-port",
+    kind: "Image",
+    model: "nano-banana-pro",
+    prompt: "Editorial portrait, hard light, 85mm, kodak portra grain",
+    credits: "1.2k tok",
+  },
+  {
+    span: "gc-3",
+    media: "media-sq",
+    kind: "Image",
+    model: "flux-pro",
+    prompt: "Hero shot for a minimalist espresso machine on travertine",
+    credits: "0.9k tok",
+  },
+  {
+    span: "gc-4",
+    media: "media-sq",
+    kind: "Audio",
+    model: "cartesia",
+    prompt: "British male narrator, warm, neutral pace · 1m 12s",
+    credits: "0.2k tok",
+  },
+  {
+    span: "gc-4",
+    media: "media-land",
+    kind: "Chat",
+    model: "Sonnet 4.5",
+    prompt: "Restructure my Series A pitch to lead with the wedge, not the vision",
+    credits: "2.1k tok",
+  },
+  {
+    span: "gc-4",
+    media: "media-port",
+    kind: "Video",
+    model: "runway",
+    prompt: "Cinematic dolly-in on a city skyline at golden hour, anamorphic flare",
+    credits: "8.0k tok",
+  },
+  {
+    span: "gc-6",
+    media: "media-wide",
+    kind: "Image",
+    model: "nano-banana-pro",
+    prompt: "Brutalist concrete interior, soft north light, single figure walking, 4:3 ratio",
+    credits: "1.4k tok",
+  },
+  {
+    span: "gc-6",
+    media: "media-wide",
+    kind: "Image",
+    model: "flux-pro",
+    prompt: "Product comp for matte-black headphones on raw linen with single specular highlight",
+    credits: "1.1k tok",
+  },
+];
+
+const RECENT_GENS = [
+  {
+    title: "Q3 board narrative",
+    model: "Sonnet 4.5",
+    time: "2h ago",
+    ico: <MessageSquare size={18} />,
+  },
+  {
+    title: "Espresso machine hero shot",
+    model: "nano-banana-pro",
+    time: "Yesterday",
+    ico: <ImageIcon size={18} />,
+  },
+  { title: "Founder explainer · 28s", model: "heygen", time: "Yesterday", ico: <Play size={18} /> },
+  {
+    title: "Onboarding voiceover",
+    model: "cartesia",
+    time: "Mon",
+    ico: <AudioWaveform size={18} />,
+  },
+  { title: "Cohort retention SQL", model: "GPT-5", time: "Mon", ico: <Code2 size={18} /> },
+];
+
+const STARTER_PROMPTS = [
+  { t: "Restructure my pitch", i: <BookOpen size={14} /> },
+  { t: "Logo concepts for a brand", i: <ImageIcon size={14} /> },
+  { t: "Cinematic product shot", i: <Sparkles size={14} /> },
+  { t: "Voiceover from this text", i: <AudioWaveform size={14} /> },
+  { t: "Explain this code", i: <Code2 size={14} /> },
+];
 
 export default function Chat() {
-  const navigate = useNavigate();
-  const params = useParams<{ id?: string }>();
-  const {
-    dialogs,
-    models,
-    currentDialogId,
-    messages,
-    isSending,
-    loadingDialogs,
-    loadingMessages,
-    setDialogs,
-    setModels,
-    setCurrentDialog,
-    setMessages,
-    appendMessage,
-    updateLastAssistant,
-    setIsSending,
-    setLoadingDialogs,
-    setLoadingMessages,
-    patchDialog,
-    removeDialog,
-  } = useChatStore();
-
-  const isTelegramLinked = useAuthStore((s) => !!s.user?.isTelegramLinked);
-  const openTelegramLinkModal = useUIStore((s) => s.openTelegramLinkModal);
-  const pushToast = useUIStore((s) => s.pushToast);
-
-  const [input, setInput] = useState("");
-  const [pickedModelId, setPickedModelId] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  // ── Загрузка моделей и диалогов при маунте ─────────────────────────────
-  useEffect(() => {
-    if (!isTelegramLinked) return;
-    let cancelled = false;
-
-    (async () => {
-      setLoadingDialogs(true);
-      try {
-        const [ms, ds] = await Promise.all([listModels("gpt"), listDialogs("gpt")]);
-        if (cancelled) return;
-        setModels(ms);
-        setDialogs(ds);
-        if (ms.length > 0) {
-          setPickedModelId(
-            (prev) => prev ?? ms.find((m) => m.id === DEFAULT_MODEL_ID)?.id ?? ms[0].id,
-          );
-        }
-      } catch (err) {
-        if (!(err instanceof ApiError) || err.code !== "TELEGRAM_NOT_LINKED") {
-          pushToast({ type: "error", message: "Не удалось загрузить данные" });
-        }
-      } finally {
-        setLoadingDialogs(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isTelegramLinked, pushToast, setDialogs, setLoadingDialogs, setModels]);
-
-  // ── Подгрузка сообщений при смене диалога ──────────────────────────────
-  const loadMessagesFor = useCallback(
-    async (dialogId: string) => {
-      setLoadingMessages(true);
-      try {
-        const ms = await getMessages(dialogId);
-        setMessages(ms);
-      } catch {
-        /* ignore */
-      } finally {
-        setLoadingMessages(false);
-      }
-    },
-    [setMessages, setLoadingMessages],
-  );
+  const isMobile = useIsMobile();
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [draft, setDraft] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const urlId = params.id ?? null;
-    if (urlId && urlId !== currentDialogId) {
-      setCurrentDialog(urlId);
-      loadMessagesFor(urlId);
-    } else if (!urlId && currentDialogId) {
-      setCurrentDialog(null);
-    }
-  }, [params.id, currentDialogId, loadMessagesFor, setCurrentDialog]);
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
 
-  // ── Автоскролл ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.content]);
+  function autosize() {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+  }
 
-  // ── Отправка сообщения ──────────────────────────────────────────────────
-  const onSubmit = async () => {
-    const content = input.trim();
-    if (!content || isSending) return;
-
-    if (!isTelegramLinked) {
-      openTelegramLinkModal("начать общение с нейросетью");
-      return;
-    }
-
-    // Если нет активного диалога — сначала создаём
-    let dialogId = currentDialogId;
-    const modelId = pickedModelId ?? DEFAULT_MODEL_ID;
-
-    if (!dialogId) {
-      try {
-        const d = await createDialog({
-          section: "gpt",
-          modelId,
-          title: content.slice(0, 40),
-        });
-        dialogId = d.id;
-        setDialogs([d, ...dialogs]);
-        setCurrentDialog(d.id);
-        navigate(`/app/chat/${d.id}`, { replace: true });
-      } catch (err) {
-        if (err instanceof ApiError && err.code === "TELEGRAM_NOT_LINKED") return;
-        pushToast({ type: "error", message: "Не удалось создать чат" });
-        return;
-      }
-    }
-
-    setInput("");
-
-    // Optimistic: добавляем user + пустой assistant-placeholder
-    const now = new Date().toISOString();
-    const userMsg: PendingMessage = {
-      id: `local-user-${Date.now()}`,
-      role: "user",
-      content,
-      mediaUrl: null,
-      mediaType: null,
-      createdAt: now,
-    };
-    const assistantMsg: PendingMessage = {
-      id: `local-assistant-${Date.now()}`,
-      role: "assistant",
-      content: "",
-      mediaUrl: null,
-      mediaType: null,
-      createdAt: now,
-      pending: true,
-      streaming: true,
-    };
-    appendMessage(userMsg);
-    appendMessage(assistantMsg);
-    setIsSending(true);
-
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    try {
-      for await (const ev of sendMessageStream(dialogId!, content, ctrl.signal)) {
-        if (ev.type === "chunk") {
-          updateLastAssistant({
-            content: (messagesRef.current.at(-1)?.content ?? "") + ev.text,
-          });
-        } else if (ev.type === "done") {
-          updateLastAssistant({ streaming: false, pending: false });
-          // Обновляем баланс (если захотим показывать)
-        } else if (ev.type === "error") {
-          updateLastAssistant({
-            streaming: false,
-            pending: false,
-            error: ev.message,
-          });
-          pushToast({ type: "error", message: ev.message });
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        updateLastAssistant({
-          streaming: false,
-          pending: false,
-          error: "Ошибка соединения",
-        });
-        pushToast({ type: "error", message: "Ошибка соединения" });
-      } else {
-        updateLastAssistant({ streaming: false, pending: false });
-      }
-    } finally {
-      setIsSending(false);
-      abortRef.current = null;
-    }
-  };
-
-  // Вспомогательный ref на актуальное состояние messages (для корректного apple-chunks)
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
-
-  const onAbort = () => {
-    abortRef.current?.abort();
-  };
-
-  const onNewChat = () => {
-    setCurrentDialog(null);
-    navigate("/app/chat");
-  };
-
-  // Модель текущего чата
-  const currentDialog = dialogs.find((d) => d.id === currentDialogId);
-  const currentModelId = currentDialog?.modelId ?? pickedModelId;
-  const currentModel = models.find((m) => m.id === currentModelId);
+  function send() {
+    const t = draft.trim();
+    if (!t) return;
+    setMessages((m) => [...m, { role: "user", text: t }]);
+    setDraft("");
+    setTimeout(autosize, 0);
+    setTimeout(() => {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "ai",
+          text: "Thinking through this — here are the three angles I'd consider. Each has a different cost in tokens but a meaningfully different output. Tap the one that fits.",
+          meta: "Claude Sonnet · 184 tokens · 1.4s",
+        },
+      ]);
+    }, 720);
+  }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Top bar */}
-      <div className="h-14 shrink-0 px-4 border-b border-border bg-bg-card flex items-center gap-3">
-        <ChatTitle
-          dialog={currentDialog}
-          onRename={async (title) => {
-            if (!currentDialog) return;
-            try {
-              await renameDialog(currentDialog.id, title);
-              patchDialog(currentDialog.id, { title });
-            } catch {
-              pushToast({ type: "error", message: "Не удалось переименовать" });
-            }
-          }}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          <ModelSelector
-            models={models}
-            currentModelId={currentModelId ?? null}
-            onPick={(id) => {
-              // Если чата ещё нет — обновляем выбранную модель.
-              // Если чат уже есть — нужен отдельный endpoint для смены модели существующего чата,
-              // пока — просто запоминаем выбор для нового.
-              setPickedModelId(id);
-            }}
-            disabled={!isTelegramLinked || !!currentDialog}
-          />
-        </div>
-      </div>
-
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Chat area */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div ref={listRef} className="flex-1 overflow-y-auto p-4 md:p-6 max-w-4xl w-full mx-auto">
-            {messages.length === 0 && !loadingMessages ? (
-              <EmptyState modelName={currentModel?.name} onNewChat={onNewChat} />
-            ) : (
-              messages.map((m) => (
-                <MessageBubble
-                  key={m.id}
-                  message={m}
-                  modelName={m.role === "assistant" ? currentModel?.name : undefined}
-                />
-              ))
-            )}
+    <div className="page chat-wrap" style={{ paddingTop: isMobile ? 16 : 24, paddingBottom: 0 }}>
+      {!isMobile && (
+        <div className="topbar">
+          <div className="model-picker">
+            <span className="dot" /> Claude Sonnet 4.5 <ChevronDown size={14} />
           </div>
-
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSubmit={onSubmit}
-            onAbort={onAbort}
-            sending={isSending}
-            disabled={loadingMessages}
-            placeholder={
-              isTelegramLinked ? "Напишите сообщение…" : "Привяжите Telegram, чтобы начать общение"
-            }
-          />
-        </div>
-
-        {/* История диалогов — desktop */}
-        <aside className="hidden md:flex w-[260px] shrink-0 border-l border-border bg-bg-card flex-col">
-          <div className="p-3 border-b border-border">
-            <Button
-              onClick={onNewChat}
-              variant="secondary"
-              size="sm"
-              fullWidth
-              leftIcon={<Plus size={16} />}
-            >
-              Новый чат
-            </Button>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Conversation started 14:02 · 8 messages
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {loadingDialogs && (
-              <div className="p-3 space-y-2">
-                {[...Array(4)].map((_, i) => (
-                  <div key={i} className="h-10 skeleton" />
-                ))}
-              </div>
-            )}
-            {!loadingDialogs && dialogs.length === 0 && (
-              <div className="p-4 text-center text-xs text-text-hint">Пока нет чатов</div>
-            )}
-            {!loadingDialogs &&
-              dialogs.map((d) => (
-                <DialogListItem
-                  key={d.id}
-                  dialog={d}
-                  active={d.id === currentDialogId}
-                  onPick={() => navigate(`/app/chat/${d.id}`)}
-                  onDelete={async () => {
-                    if (!confirm("Удалить чат?")) return;
-                    try {
-                      await deleteDialog(d.id);
-                      removeDialog(d.id);
-                      if (currentDialogId === d.id) navigate("/app/chat");
-                      pushToast({ type: "success", message: "Чат удалён" });
-                    } catch {
-                      pushToast({ type: "error", message: "Не удалось удалить" });
-                    }
+          <div className="row" style={{ marginLeft: "auto", gap: 6 }}>
+            <button className="btn btn-ghost btn-sm">
+              <RefreshCw size={15} /> New chat
+            </button>
+            <button className="btn btn-ghost btn-sm">
+              <Download size={15} /> Export
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="chat-scroll" ref={scrollRef}>
+        {messages.length === 0 ? (
+          <div className="home">
+            <section className="home-hero rise">
+              <span className="eyebrow">
+                <span className="live-dot" /> Good evening, Alex
+              </span>
+              <h1 className="home-h1">
+                Create <em>anything.</em>
+              </h1>
+              <p className="sub">
+                Chat, image, video, voice — every model in one place. Pick a tool below, or just
+                start typing.
+              </p>
+              <div className="home-prompt">
+                <input
+                  placeholder="Describe what you want to make…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && draft.trim()) send();
                   }}
                 />
-              ))}
+                <button className="pill-model" title="Switch model">
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 99,
+                      background: "var(--accent)",
+                      display: "inline-block",
+                    }}
+                  />{" "}
+                  Sonnet 4.5 <ChevronDown size={12} />
+                </button>
+                <button className="send-btn" disabled={!draft.trim()} onClick={send} title="Send">
+                  <ArrowUp size={18} />
+                </button>
+              </div>
+              <div className="starter-chips">
+                {STARTER_PROMPTS.map((s, i) => (
+                  <button key={i} className="starter-chip" onClick={() => setDraft(s.t)}>
+                    {s.i} {s.t}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rise d1">
+              <div className="home-sec-head">
+                <div>
+                  <h2>Jump into a tool.</h2>
+                  <p>Each one is one click away. We&apos;ll pre-load the best model for the job.</p>
+                </div>
+              </div>
+              <div className="tools-grid">
+                {HOME_TOOLS.map((t) => (
+                  <button key={t.id} className="tool-tile" onClick={() => setDraft("")}>
+                    <span className="ti-glow" />
+                    <div className="ti-ico">{t.icon}</div>
+                    <div className="ti-name">{t.name}</div>
+                    <div className="ti-desc">{t.desc}</div>
+                    <div className="ti-foot">
+                      <span className="mono" style={{ fontSize: 11 }}>
+                        {t.tag}
+                      </span>
+                      <span className="arr">
+                        Open <ArrowRight size={13} />
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rise d2">
+              <div className="home-sec-head">
+                <div>
+                  <h2>Featured today.</h2>
+                  <p>Curated generations from the community. Tap any card to reuse the prompt.</p>
+                </div>
+                <button className="see-all">
+                  Open gallery <ArrowRight size={14} />
+                </button>
+              </div>
+              <div className="gallery-grid">
+                {FEATURED_GENS.map((g, i) => (
+                  <div key={i} className={"gen-card " + g.span}>
+                    <div className={"media " + g.media}>
+                      <span className="label">
+                        {g.kind.toUpperCase()} · {g.model}
+                      </span>
+                      <span className="badge-model">{g.model}</span>
+                      <span className="badge-kind">{g.kind}</span>
+                    </div>
+                    <div className="body">
+                      <div className="prompt-line">{g.prompt}</div>
+                      <div className="meta-row">
+                        <span className="mono">{g.credits}</span>
+                        <span className="use-cta">
+                          Use prompt <ArrowRight size={12} />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rise d3">
+              <div className="home-sec-head">
+                <div>
+                  <h2>Pick up where you left off.</h2>
+                  <p>Your last five sessions, ready to continue.</p>
+                </div>
+                <button className="see-all">
+                  All history <ArrowRight size={14} />
+                </button>
+              </div>
+              <div className="recent-row">
+                {RECENT_GENS.map((r, i) => (
+                  <button key={i} className="recent-card">
+                    <div className="thumb">{r.ico}</div>
+                    <div className="rc-body">
+                      <div className="rc-title">{r.title}</div>
+                      <div className="rc-meta">
+                        <span className="rc-model">{r.model}</span>
+                        <span className="dot" />
+                        <span>{r.time}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
           </div>
-        </aside>
+        ) : (
+          messages.map((m, i) => (
+            <div key={i} className={"msg " + m.role + " rise"}>
+              {m.role === "ai" && (
+                <div className="ai-mark">
+                  <Sparkles size={16} />
+                </div>
+              )}
+              <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
+                <div className="bubble">
+                  {m.text.split("\n\n").map((p, k) => (
+                    <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
+                      {p}
+                    </p>
+                  ))}
+                </div>
+                {m.role === "ai" && (
+                  <div className="msg-meta">
+                    <span>{m.meta}</span>
+                    <div className="msg-actions">
+                      <button title="Copy">
+                        <Copy size={14} />
+                      </button>
+                      <button title="Regenerate">
+                        <RefreshCw size={14} />
+                      </button>
+                      <button title="More">
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
       </div>
-    </div>
-  );
-}
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-
-function ChatTitle({
-  dialog,
-  onRename,
-}: {
-  dialog: DialogDto | undefined;
-  onRename: (title: string) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
-
-  useEffect(() => {
-    setValue(dialog?.title ?? "");
-  }, [dialog?.title, dialog?.id]);
-
-  if (!dialog) {
-    return <div className="text-text-secondary font-medium">Новый чат</div>;
-  }
-
-  if (editing) {
-    return (
-      <div className="flex items-center gap-2">
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && value.trim()) {
-              onRename(value.trim());
-              setEditing(false);
-            }
-            if (e.key === "Escape") setEditing(false);
-          }}
-          autoFocus
-          className="!h-8 !text-sm max-w-xs"
-        />
-        <button
-          onClick={() => {
-            if (value.trim()) onRename(value.trim());
-            setEditing(false);
-          }}
-          className="text-success hover:opacity-80"
-        >
-          <Check size={16} />
-        </button>
-        <button onClick={() => setEditing(false)} className="text-text-hint hover:text-text">
-          <CloseIcon size={16} />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <div className="font-semibold truncate">{dialog.title || "Без названия"}</div>
-      <button
-        onClick={() => setEditing(true)}
-        className="text-text-hint hover:text-text transition-colors shrink-0"
-        aria-label="Переименовать"
-      >
-        <Pencil size={14} />
-      </button>
-    </div>
-  );
-}
-
-function DialogListItem({
-  dialog,
-  active,
-  onPick,
-  onDelete,
-}: {
-  dialog: DialogDto;
-  active: boolean;
-  onPick: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      className={clsx(
-        "group px-3 py-2.5 border-b border-border cursor-pointer transition-colors flex items-start gap-2",
-        active ? "bg-bg-secondary" : "hover:bg-bg-secondary",
-      )}
-      onClick={onPick}
-    >
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{dialog.title || "Без названия"}</div>
-        <div className="text-[11px] text-text-hint mt-0.5 truncate">
-          {dialog.modelId} · {new Date(dialog.updatedAt).toLocaleDateString("ru-RU")}
+      {messages.length > 0 && (
+        <div className="composer">
+          <div className="composer-inner">
+            <div className="composer-row">
+              <button className="tool" title="Attach">
+                <Paperclip size={18} />
+              </button>
+              <textarea
+                ref={taRef}
+                placeholder="Ask AI Box anything…"
+                value={draft}
+                rows={1}
+                onInput={autosize}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+              />
+              <button className="tool" title="Voice">
+                <Mic size={18} />
+              </button>
+              <button className="send" disabled={!draft.trim()} onClick={send} title="Send">
+                <ArrowUp size={18} />
+              </button>
+            </div>
+          </div>
+          <div className="composer-meta">
+            <span className="hint">Enter to send · Shift + Enter for newline</span>
+            <span className="hint">
+              ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span> tokens
+            </span>
+          </div>
         </div>
-      </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        className="opacity-0 group-hover:opacity-100 text-text-hint hover:text-danger shrink-0 transition-opacity"
-        aria-label="Удалить"
-      >
-        <Trash2 size={14} />
-      </button>
-    </div>
-  );
-}
-
-function EmptyState({ modelName, onNewChat }: { modelName?: string; onNewChat: () => void }) {
-  const examples = [
-    "Напиши план поста про новый продукт",
-    "Объясни квантовую запутанность простыми словами",
-    "Придумай название для кофейни в горном посёлке",
-    "Переведи и адаптируй этот текст для русской аудитории",
-  ];
-  return (
-    <div className="h-full flex flex-col items-center justify-center text-center px-4">
-      <div className="w-16 h-16 rounded-full bg-accent-lighter flex items-center justify-center mb-4">
-        <Sparkles size={28} className="text-accent" />
-      </div>
-      <h2 className="text-2xl font-bold mb-2">С чего начнём?</h2>
-      <p className="text-text-secondary mb-8">
-        {modelName
-          ? `Вы пишете ${modelName}. Спросите что угодно.`
-          : "Выберите модель и спросите что угодно."}
-      </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-xl w-full">
-        {examples.map((ex) => (
-          <button
-            key={ex}
-            onClick={onNewChat}
-            className="card px-3 py-3 text-left text-sm text-text-secondary hover:text-text hover:border-accent transition-colors"
-          >
-            {ex}
-          </button>
-        ))}
-      </div>
+      )}
     </div>
   );
 }

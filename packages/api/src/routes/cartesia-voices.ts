@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { acquireKey } from "../services/key-pool.service.js";
 import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 interface CartesiaVoiceRaw {
   id: string;
@@ -37,6 +38,7 @@ async function getCartesiaApiKey(): Promise<string | null> {
 
 export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
+  fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["voices"]));
 
   /**
    * GET /cartesia-voices — список официальных (public) Cartesia voices.
@@ -115,6 +117,38 @@ export const cartesiaVoicesRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get<{ Params: { id: string } }>(
     "/cartesia-voices/:id/preview",
+    {
+      schema: {
+        description: "Stream voice preview audio from Cartesia",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", description: "Voice ID" } },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "string",
+            additionalProperties: true,
+            contentEncoding: "binary",
+          },
+          404: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          502: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+          503: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { id } = request.params;
       const apiKey = await getCartesiaApiKey();

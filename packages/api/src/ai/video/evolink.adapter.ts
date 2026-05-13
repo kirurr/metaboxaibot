@@ -415,8 +415,19 @@ export class EvolinkVideoAdapter implements VideoAdapter {
     }
     if (data.status !== "completed") return null;
 
-    const url = data.results?.[0];
-    if (!url) throw new Error("Evolink: no video URL in completed task");
+    const rawUrl = data.results?.[0];
+    if (!rawUrl) throw new Error("Evolink: no video URL in completed task");
+
+    // Evolink для Veo (`veo`/`veo-fast`) отдаёт `gs://BUCKET/KEY` вместо HTTPS,
+    // в отличие от остальных моделей (kling/seedance) с http(s)-CDN URL'ами.
+    // Их `gcs_uris` приходит в публичный бакет `evolink-video-ev02-*` с
+    // anonymous read — поэтому простой rewrite на стандартный GCS HTTPS
+    // endpoint работает без auth. Если в будущем сделают приватным, увидим
+    // 403 от storage.googleapis.com и переключимся на signed URL / fetchBuffer
+    // с GCS auth.
+    const url = rawUrl.startsWith("gs://")
+      ? `https://storage.googleapis.com/${rawUrl.slice("gs://".length)}`
+      : rawUrl;
 
     return { url, filename: `${this.modelId}.mp4` };
   }

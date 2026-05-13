@@ -69,6 +69,8 @@ import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
 import { deferIfRateLimitOverload } from "../utils/defer-rate-limit.js";
 import { withRetry } from "../utils/with-retry.js";
 import { UserFacingError } from "@metabox/shared";
+import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { fetchVideoUrl } from "../utils/fetch-video.js";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
 
@@ -547,7 +549,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         if (interval === null) {
           await db.generationJob.update({
             where: { id: dbJobId },
-            data: { status: "failed", error: "poll timeout (24h)" },
+            data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
           await telegram
             .sendMessage(
@@ -590,10 +592,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         const buf = await withRetry("video.fetchBuffer", 3, async () =>
           pollAdapter?.fetchBuffer
             ? pollAdapter.fetchBuffer(resultUrl)
-            : await fetch(resultUrl).then((r) =>
-                r.ok
-                  ? r.arrayBuffer().then(Buffer.from)
-                  : Promise.reject(new Error(`HTTP ${r.status}`)),
+            : await fetchVideoUrl(resultUrl, "video.fetchBuffer").then((r) =>
+                r.arrayBuffer().then(Buffer.from),
               ),
         );
         videoBuffer = buf;
@@ -892,7 +892,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg },
+        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
       await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       throw new UnrecoverableError(msg);
@@ -1044,7 +1044,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: "PROVIDER_INSUFFICIENT_CREDIT" },
       });
       await notifyTechError(err, {
         jobId: dbJobId,
@@ -1061,7 +1061,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Video job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg },
+        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
       });
       if (shouldNotifyOps(err)) {
         await notifyTechError(err, {
@@ -1219,7 +1219,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err) },
+        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
       });
 
       if (tokensSpent > 0) {
@@ -1249,8 +1249,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
 
 /** Downloads a clip and returns its duration in seconds (0 on failure). */
 async function fetchClipDurationSec(url: string): Promise<number> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`fetch clip: HTTP ${res.status}`);
+  const res = await fetchVideoUrl(url, "video.fetchClipDuration");
   const buf = Buffer.from(await res.arrayBuffer());
   const info = parseMp4Info(buf);
   return info.duration ?? 0;
@@ -1269,8 +1268,7 @@ async function resolveTelegramVideoBuffer(
   // и других transient-сбоях CDN'а провайдера или S3 даём ещё шанс прежде
   // чем отдать ошибку наверх и сжечь BullMQ attempt'ы.
   return withRetry("video.fetchForTelegram", 3, async () => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch video for Telegram: ${res.status}`);
+    const res = await fetchVideoUrl(url, "video.fetchForTelegram");
     return Buffer.from(await res.arrayBuffer());
   });
 }

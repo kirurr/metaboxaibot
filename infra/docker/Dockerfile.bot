@@ -12,10 +12,13 @@ COPY prisma ./prisma
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
-COPY --from=deps /app/node_modules                 ./node_modules
-COPY --from=deps /app/packages/bot/node_modules    ./packages/bot/node_modules
-COPY --from=deps /app/packages/api/node_modules    ./packages/api/node_modules
-COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=deps /app/node_modules                         ./node_modules
+COPY --from=deps /app/packages/bot/node_modules            ./packages/bot/node_modules
+COPY --from=deps /app/packages/api/node_modules            ./packages/api/node_modules
+COPY --from=deps /app/packages/shared/node_modules         ./packages/shared/node_modules
+# shared-browser теперь имеет runtime-deps (zod) — без копии node_modules
+# tsc упадёт на `import z from "zod"` (см. shared-browser/src/ws/schemas.ts).
+COPY --from=deps /app/packages/shared-browser/node_modules ./packages/shared-browser/node_modules
 COPY . .
 RUN pnpm --filter @metabox/shared-browser build
 RUN pnpm --filter @metabox/shared build
@@ -30,6 +33,11 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app/packages/shared-browser/dist         ./packages/shared-browser/dist
 COPY --from=builder /app/packages/shared-browser/package.json ./packages/shared-browser/
+# shared-browser/dist/ws/schemas.js делает `import z from "zod"` в рантайме,
+# а @metabox/shared (value-re-export'ит из shared-browser в src/index.ts)
+# тянет всю цепочку при загрузке main entry. Без этих node_modules бэкенд
+# падает на старте: ERR_MODULE_NOT_FOUND 'zod'.
+COPY --from=builder /app/packages/shared-browser/node_modules ./packages/shared-browser/node_modules
 COPY --from=builder /app/packages/shared/dist                 ./packages/shared/dist
 COPY --from=builder /app/packages/shared/package.json         ./packages/shared/
 COPY --from=builder /app/packages/shared/node_modules         ./packages/shared/node_modules
