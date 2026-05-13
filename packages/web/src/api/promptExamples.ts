@@ -11,9 +11,12 @@ import {
 
 export type { PromptExamplesPage, PromptExample, ListPromptExamplesQuery };
 
-export async function listPromptExamples(params: ListPromptExamplesQuery = {}, signal?: AbortSignal) {
+export async function listPromptExamples(
+  params: ListPromptExamplesQuery = {},
+  signal?: AbortSignal,
+) {
   const data = await apiClient("/web/prompts", {
-		signal,
+    signal,
     query: { section: params.section, cursor: params.cursor, take: params.take },
   });
   return promptExamplesPageSchema.parse(data);
