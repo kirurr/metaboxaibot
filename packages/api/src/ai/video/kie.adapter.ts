@@ -11,7 +11,6 @@ import {
   uploadFileUrl,
   uploadFileUrlCroppedToAspect,
 } from "../../utils/kie-upload.js";
-import { parseAspectRatio } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
