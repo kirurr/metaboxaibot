@@ -186,7 +186,7 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
           return;
         }
         const example = await promptExamplesService.create(parsed.data);
-        return serialize(example);
+        return await serialize(example);
       },
     );
 
@@ -235,7 +235,7 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
           await reply.status(404).send({ error: "Prompt example not found" });
           return;
         }
-        return serialize(updated);
+        return await serialize(updated);
       },
     );
 
