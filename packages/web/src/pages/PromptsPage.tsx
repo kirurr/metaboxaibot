@@ -4,6 +4,7 @@ import { useListPromptExamples } from "@/hooks/useListPromptExamples";
 import type { PromptExample } from "@/api/promptExamples";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/common/Button";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export default function PromptsPage() {
   const [selectedType, setSelectedType] = useState<string | undefined>(undefined);
@@ -15,6 +16,8 @@ export default function PromptsPage() {
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -55,7 +58,7 @@ export default function PromptsPage() {
         <p className="text-text-secondary text-lg">Click on image to see the prompt and settings</p>
       </div>
 
-      <div className="auth-tab w-1/2 mx-auto !mb-8">
+      <div className="auth-tab lg:w-1/2 mx-auto !mb-8">
         <button
           className={clsx(selectedType === undefined && "on")}
           onClick={() => handleTypeSelect(undefined)}
@@ -76,7 +79,7 @@ export default function PromptsPage() {
         </button>
       </div>
 
-      <ul className="grid grid-flow-dense grid-cols-5 auto-rows-[400px] gap-6">
+      <ul className="grid grid-flow-dense grid-cols-2 md:grid-cols-3 lg:grid-cols-5 auto-rows-[200px] lg:auto-rows-[400px] gap-6">
         {isLoading &&
           Array.from({ length: 20 }).map((_, i) => (
             <div key={i} className="p-4 mb-4 skeleton"></div>
@@ -85,6 +88,7 @@ export default function PromptsPage() {
           const { tall, wide } = cardVariant(data.id);
           return (
             <PromptCard
+              isMobile={isMobile}
               openDialog={() => handleDialogOpen(data.id)}
               data={data}
               key={data.id}
@@ -127,21 +131,21 @@ export default function PromptsPage() {
       >
         <div
           id="dialog-content-wrapper"
-          className="w-full h-full flex flex-row gap-4 overflow-hidden relative"
+          className="w-full h-full flex flex-col md:flex-row gap-4 overflow-hidden relative"
         >
           <button
-            className="btn btn-ghost btn-icon absolute top-8 left-8"
+            className="btn btn-ghost btn-icon absolute top-0 md:top-8 right-0 md:left-8 z-50"
             onClick={handleDialogClose}
           >
             <X />
           </button>
           <div
             id="dialog-image-wrapper"
-            className="flex flex-col w-2/3 items-center justify-center"
+            className="flex flex-col flex-1 min-h-0 md:flex-none w-full md:w-1/2 lg:w-2/3 items-center justify-center"
           >
             {currentPrompt && <MediaCard prompt={currentPrompt} />}
           </div>
-          {currentPrompt && <DialogCard prompt={currentPrompt} />}
+          {currentPrompt && <DialogCard isMobile={isMobile} prompt={currentPrompt} />}
         </div>
       </dialog>
     </div>
@@ -159,16 +163,18 @@ function hashId(id: string): number {
 function cardVariant(id: string): { tall: boolean; wide: boolean } {
   const h = hashId(id);
   const wide = h % 15 === 0;
-  const tall = wide || h % 10 === 0;
+  const tall = wide || h % 7 === 0;
   return { tall, wide };
 }
 
 function PromptCard({
+  isMobile,
   data,
   openDialog,
   tall = false,
   wide = false,
 }: {
+  isMobile: boolean;
   data: PromptExample;
   openDialog: () => void;
   tall?: boolean;
@@ -194,11 +200,12 @@ function PromptCard({
       onMouseLeave={handleMouseLeave}
       className={clsx(
         `group
-rise
-			flex flex-col
-			rounded-[var(--radius)]
-			relative overflow-hidden
-size-full`,
+				rise
+				flex flex-col
+				rounded-[var(--radius)]
+				relative overflow-hidden
+				size-full`,
+
         tall && "row-span-2",
         wide && "col-span-2",
       )}
@@ -234,6 +241,7 @@ size-full`,
             playsInline
             muted
             disablePictureInPicture
+            autoPlay={isMobile}
             preload="none"
             className=" transition-transform absolute object-cover inset-0 size-full"
             onLoadedData={() => setShowThumbnail(false)}
@@ -259,7 +267,9 @@ size-full`,
 				w-1/2
 				mx-auto
 				mb-2
-				relative z-10 mt-auto"
+				relative z-10 mt-auto
+				safe-top
+				"
       >
         <Sparkles /> Try the same prompt
       </div>
@@ -267,16 +277,20 @@ size-full`,
   );
 }
 
-function DialogCard({ prompt }: { prompt: PromptExample }) {
+function DialogCard({ prompt, isMobile }: { prompt: PromptExample; isMobile: boolean }) {
   return (
-    <div className="w-1/3 card flex flex-col gap-4 text-white p-8 min-h-0 overflow-hidden">
+    <div className="shrink-0 md:shrink w-full md:w-1/2 lg:w-1/3 card flex flex-col gap-4 text-white p-4 md:p-8 min-h-0 overflow-hidden">
       <h2 className="h2 text-center shrink-0">{prompt.model?.name}</h2>
       <div className="flex flex-col gap-4 flex-1 min-h-0">
-        <h3 className="h3 text-center shrink-0">Prompt that was used for this generation:</h3>
+        <h3 className="hidden md:block h3 text-center shrink-0">
+          Prompt that was used for this generation:
+        </h3>
         <div className="text-text-secondary text-lg bg-bg-elevated p-4 rounded-[var(--radius)] overflow-y-auto">
           {prompt.prompt}
         </div>
-        <Button className="mt-auto" size="lg" rightIcon={<ArrowRight />}>
+      </div>
+      <div className="mt-auto">
+        <Button className="mt-4 w-full" size={isMobile ? "md" : "lg"} rightIcon={<ArrowRight />}>
           Try the same prompt and settings
         </Button>
       </div>
@@ -287,7 +301,7 @@ function DialogCard({ prompt }: { prompt: PromptExample }) {
 function MediaCard({ prompt }: { prompt: PromptExample }) {
   const [showThumbnail, setShowThumbnail] = useState(true);
   return (
-    <div className="size-2/3 shadow-lg rounded-[var(--radius)] overflow-hidden">
+    <div className="w-full h-full md:size-4/5 lg:size-2/3 shadow-lg rounded-[var(--radius)] overflow-hidden">
       {prompt.section === "design" && (
         <img
           className=" transition-transform object-cover inset-0 size-full"
