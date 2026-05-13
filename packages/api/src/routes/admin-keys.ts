@@ -313,7 +313,9 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           200: {
             type: "object",
             additionalProperties: true,
-            properties: { proxy: { type: "object" } },
+            // additionalProperties: true — иначе response-сериализатор стирает
+            // поля внутри proxy/keys/key и фронт получает `{}`.
+            properties: { proxy: { type: "object", additionalProperties: true } },
             required: ["proxy"],
           },
           400: badRequestResponse,
@@ -470,7 +472,9 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           200: {
             type: "object",
             additionalProperties: true,
-            properties: { keys: { type: "array", items: { type: "object" } } },
+            properties: {
+              keys: { type: "array", items: { type: "object", additionalProperties: true } },
+            },
             required: ["keys"],
           },
         },
@@ -510,7 +514,7 @@ export async function adminKeysRoutes(fastify: FastifyInstance): Promise<void> {
           200: {
             type: "object",
             additionalProperties: true,
-            properties: { key: { type: "object" } },
+            properties: { key: { type: "object", additionalProperties: true } },
             required: ["key"],
           },
           400: badRequestResponse,

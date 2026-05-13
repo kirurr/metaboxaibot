@@ -210,7 +210,7 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
                 descriptionOverride: { type: "string", nullable: true },
                 supportedAspectRatios: { type: "array", nullable: true },
                 supportedDurations: { type: "array", nullable: true },
-                durationRange: { type: "object", nullable: true },
+                durationRange: { type: "object", nullable: true, additionalProperties: true },
                 tokenCostPerRequest: { type: "number" },
                 tokenCostApproxMsg: { type: "number" },
                 tokenCostPerMPixel: { type: "number" },
@@ -219,8 +219,13 @@ export const modelsRoutes: FastifyPluginAsync = async (fastify) => {
                 tokenCostPerKChar: { type: "number" },
                 videoFps: { type: "number" },
                 settings: { type: "array" },
-                costMatrix: { type: "object", nullable: true },
-                tokenCostVariants: { type: "object", nullable: true },
+                // `additionalProperties: true` ОБЯЗАТЕЛЬНО: fastify response-serializer
+                // без него стирает все поля вложенного объекта (`.table`, `.map`,
+                // `.dims`, `.settingKey`). На фронте webapp потом крашится при
+                // обращении к `m.costMatrix.table[key]` / `m.tokenCostVariants.map[key]`
+                // ("Cannot read properties of undefined (reading '')").
+                costMatrix: { type: "object", nullable: true, additionalProperties: true },
+                tokenCostVariants: { type: "object", nullable: true, additionalProperties: true },
                 tokenCostAddons: { type: "array", nullable: true },
               },
             },
