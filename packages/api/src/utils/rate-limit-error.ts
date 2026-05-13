@@ -206,6 +206,10 @@ const TRANSIENT_NETWORK_CODES = new Set<string>([
   "EPIPE",
   "EHOSTUNREACH",
   "ENETUNREACH",
+  // node-fetch v2 (используется OpenAI SDK v4 по умолчанию) выставляет этот код
+  // когда upstream закрыл соединение пока response body ещё стримился. Для нас
+  // = transient разрыв провайдера, безопасно ретраить.
+  "ERR_STREAM_PREMATURE_CLOSE",
 ]);
 
 /** Имена классов ошибок, которые SDK провайдеров используют для сетевых сбоев. */
@@ -229,6 +233,9 @@ const TRANSIENT_NETWORK_MESSAGE_PATTERNS: RegExp[] = [
   /connection (reset|closed|terminated|aborted)/i,
   /\beconnreset\b/i,
   /\betimedout\b/i,
+  // Fallback на случай если code потерян при wrapping'е (некоторые SDK
+  // переоборачивают node-fetch FetchError в свой Error без сохранения `code`).
+  /\bpremature close\b/i,
 ];
 
 /**

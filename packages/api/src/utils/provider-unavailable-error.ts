@@ -33,9 +33,19 @@
  * же результат). Без fallback'а ошибка сразу пойдёт user-facing failure path.
  */
 export function isProviderTemporaryUnavailable(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { message?: string };
-  const msg = typeof e.message === "string" ? e.message : "";
+  if (!err) return false;
+  // Симметрично с `isKieTransientError`: принимаем и Error-like объект (общий
+  // путь — exception из адаптера), и сырую строку (`s.errorRaw` в virtual-batch
+  // sub-job'ах — там message сохранён в БД как plain string). Без string-ветки
+  // VB-резабмит на 422 «high demand» не классифицировал ошибку transient'ом
+  // и fallback не запускался.
+  const msg =
+    typeof err === "string"
+      ? err
+      : typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
+        ? (err as { message: string }).message
+        : "";
+  if (!msg) return false;
   return /high demand|service is (currently )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed/i.test(
     msg,
   );
