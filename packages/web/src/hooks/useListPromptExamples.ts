@@ -4,7 +4,7 @@ import { listPromptExamples } from "@/api/promptExamples";
 export function useListPromptExamples(section?: string) {
   const query = useInfiniteQuery({
     queryKey: ["promptExamples", section],
-    queryFn: ({ pageParam }) => listPromptExamples({ cursor: pageParam, section, take: 5 }),
+    queryFn: ({ pageParam }) => listPromptExamples({ cursor: pageParam, section, take: 10 }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
