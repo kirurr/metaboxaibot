@@ -15,21 +15,12 @@ import {
 import clsx from "clsx";
 import { useAuthStore } from "@/stores/authStore";
 import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
-
-const CAPABILITIES = [
-  { id: "text", label: "Text" },
-  { id: "image", label: "Image" },
-  { id: "video", label: "Video" },
-  { id: "audio", label: "Audio" },
-] as const;
-
-type CapabilityId = (typeof CAPABILITIES)[number]["id"];
+import { CapabilityTabs } from "./CapabilityTabs";
 
 export function TopNav() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const [capability, setCapability] = useState<CapabilityId>("text");
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -58,30 +49,15 @@ export function TopNav() {
 
   return (
     <header className="topnav">
-      <NavLink to="/app/chat" className="tn-brand" style={{ cursor: "pointer" }}>
+      <NavLink to="/" className="tn-brand" style={{ cursor: "pointer" }}>
         <div className="logo-mark">A</div>
         <span className="brand-text">AI Box</span>
       </NavLink>
 
-      <div className="cap-tabs">
-        {CAPABILITIES.map((c) => (
-          <button
-            key={c.id}
-            className={clsx("cap", capability === c.id && "on")}
-            onClick={() => setCapability(c.id)}
-          >
-            <span className="cap-dot" />
-            <span>{c.label}</span>
-          </button>
-        ))}
-      </div>
+      <CapabilityTabs />
 
       <div className="tn-right">
-        <button
-          className="tn-balance"
-          onClick={() => navigate("/app/tokens")}
-          title="Tokens balance"
-        >
+        <button className="tn-balance" onClick={() => navigate("/tokens")} title="Tokens balance">
           <span className="b-dot" />
           <span className="b-val mono">{displayBalance}</span>
           <span className="b-lbl">tokens</span>
@@ -109,21 +85,21 @@ export function TopNav() {
                   <div className="mail">{displayEmail}</div>
                 </div>
               </div>
-              <MenuLink to="/app/profile" icon={<User size={16} />} onSelect={() => setOpen(false)}>
+              <MenuLink to="/profile" icon={<User size={16} />} onSelect={() => setOpen(false)}>
                 Profile
               </MenuLink>
               <MenuLink
-                to="/app/billing"
+                to="/billing"
                 icon={<CreditCard size={16} />}
                 onSelect={() => setOpen(false)}
               >
                 Billing
               </MenuLink>
-              <MenuLink to="/app/plans" icon={<Layers size={16} />} onSelect={() => setOpen(false)}>
+              <MenuLink to="/plans" icon={<Layers size={16} />} onSelect={() => setOpen(false)}>
                 Plans
               </MenuLink>
               <MenuLink
-                to="/app/history"
+                to="/history"
                 icon={<HistoryIcon size={16} />}
                 onSelect={() => setOpen(false)}
               >

@@ -117,7 +117,7 @@ export default function History() {
           <button className="btn btn-secondary">
             <Download size={16} /> Export all
           </button>
-          <button className="btn btn-primary" onClick={() => navigate("/app/chat")}>
+          <button className="btn btn-primary" onClick={() => navigate("/chat")}>
             <Plus size={16} /> New chat
           </button>
         </div>
@@ -143,7 +143,7 @@ export default function History() {
           <Fragment key={g.day}>
             <div className="history-day">{g.day}</div>
             {g.items.map((it, i) => (
-              <div key={i} className="history-row" onClick={() => navigate("/app/chat")}>
+              <div key={i} className="history-row" onClick={() => navigate("/chat")}>
                 <div style={{ minWidth: 0 }}>
                   <div className="h-title">{it.title}</div>
                   <div className="h-preview">{it.preview}</div>

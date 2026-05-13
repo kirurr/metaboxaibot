@@ -12,7 +12,7 @@ export default function PaymentSuccess() {
         <h1 className="text-2xl font-bold mb-2">Оплата успешна</h1>
         <p className="text-text-secondary mb-6">Баланс пополнен. Спасибо за покупку!</p>
         {orderId && <div className="text-xs text-text-hint mb-4">Заказ #{orderId}</div>}
-        <Link to="/app/chat" className="btn-primary">
+        <Link to="/chat" className="btn-primary">
           Вернуться в чат
         </Link>
       </div>

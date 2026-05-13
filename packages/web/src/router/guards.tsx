@@ -22,7 +22,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Пропускает только пользователей с ролью ADMIN. Остальных — на /app. */
+/** Пропускает только пользователей с ролью ADMIN. Остальных — на главную. */
 export function AdminRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isInitializing, user } = useAuthStore();
   const location = useLocation();
@@ -40,13 +40,13 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   }
 
   if (user?.role !== "ADMIN") {
-    return <Navigate to="/app" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
 }
 
-/** Только для гостей. Авторизованных уносит на /app. */
+/** Только для гостей. Авторизованных уносит на главную. */
 export function GuestOnlyRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isInitializing } = useAuthStore();
 
@@ -59,7 +59,7 @@ export function GuestOnlyRoute({ children }: { children: ReactNode }) {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/app" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

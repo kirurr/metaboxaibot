@@ -10,11 +10,11 @@ type NavItem = {
 };
 
 const items: NavItem[] = [
-  { to: "/app/chat", label: "Главная", icon: Home },
-  { to: "/app/history", label: "Галерея", icon: ImageIcon },
-  { to: "/app/tokens", label: "Генерировать", icon: Sparkles, center: true },
-  { to: "/app/plans", label: "Обучение", icon: GraduationCap },
-  { to: "/app/profile", label: "Профиль", icon: User },
+  { to: "/", label: "Главная", icon: Home },
+  { to: "/history", label: "Галерея", icon: ImageIcon },
+  { to: "/tokens", label: "Генерировать", icon: Sparkles, center: true },
+  { to: "/plans", label: "Обучение", icon: GraduationCap },
+  { to: "/profile", label: "Профиль", icon: User },
 ];
 
 export function BottomNav() {
@@ -24,6 +24,9 @@ export function BottomNav() {
         <NavLink
           key={n.to}
           to={n.to}
+          // `end` нужен только для корня (`/`), иначе NavLink считал бы Главную
+          // активной на любой вложенной странице (т.к. `/` — родитель всех).
+          end={n.to === "/"}
           className={({ isActive }) =>
             clsx("bn-item", n.center && "bn-center", isActive && "active")
           }

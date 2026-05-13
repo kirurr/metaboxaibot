@@ -63,7 +63,7 @@ export default function PaymentPending() {
           <>
             <XCircle size={64} className="text-danger mx-auto mb-4" />
             <h1 className="text-2xl font-bold mb-2">Оплата не прошла</h1>
-            <Button onClick={() => navigate("/app/plans")}>Попробовать снова</Button>
+            <Button onClick={() => navigate("/plans")}>Попробовать снова</Button>
           </>
         )}
       </div>
