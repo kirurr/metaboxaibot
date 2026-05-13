@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { db } from "../db.js";
-import { config } from "@metabox/shared";
+import { config, AI_MODELS } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 import { promptExamplesService } from "../services/prompt-examples.js";
@@ -13,16 +13,30 @@ import {
   type CreatePromptExampleBody,
   type UpdatePromptExampleBody,
 } from "@metabox/shared-browser/dto";
+import { s3Service } from "../services/s3.service.js";
 
-function serialize(example: PrismaPromptExample): PromptExample {
+async function serialize(example: PrismaPromptExample): Promise<PromptExample> {
+  const [thumbnailUrl, mediaUrl] = await Promise.all([
+    example.thumbnailS3Key ? s3Service.getFileUrl(example.thumbnailS3Key) : null,
+    example.mediaS3Key ? s3Service.getFileUrl(example.mediaS3Key) : null,
+  ]);
+  const aiModel = AI_MODELS[example.modelId];
   return {
     id: example.id,
-    modelId: example.modelId,
+    model: aiModel
+      ? {
+          id: aiModel.id,
+          name: aiModel.name,
+          section: aiModel.section,
+          provider: aiModel.provider,
+          settings: aiModel.settings ?? null,
+        }
+      : null,
     modelSettings: example.modelSettings ?? null,
     prompt: example.prompt,
-    mediaS3Key: example.mediaS3Key,
-    thumbnailS3Key: example.thumbnailS3Key,
-    section: example.section as PromptExample["section"],
+    thumbnailUrl: thumbnailUrl ?? null,
+    mediaUrl: mediaUrl ?? null,
+    section: example.section,
     createdAt: example.createdAt.toISOString(),
   };
 }
@@ -42,11 +56,22 @@ const itemSchema = {
   additionalProperties: true,
   properties: {
     id: { type: "string" },
-    modelId: { type: "string" },
+    model: {
+      nullable: true,
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        section: { type: "string" },
+        provider: { type: "string" },
+        settings: { type: "array", nullable: true },
+      },
+    },
     modelSettings: { nullable: true },
     prompt: { type: "string" },
-    mediaS3Key: { type: "string", nullable: true },
-    thumbnailS3Key: { type: "string", nullable: true },
+    mediaUrl: { type: "string", nullable: true },
+    thumbnailUrl: { type: "string", nullable: true },
     section: { type: "string" },
     createdAt: { type: "string" },
   },
@@ -81,8 +106,9 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
         await reply.status(400).send({ error: parsed.error.message });
         return;
       }
+
       const page = await promptExamplesService.list(parsed.data);
-      return { items: page.items.map(serialize), nextCursor: page.nextCursor };
+      return { items: await Promise.all(page.items.map(serialize)), nextCursor: page.nextCursor };
     },
   );
 
@@ -127,7 +153,7 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
           return;
         }
         const page = await promptExamplesService.list(parsed.data);
-        return { items: page.items.map(serialize), nextCursor: page.nextCursor };
+        return { items: await Promise.all(page.items.map(serialize)), nextCursor: page.nextCursor };
       },
     );
 
