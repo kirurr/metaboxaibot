@@ -91,6 +91,14 @@ export type { ResolvedVoice } from "./user-voice.service.js";
 export { translatePromptIfNeeded, looksEnglish } from "./prompt-translate.service.js";
 export { describeImageForPrompt } from "./image-describe.service.js";
 export { mediaHintService } from "./media-hint.service.js";
+export { promptExamplesService } from "./prompt-examples.js";
+export type {
+  PromptExampleSection,
+  ListPromptExamplesParams,
+  PromptExamplesPage,
+  CreatePromptExampleParams,
+  UpdatePromptExampleParams,
+} from "./prompt-examples.js";
 
 // ── Web (ai.metabox.global) ─────────────────────────────────────────────
 export { consumeLinkTelegramState, markLinkTelegramLinked } from "./web-session.service.js";
