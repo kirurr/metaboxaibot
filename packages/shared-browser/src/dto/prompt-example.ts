@@ -1,15 +1,24 @@
 import z from "zod";
+import { modelSettingDefSchema } from "./model-setting.js";
 
 // section: known values are "image" | "video" | "audio"
 // kept as string for forward compatibility with new sections
 
+export const promptExampleModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  section: z.string(),
+  provider: z.string(),
+  settings: z.array(modelSettingDefSchema).nullable(),
+});
+
 export const promptExampleSchema = z.object({
   id: z.string(),
-  modelId: z.string(),
+  model: promptExampleModelSchema.nullable(),
   modelSettings: z.unknown().nullable(),
   prompt: z.string(),
-  mediaS3Key: z.string().nullable(),
-  thumbnailS3Key: z.string().nullable(),
+  mediaUrl: z.string().nullable(),
+  thumbnailUrl: z.string().nullable(),
   section: z.string(),
   createdAt: z.string(),
 });
