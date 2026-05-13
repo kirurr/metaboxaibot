@@ -31,6 +31,7 @@ const AdminKeysPage = lazy(() => import("@/pages/AdminKeys"));
 const AdminProxiesPage = lazy(() => import("@/pages/AdminProxies"));
 const AdminPricingPage = lazy(() => import("@/pages/AdminPricing"));
 const WebSocketPage = lazy(() => import("@/pages/WebSocket"));
+const PromptsPage = lazy(() => import("@/pages/PromptsPage"));
 
 function PageFallback() {
   return (
@@ -89,6 +90,7 @@ export const router = createBrowserRouter([
       { path: "tokens", element: withSuspense(<TokensPage />) },
       { path: "profile", element: withSuspense(<ProfilePage />) },
       { path: "billing", element: withSuspense(<BillingPage />) },
+      { path: "prompts", element: withSuspense(<PromptsPage />) },
     ],
   },
 

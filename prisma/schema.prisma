@@ -607,3 +607,23 @@ model DeletedUser {
   @@index([pendingMetaboxTransfer])
   @@map("deleted_users")
 }
+
+model PromptExample {
+  id String @id @default(cuid())
+
+  modelId       String
+  modelSettings Json?
+
+  prompt String
+
+  mediaS3Key     String?
+  thumbnailS3Key String?
+
+  section String // image | video | audio
+
+  createdAt DateTime @default(now())
+
+  // will use cursor pagination for infinite scrolling, so indexes by section and id
+  @@index([section, id(sort: Desc)])
+  @@map("prompt_examples")
+}

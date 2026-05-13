@@ -13,6 +13,10 @@
     "./ws": {
       "types": "./dist/ws/index.d.ts",
       "default": "./dist/ws/index.js"
+    },
+    "./dto": {
+      "types": "./dist/dto/index.d.ts",
+      "default": "./dist/dto/index.js"
     }
   },
   "scripts": {
