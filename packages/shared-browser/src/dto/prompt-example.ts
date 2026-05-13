@@ -1,6 +1,7 @@
 import z from "zod";
 
-export const promptExampleSectionSchema = z.enum(["image", "video", "audio"]);
+// section: known values are "image" | "video" | "audio"
+// kept as string for forward compatibility with new sections
 
 export const promptExampleSchema = z.object({
   id: z.string(),
@@ -9,7 +10,7 @@ export const promptExampleSchema = z.object({
   prompt: z.string(),
   mediaS3Key: z.string().nullable(),
   thumbnailS3Key: z.string().nullable(),
-  section: promptExampleSectionSchema,
+  section: z.string(),
   createdAt: z.string(),
 });
 
@@ -19,7 +20,7 @@ export const promptExamplesPageSchema = z.object({
 });
 
 export const listPromptExamplesQuerySchema = z.object({
-  section: promptExampleSectionSchema.optional(),
+  section: z.string().optional(),
   cursor: z.string().optional(),
   take: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -30,7 +31,7 @@ export const createPromptExampleBodySchema = z.object({
   prompt: z.string().min(1),
   mediaS3Key: z.string().optional(),
   thumbnailS3Key: z.string().optional(),
-  section: promptExampleSectionSchema,
+  section: z.string().min(1),
 });
 
 export const updatePromptExampleBodySchema = z.object({
@@ -39,10 +40,9 @@ export const updatePromptExampleBodySchema = z.object({
   prompt: z.string().min(1).optional(),
   mediaS3Key: z.string().nullable().optional(),
   thumbnailS3Key: z.string().nullable().optional(),
-  section: promptExampleSectionSchema.optional(),
+  section: z.string().min(1).optional(),
 });
 
-export type PromptExampleSection = z.infer<typeof promptExampleSectionSchema>;
 export type PromptExample = z.infer<typeof promptExampleSchema>;
 export type PromptExamplesPage = z.infer<typeof promptExamplesPageSchema>;
 export type ListPromptExamplesQuery = z.infer<typeof listPromptExamplesQuerySchema>;

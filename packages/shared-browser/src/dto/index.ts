@@ -1,5 +1,4 @@
 export {
-  promptExampleSectionSchema,
   promptExampleSchema,
   promptExamplesPageSchema,
   listPromptExamplesQuerySchema,
@@ -7,7 +6,6 @@ export {
   updatePromptExampleBodySchema,
 } from "./prompt-example.js";
 export type {
-  PromptExampleSection,
   PromptExample,
   PromptExamplesPage,
   ListPromptExamplesQuery,

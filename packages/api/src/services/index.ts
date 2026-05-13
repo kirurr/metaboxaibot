@@ -93,7 +93,6 @@ export { describeImageForPrompt } from "./image-describe.service.js";
 export { mediaHintService } from "./media-hint.service.js";
 export { promptExamplesService } from "./prompt-examples.js";
 export type {
-  PromptExampleSection,
   ListPromptExamplesParams,
   PromptExamplesPage,
   CreatePromptExampleParams,

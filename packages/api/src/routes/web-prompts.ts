@@ -29,9 +29,9 @@ function serialize(example: PrismaPromptExample): PromptExample {
 
 const listQuerySchema = {
   type: "object",
-  additionalProperties: false,
+  additionalProperties: true,
   properties: {
-    section: { type: "string", enum: ["image", "video", "audio"] },
+    section: { type: "string" },
     cursor: { type: "string" },
     take: { type: "string" },
   },
@@ -147,7 +147,7 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
               prompt: { type: "string" },
               mediaS3Key: { type: "string" },
               thumbnailS3Key: { type: "string" },
-              section: { type: "string", enum: ["image", "video", "audio"] },
+              section: { type: "string" },
             },
           },
           response: { 200: itemSchema, 400: badRequestResponse },
@@ -185,12 +185,16 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
               prompt: { type: "string" },
               mediaS3Key: { type: "string", nullable: true },
               thumbnailS3Key: { type: "string", nullable: true },
-              section: { type: "string", enum: ["image", "video", "audio"] },
+              section: { type: "string" },
             },
           },
           response: {
             200: itemSchema,
-            404: { type: "object", additionalProperties: true, properties: { error: { type: "string" } } },
+            404: {
+              type: "object",
+              additionalProperties: true,
+              properties: { error: { type: "string" } },
+            },
           },
         },
       },
@@ -222,8 +226,16 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
             properties: { id: { type: "string" } },
           },
           response: {
-            200: { type: "object", additionalProperties: true, properties: { success: { type: "boolean" } } },
-            404: { type: "object", additionalProperties: true, properties: { error: { type: "string" } } },
+            200: {
+              type: "object",
+              additionalProperties: true,
+              properties: { success: { type: "boolean" } },
+            },
+            404: {
+              type: "object",
+              additionalProperties: true,
+              properties: { error: { type: "string" } },
+            },
           },
         },
       },
