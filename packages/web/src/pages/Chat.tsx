@@ -26,7 +26,7 @@ import { useAuthStore } from "@/stores/authStore";
 import * as dialogsApi from "@/api/dialogs";
 import type { DialogDto, MessageDto } from "@/api/dialogs";
 import type { WebModelDto } from "@/api/models";
-import { ApiError } from "@/api/client";
+import type { ApiError } from "@/api/client";
 
 type Msg = {
   role: "user" | "ai";

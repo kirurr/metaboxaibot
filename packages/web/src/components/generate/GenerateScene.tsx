@@ -470,8 +470,8 @@ function HeroShapes({ images }: { images: readonly string[] }) {
       delay: 0.3 + i * 0.12 + Math.random() * 0.1,
       src: pick(),
     }));
-    // images intentionally fresh-per-mount — но per-mount достаточно для UI-stub'а.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // images намеренно не в deps — формы рандомятся один раз на mount, повторно
+    // дёргаться при смене `images` смысла нет (визуально это не баг для UI-stub'а).
   }, []);
 
   return (

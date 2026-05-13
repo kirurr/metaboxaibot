@@ -37,7 +37,6 @@ function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLSha
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    // eslint-disable-next-line no-console
     console.error("ShaderHero compile error", gl.getShaderInfoLog(sh));
     gl.deleteShader(sh);
     return null;
@@ -64,7 +63,6 @@ export function ShaderHero() {
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      // eslint-disable-next-line no-console
       console.error("ShaderHero link error", gl.getProgramInfoLog(prog));
       return;
     }
