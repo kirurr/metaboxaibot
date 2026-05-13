@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { RouterProvider } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router } from "@/router";
 import { useAuthStore } from "@/stores/authStore";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useDialogsStore } from "@/stores/dialogsStore";
+
+const queryClient = new QueryClient();
 
 export function App() {
   const init = useAuthStore((s) => s.init);
@@ -28,5 +31,9 @@ export function App() {
     }
   }, [isAuthenticated, loadModels, clearModels, clearDialogs]);
 
-  return <RouterProvider router={router} />;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  );
 }
