@@ -211,7 +211,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
             type: "object",
             additionalProperties: true,
             properties: {
-              user: { type: "object" },
+              user: { type: "object", additionalProperties: true },
               accessToken: { type: "string" },
               accessTokenExpiresAt: { type: "number" },
               csrfToken: { type: "string" },
@@ -330,7 +330,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
             type: "object",
             additionalProperties: true,
             properties: {
-              user: { type: "object" },
+              user: { type: "object", additionalProperties: true },
               accessToken: { type: "string" },
               accessTokenExpiresAt: { type: "number" },
               csrfToken: { type: "string" },
@@ -502,7 +502,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
             type: "object",
             additionalProperties: true,
             properties: {
-              user: { type: "object" },
+              user: { type: "object", additionalProperties: true },
               csrfToken: { type: "string" },
             },
           },
