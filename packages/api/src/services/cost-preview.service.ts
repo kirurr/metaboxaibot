@@ -1,4 +1,4 @@
-import { AI_MODELS } from "@metabox/shared";
+import { AI_MODELS, getModelDefaultDuration } from "@metabox/shared";
 import { calculateCost, computeVideoTokens } from "./token.service.js";
 import { userStateService } from "./user-state.service.js";
 import { probeAudioDurationSec } from "../utils/audio-transcode.js";
@@ -92,11 +92,14 @@ export const costPreviewService = {
     const allModelSettings = await userStateService.getModelSettings(userId);
     const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const effectiveAspectRatio = (modelSettings.aspect_ratio as string | undefined) ?? aspectRatio;
+    // `getModelDefaultDuration` приоритизирует `settings[duration].default` (то
+    // значение что рисуется в UI до взаимодействия), затем supportedDurations[0]
+    // / durationRange.min. До фикса юзеры kling'а с пустым userState видели «5»
+    // в слайдере, но бот падал на durationRange.min=3 и слал «3» в KIE.
     let effectiveDuration =
       (modelSettings.duration as number | undefined) ??
       duration ??
-      model.durationRange?.min ??
-      model.supportedDurations?.[0] ??
+      getModelDefaultDuration(model) ??
       5;
 
     if (modelId === "heygen") {

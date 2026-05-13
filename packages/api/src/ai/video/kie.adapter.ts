@@ -6,7 +6,11 @@ import type {
 } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
-import { buildKieUploadName, uploadFileUrl } from "../../utils/kie-upload.js";
+import {
+  buildKieUploadName,
+  uploadFileUrl,
+  uploadFileUrlCroppedToAspect,
+} from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
@@ -188,17 +192,46 @@ export class KieVideoAdapter implements VideoAdapter {
         });
       }
 
-      const imageUrls: string[] = [];
-      if (firstFrame)
-        imageUrls.push(
-          await uploadFileUrl(this.apiKey, firstFrame, buildKieUploadName(firstFrame)),
-        );
-      if (lastFrame)
-        imageUrls.push(await uploadFileUrl(this.apiKey, lastFrame, buildKieUploadName(lastFrame)));
-
       inputPayload.mode = klingMode;
-      inputPayload.aspect_ratio =
-        (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? "16:9";
+      const targetAspect = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? "16:9";
+      inputPayload.aspect_ratio = targetAspect;
+
+      // Kling 3.0 при наличии image_urls игнорирует aspect_ratio и адаптирует
+      // output под dimensions входной картинки (kling3.md §"Aspect Ratio
+      // Auto-Adaptation"). Чтобы выбор юзера всегда побеждал, центр-кропаем
+      // все картинки попадающие в image_urls под target aspect ПЕРЕД upload —
+      // тогда auto-adapt даёт ровно тот ratio, что выбран. Кропаем только
+      // если aspect ∈ Kling-поддерживаемые: parseAspectRatio пропустил бы
+      // "4:3"/"21:9" (валидный формат, но Kling всё равно отдаст 400 потом —
+      // wasted CPU на crop). Для unsupported → uncropped upload (KIE сам
+      // ответит 400 быстро, без нашей лишней работы).
+      const KLING_SUPPORTED_ASPECTS = ["16:9", "9:16", "1:1"];
+      const isCroppableAspect = KLING_SUPPORTED_ASPECTS.includes(targetAspect);
+      const uploadForImageUrls = (url: string): Promise<string> =>
+        isCroppableAspect
+          ? uploadFileUrlCroppedToAspect(this.apiKey, url, targetAspect, buildKieUploadName(url))
+          : uploadFileUrl(this.apiKey, url, buildKieUploadName(url));
+
+      // Параллельно — sequential await добавлял бы 1-2с на каждый crop+upload.
+      // Promise.all rejected on first failure оставляет второй промис без
+      // handler'а → unhandledRejection (в Node 20 default = throw → crash
+      // worker'а). Ловим каждую ногу отдельно, аккумулируем первую ошибку,
+      // ре-throw после settle обеих. Порядок сохраняем для KIE
+      // (index 0 = first frame, index 1 = last frame).
+      let frameError: unknown;
+      const catchFrame = (p: Promise<string | undefined>): Promise<string | undefined> =>
+        p.catch((err) => {
+          if (!frameError) frameError = err;
+          return undefined;
+        });
+      const [firstUploaded, lastUploaded] = await Promise.all([
+        catchFrame(firstFrame ? uploadForImageUrls(firstFrame) : Promise.resolve(undefined)),
+        catchFrame(lastFrame ? uploadForImageUrls(lastFrame) : Promise.resolve(undefined)),
+      ]);
+      if (frameError) throw frameError;
+      const imageUrls: string[] = [firstUploaded, lastUploaded].filter(
+        (u): u is string => u !== undefined,
+      );
 
       const durationNum = (ms.duration as number | undefined) ?? input.duration ?? 5;
       inputPayload.duration = String(durationNum);
@@ -223,11 +256,18 @@ export class KieVideoAdapter implements VideoAdapter {
         description: string;
         element_input_urls: string[];
       }> = [];
+      let placeholderSourceUrl: string | undefined;
       for (let i = 1; i <= 3; i++) {
         const urls = mi[`ref_element_${i}`] ?? [];
         if (urls.length === 0) continue;
+        const slice = urls.slice(0, 4);
+        // Truthy guard на slice[0] — пустые строки в `ref_element_*` (legacy
+        // DB-данные / ошибки upstream-валидации) не должны оседать как
+        // placeholderSourceUrl, иначе финальный if (!hasFrame && placeholder)
+        // увидит "" как falsy и пропустит push → KIE 422 на @elementN.
+        if (slice[0] && !placeholderSourceUrl) placeholderSourceUrl = slice[0];
         const uploaded = await Promise.all(
-          urls.slice(0, 4).map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
+          slice.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
         // Spec requires min 2 URLs — duplicate first image when only one is uploaded.
         const elementUrls = uploaded.length >= 2 ? uploaded : [uploaded[0]!, uploaded[0]!];
@@ -244,8 +284,13 @@ export class KieVideoAdapter implements VideoAdapter {
       // элементах прежний код пушил N entries и KIE возвращал 422
       // "image_urls supports at most 2 images". Одной заглушки достаточно:
       // KIE интерпретирует image_urls.length === 1 как first frame.
-      if (!hasFrameInImageUrls && klingElements.length > 0) {
-        imageUrls.push(klingElements[0]!.element_input_urls[0]!);
+      //
+      // Загружаем заглушку отдельно через uploadForImageUrls (с центр-кропом
+      // под target aspect): иначе uncropped element image в image_urls
+      // ретриггерит Kling auto-adapt — output подгонится под dimensions
+      // оригинала элемента, и aspect_ratio юзера снова потеряется.
+      if (!hasFrameInImageUrls && placeholderSourceUrl) {
+        imageUrls.push(await uploadForImageUrls(placeholderSourceUrl));
       }
       if (klingElements.length) inputPayload.kling_elements = klingElements;
       if (imageUrls.length) inputPayload.image_urls = imageUrls;

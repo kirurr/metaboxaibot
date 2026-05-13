@@ -236,9 +236,17 @@ export function pickAutoSlot(
 
 /**
  * Builds the human-readable per-slot capacity breakdown shown in the
- * "too many media" overflow reply. Slots from the same exclusiveGroup are
- * shown only once (the first one in definition order) — the user picks one
- * group anyway, so listing both halves of an "either/or" set is noise.
+ * "too many media" overflow reply.
+ *
+ * `dedupGroups` (default true): сворачиваем слоты с одним и тем же
+ * `exclusiveGroup` в одну строку. Это было исходно нужно для моделей с
+ * cross-mode `mediaInputs` (всё в одном массиве, юзер выбирает либо frames
+ * либо refs — не оба) — listing both half'ы было бы noise. Для уже-отфильт-
+ * рованных по mode'у слотов (seedance i2v = first+last frame, оба в группе
+ * "frames"; r2v = ref_images+ref_videos+ref_audios, все в "refs") дедуп
+ * ЛОЖНЫЙ — внутри одного режима слоты ВСЕ доступны одновременно, не
+ * либо/либо. Caller должен передать `dedupGroups: false` когда slots
+ * уже mode-filtered.
  *
  * Format examples:
  *   • Первый кадр
@@ -247,12 +255,14 @@ export function pickAutoSlot(
 export function formatSlotBreakdown(
   slots: readonly MediaInputSlot[],
   t: Translations,
+  options?: { dedupGroups?: boolean },
 ): { totalMax: number; lines: string[] } {
+  const dedup = options?.dedupGroups ?? true;
   const seenGroups = new Set<string>();
   const lines: string[] = [];
   let totalMax = 0;
   for (const slot of slots) {
-    if (slot.exclusiveGroup) {
+    if (dedup && slot.exclusiveGroup) {
       if (seenGroups.has(slot.exclusiveGroup)) continue;
       seenGroups.add(slot.exclusiveGroup);
     }
@@ -319,14 +329,35 @@ export function consumeDistribution(
 /**
  * Builds the overflow reply body. Single-slot models get a compact one-line
  * description; multi-slot models get the bullet breakdown.
+ *
+ * `activeSlots` — отфильтрованный по выбранному mode'у список слотов. Для
+ * моделей с режимами (`model.modes` определён, например seedance-2 t2v/i2v/r2v)
+ * сцена должна передавать именно слоты активного режима, иначе сообщение
+ * скажет про слоты ВСЕХ режимов сразу. Например в i2v-режиме у seedance-2
+ * без этого параметра пользователь видел «можно загрузить 10 файлов:
+ * первый кадр + 9 референсов», хотя в i2v ref_images недоступен — это путало
+ * (где кнопка добавить рефы?). Если не передан — fall back на full
+ * `model.mediaInputs` (обратная совместимость для моделей без режимов).
  */
-export function buildOverflowMessage(model: AIModel, t: Translations): string {
-  if (!model.mediaInputs?.length) return "";
-  const { totalMax, lines } = formatSlotBreakdown(model.mediaInputs, t);
+export function buildOverflowMessage(
+  model: AIModel,
+  t: Translations,
+  activeSlots?: readonly MediaInputSlot[],
+): string {
+  const slots = activeSlots ?? model.mediaInputs ?? [];
+  if (!slots.length) return "";
+  // Когда caller передал уже-mode-filtered активные слоты, отключаем
+  // exclusiveGroup-дедуп: внутри одного режима слоты ВСЕ доступны
+  // одновременно (i2v = first_frame + last_frame, оба в группе "frames" —
+  // листать оба корректно), а не либо/либо. Для legacy 2-arg вызовов
+  // (модели без режимов, e.g. design) дедуп остаётся.
+  const { totalMax, lines } = formatSlotBreakdown(slots, t, {
+    dedupGroups: activeSlots === undefined,
+  });
   const fileNoun = pluralFileNoun(totalMax, t);
 
   if (lines.length === 1) {
-    const slot = model.mediaInputs[0];
+    const slot = slots[0]!;
     const slotLabel = t.mediaInput[slot.labelKey as keyof typeof t.mediaInput] ?? slot.labelKey;
     return t.mediaInput.tooManyMediaSingleSlot
       .replace("{modelName}", model.name)
