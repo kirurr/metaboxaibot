@@ -9,8 +9,9 @@
  */
 
 import type { FastifyPluginAsync } from "fastify";
+import { randomUUID } from "node:crypto";
 import { webTelegramLinkedPreHandler } from "../middlewares/web-auth.js";
-import { dialogService } from "../services/dialog.service.js";
+import { dialogService, type StoredAttachment } from "../services/dialog.service.js";
 import {
   chatService,
   ContextOverflowError,
@@ -18,16 +19,163 @@ import {
   DocumentExtractFailedError,
 } from "../services/chat.service.js";
 import { db } from "../db.js";
-import { getFileUrl } from "../services/s3.service.js";
+import { getFileUrl, uploadBuffer } from "../services/s3.service.js";
 import { logger } from "../logger.js";
 import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+
+// ── Загрузка вложений для чата ───────────────────────────────────────────────
+// Принимаемые типы соответствуют пайплайну `chat.service`:
+//  - images: показываются модели как картинки (поддерживается через imageS3Keys).
+//  - documents: PDF — native через `supportsDocuments`, остальные (txt/csv/json/
+//    docx/xlsx) — text-class через `documentTextExtractFallback` (inline extract).
+const CHAT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — покрывает обычные PDF/изображения
+
+const IMAGE_MIMES = new Set<string>(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const DOCUMENT_MIMES = new Set<string>([
+  "application/pdf",
+  "application/json",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "text/comma-separated-values",
+]);
+function isAllowedUploadMime(mime: string): "image" | "document" | null {
+  if (IMAGE_MIMES.has(mime)) return "image";
+  if (DOCUMENT_MIMES.has(mime)) return "document";
+  // Прочие text/* (plain, csv, markdown, ...) — text-class, идут как document.
+  if (mime.startsWith("text/")) return "document";
+  return null;
+}
+
+function extFromMime(mime: string): string {
+  switch (mime) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "application/pdf":
+      return "pdf";
+    case "application/json":
+      return "json";
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+      return "docx";
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+      return "xlsx";
+    case "text/comma-separated-values":
+    case "text/csv":
+      return "csv";
+    case "text/markdown":
+      return "md";
+    case "text/plain":
+      return "txt";
+    default:
+      return "bin";
+  }
+}
 
 export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // Все роуты здесь требуют и авторизации, и привязанного Telegram.
   // Каталог моделей вынесен в `web-models.ts` (только webAuth, без Telegram).
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-chat"]));
+
+  // ── POST /web/chat-uploads ──────────────────────────────────────────────
+  /**
+   * Принимает multipart с одним файлом, кладёт в S3 под
+   * `chat-uploads/{userId}/{uuid}.{ext}`, возвращает s3Key + метаданные.
+   * Фронт хранит результат локально до отправки сообщения, затем передаёт
+   * s3Key'и через `/web/dialogs/:id/send`.
+   */
+  fastify.post(
+    "/web/chat-uploads",
+    {
+      schema: {
+        description: "Upload a file attachment for chat",
+        consumes: ["multipart/form-data"],
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              s3Key: { type: "string" },
+              name: { type: "string" },
+              mimeType: { type: "string" },
+              size: { type: "number" },
+              kind: { type: "string", enum: ["image", "document"] },
+              url: { type: "string", nullable: true },
+            },
+          },
+          400: badRequestResponse,
+          413: badRequestResponse,
+          415: badRequestResponse,
+          500: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+
+      // Per-request override 25MB поверх глобального 5MB из @fastify/multipart.
+      let part;
+      try {
+        part = await request.file({ limits: { fileSize: CHAT_UPLOAD_MAX_BYTES } });
+      } catch (err) {
+        logger.warn({ err }, "chat-uploads: failed to read multipart");
+        return reply.code(400).send({ error: "Файл не передан" });
+      }
+      if (!part) {
+        return reply.code(400).send({ error: "Файл не передан" });
+      }
+
+      const kind = isAllowedUploadMime(part.mimetype);
+      if (!kind) {
+        return reply.code(415).send({
+          error: `Тип файла не поддерживается: ${part.mimetype}`,
+          code: "UNSUPPORTED_MEDIA_TYPE",
+        });
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = await part.toBuffer();
+      } catch (err) {
+        // @fastify/multipart кидает ошибку с code 'FST_REQ_FILE_TOO_LARGE' при превышении.
+        const code = (err as { code?: string })?.code;
+        if (code === "FST_REQ_FILE_TOO_LARGE") {
+          return reply.code(413).send({
+            error: `Файл больше ${Math.round(CHAT_UPLOAD_MAX_BYTES / 1024 / 1024)} МБ`,
+            code: "FILE_TOO_LARGE",
+          });
+        }
+        logger.warn({ err }, "chat-uploads: toBuffer failed");
+        return reply.code(400).send({ error: "Не удалось прочитать файл" });
+      }
+
+      const ext = extFromMime(part.mimetype);
+      const s3Key = `chat-uploads/${aibUserId}/${randomUUID()}.${ext}`;
+      const uploaded = await uploadBuffer(s3Key, buffer, part.mimetype).catch((err) => {
+        logger.error({ err, s3Key }, "chat-uploads: S3 upload failed");
+        return null;
+      });
+      if (!uploaded) {
+        return reply.code(500).send({ error: "S3 недоступен" });
+      }
+
+      const url = await getFileUrl(s3Key).catch(() => null);
+      return {
+        s3Key,
+        name: part.filename || `upload.${ext}`,
+        mimeType: part.mimetype,
+        size: buffer.byteLength,
+        kind,
+        url: url ?? null,
+      };
+    },
+  );
 
   // ── GET /web/balance ────────────────────────────────────────────────────
   fastify.get("/web/balance", { schema: { hide: true } as any }, async (request) => {
@@ -301,6 +449,22 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 mediaUrl: { type: "string", nullable: true },
                 mediaType: { type: "string", nullable: true },
                 createdAt: { type: "string" },
+                attachments: {
+                  type: "array",
+                  nullable: true,
+                  items: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: {
+                      s3Key: { type: "string" },
+                      mimeType: { type: "string" },
+                      name: { type: "string" },
+                      size: { type: "number", nullable: true },
+                      url: { type: "string", nullable: true },
+                      kind: { type: "string" },
+                    },
+                  },
+                },
               },
             },
           },
@@ -334,6 +498,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             content: string;
             mediaUrl: string | null;
             mediaType: string | null;
+            attachments: unknown;
             createdAt: Date;
           }>
         ).map(async (m) => {
@@ -341,6 +506,32 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
           if (mediaUrl && !mediaUrl.startsWith("http")) {
             mediaUrl = (await getFileUrl(mediaUrl)) ?? mediaUrl;
           }
+          // attachments — JSON-поле в Message, prisma вернёт unknown. Маппим в
+          // DTO с подписанным URL для превью. Изображения легко определяются по
+          // mimeType (image/*), остальное считаем document.
+          const rawAtts = Array.isArray(m.attachments)
+            ? (m.attachments as Array<{
+                s3Key?: string;
+                mimeType?: string;
+                name?: string;
+                size?: number;
+              }>)
+            : [];
+          const attachments = await Promise.all(
+            rawAtts
+              .filter((a) => typeof a.s3Key === "string" && typeof a.mimeType === "string")
+              .map(async (a) => {
+                const url = (await getFileUrl(a.s3Key!).catch(() => null)) ?? null;
+                return {
+                  s3Key: a.s3Key!,
+                  mimeType: a.mimeType!,
+                  name: a.name ?? "attachment",
+                  size: typeof a.size === "number" ? a.size : null,
+                  url,
+                  kind: a.mimeType!.startsWith("image/") ? "image" : "document",
+                };
+              }),
+          );
           return {
             id: m.id,
             role: m.role,
@@ -348,6 +539,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             mediaUrl,
             mediaType: m.mediaType ?? null,
             createdAt: m.createdAt.toISOString(),
+            attachments: attachments.length > 0 ? attachments : null,
           };
         }),
       );
@@ -364,82 +556,109 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
    *   event: done     data: { messageId, tokensUsed, balance }
    *   event: error    data: { code, message }
    */
-  fastify.post<{ Params: { id: string }; Body: { content?: string } }>(
-    "/web/dialogs/:id/send",
-    { schema: { hide: true } as any },
-    async (request, reply) => {
-      const { aibUserId } = request.webUser!;
-      const { id } = request.params;
-      const content = (request.body?.content ?? "").trim();
-      if (!content) {
-        return reply.code(400).send({ error: "Сообщение не может быть пустым" });
+  fastify.post<{
+    Params: { id: string };
+    Body: {
+      content?: string;
+      /** S3 keys картинок (если пользователь приложил картинку). */
+      imageS3Keys?: string[];
+      /** Документы для модели (PDF/DOCX/XLSX/CSV/TXT/JSON). */
+      documentAttachments?: Array<{
+        s3Key: string;
+        mimeType: string;
+        name: string;
+        size?: number;
+      }>;
+    };
+  }>("/web/dialogs/:id/send", { schema: { hide: true } as any }, async (request, reply) => {
+    const { aibUserId } = request.webUser!;
+    const { id } = request.params;
+    const content = (request.body?.content ?? "").trim();
+    const imageS3Keys = request.body?.imageS3Keys?.filter((k) => typeof k === "string" && k);
+    const documentAttachments = request.body?.documentAttachments?.filter(
+      (a) => a && typeof a.s3Key === "string" && typeof a.mimeType === "string",
+    );
+    // Сообщение можно пустым (только attachment'ы) — chatService разберётся; но
+    // если совсем ничего нет — пинаем 400.
+    if (!content && !imageS3Keys?.length && !documentAttachments?.length) {
+      return reply.code(400).send({ error: "Сообщение не может быть пустым" });
+    }
+
+    const dialog = await dialogService.findById(id);
+    if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
+    if (dialog.userId !== aibUserId) return reply.code(403).send({ error: "Forbidden" });
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const send = (event: string, data: unknown) => {
+      reply.raw.write(`event: ${event}\n`);
+      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const stream = chatService.sendMessageStream({
+        dialogId: id,
+        userId: aibUserId!,
+        content,
+        ...(imageS3Keys?.length ? { imageS3Keys } : {}),
+        ...(documentAttachments?.length
+          ? {
+              documentAttachments: documentAttachments.map<StoredAttachment>((a) => ({
+                s3Key: a.s3Key,
+                mimeType: a.mimeType,
+                name: a.name,
+                ...(typeof a.size === "number" ? { size: a.size } : {}),
+              })),
+            }
+          : {}),
+      });
+      let result: Awaited<ReturnType<typeof stream.next>>;
+      while (true) {
+        result = await stream.next();
+        if (result.done) break;
+        send("chunk", { text: result.value });
       }
 
-      const dialog = await dialogService.findById(id);
-      if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
-      if (dialog.userId !== aibUserId) return reply.code(403).send({ error: "Forbidden" });
-
-      reply.raw.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
+      const balance = await db.user.findUnique({
+        where: { id: aibUserId! },
+        select: {
+          tokenBalance: true,
+          subscriptionTokenBalance: true,
+        },
       });
 
-      const send = (event: string, data: unknown) => {
-        reply.raw.write(`event: ${event}\n`);
-        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-      };
-
-      try {
-        const stream = chatService.sendMessageStream({
-          dialogId: id,
-          userId: aibUserId!,
-          content,
-        });
-        let result: Awaited<ReturnType<typeof stream.next>>;
-        while (true) {
-          result = await stream.next();
-          if (result.done) break;
-          send("chunk", { text: result.value });
-        }
-
-        const balance = await db.user.findUnique({
-          where: { id: aibUserId! },
-          select: {
-            tokenBalance: true,
-            subscriptionTokenBalance: true,
-          },
-        });
-
-        send("done", {
-          tokensUsed: result.value?.tokensUsed ?? 0,
-          balance: {
-            tokenBalance: balance?.tokenBalance.toString() ?? "0",
-            subscriptionTokenBalance: balance?.subscriptionTokenBalance.toString() ?? "0",
-          },
-        });
-      } catch (err) {
-        let code = "INTERNAL_ERROR";
-        let message = "Что-то пошло не так";
-        if (err instanceof ContextOverflowError) {
-          code = "CONTEXT_OVERFLOW";
-          message = "Превышен контекст модели. Начните новый диалог.";
-        } else if (err instanceof DocumentNotSupportedError) {
-          code = "DOCUMENT_NOT_SUPPORTED";
-          message = err.message;
-        } else if (err instanceof DocumentExtractFailedError) {
-          code = "DOCUMENT_EXTRACT_FAILED";
-          message = err.message;
-        } else if (err instanceof Error && /insufficient|balance/i.test(err.message)) {
-          code = "INSUFFICIENT_BALANCE";
-          message = "Недостаточно токенов";
-        }
-        logger.error({ err, code }, "web/dialogs/send failed");
-        send("error", { code, message });
-      } finally {
-        reply.raw.end();
+      send("done", {
+        tokensUsed: result.value?.tokensUsed ?? 0,
+        balance: {
+          tokenBalance: balance?.tokenBalance.toString() ?? "0",
+          subscriptionTokenBalance: balance?.subscriptionTokenBalance.toString() ?? "0",
+        },
+      });
+    } catch (err) {
+      let code = "INTERNAL_ERROR";
+      let message = "Что-то пошло не так";
+      if (err instanceof ContextOverflowError) {
+        code = "CONTEXT_OVERFLOW";
+        message = "Превышен контекст модели. Начните новый диалог.";
+      } else if (err instanceof DocumentNotSupportedError) {
+        code = "DOCUMENT_NOT_SUPPORTED";
+        message = err.message;
+      } else if (err instanceof DocumentExtractFailedError) {
+        code = "DOCUMENT_EXTRACT_FAILED";
+        message = err.message;
+      } else if (err instanceof Error && /insufficient|balance/i.test(err.message)) {
+        code = "INSUFFICIENT_BALANCE";
+        message = "Недостаточно токенов";
       }
-    },
-  );
+      logger.error({ err, code }, "web/dialogs/send failed");
+      send("error", { code, message });
+    } finally {
+      reply.raw.end();
+    }
+  });
 };

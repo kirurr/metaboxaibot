@@ -6,6 +6,8 @@ import {
   ChevronLeft,
   Copy,
   Download,
+  File as FileIcon,
+  ImageIcon,
   Menu,
   MoreHorizontal,
   Paperclip,
@@ -24,9 +26,10 @@ import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
 import { useDialogsStore } from "@/stores/dialogsStore";
 import { useAuthStore } from "@/stores/authStore";
 import * as dialogsApi from "@/api/dialogs";
-import type { DialogDto, MessageDto } from "@/api/dialogs";
+import type { DialogDto, MessageAttachmentDto, MessageDto } from "@/api/dialogs";
 import type { WebModelDto } from "@/api/models";
 import type { ApiError } from "@/api/client";
+import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 
 type Msg = {
   role: "user" | "ai";
@@ -34,7 +37,22 @@ type Msg = {
   meta?: string;
   /** Локальный id для оптимистичных user-сообщений (бэк не возвращает их id до done). */
   localId?: string;
+  /** Прикреплённые файлы — рендерятся над bubble. */
+  attachments?: MessageAttachmentDto[];
 };
+
+/** `accept` для file picker'а — синхронизирован с серверным `isAllowedUploadMime`. */
+const ACCEPT_MIMES =
+  "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/json," +
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet," +
+  "text/csv,text/plain,text/markdown";
+
+/** Pending-аттач до отправки: либо в процессе загрузки, либо уже в S3. */
+type PendingAttachment =
+  | { id: string; status: "uploading"; file: File }
+  | { id: string; status: "ready"; file: File; dto: ChatUploadDto }
+  | { id: string; status: "error"; file: File; error: string };
 
 const SECTION = "gpt";
 
@@ -149,10 +167,15 @@ export default function Chat() {
   const [sideOpen, setSideOpen] = useState(false);
   const [menuForId, setMenuForId] = useState<string | null>(null);
 
+  // Pending-вложения: загружены в S3, но ещё не отправлены с сообщением.
+  // Хранятся локально и сбрасываются после успешной отправки или newChat().
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+
   const sideVisible = isMobile ? sideOpen : !sideCollapsed;
   const sideRef = useRef<HTMLElement | null>(null);
   const modelPickRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   // Маркируем id диалогов, для которых история уже загружена/прогрета. Нужен
@@ -265,13 +288,76 @@ export default function Chat() {
     setMessages([]);
     setDraft("");
     setSendError(null);
+    setPendingAttachments([]);
     setSideOpen(false);
     setTimeout(() => taRef.current?.focus(), 0);
   }
 
+  // Открыть system file picker. Допустимые MIME-типы синхронизированы с серверной
+  // валидацией (см. `web-chat.ts`). multiple=true — можно прикрепить сразу пачку.
+  function openFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  function removePending(id: string) {
+    setPendingAttachments((prev) => prev.filter((p) => p.id !== id));
+  }
+
+  // Грузим каждый файл параллельно через POST /web/chat-uploads. Каждый файл —
+  // отдельный chip с состоянием uploading/ready/error. Send блокируется пока
+  // есть uploading'и (см. checkSendable).
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    // Создаём pending-chips сразу для всех файлов, чтобы у юзера был визуальный
+    // фидбек о начатой загрузке.
+    const initial: PendingAttachment[] = list.map((file) => ({
+      id: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status: "uploading",
+      file,
+    }));
+    setPendingAttachments((prev) => [...prev, ...initial]);
+
+    // Каждый upload — независимая promise, обновляем стейт по мере готовности.
+    await Promise.all(
+      initial.map(async (p) => {
+        try {
+          const dto = await uploadChatFile(p.file);
+          setPendingAttachments((prev) =>
+            prev.map((x) => (x.id === p.id ? { id: p.id, status: "ready", file: p.file, dto } : x)),
+          );
+        } catch (err) {
+          const e = err as ApiError;
+          const msg =
+            e.code === "UNSUPPORTED_MEDIA_TYPE"
+              ? "Тип файла не поддерживается"
+              : e.code === "FILE_TOO_LARGE"
+                ? "Файл слишком большой (макс. 25 МБ)"
+                : e.message || "Ошибка загрузки";
+          setPendingAttachments((prev) =>
+            prev.map((x) =>
+              x.id === p.id ? { id: p.id, status: "error", file: p.file, error: msg } : x,
+            ),
+          );
+        }
+      }),
+    );
+  }
+
+  // Дочитываемые из стейта в render'е — счётчики и блокировки кнопки Send.
+  const uploadingCount = pendingAttachments.filter((p) => p.status === "uploading").length;
+  const readyAttachments = pendingAttachments.filter(
+    (p): p is Extract<PendingAttachment, { status: "ready" }> => p.status === "ready",
+  );
+
   async function send() {
     const text = draft.trim();
-    if (!text || sending) return;
+    // Можно отправить только с текстом ИЛИ только с вложениями. Без всего — no-op.
+    if ((!text && readyAttachments.length === 0) || sending) return;
+    if (uploadingCount > 0) {
+      setSendError("Дождитесь окончания загрузки файлов");
+      return;
+    }
     if (!selectedModel) {
       setSendError("Модель ещё не загрузилась");
       return;
@@ -304,14 +390,41 @@ export default function Chat() {
       }
     }
 
+    // Split attachments на images (для chatService.imageS3Keys) и documents
+    // (для chatService.documentAttachments).
+    const imageAtts = readyAttachments.filter((p) => p.dto.kind === "image");
+    const docAtts = readyAttachments.filter((p) => p.dto.kind === "document");
+    const imageS3Keys = imageAtts.map((p) => p.dto.s3Key);
+    const documentAttachments = docAtts.map((p) => ({
+      s3Key: p.dto.s3Key,
+      mimeType: p.dto.mimeType,
+      name: p.dto.name,
+      size: p.dto.size,
+    }));
+    // DTO для оптимистичного user-bubble (показываем chip'ы прямо в треде).
+    const optimisticAtts: MessageAttachmentDto[] = readyAttachments.map((p) => ({
+      s3Key: p.dto.s3Key,
+      mimeType: p.dto.mimeType,
+      name: p.dto.name,
+      size: p.dto.size,
+      url: p.dto.url,
+      kind: p.dto.kind,
+    }));
+
     // 2) Оптимистично добавляем user-сообщение + пустой AI-bubble.
     const localId = `local-${Date.now()}`;
     setMessages((m) => [
       ...m,
-      { role: "user", text, localId },
+      {
+        role: "user",
+        text,
+        localId,
+        ...(optimisticAtts.length ? { attachments: optimisticAtts } : {}),
+      },
       { role: "ai", text: "", localId: localId + ".ai" },
     ]);
     setDraft("");
+    setPendingAttachments([]);
     setTimeout(autosize, 0);
 
     // 3) Стримим ответ.
@@ -322,7 +435,11 @@ export default function Chat() {
     try {
       await dialogsApi.streamMessage(
         dialogId,
-        text,
+        {
+          content: text,
+          ...(imageS3Keys.length ? { imageS3Keys } : {}),
+          ...(documentAttachments.length ? { documentAttachments } : {}),
+        },
         {
           onChunk: (chunk) => {
             setMessages((m) => {
@@ -564,17 +681,26 @@ export default function Chat() {
                     </div>
                   )}
                   <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
-                    <div className="bubble">
-                      {m.text.length === 0 && m.role === "ai" ? (
-                        <span className="msg-typing">…</span>
-                      ) : (
-                        m.text.split("\n\n").map((p, k) => (
-                          <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
-                            {p}
-                          </p>
-                        ))
-                      )}
-                    </div>
+                    {m.attachments && m.attachments.length > 0 && (
+                      <div className="msg-attachments">
+                        {m.attachments.map((a, ai) => (
+                          <AttachmentChip key={a.s3Key + ai} attachment={a} />
+                        ))}
+                      </div>
+                    )}
+                    {(m.text.length > 0 || m.role === "ai") && (
+                      <div className="bubble">
+                        {m.text.length === 0 && m.role === "ai" ? (
+                          <span className="msg-typing">…</span>
+                        ) : (
+                          m.text.split("\n\n").map((p, k) => (
+                            <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
+                              {p}
+                            </p>
+                          ))
+                        )}
+                      </div>
+                    )}
                     {m.role === "ai" && m.meta && (
                       <div className="msg-meta">
                         <span>{m.meta}</span>
@@ -619,8 +745,32 @@ export default function Chat() {
 
         <div className="composer">
           <div className="composer-inner">
+            {pendingAttachments.length > 0 && (
+              <div className="composer-attachments">
+                {pendingAttachments.map((p) => (
+                  <PendingChip key={p.id} pending={p} onRemove={() => removePending(p.id)} />
+                ))}
+              </div>
+            )}
             <div className="composer-row">
-              <button className="tool" title="Attach" disabled>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPT_MIMES}
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  handleFiles(e.target.files);
+                  // Сбрасываем value чтобы повторный пик того же файла сработал.
+                  e.target.value = "";
+                }}
+              />
+              <button
+                className="tool"
+                title="Прикрепить файл"
+                onClick={openFilePicker}
+                disabled={sending}
+              >
                 <Paperclip size={18} />
               </button>
               <textarea
@@ -639,9 +789,17 @@ export default function Chat() {
               />
               <button
                 className="send"
-                disabled={!draft.trim() || sending}
+                disabled={
+                  (!draft.trim() && readyAttachments.length === 0) || sending || uploadingCount > 0
+                }
                 onClick={send}
-                title={sending ? "Отправка…" : "Отправить"}
+                title={
+                  sending
+                    ? "Отправка…"
+                    : uploadingCount > 0
+                      ? "Дождитесь загрузки файлов"
+                      : "Отправить"
+                }
               >
                 {sending ? <RefreshCw size={18} className="anim-spin" /> : <ArrowUp size={18} />}
               </button>
@@ -694,5 +852,120 @@ function messageDtoToMsg(m: MessageDto): Msg {
   return {
     role: m.role === "user" ? "user" : "ai",
     text: m.content,
+    ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
   };
+}
+
+function formatBytes(bytes?: number | null): string {
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+/** Chip pending-загрузки в composer'е (uploading / ready / error). */
+function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemove: () => void }) {
+  const isImage =
+    pending.status === "ready"
+      ? pending.dto.kind === "image"
+      : pending.file.type.startsWith("image/");
+  // Для uploading-state делаем локальный preview через ObjectURL, чтобы юзер
+  // видел картинку сразу, не дожидаясь S3-presigned. ObjectURL чистим на unmount.
+  const previewUrl = useObjectUrl(pending.file, isImage);
+  const finalUrl = pending.status === "ready" ? pending.dto.url : null;
+  const url = finalUrl || previewUrl;
+  return (
+    <div
+      className={
+        "att-chip" +
+        (pending.status === "error" ? " att-chip-error" : "") +
+        (pending.status === "uploading" ? " att-chip-loading" : "")
+      }
+    >
+      <div className="att-chip-icon">
+        {isImage && url ? (
+          <img src={url} alt={pending.file.name} />
+        ) : isImage ? (
+          <ImageIcon size={14} />
+        ) : (
+          <FileIcon size={14} />
+        )}
+      </div>
+      <div className="att-chip-body">
+        <div className="att-chip-name" title={pending.file.name}>
+          {pending.file.name}
+        </div>
+        <div className="att-chip-meta">
+          {pending.status === "uploading"
+            ? "Загрузка…"
+            : pending.status === "error"
+              ? pending.error
+              : formatBytes(pending.file.size)}
+        </div>
+      </div>
+      <button className="att-chip-remove" onClick={onRemove} aria-label="Удалить">
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+/** Chip уже-сохранённого вложения внутри bubble треда. */
+function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
+  const isImage = attachment.kind === "image" && !!attachment.url;
+  if (isImage) {
+    // Картинку показываем превью с возможностью открыть полноразмер.
+    return (
+      <a
+        href={attachment.url ?? "#"}
+        target="_blank"
+        rel="noreferrer"
+        className="att-chip att-chip-image"
+        title={attachment.name}
+      >
+        <img src={attachment.url ?? undefined} alt={attachment.name} />
+      </a>
+    );
+  }
+  const inner = (
+    <>
+      <div className="att-chip-icon">
+        <FileIcon size={14} />
+      </div>
+      <div className="att-chip-body">
+        <div className="att-chip-name" title={attachment.name}>
+          {attachment.name}
+        </div>
+        <div className="att-chip-meta">{formatBytes(attachment.size)}</div>
+      </div>
+    </>
+  );
+  return attachment.url ? (
+    <a
+      href={attachment.url}
+      target="_blank"
+      rel="noreferrer"
+      className="att-chip att-chip-link"
+      title={attachment.name}
+    >
+      {inner}
+    </a>
+  ) : (
+    <div className="att-chip">{inner}</div>
+  );
+}
+
+/** Создаёт ObjectURL для локального File-preview, чистит при размонтировании. */
+function useObjectUrl(file: File, enabled: boolean): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) {
+      setUrl(null);
+      return;
+    }
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file, enabled]);
+  return url;
 }

@@ -19,6 +19,16 @@ export type DialogDto = {
   updatedAt: string;
 };
 
+export type MessageAttachmentDto = {
+  s3Key: string;
+  mimeType: string;
+  name: string;
+  size: number | null;
+  /** Presigned URL для превью; может быть null если ссылка не сгенерировалась. */
+  url: string | null;
+  kind: "image" | "document" | string;
+};
+
 export type MessageDto = {
   id: string;
   role: "user" | "ai" | "system" | string;
@@ -26,6 +36,16 @@ export type MessageDto = {
   mediaUrl: string | null;
   mediaType: string | null;
   createdAt: string;
+  /** Прикреплённые файлы (картинки + документы), `null` если их нет. */
+  attachments?: MessageAttachmentDto[] | null;
+};
+
+/** Payload для streamMessage — документы как в chatService.SendMessageParams. */
+export type SendDocumentAttachment = {
+  s3Key: string;
+  mimeType: string;
+  name: string;
+  size?: number;
 };
 
 export function listDialogs(section?: string) {
@@ -70,9 +90,15 @@ export type StreamCallbacks = {
 
 const SEND_ENDPOINT = (id: string) => `/web/dialogs/${encodeURIComponent(id)}/send`;
 
+export type StreamPayload = {
+  content: string;
+  imageS3Keys?: string[];
+  documentAttachments?: SendDocumentAttachment[];
+};
+
 export async function streamMessage(
   dialogId: string,
-  content: string,
+  payload: StreamPayload,
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -96,7 +122,7 @@ export async function streamMessage(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(csrf ? { "X-CSRF-Token": csrf } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(payload),
     });
   };
 

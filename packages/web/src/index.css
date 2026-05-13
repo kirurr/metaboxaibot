@@ -1039,6 +1039,10 @@ select {
   border: 1px solid rgba(74, 141, 245, 0.25);
   color: var(--text);
   border-radius: 18px 18px 6px 18px;
+  /* Чуть компактнее по вертикали чем AI-bubble: короткие user-сообщения
+     («Тест», «ок») в `14px` смотрелись пухло. Горизонтальное padding'и
+     одинаковые с AI, чтобы текст не упирался в рамку. */
+  padding: 10px 18px;
 }
 .msg .ai-mark {
   width: 32px;
@@ -1397,14 +1401,25 @@ select {
   padding: 24px 0 16px;
 }
 .chat-thread {
+  /* Должно совпадать с `.composer-inner` по outer-edge: и `.composer` ниже,
+     и `.chat-thread` имеют одинаковый `max-width` + `margin: 0 auto`. Padding
+     убран — раньше 24px внутри уводил правый край user-bubble левее правого
+     края composer'а. */
+  /* ВАЖНО: `width: 100%` обязателен. В flex-column родителе (`.chat-scroll`) с
+     `margin: 0 auto` thread без `width: 100%` схлопывается до max-content своих
+     детей. Из-за этого первое короткое сообщение «Тест» прижималось к узкому
+     thread'у, а потом thread расширялся при появлении длинных AI-ответов —
+     контейнер «прыгал» по мере набора истории. */
+  width: 100%;
   max-width: 820px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 .app.mobile .chat-thread {
+  /* На мобильных приподнимаем от краёв чтобы текст не упирался в edge. */
   padding: 0 16px;
 }
 
@@ -1679,6 +1694,129 @@ select {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Chat attachments — pending-chip'ы над композером + chip'ы в bubble'е
+   треда. Картинки рендерятся миниатюрой, документы — иконка + имя + размер.
+   ════════════════════════════════════════════════════════════════════════════ */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 4px 10px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 8px;
+}
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.msg.user .msg-attachments {
+  justify-content: flex-end;
+}
+
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 6px 10px 6px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.3;
+  transition:
+    border-color 120ms var(--ease),
+    background 120ms var(--ease);
+  text-decoration: none;
+}
+.att-chip-link:hover {
+  border-color: var(--accent);
+}
+.att-chip-loading {
+  opacity: 0.7;
+}
+.att-chip-error {
+  border-color: rgba(239, 83, 80, 0.4);
+  background: rgba(239, 83, 80, 0.06);
+}
+.att-chip-error .att-chip-meta {
+  color: var(--danger);
+}
+.att-chip-icon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+.att-chip-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.att-chip-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.att-chip-name {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.att-chip-meta {
+  font-size: 11px;
+  color: var(--text-hint);
+  white-space: nowrap;
+}
+.att-chip-remove {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-hint);
+  cursor: pointer;
+  transition: background 100ms var(--ease);
+}
+.att-chip-remove:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+/* Картинка-превью в bubble'е: квадратный thumbnail без подписи. */
+.att-chip-image {
+  padding: 0;
+  width: 140px;
+  height: 140px;
+  max-width: none;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.att-chip-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .topbar {
