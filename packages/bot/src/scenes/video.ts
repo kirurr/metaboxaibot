@@ -26,6 +26,7 @@ import {
   resolveModelDisplay,
   generateWebToken,
   getResolvedModes,
+  getModelDefaultDuration,
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
@@ -171,11 +172,12 @@ export async function activateVideoModel(
   if (model) {
     const allSettings = await userStateService.getModelSettings(ctx.user.id);
     const modelSettings = allSettings[modelId] ?? {};
+    // Единый источник дефолта duration — `getModelDefaultDuration`. До фикса
+    // здесь сразу падали на supportedDurations[0]/durationRange.min, что для
+    // kling давало 3 (min), хотя UI-слайдер `default: 5`. Теперь cost line
+    // в активации модели совпадает с тем что реально пошлёт submit.
     const defaultDuration =
-      (modelSettings.duration as number | undefined) ??
-      model.supportedDurations?.[0] ??
-      model.durationRange?.min ??
-      5;
+      (modelSettings.duration as number | undefined) ?? getModelDefaultDuration(model) ?? 5;
     const costLine = buildCostLine(model, modelSettings, ctx.t, defaultDuration);
     const webappUrl = config.bot.webappUrl;
     const kb = new InlineKeyboard();

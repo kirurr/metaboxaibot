@@ -14,6 +14,7 @@ import {
   resolveActiveMode,
   getActiveSlots,
   voiceCloneReturnRedisKey,
+  getModelDefaultDuration,
   type AIModel,
   type Section,
   type Translations,
@@ -261,12 +262,13 @@ async function sendModelActivatedNotification(
     );
   }
 
+  // Единый источник дефолта — `getModelDefaultDuration`. До фикса для kling
+  // здесь возвращалось 3 (durationRange.min), хотя UI рисует 5 (slider default).
+  // Активационное сообщение в чате теперь совпадает с тем что реально пошлёт
+  // submit и за что спишет.
   const defaultDuration =
     section === "video"
-      ? ((modelSettings.duration as number | undefined) ??
-        model.supportedDurations?.[0] ??
-        model.durationRange?.min ??
-        5)
+      ? ((modelSettings.duration as number | undefined) ?? getModelDefaultDuration(model) ?? 5)
       : undefined;
 
   const costLine = buildActivationCostLine(model, modelSettings, t, defaultDuration);

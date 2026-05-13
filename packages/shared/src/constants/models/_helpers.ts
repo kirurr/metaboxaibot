@@ -1,4 +1,4 @@
-import type { ModelSettingDef } from "../../types/ai.js";
+import type { AIModel, ModelSettingDef } from "../../types/ai.js";
 
 // ── Helper builders ───────────────────────────────────────────────────────────
 
@@ -65,3 +65,35 @@ export function mkNumImagesSetting(max: number): ModelSettingDef {
 
 /** Стандартный picker 1-4 (большинство моделей). Equivalent to mkNumImagesSetting(4). */
 export const NUM_IMAGES_SETTING: ModelSettingDef = mkNumImagesSetting(4);
+
+/**
+ * Дефолт duration по модели — то значение, которое UI рендерит в слайдере/селекте
+ * ДО любого взаимодействия юзера. Используется для fallback'а когда в userState
+ * нет сохранённого `modelSettings.duration` (юзер не двигал контрол).
+ *
+ * Раньше fallback падал сразу на `durationRange.min` / `supportedDurations[0]`, и
+ * для kling это давало 3 (min), хотя UI слайдер изначально показывает 5
+ * (KLING_SETTINGS.default). Юзер видел «5», бот молча слал «3», провайдер
+ * возвращал 3-сек видео — UX-разрыв и недопоставка.
+ *
+ * Приоритет:
+ *   1) `settings[duration].default` (то, что нарисовано в UI — единый источник
+ *      истины для дефолта)
+ *   2) `supportedDurations[0]` (для дискретных вариантов)
+ *   3) `durationRange.min` (для слайдеров без явного default'а)
+ *
+ * Возвращает `undefined` если у модели нет ни одного из этих полей —
+ * callers сами решают финальный fallback (обычно `?? 5`).
+ *
+ * Проверка `typeof === "number"`: ModelSettingDef.default — это `string |
+ * number | boolean | null`. Цастать as number небезопасно (NaN при string
+ * "auto" → broken cost calc). Strict-проверка отсекает не-числовые default'ы.
+ */
+export function getModelDefaultDuration(model: AIModel): number | undefined {
+  const setting = model.settings?.find((s) => s.key === "duration");
+  if (setting && typeof setting.default === "number") return setting.default;
+  if (model.supportedDurations && model.supportedDurations.length > 0) {
+    return model.supportedDurations[0];
+  }
+  return model.durationRange?.min;
+}
