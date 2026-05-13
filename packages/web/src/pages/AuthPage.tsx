@@ -11,7 +11,7 @@ type Props = { initialMode?: "login" | "signup" };
 /**
  * Дизайн из заглушки `aibox_template`, форма — реальная: дергает
  * `/auth/web-login` / `/auth/web-signup`, ставит сессию через `authStore.setSession`.
- * После успеха возвращает на `?from=` либо в `/app`. Для админов это значит
+ * После успеха возвращает на `?from=` либо на главную (`/`). Для админов это значит
  * автоматический редирект на `/admin` (т.к. они приходят сюда из `AdminRoute` с `from`).
  */
 export default function AuthPage({ initialMode = "login" }: Props) {
@@ -47,7 +47,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
             });
       setSession(session);
       const from = (location.state as { from?: string } | null)?.from;
-      navigate(from && from.startsWith("/") ? from : "/app", { replace: true });
+      navigate(from && from.startsWith("/") ? from : "/", { replace: true });
     } catch (e) {
       if (e instanceof ApiError) {
         setError(e.message);

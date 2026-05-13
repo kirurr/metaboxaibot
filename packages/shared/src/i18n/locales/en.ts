@@ -388,6 +388,8 @@ export default {
     heygenVideoFormat: "❌ Video format not supported. Please use MP4 or MOV.",
     heygenAudioFormat: "❌ Audio format not supported. Please use MP3 or WAV.",
     heygenFileFormat: "❌ File format not supported. Please use JPEG or PNG.",
+    mediaSourceUnavailable:
+      "❌ Could not load your image — the link has expired. Please send the image again and retry.",
     heygenVideoTooShort: "❌ The video is too short. Please try a different video.",
     heygenFileTooLong: "❌ The video or audio is too long. Please use a shorter file.",
     heygenAudioTooLong: "❌ The audio is too long. Please use a shorter audio file.",

@@ -11,10 +11,10 @@ export default function PaymentFailed() {
           Попробуйте ещё раз или выберите другой способ оплаты.
         </p>
         <div className="flex gap-3 justify-center">
-          <Link to="/app/plans" className="btn-primary">
+          <Link to="/plans" className="btn-primary">
             Попробовать снова
           </Link>
-          <Link to="/app/chat" className="btn-secondary">
+          <Link to="/chat" className="btn-secondary">
             В чат
           </Link>
         </div>

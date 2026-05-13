@@ -254,6 +254,7 @@ export interface Translations {
     heygenVideoFormat: string;
     heygenAudioFormat: string;
     heygenFileFormat: string;
+    mediaSourceUnavailable: string;
     heygenVideoTooShort: string;
     heygenFileTooLong: string;
     heygenAudioTooLong: string;

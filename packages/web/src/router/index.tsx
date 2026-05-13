@@ -9,7 +9,11 @@ const SignupPage = lazy(() => import("@/pages/Signup"));
 const ForgotPasswordPage = lazy(() => import("@/pages/ForgotPassword"));
 const ResetPasswordPage = lazy(() => import("@/pages/ResetPassword"));
 
+const HomePage = lazy(() => import("@/pages/Home"));
 const ChatPage = lazy(() => import("@/pages/Chat"));
+const ImagePage = lazy(() => import("@/pages/Image"));
+const VideoPage = lazy(() => import("@/pages/Video"));
+const AudioPage = lazy(() => import("@/pages/Audio"));
 const HistoryPage = lazy(() => import("@/pages/History"));
 const PlansPage = lazy(() => import("@/pages/Plans"));
 const TokensPage = lazy(() => import("@/pages/Tokens"));
@@ -47,12 +51,6 @@ export const router = createBrowserRouter([
     element: <WebSocketPage />,
   },
 
-  // Root → редирект в зависимости от авторизации (обрабатывается guard'ом)
-  {
-    path: "/",
-    element: <Navigate to="/app" replace />,
-  },
-
   // Гостевые роуты
   {
     path: "/login",
@@ -71,18 +69,21 @@ export const router = createBrowserRouter([
     element: withSuspense(<ResetPasswordPage />),
   },
 
-  // Защищённая зона
+  // Защищённая зона — без префикса `/app`, страницы прямо на root.
   {
-    path: "/app",
+    path: "/",
     element: (
       <ProtectedRoute>
         <AppShell />
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Navigate to="chat" replace /> },
+      { index: true, element: withSuspense(<HomePage />) },
       { path: "chat", element: withSuspense(<ChatPage />) },
       { path: "chat/:id", element: withSuspense(<ChatPage />) },
+      { path: "image", element: withSuspense(<ImagePage />) },
+      { path: "video", element: withSuspense(<VideoPage />) },
+      { path: "audio", element: withSuspense(<AudioPage />) },
       { path: "history", element: withSuspense(<HistoryPage />) },
       { path: "plans", element: withSuspense(<PlansPage />) },
       { path: "tokens", element: withSuspense(<TokensPage />) },

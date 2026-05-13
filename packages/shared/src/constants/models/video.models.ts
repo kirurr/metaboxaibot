@@ -1172,6 +1172,10 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["2:3", "3:2", "1:1", "16:9", "9:16"],
     durationRange: { min: 6, max: 15 },
+    // xAI (Grok) hardcap — провайдер 422-ит запрос «Prompt length exceeds the
+    // maximum allowed length of 4096». Лимит модели, одинаков и на KIE primary,
+    // и на FAL fallback — поэтому объявлен на самой AIModel записи, а не на адаптере.
+    maxPromptLength: 4096,
     settings: [
       mkAspectRatio(["16:9", "9:16", "1:1", "2:3", "3:2"]),
       mkDurationSlider(6, 15),
@@ -1230,6 +1234,8 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["2:3", "3:2", "1:1", "16:9", "9:16"],
     durationRange: { min: 6, max: 10 },
+    // xAI (Grok) hardcap — см. комментарий на `grok-imagine`.
+    maxPromptLength: 4096,
     settings: [
       mkAspectRatio(["16:9", "9:16", "1:1", "2:3", "3:2"]),
       mkDurationSlider(6, 10),
@@ -1289,6 +1295,8 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: [],
+    // xAI (Grok) hardcap — см. комментарий на `grok-imagine`.
+    maxPromptLength: 4096,
     // FAL spec формально допускает 2-10s, но на коротких extension'ах (2-5s)
     // провайдер часто возвращает ошибки/невалидный output — сужаем диапазон
     // до 6-10s, что совпадает с FAL endpoint default = 6 и даёт стабильный

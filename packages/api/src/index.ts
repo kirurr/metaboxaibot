@@ -18,6 +18,7 @@ import { registry } from "./metrics.js";
 import { authRoutes } from "./routes/auth.js";
 import { webAuthRoutes } from "./routes/web-auth.js";
 import { webChatRoutes } from "./routes/web-chat.js";
+import { webModelsRoutes } from "./routes/web-models.js";
 import { webBillingRoutes } from "./routes/web-billing.js";
 import { profileRoutes } from "./routes/profile.js";
 import { dialogsRoutes } from "./routes/dialogs.js";
@@ -100,7 +101,11 @@ await server.register(swaggerUi, {
 });
 
 await server.register(fastifyMultipart, {
-  limits: { fileSize: 5 * 1024 * 1024 },
+  // Глобальный потолок — 25 MB. Per-call можно сузить через `request.file({ limits })`,
+  // но НЕ расширить (busboy строит парсер по minimum глобальное/per-call). Под этот
+  // потолок укладываются типовые фотографии (3-10 MB) и PDF (до 25 MB) для /web/chat-uploads;
+  // image-uploads админки (slides) тоже легко.
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 await server.register(fastifyStatic, {
   root: join(__dirname, "..", "uploads"),
@@ -192,6 +197,7 @@ server.get("/metrics", { schema: { hide: true } }, async (_request, reply) => {
 await server.register(authRoutes);
 await server.register(webAuthRoutes);
 await server.register(webChatRoutes);
+await server.register(webModelsRoutes);
 await server.register(webBillingRoutes);
 await server.register(profileRoutes);
 await server.register(dialogsRoutes);

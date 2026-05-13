@@ -237,11 +237,26 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         }
       }
     } catch (err) {
-      // Stream.iterator throws a plain Error (no .status) when the API responds
-      // with an overload message during streaming — attach status=503 so that
-      // isFiveXxError in chat.service triggers the retry/fallback flow.
-      if (err instanceof Error && !("status" in err) && /overloaded/i.test(err.message)) {
-        (err as Error & { status: number }).status = 503;
+      // OpenAI Stream.iterator бросает Error/APIError без числового .status,
+      // когда сервер падает прямо в SSE-стриме. Без status'а isFiveXxError →
+      // false, retry/fallback в chat.service не срабатывает и юзер ловит
+      // raw stack-trace в ops-alert. Ставим 503 для известных transient'ов:
+      //  - "overloaded" — load-spike
+      //  - "An error occurred while processing your request … Please include
+      //    the request ID req_…" — generic OpenAI 5xx, проброшенный через SSE.
+      //    Сам провайдер советует «You can retry your request» — transient.
+      if (err instanceof Error) {
+        const status = (err as Error & { status?: unknown }).status;
+        const hasNumericStatus = typeof status === "number";
+        if (!hasNumericStatus) {
+          const msg = err.message ?? "";
+          if (
+            /overloaded/i.test(msg) ||
+            /An error occurred while processing your request/i.test(msg)
+          ) {
+            (err as Error & { status: number }).status = 503;
+          }
+        }
       }
       throw err;
     }
