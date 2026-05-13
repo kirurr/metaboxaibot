@@ -175,6 +175,30 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       max_tokens: maxTokens,
       stream: true,
       messages,
+      // Подавление tool-use инжекции от KIE: они проксируют через Claude.ai
+      // endpoint, у которого по умолчанию доступны Agent Skills (`view`,
+      // `frontend-design` и т.п.). Модель видит их в контексте и на запросах
+      // тематически близких (визуальная концепция, архитектура и т.п.)
+      // вызывает `view` на skill-файл вместо ответа текстом — стрим выглядит
+      // пустым, юзер получает «не в духе».
+      //
+      // Два независимых барьера в одном теле запроса:
+      //  1. `tools: []` — explicit signal что у нас НЕТ доступных инструментов.
+      //     Если KIE форвардит наше поле к Anthropic — модель физически не
+      //     имеет tools. Если KIE стрипает / мерджит — возможно стэкнется с их
+      //     инжекцией, но как минимум посылает им сигнал что мы не хотим tools.
+      //  2. `tool_choice: { type: "none" }` — документированное Anthropic поле,
+      //     запрещающее модели вызывать любые tools в этом turn'е (даже если
+      //     они есть в контексте от KIE-инжекции). Идёт ВМЕСТЕ с `tools: []` —
+      //     это легитимный Anthropic-сценарий «есть массив (пустой), запрещаю
+      //     использовать», без риска 400 «tool_choice without tools».
+      //
+      // function-calling у нас в принципе не используется — это no-op для
+      // легитимных сценариев. Если эта связка не помогла — следующий шаг это
+      // полная обработка tool_use блоков (буферизация → follow-up с
+      // tool_result → продолжение стрима).
+      tools: [],
+      tool_choice: { type: "none" },
       ...(input.systemPrompt ? { system: input.systemPrompt } : {}),
       ...(input.extendedThinking ? { thinkingFlag: true } : {}),
     };
