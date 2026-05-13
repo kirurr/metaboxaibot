@@ -513,6 +513,14 @@ export interface AIModel {
    */
   promptRefs?: PromptRefCapabilities;
   /**
+   * Hard cap on prompt length (in JS string code units) enforced pre-submission.
+   * When set, the generation service rejects the request с `promptTooLong`
+   * локализованным сообщением вместо того, чтобы провайдер 422-нул его
+   * mid-flight (e.g. xAI/Grok hardcap 4096 chars на FAL/KIE). Если не задан —
+   * валидация не выполняется и полагаемся на провайдер.
+   */
+  maxPromptLength?: number;
+  /**
    * Configurable generation parameters exposed in the Management mini-app.
    * The frontend renders controls dynamically based on these definitions.
    * User-chosen values are stored in UserState.modelSettings and passed to the adapter.
