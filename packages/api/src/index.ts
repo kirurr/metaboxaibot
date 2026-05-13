@@ -101,7 +101,11 @@ await server.register(swaggerUi, {
 });
 
 await server.register(fastifyMultipart, {
-  limits: { fileSize: 5 * 1024 * 1024 },
+  // Глобальный потолок — 25 MB. Per-call можно сузить через `request.file({ limits })`,
+  // но НЕ расширить (busboy строит парсер по minimum глобальное/per-call). Под этот
+  // потолок укладываются типовые фотографии (3-10 MB) и PDF (до 25 MB) для /web/chat-uploads;
+  // image-uploads админки (slides) тоже легко.
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 await server.register(fastifyStatic, {
   root: join(__dirname, "..", "uploads"),
