@@ -1113,13 +1113,25 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
     });
     debounceSlotReply(userId, mediaGroupId, async () => {
       const tracked = consumeDistribution(userId, mediaGroupId);
-      if (tracked && tracked.overflowCount > 0) {
-        await ctx.reply(buildOverflowMessage(model, ctx.t));
+      // Re-read active mode внутри debounced callback: outer-scope `activeModeSlots`
+      // захвачен в момент входа в handler, а debounce-окно ~500мс — за это время
+      // юзер мог переключить режим через mode picker, и старые слоты стали
+      // stale. Перечитываем только если действительно нужен (есть overflow или
+      // caption для запуска генерации) — иначе лишний DB-read, плюс если он
+      // бросит на пустом tracked debounceSlotReply проглотит exception и
+      // sendVideoMediaInputStatus не отработает.
+      const needsFreshSlots = !!tracked && (tracked.overflowCount > 0 || !!tracked.caption);
+      const freshSlots = needsFreshSlots ? await getActiveModelSlots(userId, modelId) : null;
+      // freshSlots может быть [] если юзер перещёл в t2v (textOnly) mid-debounce
+      // — buildOverflowMessage вернёт "", а ctx.reply("") бросит Telegram 400.
+      // Проверяем длину, не саму truthy-ность массива.
+      if (tracked && tracked.overflowCount > 0 && freshSlots && freshSlots.length > 0) {
+        await ctx.reply(buildOverflowMessage(model, ctx.t, freshSlots));
       }
       await sendVideoMediaInputStatus(ctx);
-      if (tracked?.caption) {
+      if (tracked?.caption && freshSlots) {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
-        const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
+        const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
           await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
         }
@@ -1474,13 +1486,25 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
     });
     debounceSlotReply(userId, mediaGroupId, async () => {
       const tracked = consumeDistribution(userId, mediaGroupId);
-      if (tracked && tracked.overflowCount > 0) {
-        await ctx.reply(buildOverflowMessage(model, ctx.t));
+      // Re-read active mode внутри debounced callback: outer-scope `activeModeSlots`
+      // захвачен в момент входа в handler, а debounce-окно ~500мс — за это время
+      // юзер мог переключить режим через mode picker, и старые слоты стали
+      // stale. Перечитываем только если действительно нужен (есть overflow или
+      // caption для запуска генерации) — иначе лишний DB-read, плюс если он
+      // бросит на пустом tracked debounceSlotReply проглотит exception и
+      // sendVideoMediaInputStatus не отработает.
+      const needsFreshSlots = !!tracked && (tracked.overflowCount > 0 || !!tracked.caption);
+      const freshSlots = needsFreshSlots ? await getActiveModelSlots(userId, modelId) : null;
+      // freshSlots может быть [] если юзер перещёл в t2v (textOnly) mid-debounce
+      // — buildOverflowMessage вернёт "", а ctx.reply("") бросит Telegram 400.
+      // Проверяем длину, не саму truthy-ность массива.
+      if (tracked && tracked.overflowCount > 0 && freshSlots && freshSlots.length > 0) {
+        await ctx.reply(buildOverflowMessage(model, ctx.t, freshSlots));
       }
       await sendVideoMediaInputStatus(ctx);
-      if (tracked?.caption) {
+      if (tracked?.caption && freshSlots) {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
-        const missingRequired = findMissingRequiredSlot(modelId, activeModeSlots, finalInputs);
+        const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
           await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
         }
