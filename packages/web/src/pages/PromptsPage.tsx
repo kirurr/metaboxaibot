@@ -205,10 +205,19 @@ size-full`,
       onClick={openDialog}
     >
       {data.section === "design" && (
-        <img
-          className=" transition-transform absolute object-cover inset-0 size-full"
-          src={data.mediaUrl ?? "https://picsum.photos/400"}
-        />
+        <>
+          {showThumbnail && (
+            <img
+              className=" transition-transform absolute object-cover inset-0 size-full"
+              src={data.thumbnailUrl ?? "https://picsum.photos/400"}
+            />
+          )}
+          <img
+            onLoad={() => setShowThumbnail(false)}
+            className=" transition-transform absolute object-cover inset-0 size-full"
+            src={data.mediaUrl ?? "https://picsum.photos/400"}
+          />
+        </>
       )}
 
       {data.section === "video" && (
