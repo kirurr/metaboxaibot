@@ -1,13 +1,17 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import clsx from "clsx";
+import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
+import type { WebModelDto } from "@/api/models";
 
 /**
  * Капабилити-табы в TopNav: «Chat / Image / Video / Audio».
  * Для image/video/audio при наведении показывается mega-menu с двумя колонками
  * (Features + Models). Клик по любому пункту меню — переход на соответствующий
- * раздел (`/chat`, `/image`, `/video`, `/audio`). Сейчас все элементы — заглушки
- * под будущую динамическую загрузку моделей/режимов.
+ * раздел (`/chat`, `/image`, `/video`, `/audio`).
+ *
+ * Колонка «Features» — статичная (use-case ярлыки, не настоящие модели).
+ * Колонка «Models» — динамическая из `useModelsStore` (`/web/models`).
  *
  * Источник дизайна: `aibox_template/ai-box-pre-tilted.html` (CapabilityTabs).
  */
@@ -28,6 +32,24 @@ type MenuItem = {
   letter?: string;
   badge?: "TOP" | "NEW";
 };
+
+// Сколько моделей показываем в mega-menu максимум — чтобы не утопить колонку.
+const MAX_MODELS_IN_MENU = 6;
+
+/** Имя моделей в UI: для family-моделей подставляем familyName, иначе берём `name` как есть. */
+function displayModelName(m: WebModelDto): string {
+  return m.familyName ?? m.name;
+}
+
+/** Короткое описание для строки в mega-menu (приоритет: описание варианта → общее описание). */
+function displayModelDesc(m: WebModelDto): string {
+  return m.descriptionOverride ?? m.description;
+}
+
+/** Берём первую букву family или name — для квадратного «letter» аватара слева. */
+function modelLetter(m: WebModelDto): string {
+  return displayModelName(m).trim().slice(0, 1).toUpperCase() || "·";
+}
 
 const FEATURE_MENUS: Record<string, MenuItem[]> = {
   image: [
@@ -65,44 +87,6 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
   ],
 };
 
-const MODEL_MENUS: Record<string, MenuItem[]> = {
-  image: [
-    {
-      name: "nano-banana-pro",
-      desc: "Фотореализм, продакт-съёмка, портреты.",
-      letter: "N",
-      badge: "TOP",
-    },
-    { name: "Flux Pro", desc: "Тонкая работа со светом и текстурами.", letter: "F" },
-    { name: "Flux LoRA", desc: "Обучение на вашем лице или бренде.", letter: "L", badge: "NEW" },
-    { name: "Ideogram v3", desc: "Сильно в типографике, логотипах, постерах.", letter: "I" },
-    { name: "Midjourney v7", desc: "Стилизованные кадры, кино, иллюстрация.", letter: "M" },
-  ],
-  video: [
-    {
-      name: "Runway Gen-4",
-      desc: "Кинематография, плавные камеры, сложные композиции.",
-      letter: "R",
-      badge: "TOP",
-    },
-    { name: "HeyGen", desc: "Говорящие аватары и дубляж в липсинк.", letter: "H" },
-    { name: "Kling 1.6", desc: "Сложная физика и реалистичная природа.", letter: "K" },
-    { name: "Veo 3", desc: "Нативные 1080p, высокая детализация.", letter: "V", badge: "NEW" },
-    { name: "Sora 2", desc: "OpenAI — самая продвинутая видео-модель.", letter: "S" },
-  ],
-  audio: [
-    {
-      name: "Cartesia Sonic",
-      desc: "TTS с реалистичной интонацией.",
-      letter: "C",
-      badge: "TOP",
-    },
-    { name: "ElevenLabs v3", desc: "Клон голоса и многоязычный дубляж.", letter: "E" },
-    { name: "Suno v4", desc: "Музыка целиком с вокалом по промпту.", letter: "S", badge: "NEW" },
-    { name: "Whisper Large", desc: "Распознавание речи, транскрибация.", letter: "W" },
-  ],
-};
-
 function isActiveRoute(capRoute: string, currentPath: string): boolean {
   if (capRoute === "/chat") return currentPath.startsWith("/chat");
   return currentPath === capRoute;
@@ -111,9 +95,36 @@ function isActiveRoute(capRoute: string, currentPath: string): boolean {
 export function CapabilityTabs() {
   const navigate = useNavigate();
   const location = useLocation();
+  const allModels = useModelsStore((s) => s.models);
   const [hovered, setHovered] = useState<string | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Группируем модели по capability один раз на изменение каталога — все 4 ключа,
+  // даже если для секции каталог пока пустой (загрузка не завершена). Семейства
+  // дедупим (Flux Pro/LoRA/etc. → одна строка с familyName), чтобы колонка не
+  // утопала: семейство — это бренд, варианты выбираются уже внутри страницы.
+  const modelsByCap = useMemo(() => {
+    const dedup = (cap: Capability["id"]): WebModelDto[] => {
+      const list = modelsForCapability(allModels, cap);
+      const seenFamilies = new Set<string>();
+      const out: WebModelDto[] = [];
+      for (const m of list) {
+        if (m.familyId) {
+          if (seenFamilies.has(m.familyId)) continue;
+          seenFamilies.add(m.familyId);
+        }
+        out.push(m);
+      }
+      return out;
+    };
+    return {
+      text: dedup("text"),
+      image: dedup("image"),
+      video: dedup("video"),
+      audio: dedup("audio"),
+    } satisfies Record<Capability["id"], WebModelDto[]>;
+  }, [allModels]);
 
   const openMenu = (id: string) => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -146,7 +157,7 @@ export function CapabilityTabs() {
     <div className="cap-tabs" onMouseLeave={scheduleClose}>
       {CAPABILITIES.map((c) => {
         const features = FEATURE_MENUS[c.id] ?? [];
-        const models = MODEL_MENUS[c.id] ?? [];
+        const models = modelsByCap[c.id] ?? [];
         const isMega = c.id !== "text" && features.length > 0;
         const showMenu = hovered === c.id && isMega;
         const active = isActiveRoute(c.route, location.pathname);
@@ -187,22 +198,19 @@ export function CapabilityTabs() {
                 <div className="mega-col">
                   <div className="mega-col-head">Models</div>
                   <div className="mega-list">
-                    {models.map((m, i) => (
-                      <button key={i} className="mega-item" onClick={() => pick(c)}>
-                        <span className="mega-ico letter">{m.letter ?? m.name[0]}</span>
-                        <span className="mega-body">
-                          <span className="mega-name">
-                            {m.name}
-                            {m.badge && (
-                              <span className={"mega-badge " + m.badge.toLowerCase()}>
-                                {m.badge}
-                              </span>
-                            )}
+                    {models.length === 0 ? (
+                      <div className="mega-empty">Загрузка моделей…</div>
+                    ) : (
+                      models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                        <button key={m.id} className="mega-item" onClick={() => pick(c)}>
+                          <span className="mega-ico letter">{modelLetter(m)}</span>
+                          <span className="mega-body">
+                            <span className="mega-name">{displayModelName(m)}</span>
+                            <span className="mega-desc">{displayModelDesc(m)}</span>
                           </span>
-                          <span className="mega-desc">{m.desc}</span>
-                        </span>
-                      </button>
-                    ))}
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>

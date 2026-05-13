@@ -20,85 +20,14 @@ import {
 import { db } from "../db.js";
 import { getFileUrl } from "../services/s3.service.js";
 import { logger } from "../logger.js";
-import {
-  AI_MODELS,
-  MODELS_BY_SECTION,
-  MODEL_FAMILIES,
-  type Section,
-  type AIModel,
-} from "@metabox/shared";
+import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
-
-function serializeModelCompact(m: AIModel) {
-  return {
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    section: m.section,
-    // См. routes/models.ts — claude-прокси (kie-claude / evolink-claude) нормализуем
-    // под бренд anthropic для UI.
-    provider:
-      m.provider === "kie-claude" || m.provider === "evolink-claude" ? "anthropic" : m.provider,
-    familyId: m.familyId ?? null,
-    familyName: m.familyId ? (MODEL_FAMILIES[m.familyId]?.name ?? null) : null,
-    familyDefaultModelId: m.familyId ? (MODEL_FAMILIES[m.familyId]?.defaultModelId ?? null) : null,
-    versionLabel: m.versionLabel ?? null,
-    variantLabel: m.variantLabel ?? null,
-    supportsImages: m.supportsImages,
-    supportsDocuments: m.supportsDocuments ?? false,
-  };
-}
 
 export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // Все роуты здесь требуют и авторизации, и привязанного Telegram.
+  // Каталог моделей вынесен в `web-models.ts` (только webAuth, без Telegram).
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-chat"]));
-
-  // ── GET /web/models ─────────────────────────────────────────────────────
-  fastify.get<{ Querystring: { section?: string } }>(
-    "/web/models",
-    {
-      schema: {
-        description: "Get list of AI models, optionally filtered by section",
-        querystring: {
-          type: "object",
-          properties: {
-            section: { type: "string" },
-          },
-        },
-        response: {
-          200: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: true,
-              properties: {
-                id: { type: "string" },
-                name: { type: "string" },
-                description: { type: "string" },
-                section: { type: "string" },
-                provider: { type: "string" },
-                familyId: { type: "string", nullable: true },
-                familyName: { type: "string", nullable: true },
-                familyDefaultModelId: { type: "string", nullable: true },
-                versionLabel: { type: "string", nullable: true },
-                variantLabel: { type: "string", nullable: true },
-                supportsImages: { type: "boolean" },
-                supportsDocuments: { type: "boolean" },
-              },
-            },
-          },
-        },
-      },
-    },
-    async (request) => {
-      const { section } = request.query;
-      const models = section
-        ? (MODELS_BY_SECTION[section as Section] ?? [])
-        : Object.values(AI_MODELS);
-      return models.map(serializeModelCompact);
-    },
-  );
 
   // ── GET /web/balance ────────────────────────────────────────────────────
   fastify.get("/web/balance", { schema: { hide: true } as any }, async (request) => {

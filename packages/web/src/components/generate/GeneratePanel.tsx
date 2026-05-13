@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Sparkles } from "lucide-react";
 
 /**
@@ -6,10 +6,13 @@ import { Sparkles } from "lucide-react";
  * параметров (модель + произвольные dimension'ы + промпт + CTA), справа —
  * пустой превью-стейт. Реальной генерации пока нет: «Generate» включает
  * spinner на пару секунд и оставляет превью пустым.
+ *
+ * `dimensions` может быть как статическим массивом, так и функцией от выбранной
+ * модели — нужно для Image/Video, где набор aspect ratios зависит от модели.
  */
 
 export type GenDimension = {
-  /** Уникальный ключ — пока используется только для React `key`. */
+  /** Уникальный ключ — используется и для React `key`, и как ключ в `dimValues`. */
   key: string;
   /** Лейбл секции, например «Aspect ratio» или «Voice». */
   label: string;
@@ -19,13 +22,20 @@ export type GenDimension = {
   defaultValue: string;
 };
 
-type Model = { id: string; name: string };
+export type GenModel = {
+  id: string;
+  /** Отображаемое имя (для family-моделей — familyName, иначе name). */
+  name: string;
+  /** Опц. краткое описание под именем в подсказке. */
+  description?: string;
+};
 
 export type GeneratePanelProps = {
   title: string;
   subtitle: string;
-  models: readonly Model[];
-  dimensions?: readonly GenDimension[];
+  models: readonly GenModel[];
+  /** Статичный набор параметров; либо функция от текущей модели. */
+  dimensions?: readonly GenDimension[] | ((selectedModelId: string) => readonly GenDimension[]);
   /** Подсказка под input prompt'а. */
   promptPlaceholder: string;
   /** Иконка для пустого превью-стейта (по умолчанию Sparkles). */
@@ -33,24 +43,50 @@ export type GeneratePanelProps = {
   /** Заголовок и текст превью-стейта. */
   previewTitle: string;
   previewText: string;
+  /** Сообщение в селекте при пустом списке (каталог ещё грузится). */
+  emptyModelsLabel?: string;
 };
 
 export function GeneratePanel({
   title,
   subtitle,
   models,
-  dimensions = [],
+  dimensions,
   promptPlaceholder,
   previewIcon,
   previewTitle,
   previewText,
+  emptyModelsLabel = "Загрузка моделей…",
 }: GeneratePanelProps) {
   const [prompt, setPrompt] = useState("");
-  const [modelId, setModelId] = useState(models[0]?.id ?? "");
-  const [dimValues, setDimValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(dimensions.map((d) => [d.key, d.defaultValue])),
-  );
+  const [modelId, setModelId] = useState<string>(models[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
+
+  // Когда каталог приехал/обновился — выставляем дефолтную модель, если ещё не выбрана.
+  useEffect(() => {
+    if (!modelId && models.length > 0) setModelId(models[0].id);
+  }, [models, modelId]);
+
+  const resolvedDims: readonly GenDimension[] = useMemo(() => {
+    if (!dimensions) return [];
+    return typeof dimensions === "function" ? dimensions(modelId) : dimensions;
+  }, [dimensions, modelId]);
+
+  const [dimValues, setDimValues] = useState<Record<string, string>>({});
+
+  // Реконсилируем dimValues при смене набора параметров — если опция
+  // больше не валидна (например, новая модель поддерживает другие aspect ratios),
+  // откатываемся на defaultValue.
+  useEffect(() => {
+    setDimValues((prev) => {
+      const next: Record<string, string> = {};
+      for (const d of resolvedDims) {
+        const current = prev[d.key];
+        next[d.key] = current && d.options.includes(current) ? current : d.defaultValue;
+      }
+      return next;
+    });
+  }, [resolvedDims]);
 
   function generate() {
     if (!prompt.trim() || busy) return;
@@ -81,20 +117,26 @@ export function GeneratePanel({
 
         <div className="gen-field">
           <span className="gen-field-label">Model</span>
-          <select
-            className="gen-select"
-            value={modelId}
-            onChange={(e) => setModelId(e.target.value)}
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+          {models.length === 0 ? (
+            <div className="gen-select" style={{ color: "var(--text-hint)" }}>
+              {emptyModelsLabel}
+            </div>
+          ) : (
+            <select
+              className="gen-select"
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
-        {dimensions.map((d) => (
+        {resolvedDims.map((d) => (
           <div key={d.key} className="gen-field">
             <span className="gen-field-label">{d.label}</span>
             <div className="gen-chips">
@@ -111,7 +153,11 @@ export function GeneratePanel({
           </div>
         ))}
 
-        <button className="gen-cta" disabled={!prompt.trim() || busy} onClick={generate}>
+        <button
+          className="gen-cta"
+          disabled={!prompt.trim() || busy || !modelId}
+          onClick={generate}
+        >
           <Sparkles size={16} />
           {busy ? "Generating…" : "Generate"}
         </button>

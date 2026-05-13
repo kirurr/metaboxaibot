@@ -505,6 +505,12 @@ select {
   background: var(--accent-lighter);
   color: var(--accent-light);
 }
+.mega-empty {
+  padding: 14px 10px;
+  color: var(--text-hint);
+  font-size: 12.5px;
+  text-align: center;
+}
 
 @media (max-width: 820px) {
   .mega-menu {
