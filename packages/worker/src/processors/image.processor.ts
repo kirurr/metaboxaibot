@@ -222,11 +222,24 @@ async function tryVirtualBatchFallbackResubmit(opts: {
 
   if (techRawErrors.length === 0 || !modelMeta) return false;
 
-  // Все failed sub-job'ы должны быть transient KIE-ошибкой.
+  // Все failed sub-job'ы должны быть transient-ошибкой провайдера.
   // Mixed (часть user-facing) → не fallback'аем: юзер увидит specific error.
+  //
+  // Два класса transient'ов:
+  //  - `isKieTransientError`: KIE 5xx + специфичные 422 ("task id is blank",
+  //    "playground failed", "client closed request") — внутренние сбои KIE.
+  //  - `isProviderTemporaryUnavailable`: pattern-match "high demand" /
+  //    "service unavailable" / "task processing failed" — узел провайдера
+  //    перегружен (используется в single-shot пути на poll-stage).
+  //
+  // Раньше тут чекался только KIE-specific → KIE 422 "high demand" (E003)
+  // не классифицировался transient'ом → fallback на virtual batch'е не запускался,
+  // юзер получал K=0 alert вместо переключения на evolink-аналог.
   const failedTechSubs = state.subJobs.filter((s) => s.status === "failed" && s.errorRaw);
   if (failedTechSubs.length === 0) return false;
-  const allTransient = failedTechSubs.every((s) => isKieTransientError(s.errorRaw));
+  const allTransient = failedTechSubs.every(
+    (s) => isKieTransientError(s.errorRaw) || isProviderTemporaryUnavailable(s.errorRaw),
+  );
   if (!allTransient) return false;
 
   // Refetch inputData — closures внутри try-блока могут быть устаревшими.
