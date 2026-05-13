@@ -1,420 +1,631 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
-  ArrowRight,
-  ArrowUp,
-  BookOpen,
+  Check,
   ChevronDown,
-  Code2,
+  ChevronLeft,
   Copy,
   Download,
-  Image as ImageIcon,
-  MessageSquare,
-  Mic,
+  Menu,
   MoreHorizontal,
   Paperclip,
-  Play,
+  Pencil,
+  Plus,
   RefreshCw,
+  Search,
   Sparkles,
-  User as UserIcon,
-  AudioWaveform,
+  Trash2,
+  X,
+  ArrowUp,
 } from "lucide-react";
+import clsx from "clsx";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
+import { useDialogsStore } from "@/stores/dialogsStore";
+import { useAuthStore } from "@/stores/authStore";
+import * as dialogsApi from "@/api/dialogs";
+import type { DialogDto, MessageDto } from "@/api/dialogs";
+import type { WebModelDto } from "@/api/models";
+import type { ApiError } from "@/api/client";
 
-type Msg = { role: "user" | "ai"; text: string; meta?: string };
-
-const HOME_TOOLS = [
-  {
-    id: "chat",
-    name: "Chat",
-    desc: "Reasoning, writing, code. The everyday model.",
-    tag: "Sonnet 4.5",
-    icon: <MessageSquare size={22} />,
-  },
-  {
-    id: "image",
-    name: "Image",
-    desc: "Photoreal, illustration, product shots.",
-    tag: "nano-banana-pro",
-    icon: <ImageIcon size={22} />,
-  },
-  {
-    id: "video",
-    name: "Video",
-    desc: "Cinematic shots, motion, avatars.",
-    tag: "heygen · runway",
-    icon: <Play size={22} />,
-  },
-  {
-    id: "voice",
-    name: "Voice",
-    desc: "Text-to-speech, dubbing, narration.",
-    tag: "cartesia",
-    icon: <AudioWaveform size={22} />,
-  },
-  {
-    id: "avatar",
-    name: "Avatar",
-    desc: "Train a likeness once, generate forever.",
-    tag: "flux-lora",
-    icon: <UserIcon size={22} />,
-  },
-  {
-    id: "code",
-    name: "Code",
-    desc: "Refactor, debug, scaffold whole files.",
-    tag: "GPT-5",
-    icon: <Code2 size={22} />,
-  },
-];
-
-type Gen = {
-  span: "gc-3" | "gc-4" | "gc-5" | "gc-6" | "gc-7" | "gc-8";
-  media: "media-sq" | "media-port" | "media-land" | "media-wide";
-  kind: string;
-  model: string;
-  prompt: string;
-  credits: string;
+type Msg = {
+  role: "user" | "ai";
+  text: string;
+  meta?: string;
+  /** Локальный id для оптимистичных user-сообщений (бэк не возвращает их id до done). */
+  localId?: string;
 };
 
-const FEATURED_GENS: Gen[] = [
-  {
-    span: "gc-5",
-    media: "media-land",
-    kind: "Video",
-    model: "heygen",
-    prompt: "Founder explainer · 28s · clean studio lighting · soft B-roll cuts to product UI",
-    credits: "5.4k tok",
-  },
-  {
-    span: "gc-4",
-    media: "media-port",
-    kind: "Image",
-    model: "nano-banana-pro",
-    prompt: "Editorial portrait, hard light, 85mm, kodak portra grain",
-    credits: "1.2k tok",
-  },
-  {
-    span: "gc-3",
-    media: "media-sq",
-    kind: "Image",
-    model: "flux-pro",
-    prompt: "Hero shot for a minimalist espresso machine on travertine",
-    credits: "0.9k tok",
-  },
-  {
-    span: "gc-4",
-    media: "media-sq",
-    kind: "Audio",
-    model: "cartesia",
-    prompt: "British male narrator, warm, neutral pace · 1m 12s",
-    credits: "0.2k tok",
-  },
-  {
-    span: "gc-4",
-    media: "media-land",
-    kind: "Chat",
-    model: "Sonnet 4.5",
-    prompt: "Restructure my Series A pitch to lead with the wedge, not the vision",
-    credits: "2.1k tok",
-  },
-  {
-    span: "gc-4",
-    media: "media-port",
-    kind: "Video",
-    model: "runway",
-    prompt: "Cinematic dolly-in on a city skyline at golden hour, anamorphic flare",
-    credits: "8.0k tok",
-  },
-  {
-    span: "gc-6",
-    media: "media-wide",
-    kind: "Image",
-    model: "nano-banana-pro",
-    prompt: "Brutalist concrete interior, soft north light, single figure walking, 4:3 ratio",
-    credits: "1.4k tok",
-  },
-  {
-    span: "gc-6",
-    media: "media-wide",
-    kind: "Image",
-    model: "flux-pro",
-    prompt: "Product comp for matte-black headphones on raw linen with single specular highlight",
-    credits: "1.1k tok",
-  },
-];
-
-const RECENT_GENS = [
-  {
-    title: "Q3 board narrative",
-    model: "Sonnet 4.5",
-    time: "2h ago",
-    ico: <MessageSquare size={18} />,
-  },
-  {
-    title: "Espresso machine hero shot",
-    model: "nano-banana-pro",
-    time: "Yesterday",
-    ico: <ImageIcon size={18} />,
-  },
-  { title: "Founder explainer · 28s", model: "heygen", time: "Yesterday", ico: <Play size={18} /> },
-  {
-    title: "Onboarding voiceover",
-    model: "cartesia",
-    time: "Mon",
-    ico: <AudioWaveform size={18} />,
-  },
-  { title: "Cohort retention SQL", model: "GPT-5", time: "Mon", ico: <Code2 size={18} /> },
-];
+const SECTION = "gpt";
 
 const STARTER_PROMPTS = [
-  { t: "Restructure my pitch", i: <BookOpen size={14} /> },
-  { t: "Logo concepts for a brand", i: <ImageIcon size={14} /> },
-  { t: "Cinematic product shot", i: <Sparkles size={14} /> },
-  { t: "Voiceover from this text", i: <AudioWaveform size={14} /> },
-  { t: "Explain this code", i: <Code2 size={14} /> },
+  "Напиши план запуска продукта",
+  "Объясни этот код строка за строкой",
+  "Придумай название для бренда чая",
+  "Сожми финансовый отчёт в 5 пунктов",
 ];
 
+function modelDisplayName(m: WebModelDto): string {
+  return m.familyName ?? m.name;
+}
+function modelDesc(m: WebModelDto): string {
+  return m.descriptionOverride ?? m.description;
+}
+function modelRate(m: WebModelDto): string {
+  const n = Math.round(m.tokenCostApprox / 10) * 10;
+  const unit =
+    m.tokenCostUnit === "msg"
+      ? "/ msg"
+      : m.tokenCostUnit === "mpx"
+        ? "/ MP"
+        : m.tokenCostUnit === "second"
+          ? "/ sec"
+          : m.tokenCostUnit === "kchar"
+            ? "/ 1k chars"
+            : m.tokenCostUnit === "mvideotoken"
+              ? "/ M vtok"
+              : "/ req";
+  return `≈ ${n.toLocaleString("ru-RU")} т ${unit}`;
+}
+
+function dialogTitle(d: DialogDto): string {
+  return d.title ?? "Новый диалог";
+}
+
+/** "сейчас" / "5м" / "2ч" / "Yest" / "Mon" / "Apr 28" — компактная подпись справа от треда. */
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "сейчас";
+  if (diffMin < 60) return `${diffMin}м`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}ч`;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const dayStart = new Date(d);
+  dayStart.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((today.getTime() - dayStart.getTime()) / 86_400_000);
+  if (diffDays === 1) return "Вчера";
+  if (diffDays < 7) {
+    return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][d.getDay()];
+  }
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+/**
+ * Чат — sidebar c реальными диалогами пользователя (через `/web/dialogs`),
+ * активная сессия с подгрузкой истории и SSE-стримом ответа.
+ *
+ * Все запросы под `webTelegramLinkedPreHandler` — если Telegram не привязан,
+ * модалка открывается автоматически из `apiClient`.
+ */
 export default function Chat() {
   const isMobile = useIsMobile();
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [draft, setDraft] = useState("");
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const prefill = (location.state as { prefill?: string } | null)?.prefill ?? "";
 
+  const allModels = useModelsStore((s) => s.models);
+  const chatModels = useMemo(() => {
+    const seen = new Set<string>();
+    const out: WebModelDto[] = [];
+    for (const m of modelsForCapability(allModels, "text")) {
+      const key = m.familyId ?? m.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }, [allModels]);
+
+  const dialogs = useDialogsStore((s) => s.dialogs);
+  const dialogsLoaded = useDialogsStore((s) => s.loaded);
+  const dialogsLoading = useDialogsStore((s) => s.isLoading);
+  const dialogsErrorCode = useDialogsStore((s) => s.errorCode);
+  const loadDialogs = useDialogsStore((s) => s.load);
+  const prependDialog = useDialogsStore((s) => s.prepend);
+  const renameInStore = useDialogsStore((s) => s.rename);
+  const removeFromStore = useDialogsStore((s) => s.remove);
+  const bumpInStore = useDialogsStore((s) => s.bump);
+
+  const setUser = useAuthStore((s) => s.setUser);
+  const currentUser = useAuthStore((s) => s.user);
+
+  // null = «черновик», ещё не созданный на бэке. После первой отправки
+  // вызовется `createDialog` и activeId станет реальным.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [draft, setDraft] = useState(prefill);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelId, setModelId] = useState<string>("");
+  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
+  const [menuForId, setMenuForId] = useState<string | null>(null);
+
+  const sideVisible = isMobile ? sideOpen : !sideCollapsed;
+  const sideRef = useRef<HTMLElement | null>(null);
+  const modelPickRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Маркируем id диалогов, для которых история уже загружена/прогрета. Нужен
+  // потому что после `createDialog` мы знаем, что диалог пустой, и эффект ниже
+  // не должен ходить за `getMessages` — иначе он перетрёт оптимистично-добавленные
+  // user-сообщение и placeholder AI-bubble.
+  const loadedRef = useRef<string | null>(null);
+
+  // Дефолтная модель — первая из каталога после загрузки.
+  useEffect(() => {
+    if (!modelId && chatModels.length > 0) setModelId(chatModels[0].id);
+  }, [chatModels, modelId]);
+
+  // Грузим список диалогов один раз после монтирования.
+  useEffect(() => {
+    loadDialogs(SECTION);
+  }, [loadDialogs]);
+
+  // Mobile drawer outside-click.
+  useEffect(() => {
+    if (!isMobile || !sideOpen) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (sideRef.current && !sideRef.current.contains(e.target as Node)) setSideOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [isMobile, sideOpen]);
+
+  // Model-pick popover outside-click.
+  useEffect(() => {
+    if (!modelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (modelPickRef.current && !modelPickRef.current.contains(e.target as Node)) {
+        setModelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [modelOpen]);
+
+  // Auto-scroll к низу при росте треда.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  function autosize() {
+  // При смене активного диалога — подтягиваем его историю. Если он уже помечен
+  // в `loadedRef` (например, только что создан в send() или ранее уже грузили),
+  // повторного fetch не делаем.
+  useEffect(() => {
+    if (!activeId) {
+      setMessages([]);
+      return;
+    }
+    if (loadedRef.current === activeId) return;
+    let cancelled = false;
+    setMessagesLoading(true);
+    setSendError(null);
+    dialogsApi
+      .getMessages(activeId)
+      .then((items) => {
+        if (cancelled) return;
+        loadedRef.current = activeId;
+        setMessages(items.map(messageDtoToMsg));
+      })
+      .catch((err: ApiError) => {
+        if (cancelled) return;
+        // 404 — диалог удалён, сбрасываем активный.
+        if (err.status === 404) {
+          setActiveId(null);
+          removeFromStore(activeId);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMessagesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, removeFromStore]);
+
+  // На unmount или смену диалога — отменяем активный SSE-stream.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const selectedModel = useMemo(
+    () => chatModels.find((m) => m.id === modelId) ?? chatModels[0],
+    [chatModels, modelId],
+  );
+  const activeDialog = activeId ? dialogs.find((d) => d.id === activeId) : null;
+
+  const autosize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+  }, []);
+
+  // Создание нового черновика — без обращения к бэку. Реальный POST вылетит на
+  // первой отправке (см. send()).
+  function newChat() {
+    abortRef.current?.abort();
+    setActiveId(null);
+    setMessages([]);
+    setDraft("");
+    setSendError(null);
+    setSideOpen(false);
+    setTimeout(() => taRef.current?.focus(), 0);
   }
 
-  function send() {
-    const t = draft.trim();
-    if (!t) return;
-    setMessages((m) => [...m, { role: "user", text: t }]);
+  async function send() {
+    const text = draft.trim();
+    if (!text || sending) return;
+    if (!selectedModel) {
+      setSendError("Модель ещё не загрузилась");
+      return;
+    }
+
+    setSendError(null);
+    setSending(true);
+
+    // 1) Гарантируем существующий диалог на бэке.
+    let dialogId = activeId;
+    if (!dialogId) {
+      try {
+        const created = await dialogsApi.createDialog({
+          section: SECTION,
+          modelId: selectedModel.id,
+          // Первое сообщение в качестве title — компактнее, чем «Новый диалог».
+          title: text.slice(0, 60),
+        });
+        dialogId = created.id;
+        prependDialog(created);
+        // Помечаем как «уже прогретый», иначе message-loader-effect сбегает за
+        // getMessages и затирает оптимистично-добавленные ниже messages.
+        loadedRef.current = created.id;
+        setActiveId(created.id);
+      } catch (err) {
+        const e = err as ApiError;
+        setSending(false);
+        setSendError(e.message || "Не удалось создать диалог");
+        return;
+      }
+    }
+
+    // 2) Оптимистично добавляем user-сообщение + пустой AI-bubble.
+    const localId = `local-${Date.now()}`;
+    setMessages((m) => [
+      ...m,
+      { role: "user", text, localId },
+      { role: "ai", text: "", localId: localId + ".ai" },
+    ]);
     setDraft("");
     setTimeout(autosize, 0);
-    setTimeout(() => {
-      setMessages((m) => [
-        ...m,
+
+    // 3) Стримим ответ.
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    let tokensUsed = 0;
+
+    try {
+      await dialogsApi.streamMessage(
+        dialogId,
+        text,
         {
-          role: "ai",
-          text: "Thinking through this — here are the three angles I'd consider. Each has a different cost in tokens but a meaningfully different output. Tap the one that fits.",
-          meta: "Claude Sonnet · 184 tokens · 1.4s",
+          onChunk: (chunk) => {
+            setMessages((m) => {
+              const next = [...m];
+              const last = next[next.length - 1];
+              if (last && last.role === "ai") {
+                next[next.length - 1] = { ...last, text: last.text + chunk };
+              }
+              return next;
+            });
+          },
+          onDone: ({ tokensUsed: used, balance }) => {
+            tokensUsed = used;
+            // Финализируем мету у последнего AI-сообщения.
+            setMessages((m) => {
+              const next = [...m];
+              const last = next[next.length - 1];
+              if (last && last.role === "ai") {
+                const modelName = selectedModel ? modelDisplayName(selectedModel) : "AI";
+                next[next.length - 1] = {
+                  ...last,
+                  meta: `${modelName} · ${used} tokens`,
+                };
+              }
+              return next;
+            });
+            // Обновляем баланс юзера сразу — без отдельного запроса /web/balance.
+            if (currentUser) {
+              setUser({
+                ...currentUser,
+                tokenBalance: balance.tokenBalance,
+                subscriptionTokenBalance: balance.subscriptionTokenBalance,
+              });
+            }
+          },
+          onError: ({ message }) => {
+            setSendError(message);
+            // Сносим placeholder AI-bubble — модель не успела ответить.
+            setMessages((m) => m.filter((x) => x.localId !== localId + ".ai"));
+          },
         },
-      ]);
-    }, 720);
+        ctrl.signal,
+      );
+    } catch (err) {
+      const e = err as ApiError;
+      if (e.code !== "TELEGRAM_NOT_LINKED") {
+        setSendError(e.message || "Ошибка отправки");
+      }
+      setMessages((m) => m.filter((x) => x.localId !== localId + ".ai"));
+    } finally {
+      setSending(false);
+      abortRef.current = null;
+      if (dialogId && tokensUsed > 0) bumpInStore(dialogId);
+    }
   }
 
+  async function handleRename(id: string) {
+    const current = dialogs.find((d) => d.id === id);
+    const next = window.prompt(
+      "Новое название",
+      dialogTitle(current ?? ({ title: null } as DialogDto)),
+    );
+    if (!next || next.trim().length === 0) return;
+    const title = next.trim();
+    try {
+      await dialogsApi.renameDialog(id, title);
+      renameInStore(id, title);
+    } catch (err) {
+      const e = err as ApiError;
+      setSendError(e.message || "Не удалось переименовать");
+    } finally {
+      setMenuForId(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm("Удалить диалог? Историю восстановить нельзя.")) return;
+    try {
+      await dialogsApi.deleteDialog(id);
+      removeFromStore(id);
+      if (activeId === id) {
+        setActiveId(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      const e = err as ApiError;
+      setSendError(e.message || "Не удалось удалить");
+    } finally {
+      setMenuForId(null);
+    }
+  }
+
+  const filteredDialogs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return dialogs;
+    return dialogs.filter((d) => dialogTitle(d).toLowerCase().includes(q));
+  }, [dialogs, search]);
+
   return (
-    <div className="page chat-wrap" style={{ paddingTop: isMobile ? 16 : 24, paddingBottom: 0 }}>
-      {!isMobile && (
-        <div className="topbar">
-          <div className="model-picker">
-            <span className="dot" /> Claude Sonnet 4.5 <ChevronDown size={14} />
-          </div>
-          <div className="muted" style={{ fontSize: 13 }}>
-            Conversation started 14:02 · 8 messages
-          </div>
-          <div className="row" style={{ marginLeft: "auto", gap: 6 }}>
-            <button className="btn btn-ghost btn-sm">
-              <RefreshCw size={15} /> New chat
+    <div className={clsx("chat-shell", !isMobile && sideCollapsed && "side-collapsed")}>
+      {sideVisible && (
+        <aside ref={sideRef} className={clsx("chat-side", sideOpen && "open open-backdrop")}>
+          <div className="cs-head">
+            <button className="btn btn-primary btn-sm cs-new" onClick={newChat}>
+              <Plus size={14} /> Новый диалог
             </button>
-            <button className="btn btn-ghost btn-sm">
-              <Download size={15} /> Export
+            <button
+              className="cs-collapse"
+              title={isMobile ? "Закрыть" : "Свернуть"}
+              onClick={() => {
+                if (isMobile) setSideOpen(false);
+                else setSideCollapsed(true);
+              }}
+            >
+              {isMobile ? <X size={16} /> : <ChevronLeft size={16} />}
             </button>
           </div>
-        </div>
-      )}
-
-      <div className="chat-scroll" ref={scrollRef}>
-        {messages.length === 0 ? (
-          <div className="home">
-            <section className="home-hero rise">
-              <span className="eyebrow">
-                <span className="live-dot" /> Good evening, Alex
-              </span>
-              <h1 className="home-h1">
-                Create <em>anything.</em>
-              </h1>
-              <p className="sub">
-                Chat, image, video, voice — every model in one place. Pick a tool below, or just
-                start typing.
-              </p>
-              <div className="home-prompt">
-                <input
-                  placeholder="Describe what you want to make…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && draft.trim()) send();
+          <div className="cs-search">
+            <Search size={14} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Поиск по диалогам"
+            />
+          </div>
+          <div className="cs-list">
+            {!dialogsLoaded && dialogsLoading && <div className="cs-group">Загрузка…</div>}
+            {dialogsLoaded && dialogsErrorCode === "TELEGRAM_NOT_LINKED" && (
+              <div className="cs-group" style={{ color: "var(--text-secondary)" }}>
+                Привяжите Telegram, чтобы видеть историю диалогов.
+              </div>
+            )}
+            {dialogsLoaded && filteredDialogs.length === 0 && !dialogsErrorCode && (
+              <div className="cs-group">{search ? "Ничего не найдено" : "Пока нет диалогов"}</div>
+            )}
+            {filteredDialogs.length > 0 && <div className="cs-group">Недавние</div>}
+            {filteredDialogs.map((d) => (
+              <div key={d.id} style={{ position: "relative" }}>
+                <button
+                  className={clsx("cs-item", d.id === activeId && "active")}
+                  onClick={() => {
+                    setActiveId(d.id);
+                    setSideOpen(false);
                   }}
-                />
-                <button className="pill-model" title="Switch model">
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 99,
-                      background: "var(--accent)",
-                      display: "inline-block",
-                    }}
-                  />{" "}
-                  Sonnet 4.5 <ChevronDown size={12} />
-                </button>
-                <button className="send-btn" disabled={!draft.trim()} onClick={send} title="Send">
-                  <ArrowUp size={18} />
-                </button>
-              </div>
-              <div className="starter-chips">
-                {STARTER_PROMPTS.map((s, i) => (
-                  <button key={i} className="starter-chip" onClick={() => setDraft(s.t)}>
-                    {s.i} {s.t}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="rise d1">
-              <div className="home-sec-head">
-                <div>
-                  <h2>Jump into a tool.</h2>
-                  <p>Each one is one click away. We&apos;ll pre-load the best model for the job.</p>
-                </div>
-              </div>
-              <div className="tools-grid">
-                {HOME_TOOLS.map((t) => (
-                  <button key={t.id} className="tool-tile" onClick={() => setDraft("")}>
-                    <span className="ti-glow" />
-                    <div className="ti-ico">{t.icon}</div>
-                    <div className="ti-name">{t.name}</div>
-                    <div className="ti-desc">{t.desc}</div>
-                    <div className="ti-foot">
-                      <span className="mono" style={{ fontSize: 11 }}>
-                        {t.tag}
-                      </span>
-                      <span className="arr">
-                        Open <ArrowRight size={13} />
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="rise d2">
-              <div className="home-sec-head">
-                <div>
-                  <h2>Featured today.</h2>
-                  <p>Curated generations from the community. Tap any card to reuse the prompt.</p>
-                </div>
-                <button className="see-all">
-                  Open gallery <ArrowRight size={14} />
-                </button>
-              </div>
-              <div className="gallery-grid">
-                {FEATURED_GENS.map((g, i) => (
-                  <div key={i} className={"gen-card " + g.span}>
-                    <div className={"media " + g.media}>
-                      <span className="label">
-                        {g.kind.toUpperCase()} · {g.model}
-                      </span>
-                      <span className="badge-model">{g.model}</span>
-                      <span className="badge-kind">{g.kind}</span>
-                    </div>
-                    <div className="body">
-                      <div className="prompt-line">{g.prompt}</div>
-                      <div className="meta-row">
-                        <span className="mono">{g.credits}</span>
-                        <span className="use-cta">
-                          Use prompt <ArrowRight size={12} />
-                        </span>
-                      </div>
-                    </div>
+                >
+                  <div className="cs-title">{dialogTitle(d)}</div>
+                  <div className="cs-meta">
+                    <span className="mono">{d.modelId}</span>
+                    <span>{formatRelative(d.updatedAt)}</span>
                   </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rise d3">
-              <div className="home-sec-head">
-                <div>
-                  <h2>Pick up where you left off.</h2>
-                  <p>Your last five sessions, ready to continue.</p>
-                </div>
-                <button className="see-all">
-                  All history <ArrowRight size={14} />
                 </button>
-              </div>
-              <div className="recent-row">
-                {RECENT_GENS.map((r, i) => (
-                  <button key={i} className="recent-card">
-                    <div className="thumb">{r.ico}</div>
-                    <div className="rc-body">
-                      <div className="rc-title">{r.title}</div>
-                      <div className="rc-meta">
-                        <span className="rc-model">{r.model}</span>
-                        <span className="dot" />
-                        <span>{r.time}</span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-        ) : (
-          messages.map((m, i) => (
-            <div key={i} className={"msg " + m.role + " rise"}>
-              {m.role === "ai" && (
-                <div className="ai-mark">
-                  <Sparkles size={16} />
-                </div>
-              )}
-              <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
-                <div className="bubble">
-                  {m.text.split("\n\n").map((p, k) => (
-                    <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
-                      {p}
-                    </p>
-                  ))}
-                </div>
-                {m.role === "ai" && (
-                  <div className="msg-meta">
-                    <span>{m.meta}</span>
-                    <div className="msg-actions">
-                      <button title="Copy">
-                        <Copy size={14} />
-                      </button>
-                      <button title="Regenerate">
-                        <RefreshCw size={14} />
-                      </button>
-                      <button title="More">
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
+                <button
+                  className="cs-item-menu"
+                  aria-label="Действия"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuForId(menuForId === d.id ? null : d.id);
+                  }}
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+                {menuForId === d.id && (
+                  <div className="cs-item-pop" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => handleRename(d.id)}>
+                      <Pencil size={13} /> Переименовать
+                    </button>
+                    <button className="danger" onClick={() => handleDelete(d.id)}>
+                      <Trash2 size={13} /> Удалить
+                    </button>
                   </div>
                 )}
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            ))}
+          </div>
+        </aside>
+      )}
 
-      {messages.length > 0 && (
+      <div className="chat-main">
+        <div className="chat-head">
+          {(isMobile ? !sideOpen : sideCollapsed) && (
+            <button
+              className="expand-side"
+              title="Диалоги"
+              onClick={() => {
+                if (isMobile) setSideOpen(true);
+                else setSideCollapsed(false);
+              }}
+            >
+              <Menu size={18} />
+            </button>
+          )}
+          <div className="chat-title">
+            <div className="ct-name">
+              {activeDialog ? dialogTitle(activeDialog) : "Новый диалог"}
+            </div>
+            <div className="ct-sub">
+              {messagesLoading
+                ? "Загрузка истории…"
+                : messages.length === 0
+                  ? "Начните новый диалог"
+                  : `${messages.length} сообщений`}
+            </div>
+          </div>
+          <div className="ch-actions">
+            <button className="btn btn-ghost btn-sm" onClick={newChat}>
+              <Plus size={15} /> Новый
+            </button>
+            {!isMobile && activeDialog && (
+              <button className="btn btn-ghost btn-sm" disabled title="Скоро">
+                <Download size={15} /> Export
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="chat-scroll" ref={scrollRef}>
+          {messages.length === 0 && !messagesLoading ? (
+            <div className="chat-empty">
+              <div className="ce-mark">
+                <Sparkles size={28} />
+              </div>
+              <h2>Начните новый диалог</h2>
+              <p>Спросите, попросите написать или проанализировать — модель выбирается ниже.</p>
+              <div className="ce-suggest">
+                {STARTER_PROMPTS.map((s) => (
+                  <button key={s} onClick={() => setDraft(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="chat-thread">
+              {messages.map((m, i) => (
+                <div key={i} className={"msg " + m.role + " rise"}>
+                  {m.role === "ai" && (
+                    <div className="ai-mark">
+                      <Sparkles size={16} />
+                    </div>
+                  )}
+                  <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
+                    <div className="bubble">
+                      {m.text.length === 0 && m.role === "ai" ? (
+                        <span className="msg-typing">…</span>
+                      ) : (
+                        m.text.split("\n\n").map((p, k) => (
+                          <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
+                            {p}
+                          </p>
+                        ))
+                      )}
+                    </div>
+                    {m.role === "ai" && m.meta && (
+                      <div className="msg-meta">
+                        <span>{m.meta}</span>
+                        <div className="msg-actions">
+                          <button
+                            title="Copy"
+                            onClick={() => navigator.clipboard?.writeText(m.text)}
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button title="More">
+                            <MoreHorizontal size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {messagesLoading && (
+                <div className="msg ai">
+                  <div className="ai-mark">
+                    <Sparkles size={16} />
+                  </div>
+                  <div className="bubble">
+                    <span className="msg-typing">Загрузка…</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {sendError && (
+          <div className="chat-error">
+            <span>{sendError}</span>
+            <button onClick={() => setSendError(null)} aria-label="Закрыть">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="composer">
           <div className="composer-inner">
             <div className="composer-row">
-              <button className="tool" title="Attach">
+              <button className="tool" title="Attach" disabled>
                 <Paperclip size={18} />
               </button>
               <textarea
                 ref={taRef}
-                placeholder="Ask AI Box anything…"
+                placeholder="Спросить AI Box…"
                 value={draft}
                 rows={1}
                 onInput={autosize}
@@ -426,22 +637,62 @@ export default function Chat() {
                   }
                 }}
               />
-              <button className="tool" title="Voice">
-                <Mic size={18} />
-              </button>
-              <button className="send" disabled={!draft.trim()} onClick={send} title="Send">
-                <ArrowUp size={18} />
+              <button
+                className="send"
+                disabled={!draft.trim() || sending}
+                onClick={send}
+                title={sending ? "Отправка…" : "Отправить"}
+              >
+                {sending ? <RefreshCw size={18} className="anim-spin" /> : <ArrowUp size={18} />}
               </button>
             </div>
-          </div>
-          <div className="composer-meta">
-            <span className="hint">Enter to send · Shift + Enter for newline</span>
-            <span className="hint">
-              ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span> tokens
-            </span>
+            <div className="composer-foot">
+              <div
+                ref={modelPickRef}
+                className="model-pick"
+                onClick={() => setModelOpen(!modelOpen)}
+              >
+                <span className="mp-dot" />
+                <span className="mp-name">
+                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                </span>
+                <ChevronDown size={13} />
+                {modelOpen && (
+                  <div className="mp-pop" onClick={(e) => e.stopPropagation()}>
+                    {chatModels.map((m) => (
+                      <button
+                        key={m.id}
+                        className={clsx("mp-row", m.id === modelId && "on")}
+                        onClick={() => {
+                          setModelId(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <span className="mp-row-name">
+                          {modelDisplayName(m)}
+                          {m.id === modelId && <Check size={12} />}
+                        </span>
+                        <span className="mp-row-rate mono">{modelRate(m)}</span>
+                        <span className="mp-row-desc">{modelDesc(m)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className="hint" style={{ marginLeft: "auto" }}>
+                ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span> токенов
+              </span>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
+}
+
+function messageDtoToMsg(m: MessageDto): Msg {
+  return {
+    role: m.role === "user" ? "user" : "ai",
+    text: m.content,
+  };
 }

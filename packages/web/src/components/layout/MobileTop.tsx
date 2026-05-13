@@ -14,7 +14,7 @@ export function MobileTop() {
 
   return (
     <div className="mobile-top">
-      <NavLink to="/app/chat" className="tn-brand">
+      <NavLink to="/" className="tn-brand">
         <div className="logo-mark">A</div>
         <span className="brand-text">AI Box</span>
       </NavLink>
@@ -22,16 +22,12 @@ export function MobileTop() {
         <button
           className="tn-balance"
           style={{ padding: "0 10px 0 12px" }}
-          onClick={() => navigate("/app/tokens")}
+          onClick={() => navigate("/tokens")}
         >
           <span className="b-dot" />
           <span className="b-val mono">{displayBalance}</span>
         </button>
-        <button
-          className="account-btn"
-          style={{ padding: 2 }}
-          onClick={() => navigate("/app/profile")}
-        >
+        <button className="account-btn" style={{ padding: 2 }} onClick={() => navigate("/profile")}>
           <div className="avatar">{displayInitials}</div>
         </button>
       </div>

@@ -83,6 +83,18 @@ export const videoGenerationService = {
     });
     if (refError) return refError;
 
+    // Pre-flight hardcap: ловим заведомо слишком длинный промпт до enqueue +
+    // submit'а в провайдер (e.g. xAI/Grok 4096 chars). Без этого юзер ждёт
+    // round-trip к провайдеру и получает generic «модель временно недоступна»
+    // вместо конкретного «промпт длиннее N — сократите».
+    //
+    // Счёт по code points (`[...prompt].length`), а НЕ по `.length` (UTF-16
+    // code units): иначе один эмодзи стоит 2 unit'а и юзер с 4090 кириллицей
+    // + 4 эмодзи получает ложный отказ при реальной длине ≈ 4094 chars.
+    if (model?.maxPromptLength && [...params.prompt].length > model.maxPromptLength) {
+      return { key: "promptTooLong", params: { limit: model.maxPromptLength } };
+    }
+
     const adapter = createVideoAdapter(params.modelId);
     if (!adapter.validateRequest) return null;
     const input: VideoInput = {

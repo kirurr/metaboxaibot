@@ -277,6 +277,12 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         msg = `⚠️ Этот Telegram уже привязан к другому аккаунту на Metabox${email ? ` (${email})` : ""}.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
       }
       await ctx.reply(msg);
+      // Линковка не состоялась — НЕ продолжаем общий welcome-flow, иначе
+      // пакет приветственных сообщений перекроет сверху это уведомление,
+      // и юзер не заметит причину отказа. Юзер увидит ошибку в чате и
+      // сможет сделать /start снова (без link-параметра) — на следующий
+      // вызов получит обычный welcome.
+      return;
     }
   } else if (param?.startsWith("linkweb_") && ctx.user) {
     // ── ai.metabox.global → Bot: привязка web-аккаунта ───────────────────────
@@ -292,12 +298,16 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         await ctx.reply(
           "⚠️ Ссылка недействительна или истекла. Вернитесь на сайт и нажмите «Привязать Telegram» ещё раз.",
         );
+        // Линковка не удалась — не показываем welcome-пакет поверх ошибки.
+        return;
       } else {
         // Проверяем конфликт: если на AI Box юзере уже прописан ДРУГОЙ metaboxUserId
         if (ctx.user.metaboxUserId && ctx.user.metaboxUserId !== metaboxUserId) {
           await ctx.reply(
             `⚠️ Этот Telegram уже привязан к другому аккаунту на Metabox.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`,
           );
+          // Линковка не состоялась — не перекрываем уведомление welcome'ом.
+          return;
         } else {
           await db.user.update({
             where: { id: ctx.user.id },
@@ -316,6 +326,8 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     } catch (err) {
       logger.error({ err, state }, "[start linkweb] failed");
       await ctx.reply("❌ Не удалось привязать аккаунт. Попробуйте ещё раз.");
+      // Линковка не удалась — не активируем бота, чтобы юзер увидел ошибку.
+      return;
     }
   } else if (param?.startsWith("ref_") && ctx.user && ctx.user.referredById) {
     // ── Referral deep link ─────────────────────────────────────────────────────

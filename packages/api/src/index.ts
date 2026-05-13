@@ -18,6 +18,7 @@ import { registry } from "./metrics.js";
 import { authRoutes } from "./routes/auth.js";
 import { webAuthRoutes } from "./routes/web-auth.js";
 import { webChatRoutes } from "./routes/web-chat.js";
+import { webModelsRoutes } from "./routes/web-models.js";
 import { webBillingRoutes } from "./routes/web-billing.js";
 import { profileRoutes } from "./routes/profile.js";
 import { dialogsRoutes } from "./routes/dialogs.js";
@@ -193,6 +194,7 @@ server.get("/metrics", { schema: { hide: true } }, async (_request, reply) => {
 await server.register(authRoutes);
 await server.register(webAuthRoutes);
 await server.register(webChatRoutes);
+await server.register(webModelsRoutes);
 await server.register(webBillingRoutes);
 await server.register(profileRoutes);
 await server.register(dialogsRoutes);

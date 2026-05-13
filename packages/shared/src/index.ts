@@ -32,6 +32,7 @@ export { AT_TOKEN_RE, ELEMENT_CI_RE, IMAGE_CI_RE, VIDEO_CI_RE } from "./prompt-r
 // Constants
 export { SUPPORTED_LANGUAGES, LANGUAGE_LABELS, RTL_LANGUAGES } from "./constants/languages.js";
 export { AI_MODELS, MODELS_BY_SECTION } from "./constants/models.js";
+export { getModelDefaultDuration } from "./constants/models/_helpers.js";
 export { FALLBACK_DESIGN_MODELS } from "./constants/models/design.models.js";
 export { FALLBACK_VIDEO_MODELS } from "./constants/models/video.models.js";
 export { getFallbackCandidates, isFallbackCompatible } from "./constants/models/fallback.js";

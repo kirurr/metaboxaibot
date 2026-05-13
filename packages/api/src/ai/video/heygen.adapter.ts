@@ -5,7 +5,7 @@ import type {
   VideoValidationContext,
   VideoValidationError,
 } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { getFileUrl } from "../../services/s3.service.js";
 import { logger } from "../../logger.js";
 import { fetchWithLog } from "../../utils/fetch.js";
@@ -182,7 +182,23 @@ export class HeyGenAdapter implements VideoAdapter {
       : fallbackUrl;
 
     const imgRes = await fetchWithLog(imageUrl);
-    if (!imgRes.ok) throw new Error(`Failed to fetch image for HeyGen upload: ${imgRes.status}`);
+    if (!imgRes.ok) {
+      // 404 = источник реально пропал: presigned S3 URL истёк (TTL 1ч, на
+      // attempt 2 после exp-backoff обычная история), либо Telegram file URL
+      // истёк, либо S3-объект удалён. Retry с того же URL не поможет — это
+      // user-facing «отправьте картинку снова», не наш баг. Без UserFacingError
+      // юзер видит generic «модель временно недоступна» + ops ловит alert.
+      if (imgRes.status === 404) {
+        // ВАЖНО: URL в message НЕ кладём — Telegram file URL содержит bot-token
+        // в path (`/bot{TOKEN}/...`), а presigned S3 URL содержит подпись.
+        // Сообщение уходит в DB.generationJob.error и в serializeError для логов
+        // — утечёт. Достаточно статуса и контекста, что это HeyGen image source.
+        throw new UserFacingError("HeyGen: source image returned 404", {
+          key: "mediaSourceUnavailable",
+        });
+      }
+      throw new Error(`Failed to fetch image for HeyGen upload: ${imgRes.status}`);
+    }
     let imgBuffer: Buffer = Buffer.from(await imgRes.arrayBuffer());
     if (!imgBuffer.byteLength) {
       throw new Error("HeyGen: image buffer is empty after fetch");

@@ -1,7 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "./fetch.js";
+import { centerCropToAspect } from "./image-aspect.js";
 
 const KIE_FILE_BASE = "https://kieai.redpandaai.co";
+
+// Kling 3.0 / KIE image upload жёсткий лимит — 10 МБ/файл (см. kling3.md
+// §"File Upload Requirements"). Сверх лимита KIE возвращает 400 generic
+// сообщением, юзер видит generationFailed без подсказки. Делаем pre-flight
+// check после crop'а: даём явный UserFacingError ("картинка слишком большая").
+const KIE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 interface KieFileUploadResponse {
   success: boolean;
@@ -110,4 +118,156 @@ export async function uploadFileUrl(
   }
 
   return data.data.downloadUrl;
+}
+
+/**
+ * Upload a binary buffer to KIE via `/api/file-stream-upload` (multipart/form-data).
+ *
+ * Используется когда нужно загрузить локально-обработанный buffer (например
+ * центр-кропнутый кадр под целевой aspect для Kling 3.0), а не URL. URL-based
+ * `uploadFileUrl` для buffer'а не подходит — KIE качает сам по URL.
+ *
+ * Multipart строим вручную, не через FormData/undici: см. heygen.adapter.ts
+ * — undici иногда теряет per-part Content-Type для Blob/File, что не годится
+ * для строгих валидаторов на стороне KIE/HeyGen.
+ */
+export async function uploadFileStream(
+  apiKey: string,
+  buf: Buffer,
+  fileName: string,
+  mimeType: string = "image/jpeg",
+  uploadPath: string = "metabox/media",
+): Promise<string> {
+  const boundary = `----metabox${randomBytes(16).toString("hex")}`;
+  const CRLF = "\r\n";
+
+  const filePart = Buffer.concat([
+    Buffer.from(
+      `--${boundary}${CRLF}` +
+        `Content-Disposition: form-data; name="file"; filename="${fileName}"${CRLF}` +
+        `Content-Type: ${mimeType}${CRLF}${CRLF}`,
+    ),
+    buf,
+    Buffer.from(CRLF),
+  ]);
+  const pathPart = Buffer.from(
+    `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="uploadPath"${CRLF}${CRLF}${uploadPath}${CRLF}`,
+  );
+  const nameField = Buffer.from(
+    `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="fileName"${CRLF}${CRLF}${fileName}${CRLF}`,
+  );
+  const closing = Buffer.from(`--${boundary}--${CRLF}`);
+  const body = Buffer.concat([filePart, pathPart, nameField, closing]);
+
+  const resp = await fetchWithLog(`${KIE_FILE_BASE}/api/file-stream-upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    const err = new Error(`KIE file-stream-upload failed: ${resp.status} ${txt}`) as Error & {
+      status: number;
+    };
+    err.status = resp.status;
+    throw err;
+  }
+
+  const data = (await resp.json()) as KieFileUploadResponse;
+  if (!data.success || data.code !== 200 || !data.data?.downloadUrl) {
+    throw new Error(`KIE file-stream-upload failed: ${data.code} — ${data.msg}`);
+  }
+
+  return data.data.downloadUrl;
+}
+
+/**
+ * Fetch URL → центр-кроп под target aspect → upload в KIE.
+ *
+ * Если картинка уже в нужном aspect (±1%) — `centerCropToAspect` вернёт тот же
+ * buffer reference, и мы делегируем оригинальному URL-based uploadFileUrl
+ * (без перекодирования и лишнего raw-upload через stream).
+ *
+ * Используется для Kling 3.0 frame inputs (`image_urls`): KIE auto-адаптирует
+ * output video aspect под dimensions image_urls, игнорируя явный
+ * `aspect_ratio`. Pre-crop гарантирует что Kling'овский auto-adapt даст
+ * именно выбранный юзером ratio.
+ */
+export async function uploadFileUrlCroppedToAspect(
+  apiKey: string,
+  fileUrl: string,
+  aspectRatio: string,
+  fileName: string,
+): Promise<string> {
+  // fetchWithLog: пишет debug-лог, тегает network failures `fetch GET <url>
+  // failed (<code>)` чтобы isTransientNetworkError / virtual-batch fallback
+  // ловили их корректно. Голый fetch потерял бы и observability, и cause-chain.
+  let resp: Response;
+  try {
+    resp = await fetchWithLog(fileUrl);
+  } catch (err) {
+    // Префикс `KIE` — чтобы isKieTransientError ([utils/kie-error.ts]) словил
+    // network ошибку (DNS / ECONNRESET / 5xx) на стадии fetch source-image и
+    // запустил virtual-batch fallback resubmit вместо мгновенного отказа.
+    throw new Error(`KIE crop-fetch failed: ${err instanceof Error ? err.message : String(err)}`, {
+      cause: err,
+    });
+  }
+  if (!resp.ok) {
+    // Drain тело — иначе огромный HTML error-page от прокси/CDN остаётся
+    // в памяти до GC. resp.body.cancel() освобождает сразу.
+    resp.body?.cancel().catch(() => {});
+    // 404/410 на presigned URL обычно значит "ссылка протухла" или "файл
+    // удалён" — даём конкретный UserFacingError, иначе юзер видит generic
+    // generationFailed и думает что бот сломан. Паттерн совпадает с тем как
+    // kie.adapter.ts маппит `chatInvalidImage` на input-format-ошибки KIE.
+    if (resp.status === 404 || resp.status === 410) {
+      throw new UserFacingError(`Source image not found (HTTP ${resp.status})`, {
+        key: "chatInvalidImage",
+      });
+    }
+    throw new Error(`KIE crop-fetch failed: HTTP ${resp.status}`);
+  }
+
+  // Pre-check по content-length: 50МБ raw PNG скачивать → 1-2с CPU на decode+
+  // crop+encode → выяснить что > 10МБ → throw. Лимит на raw устанавливаем как
+  // 3× KIE_IMAGE_MAX_BYTES — JPEG q=95 mozjpeg обычно сжимает PNG в ~3 раза,
+  // запас покрывает крайние случаи. Если content-length не указан (chunked
+  // transfer) — пропускаем и проверяем post-crop.
+  const SOURCE_MAX_BYTES = KIE_IMAGE_MAX_BYTES * 3;
+  const contentLength = Number(resp.headers.get("content-length") ?? 0);
+  if (contentLength > SOURCE_MAX_BYTES) {
+    resp.body?.cancel().catch(() => {});
+    throw new UserFacingError(
+      `Source image too large (${contentLength} bytes, max ${SOURCE_MAX_BYTES})`,
+      { key: "chatInvalidImage" },
+    );
+  }
+
+  const raw = Buffer.from(await resp.arrayBuffer());
+
+  const cropped = await centerCropToAspect(raw, aspectRatio);
+  if (cropped === raw) {
+    return uploadFileUrl(apiKey, fileUrl, fileName);
+  }
+
+  if (cropped.byteLength > KIE_IMAGE_MAX_BYTES) {
+    throw new UserFacingError(
+      `Image too large after crop (${cropped.byteLength} bytes, max ${KIE_IMAGE_MAX_BYTES})`,
+      { key: "chatInvalidImage" },
+    );
+  }
+
+  // После crop пайплайн сохраняет JPEG (см. centerCropToAspect). Приводим
+  // имя к `.jpg`, чтобы downstream KIE-модели валидирующие тип по extension'у
+  // не ругались на mismatch (например nano-banana-2 принимает только
+  // jpeg/jpg/png — см. kie-upload jsdoc).
+  const jpgName = fileName.replace(/\.[a-zA-Z0-9]+$/, "") + ".jpg";
+  return uploadFileStream(apiKey, cropped, jpgName, "image/jpeg");
 }
