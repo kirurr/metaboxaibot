@@ -127,7 +127,7 @@ export default {
     voiceCloneProcessing: "⏳ Creating your voice profile...",
     voiceCloneSuccess:
       "✅ Voice «{name}» created! It is now available in speech synthesis and video avatar settings.",
-    voiceCloneFailed: "❌ Failed to create voice. Check the file format and try again.",
+    voiceCloneFailed: "❌ Failed to create voice. Please try again later.",
     musicActivated:
       "🎵 Music generation (Suno) activated.\nDescribe the music you want (genre, mood, style) and I will create it.",
     musicElActivated:
@@ -399,6 +399,8 @@ export default {
     heygenVoiceNotFound: "❌ Voice not found. Please select a different voice in settings.",
     ttsVoiceUnavailable:
       "❌ Selected voice is unavailable. Open Management → model settings and pick a voice again.",
+    voiceCloneBadAudio:
+      "❌ Couldn't process the audio. Record at least ~5 seconds of clean speech — speak clearly, no music or background noise — and send it again.",
     heygenVoicePremium: "❌ The selected voice is only available for HeyGen premium accounts.",
     heygenTtsLanguage: "❌ TTS language error. Please check your voice settings.",
     heygenTrialLimit:
@@ -492,7 +494,7 @@ export default {
     falStringTooLongField: "❌ Value for field '{field}' is too long (maximum {max} characters).",
     // ElevenLabs
     elevenlabsPromptTooLong:
-      "❌ Your prompt is too long ({current} characters). The maximum for sound generation is {max} characters. Please shorten your prompt and try again.",
+      "❌ Your text is too long ({current} characters). The maximum is {max} characters. Please shorten it and try again.",
     // Suno
     sunoPromptTooLong:
       "❌ Your description is too long ({current} characters). The maximum for Suno is {max} characters. Please shorten it and try again.",

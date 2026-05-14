@@ -191,7 +191,8 @@
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "undici": "^7.2.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.27",

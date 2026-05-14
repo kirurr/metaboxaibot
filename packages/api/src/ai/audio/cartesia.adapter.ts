@@ -1,6 +1,8 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { transcodeToMp3 } from "../../utils/audio-transcode.js";
+import { resolveAudioMimeType } from "../../utils/mime-detect.js";
 import { logger } from "../../logger.js";
 
 /**
@@ -150,8 +152,28 @@ export class CartesiaAdapter implements AudioAdapter {
     language: string = "ru",
     apiKey: string = config.ai.cartesia ?? "",
   ): Promise<string> {
+    // Telegram голосовые приходят как OGG/Opus (.oga), аудиофайлы — в любом
+    // контейнере. Cartesia clone-эндпоинт надёжно ест mp3/wav; всё остальное
+    // транскодим в MP3, иначе ловим 422 "could not be processed". Битый/
+    // не-аудио вход → ffmpeg бросит → UserFacingError (user-fault, не наш баг).
+    const contentType = resolveAudioMimeType(audioBuffer, null);
+    let clipBuffer = audioBuffer;
+    let clipName = filename;
+    if (contentType !== "audio/mpeg" && contentType !== "audio/wav") {
+      logger.info({ from: contentType }, "Cartesia: transcoding clone clip to MP3");
+      try {
+        clipBuffer = await transcodeToMp3(audioBuffer);
+      } catch (err) {
+        throw new UserFacingError(
+          `Cartesia clone clip transcode to MP3 failed: ${err instanceof Error ? err.message : String(err)}`,
+          { key: "voiceCloneBadAudio", section: "audio", cause: err },
+        );
+      }
+      clipName = `${filename.replace(/\.[^.]+$/, "")}.mp3`;
+    }
+
     const form = new FormData();
-    form.append("clip", new Blob([audioBuffer]), filename);
+    form.append("clip", new Blob([clipBuffer]), clipName);
     form.append("name", name);
     form.append("language", language);
 
@@ -166,6 +188,16 @@ export class CartesiaAdapter implements AudioAdapter {
 
     if (!res.ok) {
       const text = await res.text();
+      // 422 "could not be processed" / "valid audio file" — Cartesia не смогла
+      // разобрать клип (слишком короткий, тихий, битый). Это user-fault: retry
+      // с тем же файлом бесполезен, ops алёртить незачем — юзеру нужен внятный
+      // мессадж про требования к записи.
+      if (res.status === 422 && /could not be processed|valid audio file/i.test(text)) {
+        throw new UserFacingError(`Cartesia voice clone rejected audio: ${res.status} ${text}`, {
+          key: "voiceCloneBadAudio",
+          section: "audio",
+        });
+      }
       throw new Error(`Cartesia voice clone failed: ${res.status} ${text}`);
     }
 

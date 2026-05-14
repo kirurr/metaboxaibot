@@ -36,6 +36,11 @@ export function detectAudioMimeType(buf: ArrayBuffer | Buffer): string | null {
   const b = buf instanceof Buffer ? buf : new Uint8Array(buf);
   // ID3 tag (MP3)
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "audio/mpeg";
+  // AAC ADTS — must be checked before MP3: the ADTS sync word shares the
+  // 0xFFEx prefix with an MP3 frame header, so the looser MP3 mask below
+  // (b[1] & 0xE0) would swallow it first. ADTS layer bits are always 00
+  // (b[1] & 0xF6 === 0xF0), which an MP3 frame header never has.
+  if (b[0] === 0xff && (b[1] & 0xf6) === 0xf0) return "audio/aac";
   // MPEG sync word (MP3 frame)
   if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return "audio/mpeg";
   // OGG
@@ -54,8 +59,6 @@ export function detectAudioMimeType(buf: ArrayBuffer | Buffer): string | null {
     return "audio/wav";
   // FLAC
   if (b[0] === 0x66 && b[1] === 0x4c && b[2] === 0x61 && b[3] === 0x43) return "audio/flac";
-  // AAC ADTS
-  if (b[0] === 0xff && (b[1] & 0xf0) === 0xf0) return "audio/aac";
   // ISO BMFF (MP4/M4A): "....ftyp" at bytes 0-7 (size + 'ftyp')
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
     // brand at bytes 8-11: M4A , mp42, isom, etc → all audio-capable mp4

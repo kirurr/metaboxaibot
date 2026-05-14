@@ -80,6 +80,7 @@
 html,
 body,
 #root {
+	scrollbar-gutter: stable;
   height: 100%;
   min-height: 100%;
 }
@@ -4389,4 +4390,957 @@ select {
   font-size: 13.5px;
   line-height: 1.5;
   margin: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Generate scene v2 — panel-style UI как в референсе Kling/Higgsfield.
+   Mode tabs → media slots row → prompt → settings → model picker → CTA.
+   Все параметры берутся из `WebModelDto` (`modes`/`mediaInputs`/`settings`).
+   ════════════════════════════════════════════════════════════════════════════ */
+.gen-scene {
+  position: relative;
+  /* Full-bleed: ломаемся из `.main`'s padding и max-width. */
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  width: 100vw;
+  max-width: 100vw;
+  min-height: calc(100vh - var(--topbar-h));
+  background: var(--bg);
+  padding: 32px 24px 48px;
+  display: flex;
+  justify-content: center;
+}
+.app.mobile .gen-scene {
+  padding: 20px 14px calc(var(--mobile-nav-h) + 24px);
+}
+.gen-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 80% at 50% 0%, var(--accent-lighter) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 60% at 50% 100%, rgba(74, 141, 245, 0.04) 0%, transparent 70%);
+}
+
+.gen-panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.gen-head h1 {
+  font-family: var(--font-heading);
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+.gen-head .gen-sub {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Mode tabs — underline-style, как в референсе. */
+.gen-mode-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 4px;
+}
+.gen-mode-tab {
+  padding: 10px 0;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  position: relative;
+  transition: color 120ms var(--ease);
+  white-space: nowrap;
+}
+.gen-mode-tab:hover {
+  color: var(--text);
+}
+.gen-mode-tab.on {
+  color: var(--text);
+}
+.gen-mode-tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Slots row — 1 или 2 в ряд (через grid-template-columns inline). */
+.gen-slots {
+  display: grid;
+  gap: 12px;
+}
+.gen-slots.is-single {
+  grid-template-columns: 1fr !important;
+}
+
+.gen-slot {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.gen-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gen-slot-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.gen-slot-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+.gen-slot-badge.is-optional {
+  background: var(--bg-elevated);
+  color: var(--text-hint);
+}
+.gen-slot-badge.is-required {
+  background: var(--accent-lighter);
+  color: var(--accent-light);
+}
+
+/* Empty-slot dropzone: одна большая кнопка с иконкой. */
+.gen-slot-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px;
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.gen-slot-drop:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.gen-slot-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+.gen-slot-hint {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.gen-slot-meta {
+  font-size: 11px;
+  color: var(--text-hint);
+}
+
+/* Multi-file grid: tiles + добавить ещё. */
+.gen-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+.gen-slot-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.gen-slot-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.gen-slot-tile.is-uploading img {
+  opacity: 0.5;
+}
+.gen-slot-tile.is-error {
+  border-color: rgba(239, 83, 80, 0.4);
+}
+.gen-slot-tile-icon {
+  color: var(--text-hint);
+}
+.gen-slot-tile-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+.gen-slot-tile-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  cursor: pointer;
+  transition: background 100ms var(--ease);
+}
+.gen-slot-tile-remove:hover {
+  background: var(--danger);
+}
+.gen-slot-add {
+  aspect-ratio: 1 / 1;
+  background: var(--bg);
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--text-hint);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease);
+}
+.gen-slot-add:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.gen-slot-count {
+  font-size: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-hint);
+}
+
+/* Prompt textarea. */
+.gen-scene .gen-prompt {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+  font-family: var(--font-body);
+  transition: border-color 150ms var(--ease);
+}
+.gen-scene .gen-prompt:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-lighter);
+}
+.gen-scene .gen-prompt::placeholder {
+  color: var(--text-hint);
+}
+
+/* Settings card — стэк из контролов. */
+.gen-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.gen-set {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gen-set-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gen-set-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.gen-set-desc {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-hint);
+}
+.gen-set-val {
+  font-size: 13px;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+/* Chip-row для select/dropdown. */
+.gen-scene .gen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gen-scene .gen-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.gen-scene .gen-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.gen-scene .gen-chip.on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
+/* Slider / native select / number / text. */
+.gen-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  outline: none;
+}
+.gen-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--bg-card);
+}
+.gen-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--bg-card);
+}
+.gen-scene .gen-select,
+.gen-num,
+.gen-text {
+  width: 100%;
+  height: 36px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: var(--font-body);
+  transition: border-color 120ms var(--ease);
+}
+.gen-scene .gen-select:focus,
+.gen-num:focus,
+.gen-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Toggle switch. */
+.gen-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex: 0 0 40px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+.gen-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.gen-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 150ms var(--ease);
+}
+.gen-toggle.on .gen-toggle-knob {
+  transform: translateX(18px);
+}
+
+/* Model picker chip + popover. */
+.gen-model-row {
+  position: relative;
+}
+.gen-model-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease);
+}
+.gen-model-btn:hover {
+  border-color: var(--border-strong);
+}
+.gen-model-glyph {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-gradient);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 13px;
+  flex: 0 0 28px;
+}
+.gen-model-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.gen-model-meta {
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+.gen-model-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gen-model-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  max-height: 420px;
+  overflow-y: auto;
+}
+.gen-model-row-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms var(--ease);
+}
+.gen-model-row-item:hover {
+  background: var(--bg-card);
+}
+.gen-model-row-item.on {
+  background: var(--accent-lighter);
+}
+.gen-model-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gen-model-item-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.gen-model-item-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Generate CTA. */
+.gen-scene .gen-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 52px;
+  border-radius: var(--radius);
+  background: var(--accent-gradient);
+  color: var(--text-on-accent);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-accent);
+  transition:
+    transform 120ms var(--ease),
+    box-shadow 150ms var(--ease);
+}
+.gen-scene .gen-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px var(--accent-glow);
+}
+.gen-scene .gen-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gen-cta-cost {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  opacity: 0.85;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Voice picker — sidebar справа от .gen-panel на десктопе, modal на mobile.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Кнопка в settings, показывающая текущий выбранный голос. */
+.gen-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease);
+}
+.gen-voice-btn:hover {
+  border-color: var(--border-strong);
+}
+.gen-voice-btn-name {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* На десктопе .gen-scene выравнивает контент по центру через `justify-content: center`.
+   Когда открыт picker — переключаемся на flex-row с gap'ом + смещаем влево-центр,
+   чтобы panel + picker помещались в виду. */
+.gen-scene.has-picker {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.voice-picker-backdrop {
+  /* Backdrop виден только на mobile — desktop-режим картина не блокирует. */
+  display: none;
+}
+
+.voice-picker {
+  position: relative;
+  z-index: 2;
+  width: 360px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  /* Sticky чтобы при длинном .gen-panel'е picker не уплывал вниз. */
+  position: sticky;
+  top: calc(var(--topbar-h) + 16px);
+  max-height: calc(100vh - var(--topbar-h) - 64px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.voice-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.voice-picker-title {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.voice-picker-sub {
+  font-size: 11.5px;
+  color: var(--text-hint);
+  margin-top: 2px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.voice-picker-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 100ms var(--ease);
+}
+.voice-picker-close:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.voice-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 14px 6px;
+  padding: 0 12px;
+  height: 36px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-hint);
+}
+.voice-picker-search input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font-body);
+}
+.voice-picker-search input::placeholder {
+  color: var(--text-hint);
+}
+.voice-picker-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+}
+.voice-picker-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-hint);
+}
+.voice-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+.voice-picker-item:hover {
+  background: var(--bg-card);
+}
+.voice-picker-item.is-selected {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+}
+.voice-picker-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.voice-picker-item-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-picker-item-meta {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-picker-play {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 120ms var(--ease),
+    color 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+.voice-picker-play:hover {
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.voice-picker-play.is-playing {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Media picker (avatars / motions / soul styles) ──────────────────────── */
+/* Используем .voice-picker как shell-стиль, контент-сетка специфична. */
+.media-picker .voice-picker-list,
+.media-picker-grid {
+  /* MediaPicker не использует .voice-picker-list — сетка управляется отдельно. */
+}
+.media-picker-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.media-pick-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  transition:
+    border-color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.media-pick-tile:hover {
+  border-color: var(--border-strong);
+}
+.media-pick-tile.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-lighter);
+}
+.media-pick-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.media-pick-thumb img,
+.media-pick-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.media-pick-thumb-empty {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-hint);
+  font-size: 24px;
+}
+.media-pick-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.media-pick-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
+.media-pick-meta {
+  font-size: 11px;
+  color: var(--text-hint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
+
+/* Color picker — native input + hex текст. */
+.gen-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gen-color-input {
+  width: 44px;
+  height: 36px;
+  flex: 0 0 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.gen-color-input::-webkit-color-swatch-wrapper {
+  padding: 4px;
+}
+.gen-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 6px;
+}
+.gen-color-text {
+  flex: 1;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  text-transform: uppercase;
+}
+
+/* Mobile: picker превращается в fixed-modal, backdrop затемняет фон. */
+@media (max-width: 820px) {
+  .gen-scene.has-picker {
+    /* Layout panel'а не меняется на mobile — picker наезжает поверх. */
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .voice-picker-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .voice-picker {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 101;
+    width: 100%;
+    max-width: 100%;
+    max-height: 85vh;
+    border-radius: 18px 18px 0 0;
+    /* Slide-in снизу. */
+    animation: voicePickerIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes voicePickerIn {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
 }

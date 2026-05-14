@@ -24,6 +24,13 @@ export class UserFacingError extends Error {
    */
   public readonly opsAlertDedupKey?: string;
   /**
+   * Which ops-alert тему выбрать для tech-channel алерта: `"alerts"` (по
+   * умолчанию — общая тема tech-ошибок) или `"balance"` (тема про баланс/кредиты
+   * провайдеров). Напр. ElevenLabs `quota_exceeded` ставит `"balance"`, чтобы
+   * алерт ушёл в тему BALANCE, а не в общий поток ошибок.
+   */
+  public readonly opsAlertChannel?: "alerts" | "balance";
+  /**
    * Optional section ("gpt"/"design"/"video"/"audio") used by message-render
    * helpers to pick section-appropriate variant text — например, для
    * `modelTemporarilyUnavailable` подбирает альтернативные модели по секции.
@@ -51,6 +58,7 @@ export class UserFacingError extends Error {
       params?: Record<string, string | number>;
       notifyOps?: boolean;
       opsAlertDedupKey?: string;
+      opsAlertChannel?: "alerts" | "balance";
       section?: "gpt" | "design" | "video" | "audio";
       tech?: UserFacingError["tech"];
       /**
@@ -68,6 +76,7 @@ export class UserFacingError extends Error {
     this.params = options?.params;
     this.notifyOps = options?.notifyOps;
     this.opsAlertDedupKey = options?.opsAlertDedupKey;
+    this.opsAlertChannel = options?.opsAlertChannel;
     this.section = options?.section;
     this.tech = options?.tech;
   }

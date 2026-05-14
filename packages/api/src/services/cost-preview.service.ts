@@ -172,7 +172,28 @@ export const costPreviewService = {
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    const modelSettings = allModelSettings[modelId] ?? {};
+    let modelSettings = allModelSettings[modelId] ?? {};
+
+    // Посекундный биллинг аудио (sounds-el / music-el): нормализуем
+    // duration_seconds перед расчётом стоимости. Без этого:
+    //  - отсутствует / лежит строкой → computeMediaBaseUsd падает в
+    //    fallback-ветку и списывает $0;
+    //  - stale-значение вне границ (старый слайдер sounds-el был до 30) →
+    //    юзеру списали бы за 30с, а адаптер отправит в kie максимум 22с.
+    // Зажимаем в границы каталога и кладём число обратно в
+    // effectiveModelSettings — оно уходит и в очередь, и в inputData джобы, так
+    // что превью, воркер и адаптер считают по одному числу.
+    if (model.costUsdPerSecond !== undefined) {
+      const durSetting = model.settings?.find((s) => s.key === "duration_seconds");
+      const fallback = typeof durSetting?.default === "number" ? durSetting.default : 10;
+      const min = typeof durSetting?.min === "number" ? durSetting.min : 0.5;
+      const max = typeof durSetting?.max === "number" ? durSetting.max : 22;
+      const raw = modelSettings.duration_seconds;
+      const n = typeof raw === "number" ? raw : Number(raw);
+      const normalized = Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
+      modelSettings = { ...modelSettings, duration_seconds: normalized };
+    }
+
     const cost = calculateCost(
       model,
       0,

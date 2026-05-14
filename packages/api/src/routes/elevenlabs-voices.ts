@@ -1,34 +1,27 @@
 import type { FastifyPluginAsync } from "fastify";
+import { KIE_ELEVENLABS_VOICES, kieElevenLabsVoicePreviewUrl } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
-import { acquireKey } from "../services/key-pool.service.js";
-import { PoolExhaustedError } from "../utils/pool-exhausted-error.js";
-import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-interface ElevenLabsVoiceRaw {
-  voice_id: string;
-  name: string;
-  category?: string;
-  labels?: { gender?: string; language?: string };
-  preview_url?: string | null;
-}
-
-interface ElevenLabsVoicesResponse {
-  voices?: ElevenLabsVoiceRaw[];
-}
-
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-let voicesCache: { data: object[]; at: number } | null = null;
-
+/**
+ * Static catalog of ElevenLabs voices for the `tts-el` voice picker.
+ *
+ * ElevenLabs audio runs through the kie.ai aggregator, which exposes no live
+ * voices API — its TTS models accept only a fixed enum of voice IDs. We serve
+ * that enum from `KIE_ELEVENLABS_VOICES` (@metabox/shared). kie gives no
+ * gender/language metadata, so the response carries only id / name /
+ * description / preview_url.
+ */
 export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["voices"]));
 
-  /** GET /elevenlabs-voices — proxy to ElevenLabs /v1/voices, returns premade voices */
+  /** GET /elevenlabs-voices — static list of ElevenLabs voices available via kie.ai */
   fastify.get(
     "/elevenlabs-voices",
     {
       schema: {
-        description: "Get list of premade ElevenLabs voices (cached for 1 hour)",
+        description: "Get list of ElevenLabs voices available through kie.ai",
         response: {
           200: {
             type: "array",
@@ -38,57 +31,20 @@ export const elevenlabsVoicesRoutes: FastifyPluginAsync = async (fastify) => {
               properties: {
                 voice_id: { type: "string", description: "Voice ID" },
                 name: { type: "string", description: "Voice name" },
-                category: { type: "string", description: "Voice category" },
-                gender: { type: "string", nullable: true, description: "Voice gender" },
-                language: { type: "string", nullable: true, description: "Voice language" },
+                description: { type: "string", description: "Voice flavour (timbre/style)" },
                 preview_url: { type: "string", nullable: true, description: "Preview audio URL" },
               },
             },
           },
-          502: badRequestResponse,
-          503: badRequestResponse,
         },
       },
     },
-
-    async (_request, reply) => {
-      if (voicesCache && Date.now() - voicesCache.at < CACHE_TTL_MS) {
-        return voicesCache.data;
-      }
-
-      let apiKey: string;
-      try {
-        apiKey = (await acquireKey("elevenlabs")).apiKey;
-      } catch (err) {
-        if (err instanceof PoolExhaustedError) {
-          return reply.status(503).send({ error: "ElevenLabs API key not configured" });
-        }
-        throw err;
-      }
-
-      const res = await fetch("https://api.elevenlabs.io/v1/voices?show_legacy=false", {
-        headers: { "xi-api-key": apiKey, Accept: "application/json" },
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        return reply.status(502).send({ error: `ElevenLabs error: ${res.status} ${text}` });
-      }
-
-      const json = (await res.json()) as ElevenLabsVoicesResponse;
-      const voices = (json.voices ?? []).filter((v) => v.category === "premade");
-
-      const data = voices.map((v) => ({
+    async () =>
+      KIE_ELEVENLABS_VOICES.map((v) => ({
         voice_id: v.voice_id,
         name: v.name,
-        category: v.category ?? "premade",
-        gender: v.labels?.gender ?? null,
-        language: v.labels?.language ?? null,
-        preview_url: v.preview_url ?? null,
-      }));
-
-      voicesCache = { data, at: Date.now() };
-      return data;
-    },
+        description: v.description,
+        preview_url: kieElevenLabsVoicePreviewUrl(v.voice_id),
+      })),
   );
 };

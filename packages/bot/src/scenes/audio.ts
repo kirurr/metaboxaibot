@@ -102,7 +102,10 @@ export async function handleVoiceCloneUpload(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  const file = ctx.message?.voice ?? ctx.message?.audio;
+  const file =
+    ctx.message?.voice ??
+    ctx.message?.audio ??
+    (ctx.message?.document?.mime_type?.startsWith("audio/") ? ctx.message.document : undefined);
   if (!file) return;
 
   const lockKey = `dedup:voice:${ctx.user.id}:${file.file_id}`;
@@ -213,13 +216,19 @@ export async function handleVoiceCloneUpload(ctx: BotContext): Promise<void> {
   } catch (err) {
     await releaseLock(lockKey);
     await ctx.api.deleteMessage(chatId, pendingMsg.message_id).catch(() => void 0);
-    logger.error(err, "Voice clone error");
-    await ctx.reply(ctx.t.audio.voiceCloneFailed);
-    void notifyTechError(err, {
-      section: "audio",
-      modelId: "voice-clone",
-      userId: ctx.user.id.toString(),
-    });
+    // UserFacingError — user-fault (битый/короткий/неподдерживаемый клип).
+    // Юзеру показываем actionable-текст, ops не алёртим: это не наш баг.
+    if (err instanceof UserFacingError) {
+      await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
+    } else {
+      logger.error(err, "Voice clone error");
+      await ctx.reply(ctx.t.audio.voiceCloneFailed);
+      void notifyTechError(err, {
+        section: "audio",
+        modelId: "voice-clone",
+        userId: ctx.user.id.toString(),
+      });
+    }
     // Drop any pending return marker — we don't want to silently re-activate
     // HeyGen on the next unrelated voice the user sends.
     await getRedis()

@@ -126,15 +126,36 @@ export class HeyGenAdapter implements VideoAdapter {
     const isHeyGenSupported = contentType === "audio/mpeg" || contentType === "audio/wav";
     if (!isHeyGenSupported) {
       logger.info({ from: contentType }, "HeyGen: transcoding audio to MP3");
-      audioBuffer = await transcodeToMp3(audioBuffer);
+      // ffmpeg не смог распарсить вход — файл битый или это вообще не аудио.
+      // Не наш баг и не transient: retry с тем же буфером бессмыслен, юзеру
+      // нужен внятный мессадж про формат, а не generic «модель отдыхает».
+      try {
+        audioBuffer = await transcodeToMp3(audioBuffer);
+      } catch (err) {
+        throw new UserFacingError(
+          `HeyGen: audio transcode to MP3 failed: ${err instanceof Error ? err.message : String(err)}`,
+          { key: "heygenAudioFormat", cause: err },
+        );
+      }
       contentType = "audio/mpeg";
       if (!audioBuffer.byteLength) {
-        throw new Error("HeyGen: audio buffer empty after transcode to MP3");
+        throw new UserFacingError("HeyGen: audio buffer empty after transcode to MP3", {
+          key: "heygenAudioFormat",
+        });
       }
     }
 
     if (audioBuffer.byteLength > HEYGEN_ASSET_MAX_BYTES) {
-      throw new Error(`HeyGen: audio asset exceeds 32 MB limit (${audioBuffer.byteLength} bytes)`);
+      throw new UserFacingError(
+        `HeyGen: audio asset exceeds 32 MB limit (${audioBuffer.byteLength} bytes)`,
+        {
+          key: "mediaSlotFileTooLarge",
+          params: {
+            actualMb: (audioBuffer.byteLength / (1024 * 1024)).toFixed(1),
+            maxMb: HEYGEN_ASSET_MAX_BYTES / (1024 * 1024),
+          },
+        },
+      );
     }
 
     const audioExt = contentType === "audio/wav" ? "wav" : "mp3";
@@ -164,6 +185,20 @@ export class HeyGenAdapter implements VideoAdapter {
     );
     if (!uploadRes.ok) {
       const text = await uploadRes.text();
+      // HeyGen отверг ассет по формату/типу контента — это user-fault (битый
+      // или неподдерживаемый файл, который sniffer принял за mp3/wav и пропустил
+      // мимо транскода). Retry бесполезен → UserFacingError. Гейт по 4xx: 5xx
+      // с телом, случайно матчащим regex, — это инфра-сбой, его надо ретраить,
+      // поэтому оставляем plain Error для retry + ops-alert.
+      if (
+        uploadRes.status >= 400 &&
+        uploadRes.status < 500 &&
+        /content type not supported|format not supported|invalid.*audio|audio.*format/i.test(text)
+      ) {
+        throw new UserFacingError(`HeyGen audio asset upload failed: ${uploadRes.status} ${text}`, {
+          key: "heygenAudioFormat",
+        });
+      }
       throw new Error(`HeyGen audio asset upload failed: ${uploadRes.status} ${text}`);
     }
     const uploadData = (await uploadRes.json()) as { data?: { asset_id?: string } };

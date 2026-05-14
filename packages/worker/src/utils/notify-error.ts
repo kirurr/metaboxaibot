@@ -108,7 +108,7 @@ export async function notifyTechErrorThrottled(
   err: unknown,
   ctx: ErrorContext,
   dedupKey: string,
-  opts: { maxAlerts?: number; ttlMs?: number } = {},
+  opts: { maxAlerts?: number; ttlMs?: number; channel?: "alerts" | "balance" } = {},
 ): Promise<void> {
   const maxAlerts = opts.maxAlerts ?? DEFAULT_MAX_ALERTS_PER_WINDOW;
   const ttlMs = opts.ttlMs ?? PROVIDER_OUT_ALERT_TTL_MS;
@@ -124,23 +124,29 @@ export async function notifyTechErrorThrottled(
     }
   } catch {
     // Redis down → don't swallow, send through.
-    await notifyTechError(err, ctx);
+    await notifyTechError(err, ctx, opts.channel);
     return;
   }
 
   if (count > maxAlerts) return;
-  await notifyTechError(err, ctx);
+  await notifyTechError(err, ctx, opts.channel);
 }
 
 /**
- * Sends a tech error alert to ALERT_CHAT_ID.
- * Does not throw — always resolves.
+ * Sends a tech error alert. `channel` выбирает тему: `"alerts"` (default —
+ * ALERT_CHAT_ID, общие tech-ошибки) или `"balance"` (BALANCE_ALERT_CHAT_ID,
+ * тема про баланс/кредиты провайдеров). Does not throw — always resolves.
  */
-export async function notifyTechError(err: unknown, ctx: ErrorContext): Promise<void> {
-  const chatId = config.alerts.chatId;
+export async function notifyTechError(
+  err: unknown,
+  ctx: ErrorContext,
+  channel: "alerts" | "balance" = "alerts",
+): Promise<void> {
+  const dest = channel === "balance" ? config.balanceAlerts : config.alerts;
+  const chatId = dest.chatId;
   if (!chatId) return;
 
-  const threadId = config.alerts.threadId;
+  const threadId = dest.threadId;
 
   const label = [ctx.section, ctx.modelId].filter(Boolean).join("/") || "unknown";
   const header = ctx.partialSuccess
@@ -279,7 +285,9 @@ export interface FallbackNotificationContext {
     | "long_window_rate_limit"
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
-    | "all_candidates_failed";
+    | "all_candidates_failed"
+    /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
+    | "primary_failed";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */

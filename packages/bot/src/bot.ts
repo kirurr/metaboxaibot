@@ -466,7 +466,12 @@ export function createBot(token: string): Bot<BotContext> {
     }
     if (state?.state === "AUDIO_ACTIVE") {
       if (state.audioModelId === "voice-clone") {
-        if (ctx.message?.voice || ctx.message?.audio) return handleVoiceCloneUpload(ctx);
+        if (
+          ctx.message?.voice ||
+          ctx.message?.audio ||
+          ctx.message?.document?.mime_type?.startsWith("audio/")
+        )
+          return handleVoiceCloneUpload(ctx);
         await ctx.reply(ctx.t.audio.voiceCloneNeedsAudio);
         return;
       }

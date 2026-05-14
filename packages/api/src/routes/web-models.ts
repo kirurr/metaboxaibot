@@ -12,16 +12,53 @@
  * durations) для страниц Image/Video/Audio.
  */
 
-import type { FastifyPluginAsync } from "fastify";
-import { AI_MODELS, MODELS_BY_SECTION, MODEL_FAMILIES, type Section } from "@metabox/shared";
+import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import {
+  AI_MODELS,
+  MODELS_BY_SECTION,
+  MODEL_FAMILIES,
+  getResolvedModes,
+  defaultModeId,
+  getT,
+  type Section,
+  type Language,
+} from "@metabox/shared";
 import { webAuthPreHandler } from "../middlewares/web-auth.js";
 import { calculateCost } from "../services/token.service.js";
+import { db } from "../db.js";
 import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 const TYPICAL_INPUT_TOKENS = 500;
 const TYPICAL_OUTPUT_TOKENS = 500;
 
-function serializeForWeb(m: (typeof AI_MODELS)[string]) {
+function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
+  const t = getT(lang);
+  // Modes (operation modes — t2v/i2v/r2v и т.п.). Резолвим labelKey в локаль,
+  // null = у модели нет режимов (значит и таб-переключателя в UI не будет).
+  const resolvedModes = getResolvedModes(m);
+  const modes = resolvedModes
+    ? resolvedModes.map((mode) => ({
+        id: mode.id,
+        label: String((t.modelModes as Record<string, string>)[mode.labelKey] ?? mode.labelKey),
+        slotKeys: mode.slotKeys,
+        requiredSlotKeys: mode.requiredSlotKeys ?? null,
+        textOnly: mode.textOnly ?? false,
+        default: mode.id === defaultModeId(resolvedModes),
+      }))
+    : null;
+  // Media input slots — все, с резолвленным label. Веб фильтрует их по active
+  // mode на клиенте (избегаем дублирования логики getActiveSlots на каждый mode).
+  const mediaInputs = (m.mediaInputs ?? []).map((slot) => ({
+    slotKey: slot.slotKey,
+    mode: slot.mode,
+    label: String((t.mediaInput as Record<string, string>)[slot.labelKey] ?? slot.labelKey),
+    maxImages: slot.maxImages ?? 1,
+    required: slot.required ?? false,
+    exclusiveGroup: slot.exclusiveGroup ?? null,
+    imagesOnly: slot.imagesOnly ?? false,
+    revealAfter: slot.revealAfter ?? null,
+    constraints: slot.constraints ?? null,
+  }));
   const isLLM = m.inputCostUsdPerMToken > 0;
   const isPerMPixel = (m.costUsdPerMPixel ?? 0) > 0;
   const isPerMVideoToken = (m.costUsdPerMVideoToken ?? 0) > 0;
@@ -49,6 +86,16 @@ function serializeForWeb(m: (typeof AI_MODELS)[string]) {
     supportedAspectRatios: m.supportedAspectRatios ?? null,
     supportedDurations: m.supportedDurations ?? null,
     durationRange: m.durationRange ?? null,
+    // Modes (null = single-mode model, без выбора режима в UI).
+    modes,
+    // Слоты для медиа-инпутов (фильтруются на клиенте по active mode.slotKeys).
+    mediaInputs,
+    // Настраиваемые параметры — фронт рендерит контролы по `type`.
+    // Не нормализуем: ModelSettingDef[] передаём как есть — `additionalProperties: true`
+    // в схеме ответа защищает вложенные объекты от сериализатора Fastify.
+    settings: m.settings ?? [],
+    promptOptional: m.promptOptional ?? false,
+    promptOptionalRequiresMedia: m.promptOptionalRequiresMedia ?? false,
     /** Базовая стоимость 1 запроса/среднего сообщения в токенах. UI показывает рядом с моделью. */
     tokenCostApprox: isLLM
       ? calculateCost(m, TYPICAL_INPUT_TOKENS, TYPICAL_OUTPUT_TOKENS)
@@ -127,20 +174,32 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
                 durationRange: { type: "object", nullable: true, additionalProperties: true },
                 tokenCostApprox: { type: "number" },
                 tokenCostUnit: { type: "string" },
+                modes: { type: "array", nullable: true },
+                mediaInputs: { type: "array" },
+                settings: { type: "array" },
+                promptOptional: { type: "boolean" },
+                promptOptionalRequiresMedia: { type: "boolean" },
               },
             },
           },
         },
       },
     },
-    async (request) => {
-      const { section } = request.query;
+    async (request: FastifyRequest) => {
+      const { section } = request.query as { section?: string };
+      const { aibUserId } = request.webUser!;
+      // Lang берём из User записи если Telegram привязан, иначе ru —
+      // mediaInput.labelKey'и без перевода смотрелись бы как `firstFrame`/etc.
+      const user = aibUserId
+        ? await db.user.findUnique({ where: { id: aibUserId }, select: { language: true } })
+        : null;
+      const lang = (user?.language ?? "ru") as Language;
       const all = section
         ? (MODELS_BY_SECTION[section as Section] ?? [])
         : Object.values(AI_MODELS);
       // hiddenFromCarousel-модели активируются только в спец-сценариях (например
       // «продлить» grok-imagine-extend) и не должны попадать в каталог UI.
-      return all.filter((m) => !m.hiddenFromCarousel).map(serializeForWeb);
+      return all.filter((m) => !m.hiddenFromCarousel).map((mm) => serializeForWeb(mm, lang));
     },
   );
 };
