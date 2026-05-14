@@ -52,15 +52,10 @@ export const userService = {
 
   /**
    * Upsert by telegramId — единственная точка регистрации tg-юзера в боте.
-   *
-   * Phase 2 (текущая): `id` явно прописывается = `telegramId` для backward-compat
-   * с местами, которые ещё читают `ctx.user.id` как tgid (Metabox bridge calls,
-   * referral resolution, welcome-bonus receipt key). Sequence не двигается на
-   * новых tg-юзерах — она зарезервирована под web-only signup (Phase 3+).
-   *
-   * Phase 3 уберёт `id: telegramId` отсюда — после того как все callsite'ы
-   * перейдут на `ctx.user.telegramId` для tg-операций и FK-чтения станут
-   * однозначно internal-id.
+   * `id` присваивается автоинкрементной sequence'ой (`users_id_seq`), не равен
+   * `telegramId`. Все callsite'ы, которым нужен tgid (Metabox bridge,
+   * wtoken-генерация, welcome-bonus receipt key), читают `user.telegramId`,
+   * а не `user.id`.
    */
   async upsertByTelegramId(params: {
     telegramId: bigint;
@@ -71,7 +66,7 @@ export const userService = {
     const { telegramId, username, firstName, lastName } = params;
     const user = await db.user.upsert({
       where: { telegramId },
-      create: { id: telegramId, telegramId, username, firstName, lastName },
+      create: { telegramId, username, firstName, lastName },
       update: { username, firstName, lastName },
     });
     return mapUser(user);
@@ -91,13 +86,18 @@ export const userService = {
    * зачислены в этом вызове, `false` если был пропуск (дубль). Caller
    * использует возвращаемое значение, чтобы не показывать сообщение
    * «вот ваши N приветственных токенов», когда фактически начисления не было.
+   *
+   * `userId` — внутренний FK к User (для balance update + TokenTransaction).
+   * `telegramId` — ключ дедупликации в `welcome_bonus_receipts` (записи
+   *                переживают удаление аккаунта, ключ должен быть стабильным
+   *                tgid'ом, который Telegram не переиспользует).
    */
-  async creditWelcomeBonus(userId: bigint): Promise<boolean> {
+  async creditWelcomeBonus(userId: bigint, telegramId: bigint): Promise<boolean> {
     // Дедуп через welcome_bonus_receipts (без FK, переживает удаление User).
     // Кейс: юзер /start → бонус → удаление аккаунта → /start заново. Без
     // receipt'а isNew=true у новой User-строки → бонус выдавался повторно.
     const existingReceipt = await db.welcomeBonusReceipt.findUnique({
-      where: { telegramId: userId },
+      where: { telegramId },
     });
     if (existingReceipt) {
       // Выставляем isNew=false — иначе /start продолжит идти по new-ветке
@@ -136,7 +136,7 @@ export const userService = {
       }),
       db.welcomeBonusReceipt.create({
         data: {
-          telegramId: userId,
+          telegramId,
           amount: WELCOME_BONUS_TOKENS,
         },
       }),

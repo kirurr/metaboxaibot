@@ -13,7 +13,8 @@ import type { SaleUserInfo } from "../services/payment.service.js";
 import { config } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — tgid для recordSale / Telegram API.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
@@ -85,11 +86,19 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
       const starRate = config.payments.starPriceRub;
 
       const isTestMode = false; // Always use real Telegram Stars payments
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const user = await db.user.findUnique({
         where: { id: userId },
-        select: { firstName: true, lastName: true, username: true, referredById: true },
+        select: {
+          firstName: true,
+          lastName: true,
+          username: true,
+          referredById: true,
+          referredBy: { select: { telegramId: true } },
+        },
       });
+      // referredById — внутренний FK; для Metabox нужен tgid реферрера.
+      const referrerTelegramId = user?.referredBy?.telegramId ?? undefined;
 
       if (type === "product") {
         const product = catalog.tokenPackages.find((p) => p.id === id);
@@ -103,12 +112,13 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
             firstName: user?.firstName ?? "Test",
             lastName: user?.lastName ?? undefined,
             username: user?.username ?? undefined,
-            referrerTelegramId: user?.referredById ?? undefined,
+            referrerTelegramId,
             stars,
             starRate,
           };
           await paymentService.creditDynamicPurchase(
             userId,
+            telegramId,
             product.tokens,
             product.id,
             Number(product.priceRub),
@@ -157,12 +167,13 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
             firstName: user?.firstName ?? "Test",
             lastName: user?.lastName ?? undefined,
             username: user?.username ?? undefined,
-            referrerTelegramId: user?.referredById ?? undefined,
+            referrerTelegramId,
             stars,
             starRate,
           };
           await paymentService.creditDynamicPurchase(
             userId,
+            telegramId,
             tokens,
             sub.id,
             Math.round(totalPrice),
@@ -229,7 +240,7 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const { type, id, period } = request.body;
 
       if (!type || !id) {
@@ -250,7 +261,7 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
           const result = await createAiBotInvoice({
             metaboxUserId: user.metaboxUserId,
             productId: id,
-            telegramId: userId,
+            telegramId,
           });
           return { paymentUrl: result.paymentUrl };
         }
@@ -263,7 +274,7 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
             metaboxUserId: user.metaboxUserId,
             planId: id,
             period,
-            telegramId: userId,
+            telegramId,
           });
           return { paymentUrl: result.paymentUrl };
         }

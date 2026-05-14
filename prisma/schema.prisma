@@ -591,7 +591,8 @@ model DeletedUser {
   // НЕ unique: один и тот же telegramId может удалиться несколько раз
   // (юзер удалил аккаунт → /start создаёт новый → снова удаляет). Каждое
   // удаление — отдельный snapshot для аудита и retry-reconcile.
-  telegramId                BigInt
+  // Nullable: web-only юзер мог удалить аккаунт без TG-привязки.
+  telegramId                BigInt?
   username                  String?
   firstName                 String?
   lastName                  String?

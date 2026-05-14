@@ -83,8 +83,16 @@ export const paymentService = {
     }
   },
 
-  /** Credit tokens to user after successful Stars payment (legacy hardcoded plans). */
-  async creditPurchase(userId: bigint, planId: string, userInfo: SaleUserInfo): Promise<void> {
+  /**
+   * Credit tokens to user after successful Stars payment (legacy hardcoded plans).
+   * `userId` — внутренний FK к User; `telegramId` — tgid (для recordSale в Metabox).
+   */
+  async creditPurchase(
+    userId: bigint,
+    telegramId: bigint,
+    planId: string,
+    userInfo: SaleUserInfo,
+  ): Promise<void> {
     const plan = PLANS.find((p) => p.id === planId);
     if (!plan) throw new Error(`Unknown plan: ${planId}`);
 
@@ -107,7 +115,7 @@ export const paymentService = {
 
     // Notify Metabox for MLM bonus + order tracking (always, even for unlinked users)
     recordSale({
-      telegramId: userId,
+      telegramId,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       username: userInfo.username,
@@ -123,7 +131,7 @@ export const paymentService = {
         console.log("[payment] recordSale ok:", {
           userId: res.userId,
           orderId: res.orderId,
-          tgUser: userId.toString(),
+          tgUser: telegramId.toString(),
         });
       })
       .catch((err: unknown) => {
@@ -131,9 +139,13 @@ export const paymentService = {
       });
   },
 
-  /** Credit tokens for a dynamic product purchase (from Metabox catalog). */
+  /**
+   * Credit tokens for a dynamic product purchase (from Metabox catalog).
+   * `userId` — внутренний FK к User; `telegramId` — tgid для recordSale.
+   */
   async creditDynamicPurchase(
     userId: bigint,
+    telegramId: bigint,
     tokens: number,
     productId: string,
     priceRub: number,
@@ -233,7 +245,7 @@ export const paymentService = {
 
     // Notify Metabox for MLM bonus + order tracking (always, even for unlinked users)
     recordSale({
-      telegramId: userId,
+      telegramId,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       username: userInfo.username,
@@ -250,7 +262,7 @@ export const paymentService = {
         console.log("[payment] recordSale ok:", {
           userId: res.userId,
           orderId: res.orderId,
-          tgUser: userId.toString(),
+          tgUser: telegramId.toString(),
         });
       })
       .catch((err: unknown) => {

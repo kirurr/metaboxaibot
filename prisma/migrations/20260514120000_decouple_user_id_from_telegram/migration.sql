@@ -34,3 +34,7 @@ SELECT setval(
 );
 ALTER TABLE "users" ALTER COLUMN "id" SET DEFAULT nextval('"users_id_seq"');
 ALTER SEQUENCE "users_id_seq" OWNED BY "users"."id";
+
+-- DeletedUser.telegramId — делаем nullable: web-only юзер мог удалить аккаунт
+-- без TG-привязки, snapshot всё равно нужен для аудита/retry-reconcile.
+ALTER TABLE "deleted_users" ALTER COLUMN "telegramId" DROP NOT NULL;

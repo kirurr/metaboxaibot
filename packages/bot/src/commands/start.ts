@@ -29,9 +29,10 @@ import { logger } from "../logger.js";
  *  - Зачисление + insert в GrantedMetaboxOrder идут одной db.$transaction —
  *    unique-violation на orderId откатит весь батч, токены не задвоятся.
  */
-async function syncMetaboxGrants(userId: bigint): Promise<void> {
-  // Token-pack orders sync
-  const pendingOrders = await getPendingTokenGrants(userId);
+async function syncMetaboxGrants(userId: bigint, telegramId: bigint): Promise<void> {
+  // Token-pack orders sync. `telegramId` идёт во внешние вызовы (Metabox lookup +
+  // ключ GrantedMetaboxOrder), `userId` — внутренний FK для User.update / TokenTransaction.
+  const pendingOrders = await getPendingTokenGrants(telegramId);
   for (const order of pendingOrders) {
     try {
       const alreadyGranted = await db.grantedMetaboxOrder.findUnique({
@@ -42,7 +43,7 @@ async function syncMetaboxGrants(userId: bigint): Promise<void> {
         // (mark-order-granted идемпотентен) и идём дальше.
         await markOrderGrantedOnMetabox(order.orderId);
         logger.info(
-          { orderId: order.orderId, userId: userId.toString() },
+          { orderId: order.orderId, userId: userId.toString(), telegramId: telegramId.toString() },
           "[syncMetaboxGrants] order already granted — skip credit, refresh metabox flag",
         );
         continue;
@@ -65,7 +66,7 @@ async function syncMetaboxGrants(userId: bigint): Promise<void> {
         db.grantedMetaboxOrder.create({
           data: {
             orderId: order.orderId,
-            telegramId: userId,
+            telegramId,
             tokens: order.tokens,
             description: order.description,
           },
@@ -134,7 +135,7 @@ async function sendStartMessages(
     // Возвращающимся юзерам сразу персистентная reply-клавиатура — со свежими
     // wtoken'ами в webApp-кнопках, протухшие URL'ы заменяются.
     await ctx.reply(t.start.mainMenuTitle, {
-      reply_markup: buildMainMenuKeyboard(t, ctx.user!.id),
+      reply_markup: buildMainMenuKeyboard(t, ctx.user!.telegramId),
     });
   }
 }
@@ -171,14 +172,23 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         where: { userId: ctx.user.id, type: "credit", reason: "purchase" },
         select: { id: true },
       });
+      // referredById — внутренний `User.id`; Metabox ожидает tgid реферрера.
+      let referrerTelegramId: bigint | null = null;
+      if (ctx.user.referredById) {
+        const referrer = await db.user.findUnique({
+          where: { id: ctx.user.referredById },
+          select: { telegramId: true },
+        });
+        referrerTelegramId = referrer?.telegramId ?? null;
+      }
       const { metaboxUserId, referralCode, mergedFrom } = await verifyLinkToken(
         token,
-        ctx.user.id,
+        ctx.user.telegramId!,
         {
           telegramUsername: ctx.from?.username,
           firstName: ctx.from?.first_name,
           lastName: ctx.from?.last_name,
-          referrerTelegramId: ctx.user.referredById,
+          referrerTelegramId,
           botHasPurchase: !!botPurchase,
           botCreatedAt: ctx.user.createdAt,
         },
@@ -196,7 +206,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       }
 
       // Sync subscription and pending token grants from Metabox after linking
-      void syncMetaboxGrants(ctx.user.id).catch((err) => {
+      void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
         logger.error({ err }, "[start link] grant sync failed");
       });
     } catch (err) {
@@ -314,12 +324,16 @@ export async function handleStart(ctx: BotContext): Promise<void> {
             where: { id: ctx.user.id },
             data: { metaboxUserId },
           });
-          await markLinkTelegramLinked(state, ctx.user.id.toString(), ctx.from?.username ?? null);
+          await markLinkTelegramLinked(
+            state,
+            ctx.user.telegramId!.toString(),
+            ctx.from?.username ?? null,
+          );
           await ctx.reply(
             "✅ Аккаунт привязан. Возвращайтесь на ai.metabox.global — нейросети уже доступны.",
           );
           // Синхронизируем токены/подписки из metabox
-          void syncMetaboxGrants(ctx.user.id).catch((err) => {
+          void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
             logger.error({ err }, "[start linkweb] grant sync failed");
           });
         }
@@ -360,18 +374,21 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     const refParam = param.slice("ref_".length);
 
     // Try as referralCode first (new format: ref_HU6PQYST)
-    // Then fall back to telegramId (legacy format: ref_6186315229)
+    // Then fall back to telegramId (legacy format: ref_6186315229).
+    // `referrerId` — внутренний `User.id` найденного реферрера (FK для
+    // `referredById`); резолвится через lookup по `telegramId`, потому что
+    // в URL приходит именно tgid (а в новой схеме User.id ≠ telegramId).
     let referrerId: bigint | null = null;
 
     if (/^\d+$/.test(refParam)) {
       // Legacy: numeric telegramId
-      const legacyId = BigInt(refParam);
-      if (legacyId !== ctx.user.id) {
-        const exists = await db.user.findUnique({
-          where: { id: legacyId },
+      const legacyTgid = BigInt(refParam);
+      if (legacyTgid !== ctx.user.telegramId) {
+        const referrer = await db.user.findUnique({
+          where: { telegramId: legacyTgid },
           select: { id: true },
         });
-        if (exists) referrerId = legacyId;
+        if (referrer) referrerId = referrer.id;
       }
     }
 
@@ -381,14 +398,14 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         const { resolveReferralCode } = await import("@metabox/api/services");
         const resolved = await resolveReferralCode(refParam);
         if (resolved?.telegramId) {
-          const resolvedId = BigInt(resolved.telegramId);
-          if (resolvedId !== ctx.user.id) {
-            const exists = await db.user.findUnique({
-              where: { id: resolvedId },
+          const resolvedTgid = BigInt(resolved.telegramId);
+          if (resolvedTgid !== ctx.user.telegramId) {
+            const referrer = await db.user.findUnique({
+              where: { telegramId: resolvedTgid },
               select: { id: true },
             });
-            if (exists) {
-              referrerId = resolvedId;
+            if (referrer) {
+              referrerId = referrer.id;
             }
           }
         }
@@ -425,18 +442,36 @@ export async function handleStart(ctx: BotContext): Promise<void> {
   if (config.metabox?.apiUrl) {
     (async () => {
       try {
-        // Re-read user from DB to get updated referredById (set in ref_ handler above)
+        // Re-read user from DB to get updated referredById (set in ref_ handler above).
+        // referredById — внутренний User.id ментора; Metabox ожидает tgid, поэтому
+        // подтягиваем `referrer.telegramId` отдельным lookup'ом.
         const freshUser = await db.user.findUnique({
           where: { id: ctx.user!.id },
-          select: { referredById: true, firstName: true, lastName: true, username: true },
+          select: {
+            referredById: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            telegramId: true,
+            referredBy: { select: { telegramId: true } },
+          },
         });
+        const referrerTelegramId = freshUser?.referredBy?.telegramId ?? null;
+        const telegramId = ctx.user!.telegramId ?? freshUser?.telegramId;
+        if (!telegramId) {
+          logger.warn(
+            { userId: ctx.user!.id.toString() },
+            "[start registerBotUser] no telegramId on user — skip Metabox register",
+          );
+          return;
+        }
         const { registerBotUser } = await import("@metabox/api/services");
         const result = await registerBotUser({
-          telegramId: ctx.user!.id,
+          telegramId,
           firstName: freshUser?.firstName ?? ctx.user!.firstName,
           lastName: freshUser?.lastName ?? ctx.user!.lastName,
           username: freshUser?.username ?? ctx.user!.username,
-          referrerTelegramId: freshUser?.referredById ?? ctx.user!.referredById,
+          referrerTelegramId,
           referrerUserId: resolvedReferrerUserId ?? undefined,
         });
         if (result?.ok) {
@@ -463,7 +498,8 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           if (driftDetected) {
             logger.warn(
               {
-                telegramId: ctx.user!.id.toString(),
+                telegramId: telegramId.toString(),
+                userId: ctx.user!.id.toString(),
                 from: previousMetaboxUserId,
                 to: result.userId,
                 isStub: result.isStub,
@@ -482,7 +518,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
               .catch(() => {});
 
             // Sync subscription + pending token grants from Metabox
-            void syncMetaboxGrants(ctx.user!.id).catch((err) => {
+            void syncMetaboxGrants(ctx.user!.id, telegramId).catch((err) => {
               logger.error({ err }, "[start registerBotUser] grant sync failed");
             });
 
@@ -490,6 +526,8 @@ export async function handleStart(ctx: BotContext): Promise<void> {
             // Закрывает дыру: реферал мог зарегистрироваться в боте раньше
             // наставника — тогда его referredById остался null, потому что
             // строки наставника в db.user ещё не было. Идемпотентно.
+            //
+            // Первый параметр — внутренний `User.id` ментора (FK для referredById).
             void backfillBotReferrals(ctx.user!.id, result.userId).catch((err) => {
               logger.error({ err }, "[start registerBotUser] referral backfill failed");
             });
@@ -506,7 +544,10 @@ export async function handleStart(ctx: BotContext): Promise<void> {
   // после удаления аккаунта) — фактического начисления не было, поэтому
   // сообщение «вот ваши N приветственных токенов» показывать нельзя;
   // воспринимаем юзера как возвращающегося (balance + main menu).
-  const creditedNow = isNew ? await userService.creditWelcomeBonus(ctx.user.id) : false;
+  const creditedNow =
+    isNew && ctx.user.telegramId
+      ? await userService.creditWelcomeBonus(ctx.user.id, ctx.user.telegramId)
+      : false;
 
   await sendStartMessages(ctx, inferredLang, {
     isNew: creditedNow,
@@ -547,7 +588,7 @@ export async function handleOnboardingOk(ctx: BotContext): Promise<void> {
 
   const t = ctx.t;
   await ctx.reply(t.start.mainMenuTitle, {
-    reply_markup: buildMainMenuKeyboard(t, ctx.user?.id),
+    reply_markup: buildMainMenuKeyboard(t, ctx.user?.telegramId),
   });
 }
 

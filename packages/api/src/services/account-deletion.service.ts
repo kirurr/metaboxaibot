@@ -52,25 +52,41 @@ function generateCode(): string {
   return randomInt(100000, 1000000).toString();
 }
 
-async function getUserLang(userId: bigint): Promise<Language> {
-  const u = await db.user.findUnique({ where: { id: userId }, select: { language: true } });
-  return ((u?.language as Language | undefined) ?? "en") as Language;
+async function getUserLangAndTg(
+  userId: bigint,
+): Promise<{ lang: Language; telegramId: bigint | null }> {
+  const u = await db.user.findUnique({
+    where: { id: userId },
+    select: { language: true, telegramId: true },
+  });
+  return {
+    lang: ((u?.language as Language | undefined) ?? "en") as Language,
+    telegramId: u?.telegramId ?? null,
+  };
 }
 
-async function sendBotMessage(chatId: bigint, text: string, replyMarkup?: object): Promise<void> {
+async function sendBotMessage(
+  telegramId: bigint | null,
+  text: string,
+  replyMarkup?: object,
+): Promise<void> {
+  if (telegramId === null) return; // web-only юзер — slать некуда
   try {
     await fetch(`https://api.telegram.org/bot${config.bot.token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: Number(chatId),
+        chat_id: Number(telegramId),
         text,
         parse_mode: "HTML",
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     });
   } catch (err) {
-    logger.error({ err, chatId: chatId.toString() }, "[account-deletion] sendBotMessage failed");
+    logger.error(
+      { err, telegramId: telegramId.toString() },
+      "[account-deletion] sendBotMessage failed",
+    );
   }
 }
 
@@ -83,7 +99,7 @@ async function sendBotMessage(chatId: bigint, text: string, replyMarkup?: object
  */
 export async function initiateAccountDeletion(userId: bigint): Promise<void> {
   const redis = getRedis();
-  const lang = await getUserLang(userId);
+  const { lang, telegramId } = await getUserLangAndTg(userId);
   const t = getT(lang);
 
   // Сохраняем prevState ТОЛЬКО если в Redis ещё нет (защита от перезаписи
@@ -107,7 +123,7 @@ export async function initiateAccountDeletion(userId: bigint): Promise<void> {
   const record: CodeRecord = { code, attempts: 0, verified: false };
   await redis.set(codeKey(userId), JSON.stringify(record), "EX", TTL_SEC);
 
-  await sendBotMessage(userId, t.accountDelete.codeMessage.replace("{code}", code), {
+  await sendBotMessage(telegramId, t.accountDelete.codeMessage.replace("{code}", code), {
     inline_keyboard: [
       [{ text: t.accountDelete.cancelButton, callback_data: "account_delete:cancel" }],
     ],
@@ -225,11 +241,11 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
       .filter((id): id is string => !!id);
   }
 
-  if (shouldTransfer) {
+  if (shouldTransfer && user.telegramId) {
     try {
       await metaboxTransfer({
         metaboxUserId: user.metaboxUserId!,
-        telegramId: user.id,
+        telegramId: user.telegramId,
         purchasedTokens,
         subscriptionTokens,
         subscription: subToTransfer,
@@ -257,8 +273,10 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
   }
 
   // ── 2. Snapshot + cascade-delete атомарно ───────────────────────────────
+  // DeletedUser.telegramId — nullable: для web-only юзеров tgid'а нет, снапшот
+  // всё равно создаём (для аудита и retry-reconcile).
   const snapshot = {
-    telegramId: user.id,
+    telegramId: user.telegramId ?? null,
     username: user.username ?? null,
     firstName: user.firstName ?? null,
     lastName: user.lastName ?? null,
@@ -298,7 +316,7 @@ export async function executeAccountDeletion(userId: bigint): Promise<{ ok: true
 
   const lang = (user.language as Language) ?? "en";
   const t = getT(lang);
-  await sendBotMessage(userId, t.accountDelete.success);
+  await sendBotMessage(user.telegramId ?? null, t.accountDelete.success);
 
   logger.info(
     {
@@ -341,7 +359,7 @@ export async function cancelAccountDeletion(
 
   await redis.del(codeKey(userId), prevStateKey(userId));
 
-  const lang = await getUserLang(userId);
+  const { lang, telegramId } = await getUserLangAndTg(userId);
   const t = getT(lang);
   let text: string;
   switch (reason) {
@@ -354,7 +372,7 @@ export async function cancelAccountDeletion(
     default:
       text = t.accountDelete.cancelled;
   }
-  await sendBotMessage(userId, text);
+  await sendBotMessage(telegramId, text);
 
   logger.info({ userId: userId.toString(), reason }, "[account-deletion] cancelled");
 }
