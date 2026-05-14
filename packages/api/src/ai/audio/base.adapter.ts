@@ -19,6 +19,13 @@ export interface AudioResult {
   /** MIME type: 'audio/mpeg' | 'audio/wav' | 'audio/ogg' */
   contentType: string;
   /**
+   * Какой провайдер фактически выдал результат, если это не primary. Ставится
+   * адаптером при фолбэке: `KieElevenLabsAdapter` помечает `"elevenlabs"`, когда
+   * генерация на kie упала и сработал прямой ElevenLabs. Процессор пишет это
+   * в audit-поле `actualProvider` `TokenTransaction`.
+   */
+  actualProvider?: string;
+  /**
    * Optional: дополнительные треки, сгенерированные тем же запросом.
    * Suno за один запрос возвращает 2 трека — первый кладём в основной
    * `AudioResult`, остальные в `extras`. Worker сохраняет каждый как отдельный
@@ -38,6 +45,12 @@ export interface AudioAdapter {
   generate?(input: AudioInput): Promise<AudioResult>;
   /** Submit async job. Returns provider-side job ID. */
   submit?(input: AudioInput): Promise<string>;
-  /** Poll async result. Returns null if still processing. */
-  poll?(jobId: string): Promise<AudioResult | null>;
+  /**
+   * Poll async result. Returns null if still processing.
+   *
+   * Опциональный `input` нужен адаптерам с фолбэком: `KieElevenLabsAdapter` при
+   * сбое kie генерит на прямом ElevenLabs из того же `AudioInput`. Async-адаптеры
+   * без фолбэка (Suno) второй параметр игнорируют — сигнатура совместима.
+   */
+  poll?(jobId: string, input?: AudioInput): Promise<AudioResult | null>;
 }

@@ -7,6 +7,11 @@ import {
   UserFacingError,
 } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { logger } from "../../logger.js";
+import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
+import { acquireKey } from "../../services/key-pool.service.js";
+import { envKeyForProvider } from "../key-provider.js";
+import { isPoolExhaustedError } from "../../utils/pool-exhausted-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -27,6 +32,13 @@ const TTS_MODEL_NAMES: Record<string, string> = {
 };
 const DEFAULT_TTS_MODEL = "elevenlabs/text-to-speech-multilingual-v2";
 const SOUND_EFFECT_MODEL = "elevenlabs/sound-effect-v2";
+
+/**
+ * Sentinel-префикс для taskId. `submit()` возвращает `el-fallback:<reason>`,
+ * когда kie createTask упал — `poll()` ловит этот префикс и генерит напрямую
+ * через ElevenLabs. Двоеточие не пересекается с реальными kie taskId (hex/uuid).
+ */
+const EL_FALLBACK_PREFIX = "el-fallback:";
 
 interface KieSubmitResponse {
   code: number;
@@ -159,46 +171,149 @@ export class KieElevenLabsAdapter implements AudioAdapter {
     };
   }
 
+  /**
+   * Резолвит ElevenLabs API-ключ для фолбэка: сначала пул (`acquireKey`), при
+   * `PoolExhaustedError` — env-fallback (`config.ai.elevenlabs`). Если нет
+   * нигде — throw (редкий hard fail; EL-фолбэк без ключа невозможен).
+   */
+  private async resolveElKey(): Promise<string> {
+    try {
+      return (await acquireKey("elevenlabs")).apiKey;
+    } catch (err) {
+      if (!isPoolExhaustedError(err)) throw err;
+      const envKey = envKeyForProvider("elevenlabs");
+      if (envKey) return envKey;
+      throw new Error("ElevenLabs fallback key unavailable: empty pool and no env key");
+    }
+  }
+
+  /**
+   * Прямая генерация через ElevenLabs — переиспользует синхронный
+   * `ElevenLabsAdapter`. Результат помечается `actualProvider: "elevenlabs"`,
+   * чтобы процессор записал фактического провайдера в аудит.
+   *
+   * Голос для `tts-el` (try-real-then-default): voice_id из каталога kie сейчас
+   * не резолвятся на нашем EL-аккаунте, поэтому попытка 1 идёт с реальным
+   * голосом юзера; при plain-сбое попытка 2 повторяется с premade-голосом EL по
+   * умолчанию (`ElevenLabsAdapter` сам берёт Rachel, когда voice не задан — для
+   * этого снимаем voice_id с input). `UserFacingError` из попытки 1 — финальный
+   * вердикт, ре-кидается без попытки 2. `sounds-el`/`music-el` голос не нужен —
+   * один вызов, любой throw (вкл. `UserFacingError`) пробрасывается.
+   */
+  private async generateViaElevenLabs(input: AudioInput): Promise<AudioResult> {
+    const elKey = await this.resolveElKey();
+    const elAdapter = new ElevenLabsAdapter(this.modelId, elKey, this.fetchFn);
+
+    if (this.modelId !== "tts-el") {
+      const result = await elAdapter.generate(input);
+      return { ...result, actualProvider: "elevenlabs" };
+    }
+
+    try {
+      const result = await elAdapter.generate(input);
+      return { ...result, actualProvider: "elevenlabs" };
+    } catch (err) {
+      // UserFacingError из попытки 1 — финальный вердикт, не ретраим, не глотаем.
+      if (err instanceof UserFacingError) throw err;
+      // Попытка 1 упала (скорее всего kie-voice_id не существует на EL-
+      // аккаунте) — повтор с дефолтным premade-голосом EL: снимаем voice_id,
+      // `ElevenLabsAdapter.generateSpeech` сам подставит свой DEFAULT_VOICE_ID.
+      const retryInput: AudioInput = {
+        ...input,
+        voiceId: undefined,
+        modelSettings: { ...(input.modelSettings ?? {}), voice_id: undefined },
+      };
+      const result = await elAdapter.generate(retryInput);
+      return { ...result, actualProvider: "elevenlabs" };
+    }
+  }
+
+  /**
+   * Сабмит kie createTask. При ЛЮБОМ сбое kie (HTTP non-200, `code≠200`, 402,
+   * сетевая ошибка) возвращает sentinel-taskId `el-fallback:<reason>` — `poll()`
+   * увидит префикс и сгенерит через прямой ElevenLabs.
+   *
+   * `buildBody` (вместе с гардом длины, который кидает `UserFacingError`)
+   * вызывается ДО `try` — слишком длинный промпт это финальный вердикт юзеру, он
+   * никогда не превращается в фолбэк. Внутри `try` `UserFacingError` сейчас не
+   * бросается, но `catch` всё равно его ре-кидает — явная гарантия на будущее.
+   */
   async submit(input: AudioInput): Promise<string> {
     const body = this.buildBody(input);
 
-    const resp = await fetchWithLog(
-      `${KIE_BASE}/api/v1/jobs/createTask`,
-      {
-        method: "POST",
-        headers: this.jsonHeaders,
-        body: JSON.stringify(body),
-      },
-      this.fetchFn,
-    );
+    try {
+      const resp = await fetchWithLog(
+        `${KIE_BASE}/api/v1/jobs/createTask`,
+        {
+          method: "POST",
+          headers: this.jsonHeaders,
+          body: JSON.stringify(body),
+        },
+        this.fetchFn,
+      );
 
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`KIE audio submit error ${resp.status}: ${txt}`);
-    }
-
-    const data = (await resp.json()) as KieSubmitResponse;
-    if (data.code !== 200 || !data.data?.taskId) {
-      const msg = data.msg ?? "no taskId in response";
-      // 402 = Insufficient Credits — kie.ai account is empty, affects every user
-      // until topped up. Generic "temporarily unavailable" + deduped ops alert
-      // (mirror KieSunoAdapter). Separate dedup key from Suno so alerts don't merge.
-      if (data.code === 402) {
-        const modelName = AI_MODELS[this.modelId]?.name ?? this.modelId;
-        throw new UserFacingError(`KIE audio submit failed: 402 — ${msg}`, {
-          key: "modelTemporarilyUnavailable",
-          section: "audio",
-          params: { modelName },
-          notifyOps: true,
-          opsAlertDedupKey: "kie-audio-credits-exhausted",
-        });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        logger.warn(
+          { modelId: this.modelId, status: resp.status, body: txt.slice(0, 300) },
+          "KIE audio submit HTTP error — falling back to ElevenLabs",
+        );
+        return `${EL_FALLBACK_PREFIX}http-${resp.status}`;
       }
-      throw new Error(`KIE audio submit failed: ${data.code} — ${msg}`);
+
+      const data = (await resp.json()) as KieSubmitResponse;
+      if (data.code !== 200 || !data.data?.taskId) {
+        const msg = data.msg ?? "no taskId in response";
+        // 402 = Insufficient Credits. Раньше бросали UserFacingError(notifyOps);
+        // теперь EL-фолбэк сам это покрывает — просто warn. Suno (KieSunoAdapter)
+        // по-прежнему алертит ops на свой 402, так что исчерпание кредитов kie
+        // всё равно видно операторам.
+        logger.warn(
+          { modelId: this.modelId, code: data.code, msg },
+          "KIE audio submit non-success — falling back to ElevenLabs",
+        );
+        return `${EL_FALLBACK_PREFIX}code-${data.code}`;
+      }
+      return data.data.taskId;
+    } catch (err) {
+      // UserFacingError НИКОГДА не превращается в sentinel/фолбэк.
+      if (err instanceof UserFacingError) throw err;
+      // Сетевая ошибка / parse — kie недоступен. Фолбэк на ElevenLabs.
+      logger.warn(
+        { modelId: this.modelId, err },
+        "KIE audio submit threw — falling back to ElevenLabs",
+      );
+      return `${EL_FALLBACK_PREFIX}error`;
     }
-    return data.data.taskId;
   }
 
-  async poll(taskId: string): Promise<AudioResult | null> {
+  /**
+   * Поллинг kie recordInfo. Расширения для EL-фолбэка:
+   *  - `taskId` с префиксом `el-fallback:` → kie был недоступен на submit,
+   *    генерим напрямую через ElevenLabs из `input`.
+   *  - kie `state:"fail"` с модерацией (`failCode 501` / regex) → бросаем
+   *    `UserFacingError(contentPolicyViolation)` — EL применяет ту же политику,
+   *    фолбэк не поможет; финальный вердикт юзеру, БЕЗ фолбэка.
+   *  - kie `state:"fail"` прочее (вкл. `failCode 500`, `422 playground`) →
+   *    фолбэк на ElevenLabs.
+   *  - ошибка самого poll-запроса (HTTP / parse) → throw (kie-задача жива,
+   *    перепол позже; БЕЗ фолбэка).
+   *
+   * EL-фолбэк (`generateViaElevenLabs`) НЕ оборачивается в catch-all: если EL
+   * бросит `UserFacingError` (напр. `sounds-el` промпт >450 симв.), она
+   * пробрасывается из `poll()` как есть — процессор покажет её юзеру без списания.
+   */
+  async poll(taskId: string, input?: AudioInput): Promise<AudioResult | null> {
+    // Sentinel из submit(): kie упал ещё на createTask — сразу EL.
+    if (taskId.startsWith(EL_FALLBACK_PREFIX)) {
+      if (!input) {
+        // Legacy in-flight джоба до этого деплоя — нет AudioInput для
+        // реконструкции. Деградируем к до-деплойному поведению, не падая молча.
+        throw new Error(`KIE audio: EL fallback requested but no input (taskId=${taskId})`);
+      }
+      return this.generateViaElevenLabs(input);
+    }
+
     const resp = await fetchWithLog(
       `${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`,
       { headers: { Authorization: `Bearer ${this.apiKey}` } },
@@ -218,15 +333,9 @@ export class KieElevenLabsAdapter implements AudioAdapter {
       const failMsg = task.failMsg ?? "unknown error";
       const failCode = task.failCode;
       const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${failMsg}`;
-      // Transient kie.ai infra error — valid taskId, their backend hiccupped.
-      // Plain Error so BullMQ retries (mirror kie.adapter.ts / isKieTransientError).
-      if (
-        failCode === "422" &&
-        /playground failed|task id is blank|client closed request/i.test(failMsg)
-      ) {
-        throw new Error(technicalMessage);
-      }
-      // Content moderation — user must change the prompt.
+
+      // Модерация контента — EL применяет ту же политику, фолбэк не поможет.
+      // Финальный вердикт юзеру, БЕЗ фолбэка.
       if (
         failCode === "501" ||
         /sensitiv|policy|prohibited|moderation|blocked|rejected|inappropriate/i.test(failMsg)
@@ -236,7 +345,17 @@ export class KieElevenLabsAdapter implements AudioAdapter {
           section: "audio",
         });
       }
-      throw new Error(technicalMessage);
+
+      // Любой другой terminal-сбой kie (вкл. failCode 500, 422 "playground
+      // failed" и т.п.) — kie эту задачу не воскресит. Фолбэк на ElevenLabs.
+      if (!input) {
+        throw new Error(`${technicalMessage} (no input for EL fallback)`);
+      }
+      logger.warn(
+        { modelId: this.modelId, taskId, failCode, failMsg },
+        "KIE audio task failed — falling back to ElevenLabs",
+      );
+      return this.generateViaElevenLabs(input);
     }
 
     if (task.state !== "success") return null;

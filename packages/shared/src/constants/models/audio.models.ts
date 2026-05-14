@@ -228,14 +228,16 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     section: "audio",
     provider: "kie",
     costUsdPerRequest: 0,
-    costUsdPerKChar: 0.06, // elevenlabs/text-to-speech-multilingual-v2 via kie.ai
+    // Тариф ElevenLabs, не kie: KieElevenLabsAdapter фолбэчит на прямой EL при
+    // сбое kie, поэтому биллим по EL — иначе фолбэк убыточен (kie дешевле).
+    costUsdPerKChar: 0.3,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     costVariants: {
       settingKey: "model_id",
       map: {
-        eleven_multilingual_v2: { costUsdPerKChar: 0.06 },
-        eleven_turbo_v2_5: { costUsdPerKChar: 0.03 },
+        eleven_multilingual_v2: { costUsdPerKChar: 0.3 },
+        eleven_turbo_v2_5: { costUsdPerKChar: 0.15 },
       },
     },
     supportsImages: false,
@@ -355,8 +357,9 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
       "Генерирует оригинальные звуковые эффекты по описанию. Подходит для видеопроизводства, игр и подкастов. Рекомендуем задавать промпт на английском языке.",
     section: "audio",
     provider: "kie",
-    costUsdPerRequest: 0,
-    costUsdPerSecond: 0.0012, // elevenlabs/sound-effect-v2 via kie.ai
+    // Флэт за вызов по тарифу EL sound-generation (не посекундно):
+    // KieElevenLabsAdapter фолбэчит на прямой EL, биллим по EL — иначе убыточно.
+    costUsdPerRequest: 0.06,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: false,
@@ -406,7 +409,9 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     section: "audio",
     provider: "kie",
     costUsdPerRequest: 0,
-    costUsdPerSecond: 0.0012, // elevenlabs/sound-effect-v2 via kie.ai
+    // Тариф ElevenLabs, не kie: KieElevenLabsAdapter фолбэчит на прямой EL при
+    // сбое kie, биллим по EL — иначе фолбэк убыточен.
+    costUsdPerSecond: 0.008,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: false,
