@@ -605,7 +605,19 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         dialogId: id,
         userId: aibUserId!,
         content,
-        ...(imageS3Keys?.length ? { imageS3Keys } : {}),
+        // Картинки: передаём И imageS3Keys (для history-re-attach и save в DB),
+        // И imageUrls (presigned) — без последних адаптер не получит `image_url`
+        // блока в content и модель ответит «не вижу файла» (см. chat.service:357,
+        // строит `LLMInput.imageUrls` ТОЛЬКО из переданных `imageUrls`).
+        // Бот резолвит s3Key→URL до вызова сервиса; для web делаем то же тут.
+        ...(imageS3Keys?.length
+          ? {
+              imageS3Keys,
+              imageUrls: (
+                await Promise.all(imageS3Keys.map((k) => getFileUrl(k).catch(() => null)))
+              ).filter((u): u is string => typeof u === "string" && u.length > 0),
+            }
+          : {}),
         ...(documentAttachments?.length
           ? {
               documentAttachments: documentAttachments.map<StoredAttachment>((a) => ({
