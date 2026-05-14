@@ -446,7 +446,14 @@ function SettingControl({
           <select
             className="gen-select"
             value={String(value ?? setting.default ?? "")}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              // Native <select> возвращает string — резолвим обратно в исходный
+              // тип опции (number/boolean/string), чтобы адаптеры на воркере
+              // не получили "1" вместо 1. Chip-row (≤6 опций) такого приёма
+              // не требует, там o.value передаётся напрямую.
+              const found = opts.find((o) => String(o.value) === e.target.value);
+              onChange(found ? found.value : e.target.value);
+            }}
           >
             {opts.map((o) => (
               <option key={String(o.value)} value={String(o.value)}>
