@@ -30,6 +30,8 @@ const AdminLayout = lazy(() => import("@/pages/AdminLayout"));
 const AdminKeysPage = lazy(() => import("@/pages/AdminKeys"));
 const AdminProxiesPage = lazy(() => import("@/pages/AdminProxies"));
 const AdminPricingPage = lazy(() => import("@/pages/AdminPricing"));
+const AdminPromptsListPage = lazy(() => import("@/pages/AdminPromptsList"));
+const AdminPromptEditorPage = lazy(() => import("@/pages/AdminPromptEditor"));
 const WebSocketPage = lazy(() => import("@/pages/WebSocket"));
 const PromptsPage = lazy(() => import("@/pages/PromptsPage"));
 
@@ -103,6 +105,9 @@ export const router = createBrowserRouter([
       { path: "keys", element: withSuspense(<AdminKeysPage />) },
       { path: "proxies", element: withSuspense(<AdminProxiesPage />) },
       { path: "pricing", element: withSuspense(<AdminPricingPage />) },
+      { path: "prompts", element: withSuspense(<AdminPromptsListPage />) },
+      { path: "prompts/new", element: withSuspense(<AdminPromptEditorPage />) },
+      { path: "prompts/:id/edit", element: withSuspense(<AdminPromptEditorPage />) },
     ],
   },
 
