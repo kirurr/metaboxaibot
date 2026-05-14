@@ -2,14 +2,23 @@ import { apiClient } from "./client";
 import {
   promptExamplesPageSchema,
   promptExampleSchema,
+  adminPromptsModelsResponseSchema,
   type PromptExamplesPage,
   type PromptExample,
   type ListPromptExamplesQuery,
   type CreatePromptExampleBody,
   type UpdatePromptExampleBody,
+  type AdminPromptsModelsResponse,
+  type PromptModelDto,
 } from "@metabox/shared-browser/dto";
 
-export type { PromptExamplesPage, PromptExample, ListPromptExamplesQuery };
+export type {
+  PromptExamplesPage,
+  PromptExample,
+  ListPromptExamplesQuery,
+  AdminPromptsModelsResponse,
+  PromptModelDto,
+};
 
 export async function listPromptExamples(
   params: ListPromptExamplesQuery = {},
@@ -24,11 +33,15 @@ export async function listPromptExamples(
 
 // ── Admin ──────────────────────────────────────────────────────────────────
 
-export async function adminListPromptExamples(params: ListPromptExamplesQuery = {}) {
-  const data = await apiClient("/admin/prompts", {
-    query: { section: params.section, cursor: params.cursor, take: params.take },
-  });
-  return promptExamplesPageSchema.parse(data);
+/** Каталог моделей (design + video) с их settings — для формы редактирования промптов. */
+export async function adminListPromptModels(): Promise<AdminPromptsModelsResponse> {
+  const data = await apiClient("/admin/prompts");
+  return adminPromptsModelsResponseSchema.parse(data);
+}
+
+export async function adminGetPromptExample(id: string): Promise<PromptExample> {
+  const data = await apiClient(`/admin/prompts/${encodeURIComponent(id)}`);
+  return promptExampleSchema.parse(data);
 }
 
 export async function adminCreatePromptExample(body: CreatePromptExampleBody) {

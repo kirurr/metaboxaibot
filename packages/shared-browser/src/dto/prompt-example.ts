@@ -19,6 +19,10 @@ export const promptExampleSchema = z.object({
   prompt: z.string(),
   mediaUrl: z.string().nullable(),
   thumbnailUrl: z.string().nullable(),
+  // S3 keys возвращаются только админам (GET /admin/prompts/:id), для редактора.
+  // На публичных списках опускаются — поэтому optional + nullable.
+  mediaS3Key: z.string().nullable().optional(),
+  thumbnailS3Key: z.string().nullable().optional(),
   section: z.string(),
   createdAt: z.string(),
 });
@@ -26,6 +30,12 @@ export const promptExampleSchema = z.object({
 export const promptExamplesPageSchema = z.object({
   items: z.array(promptExampleSchema),
   nextCursor: z.string().nullable(),
+});
+
+export const promptModelDtoSchema = promptExampleModelSchema;
+
+export const adminPromptsModelsResponseSchema = z.object({
+  models: z.array(promptModelDtoSchema),
 });
 
 export const listPromptExamplesQuerySchema = z.object({
@@ -57,3 +67,5 @@ export type PromptExamplesPage = z.infer<typeof promptExamplesPageSchema>;
 export type ListPromptExamplesQuery = z.infer<typeof listPromptExamplesQuerySchema>;
 export type CreatePromptExampleBody = z.infer<typeof createPromptExampleBodySchema>;
 export type UpdatePromptExampleBody = z.infer<typeof updatePromptExampleBodySchema>;
+export type PromptModelDto = z.infer<typeof promptModelDtoSchema>;
+export type AdminPromptsModelsResponse = z.infer<typeof adminPromptsModelsResponseSchema>;

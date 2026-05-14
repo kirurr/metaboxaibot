@@ -2,6 +2,8 @@ export {
   promptExampleSchema,
   promptExamplesPageSchema,
   promptExampleModelSchema,
+  promptModelDtoSchema,
+  adminPromptsModelsResponseSchema,
   listPromptExamplesQuerySchema,
   createPromptExampleBodySchema,
   updatePromptExampleBodySchema,
@@ -12,6 +14,8 @@ export type {
   ListPromptExamplesQuery,
   CreatePromptExampleBody,
   UpdatePromptExampleBody,
+  PromptModelDto,
+  AdminPromptsModelsResponse,
 } from "./prompt-example.js";
 export {
   modelSettingDefSchema,
