@@ -405,6 +405,7 @@ describe("KieElevenLabsAdapter — EL quota_exceeded", () => {
     expect(err).toBeInstanceOf(UserFacingError);
     expect((err as UserFacingError).notifyOps).toBe(true);
     expect((err as UserFacingError).opsAlertDedupKey).toBe("elevenlabs-credits-exhausted");
+    expect((err as UserFacingError).opsAlertChannel).toBe("balance");
     expect(calls.elSound).toBe(1);
     // фолбэк сработал и упал → onFallback(true)
     expect(onFallback).toHaveBeenCalledWith(true);

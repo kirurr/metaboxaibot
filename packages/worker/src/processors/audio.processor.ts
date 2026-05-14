@@ -33,6 +33,7 @@ import {
   resolveUserFacingMessage,
   shouldNotifyOps,
   getOpsAlertDedupKey,
+  getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -872,10 +873,13 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           attempt: job.attemptsMade,
         };
         const dedupKey = getOpsAlertDedupKey(err);
+        // channel: "balance" роутит алерт в тему BALANCE (напр. EL quota_exceeded),
+        // по умолчанию "alerts" — общая тема tech-ошибок.
+        const channel = getOpsAlertChannel(err);
         if (dedupKey) {
-          await notifyTechErrorThrottled(err, ctx, dedupKey);
+          await notifyTechErrorThrottled(err, ctx, dedupKey, { channel });
         } else {
-          await notifyTechError(err, ctx);
+          await notifyTechError(err, ctx, channel);
         }
       }
       await telegram.sendMessage(telegramChatId, providerMsg).catch(() => void 0);

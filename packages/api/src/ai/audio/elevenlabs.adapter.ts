@@ -32,6 +32,8 @@ function throwIfQuotaExceeded(modelId: string, status: number, body: string): vo
     params: { modelName: AI_MODELS[modelId]?.name ?? modelId },
     notifyOps: true,
     opsAlertDedupKey: "elevenlabs-credits-exhausted",
+    // Алерт про исчерпанный баланс EL → тема BALANCE, не общий поток tech-ошибок.
+    opsAlertChannel: "balance",
   });
 }
 
