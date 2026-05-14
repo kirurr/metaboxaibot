@@ -187,6 +187,22 @@ export const config = {
   },
 
   /**
+   * Balance-алерты (optional) — всё про баланс/кредиты провайдеров: проактивные
+   * предупреждения о низком балансе (balance.monitor) и runtime-сбои из-за
+   * исчерпанного баланса (напр. ElevenLabs `quota_exceeded`). Отделены от alerts,
+   * чтобы баланс-сигналы шли в свою тему.
+   *
+   * Фоллбек: если BALANCE_ALERT_* не заданы, используется alerts.chatId / threadId.
+   *
+   * BALANCE_ALERT_CHAT_ID — отдельный канал для баланс-алертов; default — alerts.chatId.
+   * BALANCE_ALERT_THREAD_ID — message_thread_id; default — alerts.threadId.
+   */
+  balanceAlerts: {
+    chatId: opt("BALANCE_ALERT_CHAT_ID") ?? opt("ALERT_CHAT_ID"),
+    threadId: optInt("BALANCE_ALERT_THREAD_ID", 0) || optInt("ALERT_THREAD_ID", 0) || undefined,
+  },
+
+  /**
    * Metabox site integration (optional — only needed for ecosystem linking).
    * METABOX_API_URL      — base URL of Metabox Next.js app, e.g. https://app.meta-box.ru
    * METABOX_INTERNAL_KEY — shared secret for X-Internal-Key header

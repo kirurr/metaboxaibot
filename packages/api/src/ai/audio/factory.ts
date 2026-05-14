@@ -23,6 +23,12 @@ export { ElevenLabsAdapter, CartesiaAdapter };
 export function createAudioAdapter(
   modelOrId: string | AIModel,
   ctx?: AdapterContext,
+  /**
+   * Колбэк «сработал EL-фолбэк» — пробрасывается только в `KieElevenLabsAdapter`
+   * (tts-el / sounds-el / music-el), остальные адаптеры его игнорируют.
+   * Процессор вешает сюда `notifyFallback` для видимости фолбэка.
+   */
+  onElFallback?: (failed: boolean) => void | Promise<void>,
 ): AudioAdapter {
   const model = typeof modelOrId === "string" ? AI_MODELS[modelOrId] : modelOrId;
   const modelId = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
@@ -48,11 +54,11 @@ export function createAudioAdapter(
     // импортированным/ре-экспортированным: его статические методы держат
     // legacy-чистку клонированных голосов (см. user-voice.service.ts).
     case "tts-el":
-      return new KieElevenLabsAdapter("tts-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("tts-el", apiKey, fetchFn, onElFallback);
     case "sounds-el":
-      return new KieElevenLabsAdapter("sounds-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("sounds-el", apiKey, fetchFn, onElFallback);
     case "music-el":
-      return new KieElevenLabsAdapter("music-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("music-el", apiKey, fetchFn, onElFallback);
     case "suno":
       // Provider-based dispatch: kie primary, apipass fallback (см. MET-148).
       // Если lookup по строке не дал AIModel (legacy / неизвестная конфигурация),

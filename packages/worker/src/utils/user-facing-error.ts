@@ -56,6 +56,18 @@ export function getOpsAlertDedupKey(err: unknown): string | null {
 }
 
 /**
+ * Returns the ops-alert channel for a UserFacingError ("alerts" | "balance"),
+ * defaulting to "alerts". Lets provider-credits errors (e.g. ElevenLabs
+ * `quota_exceeded`) route their tech alert to the dedicated balance topic.
+ */
+export function getOpsAlertChannel(err: unknown): "alerts" | "balance" {
+  if (err instanceof UserFacingError && err.opsAlertChannel) {
+    return err.opsAlertChannel;
+  }
+  return "alerts";
+}
+
+/**
  * Resolve a sub-job error в form для virtual batch'а.
  *
  *   - userText: показывается юзеру только в K=0 user-fault ветке

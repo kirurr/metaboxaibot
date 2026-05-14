@@ -341,3 +341,83 @@ describe("KieElevenLabsAdapter — resolveElKey()", () => {
     );
   });
 });
+
+describe("KieElevenLabsAdapter — onFallback visibility callback", () => {
+  test("успешный EL-фолбэк → onFallback(false) вызван один раз", async () => {
+    const { fn } = createMockFetch({ elSound: () => audioResponse() });
+    const onFallback = vi.fn();
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn, onFallback);
+    const result = await adapter.poll("el-fallback:error", baseInput());
+    expect(result?.actualProvider).toBe("elevenlabs");
+    expect(onFallback).toHaveBeenCalledTimes(1);
+    expect(onFallback).toHaveBeenCalledWith(false);
+  });
+
+  test("EL-фолбэк упал → onFallback(true) вызван, ошибка проброшена", async () => {
+    const { fn } = createMockFetch({
+      elSound: () => new Response("server error", { status: 500 }),
+    });
+    const onFallback = vi.fn();
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn, onFallback);
+    await expect(adapter.poll("el-fallback:error", baseInput())).rejects.toThrow(
+      /sound generation failed: 500/,
+    );
+    expect(onFallback).toHaveBeenCalledTimes(1);
+    expect(onFallback).toHaveBeenCalledWith(true);
+  });
+
+  test("kie success без фолбэка → onFallback не вызван", async () => {
+    const { fn } = createMockFetch({
+      kiePoll: () =>
+        jsonResponse({
+          code: 200,
+          msg: "ok",
+          data: {
+            state: "success",
+            resultJson: JSON.stringify({ resultUrls: ["https://cdn.example/r.mp3"] }),
+          },
+        }),
+    });
+    const onFallback = vi.fn();
+    const adapter = new KieElevenLabsAdapter("tts-el", "test-kie-key", fn, onFallback);
+    await adapter.poll("kie-task-1", baseInput());
+    expect(onFallback).not.toHaveBeenCalled();
+  });
+});
+
+describe("KieElevenLabsAdapter — EL quota_exceeded", () => {
+  test("EL 401 quota_exceeded → UserFacingError(notifyOps), не plain Error", async () => {
+    const { fn, calls } = createMockFetch({
+      elSound: () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              status: "quota_exceeded",
+              message: "This request exceeds your quota. You have 69 credits remaining.",
+            },
+          }),
+          { status: 401 },
+        ),
+    });
+    const onFallback = vi.fn();
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn, onFallback);
+    const err = await adapter.poll("el-fallback:error", baseInput()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).notifyOps).toBe(true);
+    expect((err as UserFacingError).opsAlertDedupKey).toBe("elevenlabs-credits-exhausted");
+    expect((err as UserFacingError).opsAlertChannel).toBe("balance");
+    expect(calls.elSound).toBe(1);
+    // фолбэк сработал и упал → onFallback(true)
+    expect(onFallback).toHaveBeenCalledWith(true);
+  });
+
+  test("EL 401 не-quota (битый ключ) → остаётся plain Error", async () => {
+    const { fn } = createMockFetch({
+      elSound: () => new Response('{"detail":{"status":"invalid_api_key"}}', { status: 401 }),
+    });
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn);
+    const err = await adapter.poll("el-fallback:error", baseInput()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(UserFacingError);
+  });
+});
