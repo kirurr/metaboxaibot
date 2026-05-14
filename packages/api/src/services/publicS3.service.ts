@@ -55,18 +55,15 @@ export async function uploadBuffer(
     return null;
   }
 
-  await withRetry(
-    "publicS3.uploadBuffer",
-    { key, contentType, size: buffer.byteLength },
-    () =>
-      client.send(
-        new PutObjectCommand({
-          Bucket: config.s3Public.bucket!,
-          Key: key,
-          Body: buffer,
-          ContentType: contentType,
-        }),
-      ),
+  await withRetry("publicS3.uploadBuffer", { key, contentType, size: buffer.byteLength }, () =>
+    client.send(
+      new PutObjectCommand({
+        Bucket: config.s3Public.bucket!,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      }),
+    ),
   );
 
   return key;
