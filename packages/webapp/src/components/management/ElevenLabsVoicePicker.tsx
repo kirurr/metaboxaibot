@@ -10,22 +10,18 @@ interface ElevenLabsVoicePickerProps {
 }
 
 /**
- * Picker для tts-el модели — показывает ТОЛЬКО официальные ElevenLabs voices.
+ * Picker для tts-el модели — показывает официальный каталог голосов ElevenLabs,
+ * доступных через kie.ai. kie не отдаёт живой voices-API, только фиксированный
+ * enum id'шников, поэтому список статичный и без фильтров по языку/полу
+ * (этих метаданных у kie нет). Описание голоса показывается второй строкой.
  *
- * Клонированные голоса юзеров после миграции живут на Cartesia → доступны в
- * tts-cartesia модели через CartesiaVoicePicker. tts-el остаётся для тех кто
- * хочет именно официальный EL-каталог (нейтральные голоса с уникальной
- * выразительностью multilingual_v2). Cтарые legacy-EL голоса не показываем
- * здесь намеренно — их единственный путь использования теперь через
- * CartesiaVoicePicker, где `resolveVoiceForTTS` принудительно мигрирует их
- * на Cartesia и переключает адаптер.
+ * Клонированные голоса юзеров живут на Cartesia → доступны в модели
+ * tts-cartesia через CartesiaVoicePicker.
  */
 export function ElevenLabsVoicePicker({ voiceId, onChange }: ElevenLabsVoicePickerProps) {
   const { t } = useI18n();
   const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
-  const [langFilter, setLangFilter] = useState("all");
-  const [genderFilter, setGenderFilter] = useState("all");
 
   useEffect(() => {
     if (voices.length === 0) {
@@ -42,33 +38,10 @@ export function ElevenLabsVoicePicker({ voiceId, onChange }: ElevenLabsVoicePick
     onChange("voice_id", item.id);
   };
 
-  const uniqueLanguages = Array.from(
-    new Set(voices.map((v) => v.language).filter(Boolean) as string[]),
-  ).sort();
-  const showLanguage = uniqueLanguages.length > 1;
-  const languages = ["all", ...uniqueLanguages];
-
-  const filtered = voices.filter(
-    (v) =>
-      (langFilter === "all" || v.language === langFilter) &&
-      (genderFilter === "all" || v.gender === genderFilter),
-  );
-
-  const officialItems: VoiceListItem[] = filtered.map((v) => ({
+  const officialItems: VoiceListItem[] = voices.map((v) => ({
     id: v.voice_id,
     name: v.name,
-    meta: [
-      showLanguage ? v.language : null,
-      v.gender
-        ? v.gender === "male"
-          ? t("picker.genderM")
-          : v.gender === "female"
-            ? t("picker.genderF")
-            : v.gender
-        : null,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    meta: v.description || undefined,
     hasPreview: !!v.preview_url,
     resolvePreviewUrl: v.preview_url ? () => v.preview_url! : undefined,
   }));
@@ -80,36 +53,6 @@ export function ElevenLabsVoicePicker({ voiceId, onChange }: ElevenLabsVoicePick
       ) : (
         <>
           <div className="voice-picker__hint">💡 {t("uploads.elevenlabsLangHint")}</div>
-          <div className="voice-picker__filters">
-            {showLanguage && (
-              <select
-                className="voice-picker__filter-select"
-                value={langFilter}
-                onChange={(e) => setLangFilter(e.target.value)}
-              >
-                {languages.map((l) => (
-                  <option key={l} value={l}>
-                    {l === "all" ? t("picker.langAll") : l}
-                  </option>
-                ))}
-              </select>
-            )}
-            <div className="voice-picker__gender-btns">
-              {(["all", "male", "female"] as const).map((g) => (
-                <button
-                  key={g}
-                  className={`voice-picker__gender-btn${genderFilter === g ? " voice-picker__gender-btn--active" : ""}`}
-                  onClick={() => setGenderFilter(g)}
-                >
-                  {g === "all"
-                    ? t("picker.genderAll")
-                    : g === "male"
-                      ? t("picker.genderM")
-                      : t("picker.genderF")}
-                </button>
-              ))}
-            </div>
-          </div>
           <VoiceList
             items={officialItems}
             selectedId={voiceId}

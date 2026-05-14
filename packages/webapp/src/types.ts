@@ -102,9 +102,8 @@ export interface ModelSettingDef {
 export interface ElevenLabsVoice {
   voice_id: string;
   name: string;
-  category: string;
-  gender: string | null;
-  language: string | null;
+  /** Voice flavour (timbre/style) — shown as the picker's secondary meta line. */
+  description: string;
   preview_url: string | null;
 }
 
