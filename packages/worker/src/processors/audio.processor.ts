@@ -435,7 +435,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         // Sync adapter — generate inline, then fall through to finalize.
         audioResult = await submitWithThrottle({
           modelId,
-          provider: modelMeta?.provider,
+          // Sticky-voice path: effective adapter/key может быть Cartesia даже у
+          // kie-provider модели (tts-el с клонированным голосом). Throttle
+          // ключим на ФАКТИЧЕСКОМ провайдере, иначе rate-limit Cartesia ушёл бы
+          // в long-cooldown всему провайдеру kie.
+          provider: AI_MODELS[effectiveModelId]?.provider ?? modelMeta?.provider,
           section: "audio",
           job,
           token,

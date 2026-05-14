@@ -6,6 +6,7 @@ import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
 import { CartesiaAdapter } from "./cartesia.adapter.js";
 import { ApipassSunoAdapter } from "./apipass-suno.adapter.js";
 import { KieSunoAdapter } from "./kie-suno.adapter.js";
+import { KieElevenLabsAdapter } from "./kie-elevenlabs.adapter.js";
 import { buildProxyFetch } from "../transport/proxy-fetch.js";
 import type { AdapterContext } from "../with-pool.js";
 import { AI_MODELS, type AIModel } from "@metabox/shared";
@@ -42,12 +43,16 @@ export function createAudioAdapter(
       return new CartesiaAdapter("voice-clone", apiKey, fetchFn);
     case "tts-cartesia":
       return new CartesiaAdapter("tts-cartesia", apiKey, fetchFn);
+    // tts-el / sounds-el / music-el — ElevenLabs-модели теперь через kie.ai
+    // (async createTask + recordInfo poll). `ElevenLabsAdapter` остаётся
+    // импортированным/ре-экспортированным: его статические методы держат
+    // legacy-чистку клонированных голосов (см. user-voice.service.ts).
     case "tts-el":
-      return new ElevenLabsAdapter("tts-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("tts-el", apiKey, fetchFn);
     case "sounds-el":
-      return new ElevenLabsAdapter("sounds-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("sounds-el", apiKey, fetchFn);
     case "music-el":
-      return new ElevenLabsAdapter("music-el", apiKey, fetchFn);
+      return new KieElevenLabsAdapter("music-el", apiKey, fetchFn);
     case "suno":
       // Provider-based dispatch: kie primary, apipass fallback (см. MET-148).
       // Если lookup по строке не дал AIModel (legacy / неизвестная конфигурация),

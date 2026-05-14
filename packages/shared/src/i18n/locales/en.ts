@@ -492,7 +492,7 @@ export default {
     falStringTooLongField: "❌ Value for field '{field}' is too long (maximum {max} characters).",
     // ElevenLabs
     elevenlabsPromptTooLong:
-      "❌ Your prompt is too long ({current} characters). The maximum for sound generation is {max} characters. Please shorten your prompt and try again.",
+      "❌ Your text is too long ({current} characters). The maximum is {max} characters. Please shorten it and try again.",
     // Suno
     sunoPromptTooLong:
       "❌ Your description is too long ({current} characters). The maximum for Suno is {max} characters. Please shorten it and try again.",

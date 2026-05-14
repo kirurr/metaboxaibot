@@ -1,4 +1,5 @@
 import type { AIModel } from "../../types/ai.js";
+import { KIE_ELEVENLABS_DEFAULT_VOICE_ID } from "../kie-elevenlabs-voices.js";
 
 export const AUDIO_MODELS: Record<string, AIModel> = {
   // ── Аудио ─────────────────────────────────────────────────────────────────
@@ -223,24 +224,24 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     id: "tts-el",
     name: "🔊 Синтез речи (ElevenLabs)",
     description:
-      "Синтез речи от ElevenLabs — широкая библиотека голосов + ваши клонированные. Выше качество и выразительность, чем OpenAI TTS, но дороже.",
+      "Синтез речи от ElevenLabs — широкая библиотека официальных голосов. Выше качество и выразительность, чем OpenAI TTS, но дороже.",
     section: "audio",
-    provider: "elevenlabs",
+    provider: "kie",
     costUsdPerRequest: 0,
-    costUsdPerKChar: 0.3, // eleven_multilingual_v2: $0.24/1K chars
+    costUsdPerKChar: 0.06, // elevenlabs/text-to-speech-multilingual-v2 via kie.ai
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     costVariants: {
       settingKey: "model_id",
       map: {
-        eleven_multilingual_v2: { costUsdPerKChar: 0.3 },
-        eleven_turbo_v2_5: { costUsdPerKChar: 0.15 },
+        eleven_multilingual_v2: { costUsdPerKChar: 0.06 },
+        eleven_turbo_v2_5: { costUsdPerKChar: 0.03 },
       },
     },
     supportsImages: false,
     supportsVoice: false,
     supportsWeb: false,
-    isAsync: false,
+    isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     settings: [
@@ -259,9 +260,9 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
       {
         key: "voice_id",
         label: "Голос",
-        description: "Выберите голос из официальной библиотеки ElevenLabs или своих клонированных.",
+        description: "Выберите голос из официальной библиотеки ElevenLabs.",
         type: "elevenlabs-voice-picker",
-        default: "21m00Tcm4TlvDq8ikWAM",
+        default: KIE_ELEVENLABS_DEFAULT_VOICE_ID,
       },
       {
         key: "stability",
@@ -295,14 +296,6 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
         max: 1,
         step: 0.05,
         default: 0.0,
-        advanced: true,
-      },
-      {
-        key: "use_speaker_boost",
-        label: "Speaker Boost",
-        description: "Усиление качества и чёткости голоса.",
-        type: "toggle",
-        default: true,
         advanced: true,
       },
     ],
@@ -361,27 +354,27 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     description:
       "Генерирует оригинальные звуковые эффекты по описанию. Подходит для видеопроизводства, игр и подкастов. Рекомендуем задавать промпт на английском языке.",
     section: "audio",
-    provider: "elevenlabs",
-    costUsdPerRequest: 0.06,
-    costUsdPerSecond: 0,
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.0012, // elevenlabs/sound-effect-v2 via kie.ai
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: false,
     supportsVoice: false,
     supportsWeb: false,
-    isAsync: false,
+    isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     settings: [
       {
         key: "duration_seconds",
         label: "Длительность (сек)",
-        description: "Конкретная длительность в секундах (1–30).",
+        description: "Конкретная длительность в секундах (1–22).",
         type: "slider",
         min: 1,
-        max: 30,
+        max: 22,
         step: 1,
-        default: null,
+        default: 5,
       },
       {
         key: "prompt_influence",
@@ -411,15 +404,15 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
     description:
       "Генерирует фоновую музыку, амбиент и атмосферы через ElevenLabs. Инструментал без вокала, до 22 секунд. Быстрее Suno, но без пения. Промпт лучше на английском.",
     section: "audio",
-    provider: "elevenlabs",
+    provider: "kie",
     costUsdPerRequest: 0,
-    costUsdPerSecond: 0.008, // manual duration: 20 credits/sec × $0.00048/credit
+    costUsdPerSecond: 0.0012, // elevenlabs/sound-effect-v2 via kie.ai
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: false,
     supportsVoice: false,
     supportsWeb: false,
-    isAsync: false,
+    isAsync: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     settings: [
@@ -439,7 +432,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
         min: 1,
         max: 22,
         step: 1,
-        default: null,
+        default: 10,
       },
       {
         key: "prompt_influence",

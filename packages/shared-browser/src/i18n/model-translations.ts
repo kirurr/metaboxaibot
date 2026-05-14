@@ -149,7 +149,7 @@ export const MODEL_TRANSLATIONS_EN: Record<string, ModelTranslation> = {
   "tts-el": {
     name: "🔊 Speech Synthesis (ElevenLabs)",
     description:
-      "ElevenLabs text-to-speech — wide voice library + your cloned voices. Higher quality and expressiveness than OpenAI TTS, but more expensive.",
+      "ElevenLabs text-to-speech — wide library of official voices. Higher quality and expressiveness than OpenAI TTS, but more expensive.",
   },
   suno: {
     name: "🎵 Music Generation (Suno)",
