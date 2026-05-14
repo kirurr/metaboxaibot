@@ -3,6 +3,7 @@ import type { Server, Socket } from "../utils/ws.js";
 import socketioPlugin from "fastify-socket.io";
 import { logger } from "../logger.js";
 import { wsAuthMiddleware } from "../middlewares/ws-auth.js";
+import { setWsServer, userRoom } from "../services/ws-bus.service.js";
 
 // Module redeclarations for websocket type safety
 declare module "fastify" {
@@ -19,9 +20,18 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.io.use(wsAuthMiddleware);
+  setWsServer(fastify.io);
 
   fastify.io.on("connection", (socket: Socket) => {
-    logger.info({ metaboxUserId: socket.data.webUser.metaboxUserId }, "ws connection established");
+    const { metaboxUserId, aibUserId } = socket.data.webUser;
+    logger.info({ metaboxUserId }, "ws connection established");
+
+    // Юзеры без aibUserId (зарегистрированы на вебе, но не привязали TG) в room
+    // не попадают — у них нет генераций. Если понадобится — отдельный
+    // metaboxUserRoom().
+    if (aibUserId !== null) {
+      void socket.join(userRoom(aibUserId));
+    }
 
     socket.on("example:send", (msg) => {
       logger.info("we recieved message from client: " + msg.text);

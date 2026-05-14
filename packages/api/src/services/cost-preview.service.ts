@@ -57,12 +57,12 @@ export interface AudioCostPreview {
 
 export const costPreviewService = {
   async previewImage(params: SubmitImageParams): Promise<ImageCostPreview> {
-    const { userId, modelId, aspectRatio } = params;
+    const { userId, modelId, aspectRatio, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    const modelSettings = allModelSettings[modelId] ?? {};
+    const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const effectiveAspectRatio = (modelSettings.aspect_ratio as string | undefined) ?? aspectRatio;
 
     const estimatedMegapixels = model.costUsdPerMPixel ? 1.0 : undefined;

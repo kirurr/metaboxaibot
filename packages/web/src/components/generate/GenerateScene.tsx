@@ -11,7 +11,8 @@ import {
 import clsx from "clsx";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
-import type { ApiError } from "@/api/client";
+import { ApiError } from "@/api/client";
+import { submitImageGeneration, type SubmitImageGenerationBody } from "@/api/generation";
 import { listVoices, type VoiceItem, type VoiceProvider } from "@/api/voices";
 import {
   listHeyGenAvatars,
@@ -484,6 +485,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const modelPickRef = useRef<HTMLDivElement | null>(null);
 
@@ -748,11 +750,36 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
         Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
   const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy;
 
-  function generate() {
-    if (!canGenerate) return;
+  async function generate() {
+    if (!canGenerate || !selectedModel) return;
     setBusy(true);
-    // Заглушка: бекенда для генерации с web ещё нет.
-    setTimeout(() => setBusy(false), 1600);
+    setSubmitError(null);
+    try {
+      // В payload — только ready-файлы (uploading/error пропускаем). Передаём
+      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит.
+      const mediaInputs: Record<string, string[]> = {};
+      for (const [slotKey, files] of Object.entries(slotFiles)) {
+        const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+        if (keys.length > 0) mediaInputs[slotKey] = keys;
+      }
+
+      const body: SubmitImageGenerationBody = {
+        modelId: selectedModel.id,
+        prompt,
+        ...(modeId ? { modeId } : {}),
+        ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
+        ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
+      };
+      const { dbJobId } = await submitImageGeneration(body);
+      // TODO: следить за прогрессом через WS-событие на subscriber'е (job-notifications).
+      // Пока что просто логируем — результат прилетит в logs API/worker.
+      console.info("[generate] job submitted", dbJobId);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
+      setSubmitError(msg);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Активный picker — резолвим один раз для render'а.
@@ -960,6 +987,12 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             </span>
           )}
         </button>
+
+        {submitError && (
+          <div className="gen-error" role="alert">
+            {submitError}
+          </div>
+        )}
       </div>
 
       {voicePickerSetting && activePickerProvider && (
