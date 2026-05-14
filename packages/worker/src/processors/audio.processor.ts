@@ -2,6 +2,7 @@ import { UnrecoverableError, DelayedError, type Job } from "bullmq";
 import { delayJob } from "../utils/delay-job.js";
 import { withRetry } from "../utils/with-retry.js";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { Api, InputFile } from "grammy";
 import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
@@ -549,22 +550,31 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
             where: { id: dbJobId },
             data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "audio",
+              userId: userIdStr,
+              dbJobId,
+              userMessage: timeoutMsg,
+              errorCode: POLL_TIMEOUT_CODE,
+            }).catch(() => void 0);
+          }
           throw new UnrecoverableError("poll timeout 24h");
         }
 
         if (job.data.lastIntervalMs !== undefined && interval !== job.data.lastIntervalMs) {
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationStillRunning.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          // "still running" hint имеет смысл только в TG-чате; web сам поллит статус.
+          if (telegramChatId !== null) {
+            await telegram
+              .sendMessage(
+                telegramChatId,
+                t.errors.generationStillRunning.replace("{modelName}", modelName),
+              )
+              .catch(() => void 0);
+          }
         }
 
         await delayJob(
@@ -723,12 +733,34 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       tokenBalance: deductResult?.tokenBalance,
     });
 
-    // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
-    // caption — отдельным сообщением сразу после.
-    try {
-      await sendAudioBatch(telegramChatId, tracks, audioCaption, promptMessageId);
-    } catch (sendErr) {
-      logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
+    if (telegramChatId !== null) {
+      // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
+      // caption — отдельным сообщением сразу после.
+      try {
+        await sendAudioBatch(telegramChatId, tracks, audioCaption, promptMessageId);
+      } catch (sendErr) {
+        logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
+      }
+    } else {
+      // Web: достаём финальные output-записи из БД (uploaded не в scope здесь,
+      // т.к. определён внутри `if (!existingOutput)` блока выше).
+      const outputs = await db.generationJobOutput
+        .findMany({
+          where: { jobId: dbJobId },
+          select: { id: true, outputUrl: true, s3Key: true },
+          orderBy: { index: "asc" },
+        })
+        .catch(() => []);
+      await apiNotifySuccess({
+        section: "audio",
+        userId: userIdStr,
+        dbJobId,
+        outputs: outputs.map((o) => ({
+          id: o.id,
+          outputUrl: o.outputUrl,
+          s3Key: o.s3Key,
+        })),
+      }).catch(() => void 0);
     }
 
     logger.info({ dbJobId }, "Audio job completed");
@@ -740,7 +772,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         where: { id: dbJobId },
         data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     // ── Poll-stage re-submit на provider temporary unavailable ──────────
@@ -835,7 +877,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           await notifyTechError(err, ctx);
         }
       }
-      await telegram.sendMessage(telegramChatId, providerMsg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, providerMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: providerMsg,
+          errorCode: classifyError(err),
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(providerMsg);
     }
 
@@ -966,12 +1018,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         });
       }
 
-      await telegram
-        .sendMessage(
-          telegramChatId,
-          userMessage ?? pickGenerationFailedMessage(t, modelName, "audio"),
-        )
-        .catch(() => void 0);
+      const finalMsg = userMessage ?? pickGenerationFailedMessage(t, modelName, "audio");
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, finalMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: finalMsg,
+        }).catch(() => void 0);
+      }
     }
 
     throw err;

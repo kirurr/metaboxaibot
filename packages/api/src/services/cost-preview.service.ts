@@ -167,12 +167,12 @@ export const costPreviewService = {
   },
 
   async previewAudio(params: SubmitAudioParams): Promise<AudioCostPreview> {
-    const { userId, modelId, prompt } = params;
+    const { userId, modelId, prompt, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    const modelSettings = allModelSettings[modelId] ?? {};
+    const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const cost = calculateCost(
       model,
       0,

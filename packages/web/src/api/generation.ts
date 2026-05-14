@@ -10,7 +10,7 @@ import { apiClient } from "./client";
  * подняли через Redis pub/sub).
  */
 
-export interface SubmitImageGenerationBody {
+export interface SubmitMediaGenerationBody {
   modelId: string;
   modeId?: string;
   prompt: string;
@@ -24,15 +24,42 @@ export interface SubmitImageGenerationBody {
   mediaInputs?: Record<string, string[]>;
 }
 
-export interface SubmitImageGenerationResponse {
+export type SubmitImageGenerationBody = SubmitMediaGenerationBody;
+export type SubmitVideoGenerationBody = SubmitMediaGenerationBody;
+
+export interface SubmitAudioGenerationBody {
+  modelId: string;
+  prompt: string;
+  settings?: Record<string, unknown>;
+}
+
+export interface SubmitGenerationResponse {
   dbJobId: string;
 }
 
 export function submitImageGeneration(
   body: SubmitImageGenerationBody,
-): Promise<SubmitImageGenerationResponse> {
-  return apiClient<SubmitImageGenerationResponse, SubmitImageGenerationBody>(
+): Promise<SubmitGenerationResponse> {
+  return apiClient<SubmitGenerationResponse, SubmitImageGenerationBody>(
     "/web/generation/image",
+    { method: "POST", body },
+  );
+}
+
+export function submitVideoGeneration(
+  body: SubmitVideoGenerationBody,
+): Promise<SubmitGenerationResponse> {
+  return apiClient<SubmitGenerationResponse, SubmitVideoGenerationBody>(
+    "/web/generation/video",
+    { method: "POST", body },
+  );
+}
+
+export function submitAudioGeneration(
+  body: SubmitAudioGenerationBody,
+): Promise<SubmitGenerationResponse> {
+  return apiClient<SubmitGenerationResponse, SubmitAudioGenerationBody>(
+    "/web/generation/audio",
     { method: "POST", body },
   );
 }

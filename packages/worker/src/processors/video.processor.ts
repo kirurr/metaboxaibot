@@ -70,6 +70,7 @@ import { deferIfRateLimitOverload } from "../utils/defer-rate-limit.js";
 import { withRetry } from "../utils/with-retry.js";
 import { UserFacingError } from "@metabox/shared";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { fetchVideoUrl } from "../utils/fetch-video.js";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
@@ -551,22 +552,31 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
             where: { id: dbJobId },
             data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "video",
+              userId: userIdStr,
+              dbJobId,
+              userMessage: timeoutMsg,
+              errorCode: POLL_TIMEOUT_CODE,
+            }).catch(() => void 0);
+          }
           throw new UnrecoverableError("poll timeout 24h");
         }
 
         if (job.data.lastIntervalMs !== undefined && interval !== job.data.lastIntervalMs) {
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationStillRunning.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          // "still running" hint имеет смысл только в TG-чате; web сам поллит статус.
+          if (telegramChatId !== null) {
+            await telegram
+              .sendMessage(
+                telegramChatId,
+                t.errors.generationStillRunning.replace("{modelName}", modelName),
+              )
+              .catch(() => void 0);
+          }
         }
 
         await delayJob(
@@ -848,41 +858,52 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       emptyPromptLabel: hasAudioDriver ? t.common.generationAudioPrompt : undefined,
     });
 
-    if (tooLargeForTelegram) {
-      // t.errors.fileTooLargeForTelegram — i18n-строка без HTML-спецсимволов,
-      // безопасно склеивать с HTML-caption'ом без экранирования.
-      await telegram.sendMessage(
-        telegramChatId,
-        `${caption}\n\n${t.errors.fileTooLargeForTelegram}`,
-        {
-          parse_mode: "HTML",
-          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-          ...replyToPrompt,
-        },
-      );
+    if (telegramChatId !== null) {
+      if (tooLargeForTelegram) {
+        // t.errors.fileTooLargeForTelegram — i18n-строка без HTML-спецсимволов,
+        // безопасно склеивать с HTML-caption'ом без экранирования.
+        await telegram.sendMessage(
+          telegramChatId,
+          `${caption}\n\n${t.errors.fileTooLargeForTelegram}`,
+          {
+            parse_mode: "HTML",
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+            ...replyToPrompt,
+          },
+        );
+      } else {
+        // Probe the remuxed buffer so the values we pass to Telegram match the
+        // file it will actually receive.
+        const info = parseMp4Info(videoBuf);
+        const jpegThumb = await generateVideoJpegThumbnail(videoBuf);
+        // 2 попытки — sendVideo (multipart upload в Telegram) на разовых
+        // network blip'ах редко, но падает. Single retry даёт безопасный
+        // второй шанс без сильного риска double-send (грамми падает до
+        // получения подтверждения, поэтому retry безопасен на тех же байтах).
+        // На permanent-ошибках (Bad Request) второй вызов падает быстро.
+        await withRetry("video.sendVideo", 2, () =>
+          telegram.sendVideo(telegramChatId, new InputFile(videoBuf, "video.mp4"), {
+            caption,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            supports_streaming: true,
+            ...(info.width ? { width: info.width } : {}),
+            ...(info.height ? { height: info.height } : {}),
+            ...(info.duration ? { duration: Math.round(info.duration) } : {}),
+            ...(jpegThumb ? { thumbnail: new InputFile(jpegThumb, "thumb.jpg") } : {}),
+            ...replyToPrompt,
+          }),
+        );
+      }
     } else {
-      // Probe the remuxed buffer so the values we pass to Telegram match the
-      // file it will actually receive.
-      const info = parseMp4Info(videoBuf);
-      const jpegThumb = await generateVideoJpegThumbnail(videoBuf);
-      // 2 попытки — sendVideo (multipart upload в Telegram) на разовых
-      // network blip'ах редко, но падает. Single retry даёт безопасный
-      // второй шанс без сильного риска double-send (грамми падает до
-      // получения подтверждения, поэтому retry безопасен на тех же байтах).
-      // На permanent-ошибках (Bad Request) второй вызов падает быстро.
-      await withRetry("video.sendVideo", 2, () =>
-        telegram.sendVideo(telegramChatId, new InputFile(videoBuf, "video.mp4"), {
-          caption,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          supports_streaming: true,
-          ...(info.width ? { width: info.width } : {}),
-          ...(info.height ? { height: info.height } : {}),
-          ...(info.duration ? { duration: Math.round(info.duration) } : {}),
-          ...(jpegThumb ? { thumbnail: new InputFile(jpegThumb, "thumb.jpg") } : {}),
-          ...replyToPrompt,
-        }),
-      );
+      // Для web TG-лимит 50MB неприменим — отдаём один output с s3Key, фронт
+      // сам решит как показать (preview/download по signed URL).
+      await apiNotifySuccess({
+        section: "video",
+        userId: userIdStr,
+        dbJobId,
+        outputs: [{ id: outputId, outputUrl: outputUrl || null, s3Key: s3Key }],
+      }).catch(() => void 0);
     }
 
     logger.info({ dbJobId }, "Video job completed");
@@ -894,7 +915,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         where: { id: dbJobId },
         data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "video",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     // Provider-side rate-limit/overload (например KIE 422 "high demand") —
@@ -1053,7 +1084,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         userId: userIdStr,
         attempt: job.attemptsMade,
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "video",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "PROVIDER_INSUFFICIENT_CREDIT",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     const userMsg = resolveUserFacingMessage(err, t);
@@ -1072,7 +1113,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           attempt: job.attemptsMade,
         });
       }
-      await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "video",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: userMsg,
+          errorCode: classifyError(err),
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(userMsg);
     }
 
@@ -1238,9 +1289,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         attempt: job.attemptsMade,
       });
 
-      await telegram
-        .sendMessage(telegramChatId, pickGenerationFailedMessage(t, modelName, "video"))
-        .catch(() => void 0);
+      const failureMsg = pickGenerationFailedMessage(t, modelName, "video");
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "video",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: failureMsg,
+        }).catch(() => void 0);
+      }
     }
 
     throw err;

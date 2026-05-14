@@ -42,9 +42,15 @@ export interface SubmitAudioParams {
   prompt: string;
   voiceId?: string;
   sourceAudioUrl?: string;
-  telegramChatId: number;
+  /** Telegram chat id; `null` для генераций, запущенных с веба. */
+  telegramChatId: number | null;
   /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
   promptMessageId?: number;
+  /**
+   * Per-request override настроек модели (web-flow, где нет userStateService).
+   * Мержится поверх user-state'овых defaults в `previewAudio`.
+   */
+  extraModelSettings?: Record<string, unknown>;
 }
 
 export interface SubmitAudioResult {

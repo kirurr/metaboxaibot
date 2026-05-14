@@ -1280,6 +1280,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
             } else {
               await apiNotifyError({
+                section: "image",
                 userId: userIdStr,
                 dbJobId,
                 userMessage: timeoutMsg,
@@ -1386,6 +1387,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
             } else {
               await apiNotifyError({
+                section: "image",
                 userId: userIdStr,
                 dbJobId,
                 userMessage: timeoutMsg,
@@ -1460,6 +1462,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
       } else {
         await apiNotifyError({
+          section: "image",
           userId: userIdStr,
           dbJobId,
           userMessage: text,
@@ -1558,6 +1561,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         }
       } else {
         await apiNotifySuccess({
+          section: "image",
           userId: userIdStr,
           dbJobId,
           outputs: outputRecords.map((r) => ({
@@ -1686,6 +1690,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       }
     } else {
       await apiNotifySuccess({
+        section: "image",
         userId: userIdStr,
         dbJobId,
         outputs: [
@@ -1714,6 +1719,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       } else {
         await apiNotifyError({
+          section: "image",
           userId: userIdStr,
           dbJobId,
           userMessage: msg,
@@ -1890,6 +1896,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
       } else {
         await apiNotifyError({
+          section: "image",
           userId: userIdStr,
           dbJobId,
           userMessage: userMsg,
@@ -2067,6 +2074,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {
         await apiNotifyError({
+          section: "image",
           userId: userIdStr,
           dbJobId,
           userMessage: failureMsg,

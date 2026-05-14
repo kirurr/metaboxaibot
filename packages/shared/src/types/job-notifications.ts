@@ -10,7 +10,7 @@ const jobNotificationOutputSchema = z.object({
 
 export const jobNotificationSuccessSchema = z.object({
   kind: z.literal("success"),
-  section: z.literal("image"),
+  section: z.enum(["image", "video", "audio"]),
   userId: z.string(),
   dbJobId: z.string(),
   outputs: z.array(jobNotificationOutputSchema),
@@ -24,7 +24,7 @@ export const jobNotificationSuccessSchema = z.object({
 
 export const jobNotificationErrorSchema = z.object({
   kind: z.literal("error"),
-  section: z.literal("image"),
+  section: z.enum(["image", "video", "audio"]),
   userId: z.string(),
   dbJobId: z.string(),
   userMessage: z.string(),

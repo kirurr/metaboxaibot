@@ -2,7 +2,10 @@ import { getRedis } from "@metabox/api/redis";
 import { JOB_NOTIFICATIONS_CHANNEL, type JobNotificationMessage } from "@metabox/shared";
 import { logger } from "../logger.js";
 
+type Section = JobNotificationMessage["section"];
+
 interface ApiNotifySuccessInput {
+  section: Section;
   userId: string;
   dbJobId: string;
   outputs: Array<{
@@ -14,6 +17,7 @@ interface ApiNotifySuccessInput {
 }
 
 interface ApiNotifyErrorInput {
+  section: Section;
   userId: string;
   dbJobId: string;
   userMessage: string;
@@ -32,9 +36,9 @@ async function publish(message: JobNotificationMessage): Promise<void> {
 }
 
 export async function apiNotifySuccess(input: ApiNotifySuccessInput): Promise<void> {
-  await publish({ kind: "success", section: "image", ...input });
+  await publish({ kind: "success", ...input });
 }
 
 export async function apiNotifyError(input: ApiNotifyErrorInput): Promise<void> {
-  await publish({ kind: "error", section: "image", ...input });
+  await publish({ kind: "error", ...input });
 }

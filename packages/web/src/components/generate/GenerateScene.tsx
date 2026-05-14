@@ -12,7 +12,15 @@ import clsx from "clsx";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
-import { submitImageGeneration, type SubmitImageGenerationBody } from "@/api/generation";
+import {
+  submitImageGeneration,
+  submitVideoGeneration,
+  submitAudioGeneration,
+  type SubmitImageGenerationBody,
+  type SubmitVideoGenerationBody,
+  type SubmitAudioGenerationBody,
+  type SubmitGenerationResponse,
+} from "@/api/generation";
 import { listVoices, type VoiceItem, type VoiceProvider } from "@/api/voices";
 import {
   listHeyGenAvatars,
@@ -763,17 +771,43 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
         if (keys.length > 0) mediaInputs[slotKey] = keys;
       }
 
-      const body: SubmitImageGenerationBody = {
-        modelId: selectedModel.id,
-        prompt,
-        ...(modeId ? { modeId } : {}),
-        ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
-        ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
-      };
-      const { dbJobId } = await submitImageGeneration(body);
+      const section = selectedModel.section;
+      const settingsField =
+        Object.keys(settingValues).length > 0 ? { settings: settingValues } : {};
+      const mediaField =
+        Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
+
+      let result: SubmitGenerationResponse;
+      if (section === "design" || section === "image") {
+        const body: SubmitImageGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitImageGeneration(body);
+      } else if (section === "video") {
+        const body: SubmitVideoGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitVideoGeneration(body);
+      } else if (section === "audio") {
+        const body: SubmitAudioGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...settingsField,
+        };
+        result = await submitAudioGeneration(body);
+      } else {
+        throw new Error(`Unsupported section: ${section}`);
+      }
       // TODO: следить за прогрессом через WS-событие на subscriber'е (job-notifications).
-      // Пока что просто логируем — результат прилетит в logs API/worker.
-      console.info("[generate] job submitted", dbJobId);
+      console.info("[generate] job submitted", section, result.dbJobId);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
       setSubmitError(msg);
