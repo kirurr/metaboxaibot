@@ -588,11 +588,11 @@ export async function handleNewGptDialog(ctx: BotContext): Promise<void> {
 
 async function replyNoActiveDialog(ctx: BotContext): Promise<void> {
   const webappUrl = config.bot.webappUrl;
-  if (!webappUrl || !ctx.user) {
+  if (!webappUrl || !ctx.user || !ctx.user.telegramId) {
     await ctx.reply(ctx.t.gpt.noActiveDialog);
     return;
   }
-  const token = generateWebToken(ctx.user.id, config.bot.token);
+  const token = generateWebToken(ctx.user.telegramId, config.bot.token);
   const kb = new InlineKeyboard().webApp(
     ctx.t.gpt.createDialog,
     `${webappUrl}?page=management&section=gpt&action=new&wtoken=${token}`,

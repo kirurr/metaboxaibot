@@ -19,7 +19,9 @@ export const authMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
   if (!ctx.from) return next();
 
   const { id, username, first_name, last_name } = ctx.from;
-  const user = await userService.findById(BigInt(id));
+  // Lookup по telegramId — внутренний `User.id` не равен tgid после миграции
+  // на surrogate PK. У существующих юзеров `telegramId` забэкфилен из `id`.
+  const user = await userService.findByTelegramId(BigInt(id));
   if (!user) return next();
 
   if (user.isBlocked) {
@@ -35,7 +37,7 @@ export const authMiddleware: MiddlewareFn<BotContext> = async (ctx, next) => {
     user.lastName !== (last_name ?? undefined)
   ) {
     void userService
-      .updateProfile(BigInt(id), { username, firstName: first_name, lastName: last_name })
+      .updateProfile(user.id, { username, firstName: first_name, lastName: last_name })
       .catch(() => void 0);
   }
 

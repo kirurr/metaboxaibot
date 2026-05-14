@@ -8,7 +8,8 @@ import { db } from "../db.js";
 import { getAiBotProducts, createAiBotInvoice } from "../services/metabox-bridge.service.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — tgid для Metabox API.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
@@ -81,7 +82,7 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const { productId } = request.body as { productId?: string };
 
       if (!productId) {
@@ -101,7 +102,7 @@ export const metaboxAibotRoutes: FastifyPluginAsync = async (fastify) => {
         const result = await createAiBotInvoice({
           metaboxUserId: user.metaboxUserId,
           productId,
-          telegramId: userId,
+          telegramId,
         });
         return { paymentUrl: result.paymentUrl };
       } catch (e) {

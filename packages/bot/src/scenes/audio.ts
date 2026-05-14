@@ -66,7 +66,10 @@ export async function handleAudioSubSection(ctx: BotContext, modelId: string): P
       const modelSettings = allSettings[modelId] ?? {};
       const costLine = buildCostLine(model, modelSettings, ctx.t);
       const webappUrl = config.bot.webappUrl;
-      const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+      const token =
+        webappUrl && ctx.user.telegramId
+          ? generateWebToken(ctx.user.telegramId, config.bot.token)
+          : "";
       const kb = webappUrl
         ? new InlineKeyboard().webApp(
             ctx.t.audio.management,

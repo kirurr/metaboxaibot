@@ -6,7 +6,10 @@ import { buildDownloadButton, generateDownloadToken } from "../utils/download-to
 import { AI_MODELS, config, getT, buildResultCaption } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов `https://api.telegram.org/.../sendXxx`. После decoupling-миграции
+// они различаются для web-only юзеров; для tg-линкованных пока совпадают.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 // Telegram multipart-upload limits (когда бот шлёт файл как multipart, а не URL):
 //   sendPhoto       ≤ 10 MB
@@ -59,7 +62,7 @@ function filenameFromS3Key(s3Key: string | null, fallback: string): string {
  * действуют 10/50 MB лимиты на multipart, что обычно перекрывает all our outputs).
  */
 async function sendBufferToUser(
-  userId: bigint,
+  chatId: bigint,
   method: TelegramSendMethod,
   buffer: Buffer,
   filename: string,
@@ -68,7 +71,7 @@ async function sendBufferToUser(
 ): Promise<void> {
   const paramKey = methodParamKey(method);
   const form = new FormData();
-  form.append("chat_id", userId.toString());
+  form.append("chat_id", chatId.toString());
   if (caption) {
     form.append("caption", caption);
     form.append("parse_mode", "HTML");
@@ -92,11 +95,11 @@ async function sendBufferToUser(
  * `attach://<name>`, JSON в `media` ссылается на эти имена.
  */
 async function sendMediaGroupBuffers(
-  userId: bigint,
+  chatId: bigint,
   items: Array<{ buffer: Buffer; filename: string; caption?: string }>,
 ): Promise<boolean> {
   const form = new FormData();
-  form.append("chat_id", userId.toString());
+  form.append("chat_id", chatId.toString());
   const media = items.map((item, i) => {
     const attachName = `file${i}`;
     form.append(attachName, new Blob([new Uint8Array(item.buffer)]), item.filename);
@@ -253,6 +256,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post<{ Params: { id: string } }>("/gallery/jobs/:id/send", async (request, reply) => {
     const userId = (request as AuthRequest).userId;
+    const telegramId = (request as AuthRequest).telegramId;
     const { id } = request.params;
 
     const job = await db.generationJob.findUnique({
@@ -379,7 +383,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const groupOk = await sendMediaGroupBuffers(userId, items).catch(() => false);
+      const groupOk = await sendMediaGroupBuffers(telegramId, items).catch(() => false);
 
       if (!groupOk) {
         // Group rejected (rare после compression) — шлём каждый файл отдельно
@@ -388,7 +392,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
         for (let i = 0; i < resolved.length; i++) {
           const out = resolved[i];
           await sendBufferToUser(
-            userId,
+            telegramId,
             "sendDocument",
             out.buffer,
             out.filename,
@@ -431,7 +435,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            chat_id: userId.toString(),
+            chat_id: telegramId.toString(),
             text: hintText,
             reply_markup: { inline_keyboard: rows },
           }),
@@ -473,7 +477,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            chat_id: userId.toString(),
+            chat_id: telegramId.toString(),
             text: `${isFirst ? caption : ""}\n\n${t.errors.fileTooLargeForTelegram}`,
             parse_mode: "HTML",
             ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
@@ -494,7 +498,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
 
       try {
         await sendBufferToUser(
-          userId,
+          telegramId,
           sectionMethod,
           sendBuffer,
           sendFilename,
@@ -513,7 +517,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              chat_id: userId.toString(),
+              chat_id: telegramId.toString(),
               text: `${isFirst ? caption : ""}\n\n${t.errors.fileTooLargeForTelegram}`,
               parse_mode: "HTML",
               ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),

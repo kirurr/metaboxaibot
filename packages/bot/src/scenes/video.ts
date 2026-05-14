@@ -218,7 +218,10 @@ export async function activateVideoModel(
     // или mode-activated). Раз reply_markup-слот свободен — всегда привязываем
     // нижнюю persistent-клавиатуру со СВЕЖИМ wtoken для кнопки «Управление»
     // (web_app). Без обновления токены протухают через ~24ч.
-    const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+    const token =
+      webappUrl && ctx.user.telegramId
+        ? generateWebToken(ctx.user.telegramId, config.bot.token)
+        : "";
     const managementBtn = webappUrl
       ? {
           text: ctx.t.video.management,
@@ -1540,7 +1543,11 @@ export async function handleAvatarPhotoCapture(ctx: BotContext): Promise<void> {
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
 
   const userId = ctx.user.id;
-  const chatId = ctx.chat?.id ?? Number(userId);
+  const telegramId = ctx.user.telegramId;
+  // chat_id для Telegram API. Если по какой-то причине ctx.chat пуст —
+  // fallback на telegramId юзера. Никогда не подставляем internal id.
+  const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
+  if (chatId === undefined) return;
 
   // Fetch original image to (a) detect content-type and (b) build a thumbnail.
   const imgRes = await fetch(tgUrl);
@@ -1600,7 +1607,7 @@ export async function handleAvatarPhotoCapture(ctx: BotContext): Promise<void> {
 
   // Show the section reply keyboard immediately; ready message arrives async from worker.
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(userId, config.bot.token) : "";
+  const token = webappUrl && telegramId ? generateWebToken(telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.video.management,
@@ -1913,6 +1920,7 @@ export async function handleSoulCreateSubmit(ctx: BotContext): Promise<void> {
   await ctx.answerCallbackQuery();
 
   const userId = ctx.user.id;
+  const telegramId = ctx.user.telegramId;
   try {
     if (!(await acquireLock(`dedup:soul:${userId}`, 120))) return;
   } catch {
@@ -1998,7 +2006,7 @@ export async function handleSoulCreateSubmit(ctx: BotContext): Promise<void> {
         userId: userId.toString(),
         provider: "higgsfield_soul",
         action: "create",
-        telegramChatId: ctx.chat?.id ?? Number(userId),
+        telegramChatId: ctx.chat?.id ?? (telegramId ? Number(telegramId) : 0),
         s3Keys,
         characterName: ctx.t.video.myAvatarDefaultName,
       },
