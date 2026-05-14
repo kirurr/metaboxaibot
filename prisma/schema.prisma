@@ -16,7 +16,12 @@ enum Role {
 // Пользователь
 // ─────────────────────────────────────────────
 model User {
-  id                       BigInt  @id // Telegram user ID
+  id                       BigInt  @id @default(autoincrement())
+  // Telegram user ID — nullable, чтобы web-only юзеры существовали без привязки бота.
+  // У существующих/линкованных юзеров `telegramId` совпадает с историческим `id`
+  // (backfill в миграции). Все Telegram-операции (chat_id, ctx.from.id lookup) и
+  // записи `WelcomeBonusReceipt` / `GrantedMetaboxOrder` (ключ без FK) — по `telegramId`.
+  telegramId               BigInt? @unique
   username                 String?
   firstName                String?
   lastName                 String?

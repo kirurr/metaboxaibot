@@ -6,6 +6,7 @@ import type { User } from "@prisma/client";
 function mapUser(user: User): UserDto {
   return {
     id: user.id,
+    telegramId: user.telegramId ?? null,
     username: user.username ?? undefined,
     firstName: user.firstName ?? undefined,
     lastName: user.lastName ?? undefined,
@@ -20,8 +21,18 @@ function mapUser(user: User): UserDto {
 }
 
 export const userService = {
+  /** Lookup по внутреннему `User.id` (FK semantics). */
   async findById(id: bigint): Promise<UserDto | null> {
     const user = await db.user.findUnique({ where: { id } });
+    return user ? mapUser(user) : null;
+  },
+
+  /**
+   * Lookup по `telegramId` — для bot middleware (ctx.from.id → User).
+   * После decoupling-миграции PK у новых юзеров не совпадает с tgid.
+   */
+  async findByTelegramId(telegramId: bigint): Promise<UserDto | null> {
+    const user = await db.user.findUnique({ where: { telegramId } });
     return user ? mapUser(user) : null;
   },
 
@@ -39,16 +50,28 @@ export const userService = {
     });
   },
 
-  async upsert(params: {
-    id: bigint;
+  /**
+   * Upsert by telegramId — единственная точка регистрации tg-юзера в боте.
+   *
+   * Phase 2 (текущая): `id` явно прописывается = `telegramId` для backward-compat
+   * с местами, которые ещё читают `ctx.user.id` как tgid (Metabox bridge calls,
+   * referral resolution, welcome-bonus receipt key). Sequence не двигается на
+   * новых tg-юзерах — она зарезервирована под web-only signup (Phase 3+).
+   *
+   * Phase 3 уберёт `id: telegramId` отсюда — после того как все callsite'ы
+   * перейдут на `ctx.user.telegramId` для tg-операций и FK-чтения станут
+   * однозначно internal-id.
+   */
+  async upsertByTelegramId(params: {
+    telegramId: bigint;
     username?: string;
     firstName?: string;
     lastName?: string;
   }): Promise<UserDto> {
-    const { id, username, firstName, lastName } = params;
+    const { telegramId, username, firstName, lastName } = params;
     const user = await db.user.upsert({
-      where: { id },
-      create: { id, username, firstName, lastName },
+      where: { telegramId },
+      create: { id: telegramId, telegramId, username, firstName, lastName },
       update: { username, firstName, lastName },
     });
     return mapUser(user);

@@ -60,7 +60,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       await db.user.update({
-        where: { id: BigInt(telegramId) },
+        where: { telegramId: BigInt(telegramId) },
         data: { metaboxUserId },
       });
 
@@ -144,16 +144,17 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId and non-zero tokens are required" });
       }
 
-      const userId = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const tgid = BigInt(telegramId);
+      const user = await db.user.findUnique({ where: { telegramId: tgid } });
       if (!user) {
         return reply.code(404).send({ error: "User not found" });
       }
+      const userId = user.id;
 
       if (grantType === "subscription") {
         const resolvedEndDate = endDate ? new Date(endDate) : new Date();
         console.log(
-          `[grant-tokens] subscription grant: userId=${userId}, tokens=${tokens}, endDate=${resolvedEndDate.toISOString()}, planName=${planName}, subscriptionId=${subscriptionId}`,
+          `[grant-tokens] subscription grant: userId=${userId}, tgid=${tgid}, tokens=${tokens}, endDate=${resolvedEndDate.toISOString()}, planName=${planName}, subscriptionId=${subscriptionId}`,
         );
         const granted = await grantMetaboxSubscription({
           userId,
@@ -206,7 +207,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
                 db.grantedMetaboxOrder.create({
                   data: {
                     orderId,
-                    telegramId: userId,
+                    telegramId: tgid,
                     tokens,
                     description: description || null,
                   },
@@ -307,11 +308,12 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const userId = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const tgid = BigInt(telegramId);
+      const user = await db.user.findUnique({ where: { telegramId: tgid } });
       if (!user) {
         return reply.code(404).send({ error: "User not found" });
       }
+      const userId = user.id;
 
       // Idempotency check 1: subscriptionTokenBalance дедуплицируется по
       // metaboxSubscriptionId. Если LocalSubscription с этим metaboxSubscriptionId
@@ -357,7 +359,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         for (const grant of newGrants) {
           newOrderInserts.push({
             orderId: grant.orderId,
-            telegramId: userId,
+            telegramId: tgid,
             tokens: grant.tokens,
             description: grant.description ?? null,
           });
@@ -465,15 +467,21 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const userId = BigInt(telegramId);
-      await db.localSubscription
-        .update({
-          where: { userId },
-          data: { metaboxSubscriptionId: null },
-        })
-        .catch(() => {
-          /* no subscription to unlink — that's ok */
-        });
+      const tgid = BigInt(telegramId);
+      const user = await db.user.findUnique({
+        where: { telegramId: tgid },
+        select: { id: true },
+      });
+      if (user) {
+        await db.localSubscription
+          .update({
+            where: { userId: user.id },
+            data: { metaboxSubscriptionId: null },
+          })
+          .catch(() => {
+            /* no subscription to unlink — that's ok */
+          });
+      }
 
       return { ok: true };
     },
@@ -512,12 +520,15 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const user = await db.user.findUnique({ where: { id: BigInt(telegramId) } });
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        select: { id: true },
+      });
       if (!user) {
         return { ok: true }; // user not in bot — nothing to revoke
       }
 
-      await expireSubscription(BigInt(telegramId));
+      await expireSubscription(user.id);
 
       return { ok: true };
     },
@@ -574,11 +585,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId and positive tokens are required" });
       }
 
-      const userId = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+      });
       if (!user) {
         return { ok: true, deducted: 0, newBalance: 0 };
       }
+      const userId = user.id;
 
       const currentBalance = Number(user.tokenBalance);
       const actualDeduct = Math.min(currentBalance, tokens);
@@ -673,11 +686,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId and positive tokens are required" });
       }
 
-      const userId = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+      });
       if (!user) {
         return { ok: true, deducted: 0, newBalance: 0, localSubscriptionDeleted: false };
       }
+      const userId = user.id;
 
       const currentBalance = Number(user.subscriptionTokenBalance);
       const actualDeduct = Math.min(currentBalance, tokens);
@@ -759,11 +774,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const user = await db.user.findUnique({ where: { id: BigInt(telegramId) } });
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+      });
       if (!user) return { ok: true };
 
       await db.user.update({
-        where: { id: BigInt(telegramId) },
+        where: { id: user.id },
         data: { tokenBalance: 0 },
       });
 
@@ -885,7 +902,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const user = await db.user.findUnique({
-        where: { id: BigInt(telegramId) },
+        where: { telegramId: BigInt(telegramId) },
         select: { id: true },
       });
 
@@ -894,7 +911,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       await db.user.update({
-        where: { id: BigInt(telegramId) },
+        where: { id: user.id },
         data: { metaboxUserId: null, metaboxReferralCode: null },
       });
 
@@ -938,7 +955,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
       const user = await db.user.findUnique({
-        where: { id: BigInt(telegramId) },
+        where: { telegramId: BigInt(telegramId) },
         select: { tokenBalance: true, subscriptionTokenBalance: true },
       });
       if (!user) {
@@ -983,7 +1000,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
       const user = await db.user.findUnique({
-        where: { id: BigInt(telegramId) },
+        where: { telegramId: BigInt(telegramId) },
         select: { id: true },
       });
       return { activated: !!user };
@@ -1037,13 +1054,16 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId, planName, endDate required" });
       }
 
-      const user = await db.user.findUnique({ where: { id: BigInt(telegramId) } });
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        select: { id: true },
+      });
       if (!user) return { ok: true };
 
       await db.localSubscription.upsert({
-        where: { userId: BigInt(telegramId) },
+        where: { userId: user.id },
         create: {
-          userId: BigInt(telegramId),
+          userId: user.id,
           planName,
           period: period || "M1",
           tokensGranted: tokensGranted || 0,
@@ -1095,9 +1115,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const sub = await db.localSubscription.findUnique({
-        where: { userId: BigInt(telegramId) },
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        select: { id: true },
       });
+      const sub = user
+        ? await db.localSubscription.findUnique({ where: { userId: user.id } })
+        : null;
 
       if (!sub || !sub.isActive || new Date(sub.endDate) <= new Date()) {
         return { subscription: null };
@@ -1148,9 +1172,13 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(400).send({ error: "telegramId is required" });
       }
 
-      const sub = await db.localSubscription.findUnique({
-        where: { userId: BigInt(telegramId) },
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        select: { id: true },
       });
+      const sub = user
+        ? await db.localSubscription.findUnique({ where: { userId: user.id } })
+        : null;
 
       if (!sub || !sub.isActive || new Date(sub.endDate) <= new Date()) {
         return { subscription: null };

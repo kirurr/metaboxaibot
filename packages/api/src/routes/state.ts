@@ -24,7 +24,9 @@ import { getRedis } from "../redis.js";
 import { logger } from "../logger.js";
 import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов Bot API. После decoupling-миграции они различаются у web-only юзеров.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 /**
  * Build localised cost line with optional min–max range.
@@ -161,7 +163,7 @@ function buildActivationCostLine(
  * Возвращает null если section не имеет persistent-keyboard'а (gpt и т.п.).
  */
 function buildSectionReplyMarkup(
-  userId: bigint,
+  telegramId: bigint,
   section: string,
   t: Translations,
   token: string,
@@ -171,7 +173,7 @@ function buildSectionReplyMarkup(
   resize_keyboard: boolean;
   is_persistent: boolean;
 } | null {
-  const wtoken = webappUrl ? generateWebToken(userId, token) : "";
+  const wtoken = webappUrl ? generateWebToken(telegramId, token) : "";
   const makeMgmtBtn = (label: string) =>
     webappUrl
       ? {
@@ -211,13 +213,13 @@ function buildSectionReplyMarkup(
 
 /** Send a section-entry message with the appropriate reply keyboard (mirrors bot menu.ts). */
 async function sendSectionMessage(
-  userId: bigint,
+  telegramId: bigint,
   section: string,
   t: Translations,
   token: string,
   webappUrl: string | undefined,
 ): Promise<void> {
-  const replyMarkup = buildSectionReplyMarkup(userId, section, t, token, webappUrl);
+  const replyMarkup = buildSectionReplyMarkup(telegramId, section, t, token, webappUrl);
   if (!replyMarkup) return;
 
   const text =
@@ -231,7 +233,7 @@ async function sendSectionMessage(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: String(userId),
+      chat_id: String(telegramId),
       text,
       reply_markup: replyMarkup,
     }),
@@ -248,16 +250,23 @@ async function sendModelActivatedNotification(
   if (!model || !config.bot.token) return;
 
   const [user, allSettings] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { language: true } }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { language: true, telegramId: true },
+    }),
     userStateService.getModelSettings(userId),
   ]);
-  const t = getT((user?.language ?? "en") as Language);
+  // Без telegramId юзеру некуда слать активационное сообщение (web-only без TG).
+  // Бесшумно скипаем — фронт уже показал нужное состояние из ответа /state-select.
+  if (!user?.telegramId) return;
+  const telegramId = user.telegramId;
+  const t = getT((user.language ?? "en") as Language);
   const modelSettings = allSettings[modelId] ?? {};
 
   // Section switch (state/section) was already performed synchronously in the route handler.
   // Here we only send the optional section-switch keyboard message if needed.
   if (sectionSwitched) {
-    await sendSectionMessage(userId, section, t, config.bot.token, config.bot.webappUrl).catch(
+    await sendSectionMessage(telegramId, section, t, config.bot.token, config.bot.webappUrl).catch(
       (reason) => logger.warn(reason, "Could not send section switch message"),
     );
   }
@@ -290,7 +299,7 @@ async function sendModelActivatedNotification(
     "d-id": t.video.hintDid,
   };
 
-  const lang = (user?.language ?? "en") as string;
+  const lang = (user.language ?? "en") as string;
   const { name: modelName, description: modelDesc } = resolveModelDisplay(modelId, lang, model);
   const webappUrl = config.bot.webappUrl;
 
@@ -301,7 +310,7 @@ async function sendModelActivatedNotification(
       // voice-clone: plain label + hint, no inline kb. Раз нет inline —
       // прикрепляем нижнюю persistent клавиатуру со свежим wtoken.
       const bottomKb = buildSectionReplyMarkup(
-        userId,
+        telegramId,
         section,
         t,
         config.bot.token,
@@ -313,7 +322,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: `${t.audio.voiceClone}\n\n${audioHint}`,
           parse_mode: "HTML",
           ...(bottomKb ? { reply_markup: bottomKb } : {}),
@@ -342,7 +351,7 @@ async function sendModelActivatedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: String(userId),
+        chat_id: String(telegramId),
         text: audioText,
         ...(audioReplyMarkup ? { reply_markup: audioReplyMarkup } : {}),
         ...(ttsTextOnly ? { parse_mode: "HTML" } : {}),
@@ -407,7 +416,7 @@ async function sendModelActivatedNotification(
   // Bottom persistent keyboard со свежим wtoken — для сообщений БЕЗ inline kb,
   // чтобы юзер при следующем клике на «Управление» использовал не протухший token.
   const bottomKb = buildSectionReplyMarkup(
-    userId,
+    telegramId,
     section,
     t,
     config.bot.token,
@@ -424,7 +433,7 @@ async function sendModelActivatedNotification(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: String(userId),
+      chat_id: String(telegramId),
       text,
       ...(descriptionMarkup ? { reply_markup: descriptionMarkup } : {}),
     }),
@@ -437,7 +446,7 @@ async function sendModelActivatedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: String(userId),
+        chat_id: String(telegramId),
         text: hint,
         ...(hintMarkup ? { reply_markup: hintMarkup } : {}),
       }),
@@ -488,7 +497,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: modeText,
           ...(modeKb.length ? { reply_markup: { inline_keyboard: modeKb } } : {}),
         }),
@@ -509,7 +518,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: t.modelModes.pickerTitle,
           reply_markup: { inline_keyboard: pickerKb },
         }),

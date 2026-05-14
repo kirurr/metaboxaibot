@@ -152,10 +152,11 @@ export async function handleStart(ctx: BotContext): Promise<void> {
   // ── User registration ────────────────────────────────────────────────────
   // authMiddleware больше не создаёт юзера автоматически (см. middleware doc),
   // поэтому при первом /start (или после удаления аккаунта) `ctx.user` пуст.
-  // Создаём здесь — это единственная точка регистрации в боте.
+  // Создаём здесь — это единственная точка регистрации в боте. `id` присваивается
+  // sequence'ой (автоинкремент); `telegramId` — уникальный tgid из ctx.from.
   if (ctx.from && !ctx.user) {
-    ctx.user = await userService.upsert({
-      id: BigInt(ctx.from.id),
+    ctx.user = await userService.upsertByTelegramId({
+      telegramId: BigInt(ctx.from.id),
       username: ctx.from.username,
       firstName: ctx.from.first_name,
       lastName: ctx.from.last_name,
