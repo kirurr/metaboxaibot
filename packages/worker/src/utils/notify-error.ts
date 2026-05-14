@@ -279,7 +279,9 @@ export interface FallbackNotificationContext {
     | "long_window_rate_limit"
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
-    | "all_candidates_failed";
+    | "all_candidates_failed"
+    /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
+    | "primary_failed";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */

@@ -549,7 +549,20 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       const effKeyProvider = effModel ? resolveKeyProviderForModel(effModel) : keyProvider;
 
       const acquired = await acquireForPoll(existingJob?.providerKeyId, effKeyProvider);
-      const adapter = createAudioAdapter(effModel ?? modelId, acquired);
+      // Видимость фолбэка: KieElevenLabsAdapter дёргает этот колбэк на каждый
+      // EL-фолбэк (failed=false — EL вытянул, failed=true — EL тоже упал).
+      // notifyFallback шлёт в fallback-канал, как и Suno-фолбэк процессора.
+      const onElFallback = (failed: boolean): Promise<void> =>
+        notifyFallback({
+          section: "audio",
+          modelId,
+          primaryProvider: modelMeta?.provider ?? keyProvider,
+          fallbackProvider: failed ? null : "elevenlabs",
+          reason: failed ? "all_candidates_failed" : "primary_failed",
+          jobId: dbJobId,
+          userId: userIdStr,
+        });
+      const adapter = createAudioAdapter(effModel ?? modelId, acquired, onElFallback);
       if (!adapter.poll) throw new Error(`Adapter ${modelId} has no poll()`);
 
       // Реконструируем AudioInput — адаптеры с фолбэком (KieElevenLabsAdapter →

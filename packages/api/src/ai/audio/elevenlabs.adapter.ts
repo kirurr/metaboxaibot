@@ -1,5 +1,5 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
 
@@ -7,6 +7,33 @@ const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
 /** Default voice ID — Rachel */
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+
+/**
+ * ElevenLabs отдаёт 401 c телом `{ detail: { status: "quota_exceeded", … } }`,
+ * когда у аккаунта кончились кредиты — это provider-wide состояние (бьёт по
+ * всем джобам до пополнения), а не вина конкретного запроса. Превращаем в
+ * чистую терминальную `UserFacingError` с ops-алертом (дедуп), вместо plain
+ * `Error`, который жёг бы BullMQ-ретраи. Обычный 401 (битый ключ) не трогаем —
+ * это другой кейс, пусть остаётся plain Error.
+ */
+function throwIfQuotaExceeded(modelId: string, status: number, body: string): void {
+  if (status !== 401) return;
+  let isQuota = false;
+  try {
+    const parsed = JSON.parse(body) as { detail?: { status?: string } };
+    isQuota = parsed.detail?.status === "quota_exceeded";
+  } catch {
+    return; // не JSON — не quota-форма, дальше пойдёт plain Error
+  }
+  if (!isQuota) return;
+  throw new UserFacingError(`ElevenLabs quota exhausted (${modelId}): ${body.slice(0, 200)}`, {
+    key: "modelTemporarilyUnavailable",
+    section: "audio",
+    params: { modelName: AI_MODELS[modelId]?.name ?? modelId },
+    notifyOps: true,
+    opsAlertDedupKey: "elevenlabs-credits-exhausted",
+  });
+}
 
 /**
  * ElevenLabs adapter.
@@ -67,6 +94,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
 
     if (!res.ok) {
       const text = await res.text();
+      throwIfQuotaExceeded(this.modelId, res.status, text);
       throw new Error(`ElevenLabs TTS failed: ${res.status} ${text}`);
     }
 
@@ -119,6 +147,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
           if (e instanceof UserFacingError) throw e;
         }
       }
+      throwIfQuotaExceeded(this.modelId, res.status, text);
       throw new Error(`ElevenLabs sound generation failed: ${res.status} ${text}`);
     }
 

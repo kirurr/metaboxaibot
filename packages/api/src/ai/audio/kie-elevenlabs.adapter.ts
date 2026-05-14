@@ -83,14 +83,22 @@ export class KieElevenLabsAdapter implements AudioAdapter {
 
   private readonly apiKeyOverride: string | undefined;
   private readonly fetchFn: typeof globalThis.fetch | undefined;
+  /**
+   * Опциональный колбэк «сработал EL-фолбэк» — инжектится фактори/процессором.
+   * `failed` = true, если EL тоже упал (фолбэк не спас). Процессор вешает сюда
+   * `notifyFallback`. Адаптер не знает про worker-утилиты — поэтому через DI.
+   */
+  private readonly onFallback: ((failed: boolean) => void | Promise<void>) | undefined;
 
   constructor(
     readonly modelId: KieAudioModelId,
     apiKey?: string,
     fetchFn?: typeof globalThis.fetch,
+    onFallback?: (failed: boolean) => void | Promise<void>,
   ) {
     this.apiKeyOverride = apiKey;
     this.fetchFn = fetchFn;
+    this.onFallback = onFallback;
   }
 
   private get apiKey(): string {
@@ -229,6 +237,23 @@ export class KieElevenLabsAdapter implements AudioAdapter {
   }
 
   /**
+   * Обёртка над `generateViaElevenLabs` для видимости фолбэка: дёргает
+   * `onFallback(failed)` по факту исхода (EL вытянул / EL тоже упал). `poll()`
+   * зовёт её в обеих фолбэк-ветках (sentinel + `state:fail`), так что
+   * нотификация уходит на каждый фолбэк.
+   */
+  private async runElFallback(input: AudioInput): Promise<AudioResult> {
+    try {
+      const result = await this.generateViaElevenLabs(input);
+      await this.onFallback?.(false);
+      return result;
+    } catch (err) {
+      await this.onFallback?.(true);
+      throw err;
+    }
+  }
+
+  /**
    * Сабмит kie createTask. При ЛЮБОМ сбое kie (HTTP non-200, `code≠200`, 402,
    * сетевая ошибка) возвращает sentinel-taskId `el-fallback:<reason>` — `poll()`
    * увидит префикс и сгенерит через прямой ElevenLabs.
@@ -311,7 +336,7 @@ export class KieElevenLabsAdapter implements AudioAdapter {
         // реконструкции. Деградируем к до-деплойному поведению, не падая молча.
         throw new Error(`KIE audio: EL fallback requested but no input (taskId=${taskId})`);
       }
-      return this.generateViaElevenLabs(input);
+      return this.runElFallback(input);
     }
 
     const resp = await fetchWithLog(
@@ -355,7 +380,7 @@ export class KieElevenLabsAdapter implements AudioAdapter {
         { modelId: this.modelId, taskId, failCode, failMsg },
         "KIE audio task failed — falling back to ElevenLabs",
       );
-      return this.generateViaElevenLabs(input);
+      return this.runElFallback(input);
     }
 
     if (task.state !== "success") return null;
