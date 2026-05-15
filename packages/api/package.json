@@ -71,6 +71,10 @@
       "types": "./src/ai/avatar/higgsfield.soul.adapter.ts",
       "default": "./dist/ai/avatar/higgsfield.soul.adapter.js"
     },
+    "./utils/bot-token-scrub": {
+      "types": "./src/utils/bot-token-scrub.ts",
+      "default": "./dist/utils/bot-token-scrub.js"
+    },
     "./utils/fal-error": {
       "types": "./src/utils/fal-error.ts",
       "default": "./dist/utils/fal-error.js"

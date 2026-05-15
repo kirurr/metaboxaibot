@@ -243,6 +243,24 @@ export class KieImageAdapter implements ImageAdapter {
           opsAlertDedupKey: `kie-image-unsupported-format-${this.modelId}`,
         });
       }
+      // 402 «Credits insufficient ... Your current balance isn't enough» — наш
+      // KIE-аккаунт исчерпан, бьёт по всем юзерам до пополнения. Provider-wide
+      // состояние, не вина юзера. Чистая терминальная UserFacingError с ops-
+      // alert'ом (дедуп) в тему BALANCE — вместо plain Error, который жёг бы
+      // BullMQ-ретраи и уходил в общий поток tech-ошибок.
+      if (data.code === 402 || /credits? insufficient|balance.*enough|out of credits/i.test(msg)) {
+        throw new UserFacingError(
+          `KIE credits exhausted (${this.modelId}): ${data.code} — ${msg}`,
+          {
+            key: "modelTemporarilyUnavailable",
+            section: "design",
+            params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+            notifyOps: true,
+            opsAlertDedupKey: "kie-credits-exhausted",
+            opsAlertChannel: "balance",
+          },
+        );
+      }
       throw new Error(`KIE image submit failed: ${data.code} — ${msg}`);
     }
     return data.data.taskId;
@@ -332,7 +350,7 @@ export class KieImageAdapter implements ImageAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected|failed (?:the )?review/i.test(
           rawFailMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE

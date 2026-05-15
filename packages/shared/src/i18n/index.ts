@@ -108,6 +108,7 @@ export interface Translations {
     voiceCloneProcessing: string;
     voiceCloneSuccess: string;
     voiceCloneFailed: string;
+    voiceCloneProviderUnavailable: string;
     musicActivated: string;
     musicElActivated: string;
     soundsActivated: string;
@@ -220,6 +221,8 @@ export interface Translations {
     recraftImg2imgFileTooLarge: string;
     recraftImg2imgDimensionsTooLarge: string;
     recraftImg2imgResolutionTooLarge: string;
+    providerInputRejected: string;
+    promptTooLongUtf8: string;
     gptImageModerationBlocked: string;
     audioSensitiveWord: string;
     audioGenerateFailed: string;

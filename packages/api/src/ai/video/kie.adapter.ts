@@ -510,7 +510,7 @@ export class KieVideoAdapter implements VideoAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected|failed (?:the )?review/i.test(
           failMsg,
         );
       // Kling Motion: ошибки про невалидное reference-фото. Включают:

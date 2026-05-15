@@ -1,8 +1,91 @@
 import { fal } from "@fal-ai/client";
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
+
+/**
+ * Конвертирует ApiError из @fal-ai/client в чистый Error с коротким message
+ * и сохранённым numeric `status` (для isFiveXxError → cascade-fallback).
+ *
+ * Зачем: fal SDK строит `ApiError.message` как
+ * `"<short text>\nHTTP <code>\nbody: <full json>"`. Для `downstream_service_error`
+ * (xAI/Grok upstream down) body содержит полный input запроса — prompt +
+ * presigned S3 URL с `X-Amz-Signature`. Без обрезки это утекает в ops-алёрты
+ * многокилобайтной портянкой, плюс лёгкий security smell (signed URL — короткий
+ * credential). Чистая версия — статус + тип ошибки + первые 200 символов msg.
+ *
+ * Наши собственные `throw new Error("FAL …")` (валидация входа) пропускаются
+ * без изменений — у них `name === "Error"`, а fal SDK ставит `name = "ApiError"`
+ * или `"ValidationError"` (последний — subclass от ApiError, бросается на 422
+ * от pydantic-валидации входа; тоже несёт `body.detail` с эхом запроса).
+ *
+ * Возвращает `never` (всегда throw'ит) — для TS narrowing в catch-блоке вызова.
+ */
+function rethrowFalApiError(err: unknown): never {
+  const e = err as {
+    name?: unknown;
+    status?: unknown;
+    body?: unknown;
+    message?: unknown;
+  };
+  if (e?.name === "ApiError" || e?.name === "ValidationError") {
+    const status = typeof e.status === "number" && e.status >= 100 && e.status < 600 ? e.status : 0;
+    const body = e.body as
+      | { detail?: Array<{ msg?: string; type?: string; input?: { prompt?: unknown } }> }
+      | undefined;
+    const detail = body?.detail?.[0];
+    const errType = detail?.type ?? "unknown";
+    const rawMsg =
+      detail?.msg ?? (typeof e.message === "string" ? e.message.split("\n")[0] : "FAL error");
+    const briefMsg = rawMsg.slice(0, 200);
+
+    // ValidationError (422) — это user-fault, BullMQ-ретраи бесполезны, ops
+    // алёртить незачем. Маппим в UserFacingError, чтобы video processor
+    // показал юзеру осмысленный текст и пометил job как UnrecoverableError.
+    //
+    // Спец-кейс: «Prompt length exceeds the maximum allowed length of N» →
+    // используем готовый ключ promptTooLongUtf8 c числом из ошибки провайдера,
+    // подогнанным под bytes-per-char ratio юзерского промпта (см. ниже).
+    if (e?.name === "ValidationError") {
+      const limitMatch = /maximum allowed length of (\d+)/i.exec(rawMsg);
+      if (limitMatch) {
+        // Считаем char-лимит из реального промпта юзера, эхающегося в body.
+        // fal в ValidationError возвращает `body.detail[0].input.prompt` —
+        // оригинальный prompt, который мы только что послали. Это позволяет
+        // показать юзеру char-лимит, точный для **его** языка: 1.0×byteLimit
+        // для ASCII, 0.5× для русского, etc. Без эхо-промпта — fallback halve.
+        const inputPrompt = detail?.input?.prompt;
+        const promptStr = typeof inputPrompt === "string" ? inputPrompt : undefined;
+        const limitFromError = Number(limitMatch[1]);
+        let charLimit: number;
+        if (promptStr) {
+          const charLen = [...promptStr].length;
+          const byteLen = Buffer.byteLength(promptStr, "utf8");
+          const bytesPerChar = charLen > 0 ? byteLen / charLen : 2;
+          charLimit = Math.floor(limitFromError / bytesPerChar);
+        } else {
+          charLimit = Math.floor(limitFromError / 2);
+        }
+        throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+          key: "promptTooLongUtf8",
+          params: { limit: charLimit },
+        });
+      }
+      throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+        key: "providerInputRejected",
+        params: { reason: briefMsg },
+      });
+    }
+
+    const cleaned = new Error(`FAL ${status || "??"} ${errType}: ${briefMsg}`) as Error & {
+      status?: number;
+    };
+    if (status) cleaned.status = status;
+    throw cleaned;
+  }
+  throw err;
+}
 
 /**
  * Text-to-video endpoint for each model.
@@ -111,6 +194,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async submit(input: VideoInput): Promise<string> {
+    try {
+      return await this._submitImpl(input);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _submitImpl(input: VideoInput): Promise<string> {
     const imageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
@@ -327,6 +418,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async poll(providerJobId: string): Promise<VideoResult | null> {
+    try {
+      return await this._pollImpl(providerJobId);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _pollImpl(providerJobId: string): Promise<VideoResult | null> {
     // Support legacy plain request_id format (pre-encoding) for backwards compat
     let endpoint: string;
     let requestId: string;

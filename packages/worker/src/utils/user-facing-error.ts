@@ -94,6 +94,16 @@ export function resolveSubJobError(
   userText: string;
   rawText: string;
   isUserFacing: boolean;
+  /**
+   * True если ошибка — это `UserFacingError` с `notifyOps: true` (provider-wide
+   * сигнал: credits exhausted, AI-classifier-detected pattern и т.п.). Batch
+   * catch sites сохраняют `errorRaw` для таких ошибок (чтобы они попадали в
+   * `techRawErrors` и шли в ops-алёрт), даже если `isUserFacing === true`.
+   *
+   * Симметрично single-shot path'у, где `shouldNotifyOps(err)` определяет
+   * нужно ли алёртить ops при user-facing ошибке.
+   */
+  shouldNotifyOps: boolean;
   /** Структурированная категория для агрегаций — пишется и в sub-job.errorCode,
    *  и попадает в parent GenerationJob.errorCode через pickBatchErrorCode. */
   errorCode: GenerationErrorCode;
@@ -103,12 +113,25 @@ export function resolveSubJobError(
   // syscall/host из каждого уровня cause до 4 шагов.
   const rawText = formatErrorWithCauseChain(err);
   const errorCode = classifyError(err);
+  const shouldNotifyOpsValue = shouldNotifyOps(err);
   const mapped = resolveUserFacingMessage(err, t);
   if (mapped !== null) {
-    return { userText: mapped, rawText, isUserFacing: true, errorCode };
+    return {
+      userText: mapped,
+      rawText,
+      isUserFacing: true,
+      shouldNotifyOps: shouldNotifyOpsValue,
+      errorCode,
+    };
   }
   const userText = pickGenerationFailedMessage(t, modelName, section);
-  return { userText, rawText, isUserFacing: false, errorCode };
+  return {
+    userText,
+    rawText,
+    isUserFacing: false,
+    shouldNotifyOps: shouldNotifyOpsValue,
+    errorCode,
+  };
 }
 
 /**

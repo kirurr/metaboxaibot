@@ -60,7 +60,11 @@ import {
 } from "../utils/acquire-for-processor.js";
 import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { acquireById, markRateLimited } from "@metabox/api/services/key-pool";
-import { classifyRateLimit, LONG_WINDOW_THRESHOLD_MS } from "@metabox/api/utils/rate-limit-error";
+import {
+  classifyRateLimit,
+  isFiveXxError,
+  LONG_WINDOW_THRESHOLD_MS,
+} from "@metabox/api/utils/rate-limit-error";
 import type { AcquiredKey } from "@metabox/api/services/key-pool";
 import type { Prisma } from "@prisma/client";
 import { userAvatarService } from "@metabox/api/services/user-avatar";
@@ -1131,14 +1135,58 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
 
     const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
 
-    // ── Poll-stage fallback на KIE 5xx ──────────────────────────────────
-    // KIE при 5xx terminal failure НЕ перезапускает генерацию у себя. Если
-    // BullMQ retry'и исчерпаны и есть неиспользованный fallback-кандидат —
-    // пере-enqueue через delayJob: stage сбрасываем на "generate", чистим
-    // providerJobId, в attemptedProviders добавляем текущий effective
-    // provider. Submit-stage прочтёт attemptedProviders и через skipProviders
-    // пропустит primary, сразу возьмёт fallback.
-    if (stage === "poll" && isLastAttempt && isKieTransientError(err) && modelMeta) {
+    // ── Poll-stage fallback на 5xx от текущего провайдера ─────────────────
+    // Условие: BullMQ retry'и исчерпаны (isLastAttempt) И ошибка — terminal
+    // 5xx-сигнал текущего провайдера, который ретраи на нём не починят.
+    // Покрываются ДВА класса ошибок (взаимно дополняющие, не пересекаются):
+    //
+    //  1. `isKieTransientError` — KIE 5xx + 422 task-id-blank + "client closed
+    //     request". KIE-адаптер бросает plain Error БЕЗ `err.status`, поэтому
+    //     детектится по тексту message ("KIE …").
+    //
+    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. Покрывает прочие
+    //     адаптеры, которые выставляют numeric status на throw'е (например
+    //     evolink: 524 от Cloudflare; fal/replicate: 502/503). Эта ветка
+    //     прицельно закрывает дыру кие→evolink→fal: раньше evolink-овые 5xx
+    //     на poll-стадии не каскадировались на fal, и юзер получал generic
+    //     "model is resting" + refund, хотя следующий fallback был свободен.
+    //
+    // Защита от поспешного каскада на ПЕРВОМ провайдере: `isLastAttempt` —
+    // поодиночные 5xx-блипы (например Cloudflare 524 за одну poll-итерацию)
+    // сначала проходят обычные BullMQ ретраи, и только потом если 5xx
+    // стабильный — каскадим.
+    //
+    // ⚠ Caveat — нет грейсфул-degradation на ПОСЛЕДУЮЩИХ провайдерах:
+    // `attemptsMade` не сбрасывается при cascade re-enqueue (delayJob /
+    // moveToDelayed его сохраняют). Поэтому у задачи на fallback-провайдере
+    // 0 BullMQ-ретраев в запасе: единичный блип у fal на сабмите или poll'е
+    // → fail без повторной попытки. Это НЕ регрессия (до этого фикса юзер
+    // вообще не доходил до fal'а), но и не «попробуем ещё раз через минуту».
+    //
+    // Защита от зацикливания: `currentEff` читается из inputData.fallback
+    // (submit-with-fallback его пишет при каскаде на submit-стадии),
+    // добавляется в attemptedProviders → submit-with-fallback на следующем
+    // запуске skip'нет его через skipProviders. Цепочка терминируется когда
+    // все зарегистрированные fallback-кандидаты в attemptedProviders.
+    //
+    // ⚠ НЕТ защиты от несовместимого input'а на следующем провайдере:
+    // submitWithFallback ([:387]) формально умеет ловить
+    // ProviderInputIncompatibleError, но на момент коммита НИ ОДИН video-
+    // адаптер его не бросает. Если у fal-Kling другая структура
+    // modelSettings/mediaInputs, чем у evolink-Kling — fal ответит 400 и
+    // юзер получит generic failure. Trade-off принят сознательно: в худшем
+    // случае результат тот же, что был до фикса (generic + refund), в
+    // лучшем — fal отрабатывает и юзер получает видео.
+    //
+    // Пере-enqueue: stage сбрасываем на undefined (→ "generate" по умолчанию),
+    // чистим providerJobId/Key. Затем delayJob throw'ит DelayedError →
+    // outer-catch (выше) пере-кидает её → BullMQ переводит job в delayed-set.
+    if (
+      stage === "poll" &&
+      isLastAttempt &&
+      (isKieTransientError(err) || isFiveXxError(err)) &&
+      modelMeta
+    ) {
       // readFallbackState/writeFallbackState — closures внутри try-блока,
       // в catch недоступны. Refetch'аем напрямую.
       const dbJob = await db.generationJob.findUnique({
@@ -1159,7 +1207,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       if (nextCandidate) {
         logger.warn(
           { dbJobId, modelId, currentEff, next: nextCandidate.provider },
-          "Video poll: KIE 5xx terminal — re-enqueuing on fallback",
+          "Video poll: provider 5xx after retries — re-enqueuing on fallback",
         );
         await notifyFallback({
           section: "video",
@@ -1212,7 +1260,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
             registeredFallbacks: fallbackCandidates.map((m) => m.provider),
             errMessage: err instanceof Error ? err.message : String(err),
           },
-          "Video poll: KIE 5xx terminal — fallback skipped (no eligible candidate)",
+          "Video poll: provider 5xx after retries — fallback skipped (no eligible candidate)",
         );
       }
     }
@@ -1232,7 +1280,11 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           { dbJobId, modelId },
           "Video fallback skipped: modelMeta missing (model not in AI_MODELS)",
         );
-      } else if (!isKieTransientError(err) && !isProviderTemporaryUnavailable(err)) {
+      } else if (
+        !isKieTransientError(err) &&
+        !isProviderTemporaryUnavailable(err) &&
+        !isFiveXxError(err)
+      ) {
         logger.warn(
           {
             dbJobId,
@@ -1241,7 +1293,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
             registeredFallbacks: fallbackCandidates.map((m) => m.provider),
             errMessage: err instanceof Error ? err.message : String(err),
           },
-          "Video fallback skipped: error type not eligible (need KIE transient or provider-unavailable)",
+          "Video fallback skipped: error type not eligible (need KIE transient / provider-unavailable / 5xx)",
         );
       } else if (fallbackCandidates.length === 0) {
         logger.warn(

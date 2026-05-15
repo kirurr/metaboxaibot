@@ -150,6 +150,21 @@ export class RunwayAdapter implements VideoAdapter {
           params: { size: sizeMb, limit: limitMb },
         });
       }
+      // 400 «Invalid asset aspect ratio. width / height ratio must be at least
+      // 0.5. Got 0.462.» — user-fault, вытянутое фото. Slot-валидация это уже
+      // отбивает (RUNWAY_IMAGE_ASPECT.minAspectRatio=0.5), но defense-in-depth
+      // ловим и в адаптере: фото могло прийти через webapp/legacy путь, минуя
+      // slot-валидацию. Без этого юзер ждал 3 BullMQ-ретрая на детерминированной
+      // ошибке + получал generic «модель отдыхает».
+      const aspectMatch =
+        res.status === 400 &&
+        /Invalid asset aspect ratio.*at least ([\d.]+).*Got ([\d.]+)/i.exec(text);
+      if (aspectMatch) {
+        throw new UserFacingError(`Runway rejected promptImage: bad aspect ratio ${text}`, {
+          key: "runwayImageBadAspect",
+          params: { min: aspectMatch[1], got: aspectMatch[2] },
+        });
+      }
       throw new Error(`Runway submit failed: ${res.status} ${text}`);
     }
 

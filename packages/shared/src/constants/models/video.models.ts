@@ -49,6 +49,14 @@ const MI_REF_ELEMENTS: MediaInputSlot[] = [1, 2, 3].map((i) => ({
  */
 const KLING_IMAGE_ASPECT = { minAspectRatio: 0.4, maxAspectRatio: 2.5 } as const;
 
+/**
+ * Runway требует w/h ≥ 0.5 (= 1:2 портрет максимум). Наблюдали 2026-05:
+ * submit падал с 400 «Invalid asset aspect ratio. width / height ratio must
+ * be at least 0.5. Got 0.462.» Валидируем на upload'е, иначе юзер ждёт
+ * 3 пустых BullMQ-ретрая.
+ */
+const RUNWAY_IMAGE_ASPECT = { minAspectRatio: 0.5 } as const;
+
 // KIE Kling принимает first/last frame одним массивом image_urls, поэтому
 // last_frame standalone не имеет смысла — кнопка появляется только после
 // загрузки first_frame.
@@ -1541,7 +1549,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     supportsImages: true,
     // first_frame опциональный: с ним → POST /v1/image_to_video; без него →
     // POST /v1/text_to_video (адаптер выбирает endpoint автоматически).
-    mediaInputs: [MI_FIRST_FRAME],
+    mediaInputs: [{ ...MI_FIRST_FRAME, constraints: RUNWAY_IMAGE_ASPECT }],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,

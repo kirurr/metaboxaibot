@@ -128,6 +128,8 @@ export default {
     voiceCloneSuccess:
       "✅ Voice «{name}» created! It is now available in speech synthesis and video avatar settings.",
     voiceCloneFailed: "❌ Failed to create voice. Please try again later.",
+    voiceCloneProviderUnavailable:
+      "❌ Voice cloning service is temporarily unavailable. Please try again in 1-2 minutes.",
     musicActivated:
       "🎵 Music generation (Suno) activated.\nDescribe the music you want (genre, mood, style) and I will create it.",
     musicElActivated:
@@ -330,6 +332,10 @@ export default {
       "❌ The reference image resolution {width}×{height} ({mp} MP) exceeds the Recraft img2img limit of 16 MP.",
     promptTooLong:
       "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
+    providerInputRejected:
+      "❌ Provider rejected the request: {reason}. Try adjusting your parameters or prompt.",
+    promptTooLongUtf8:
+      "❌ Prompt is too long. Shorten it to about {limit} characters and try again.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:
@@ -445,6 +451,8 @@ export default {
     runwayRejected: "❌ Runway rejected your request. Please check your settings and try again.",
     runwayImageTooLarge:
       "❌ The image is too large ({size} MB) for Runway. Please send a photo under {limit} MB or compress it.",
+    runwayImageBadAspect:
+      "❌ Image is too elongated for Runway (aspect ratio {got}, minimum {min}). Send a less elongated image.",
     // Replicate
     replicateOom:
       "❌ Input data is too large for this model. Please try reducing the image size or text length.",

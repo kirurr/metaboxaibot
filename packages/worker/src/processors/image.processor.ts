@@ -5,6 +5,7 @@ import {
   resolveUserFacingMessage,
   shouldNotifyOps,
   resolveSubJobError,
+  getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { Api } from "grammy";
@@ -184,6 +185,25 @@ function formatSubJobErrorReport(
     lines.push(`[${i}] provider=${provider}${fbMark}:\n${indented}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Роутинг batch-алерта: если хотя бы один sub-job упал на balance/credits-
+ * exhausted паттерн (KIE 402 «Credits insufficient», EL `quota_exceeded`) —
+ * алерт идёт в тему BALANCE. Иначе — общий ALERTS поток.
+ *
+ * В batch-пути мы не имеем доступа к оригинальному `UserFacingError` каждого
+ * sub-job'а (`notifyTechError` получает synthetic `new Error(report)`),
+ * поэтому детектим по подстроке в `errorRaw` — единый источник правды для
+ * batch-алерта.
+ */
+function detectBatchAlertChannel(techRawErrors: string[]): "alerts" | "balance" {
+  const hit = techRawErrors.some((e) =>
+    /credits? insufficient|quota_exceeded|out of credits|insufficient credits|balance.*enough/i.test(
+      e,
+    ),
+  );
+  return hit ? "balance" : "alerts";
 }
 
 /**
@@ -813,7 +833,8 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
-              errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorRaw:
+                resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
               errorCode: resolved.errorCode,
             };
             await writeBatchState(state);
@@ -965,7 +986,8 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
-              errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorRaw:
+                resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
               errorCode: resolved.errorCode,
             };
           }
@@ -996,14 +1018,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               "submit",
               modelMeta?.provider ?? "unknown",
             );
-            await notifyTechError(new Error(report), {
-              jobId: dbJobId,
-              modelId,
-              section: "image",
-              userId: userIdStr,
-              attempt: job.attemptsMade,
-              partialSuccess: successResults.length > 0,
-            });
+            await notifyTechError(
+              new Error(report),
+              {
+                jobId: dbJobId,
+                modelId,
+                section: "image",
+                userId: userIdStr,
+                attempt: job.attemptsMade,
+                partialSuccess: successResults.length > 0,
+              },
+              detectBatchAlertChannel(techRawErrors),
+            );
           }
           if (successResults.length === 0) {
             // K=0 — все провалились. Перед mark-failed пробуем fallback re-submit:
@@ -1256,7 +1282,8 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 ...sub,
                 status: "failed",
                 error: resolved.userText,
-                errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+                errorRaw:
+                  resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
                 errorCode: resolved.errorCode,
               };
             }
@@ -1315,14 +1342,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             "poll",
             modelMeta?.provider ?? "unknown",
           );
-          await notifyTechError(new Error(report), {
-            jobId: dbJobId,
-            modelId,
-            section: "image",
-            userId: userIdStr,
-            attempt: job.attemptsMade,
-            partialSuccess: successResults.length > 0,
-          });
+          await notifyTechError(
+            new Error(report),
+            {
+              jobId: dbJobId,
+              modelId,
+              section: "image",
+              userId: userIdStr,
+              attempt: job.attemptsMade,
+              partialSuccess: successResults.length > 0,
+            },
+            detectBatchAlertChannel(techRawErrors),
+          );
         }
         if (successResults.length === 0) {
           // K=0 — все провалились. См. tryVirtualBatchFallbackResubmit:
@@ -1884,13 +1915,17 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
       });
       if (shouldNotifyOps(err)) {
-        await notifyTechError(err, {
-          jobId: dbJobId,
-          modelId,
-          section: "image",
-          userId: userIdStr,
-          attempt: job.attemptsMade,
-        });
+        await notifyTechError(
+          err,
+          {
+            jobId: dbJobId,
+            modelId,
+            section: "image",
+            userId: userIdStr,
+            attempt: job.attemptsMade,
+          },
+          getOpsAlertChannel(err),
+        );
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);

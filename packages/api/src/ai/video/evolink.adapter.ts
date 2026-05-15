@@ -401,7 +401,12 @@ export class EvolinkVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      const err = new Error(`Evolink video poll error ${resp.status}: ${txt}`) as Error & {
+      // Cloudflare 5xx-страницы (524 timeout и т.п.) — это многокилобайтная
+      // HTML-портянка. В message нужны только статус + первые байты для
+      // классификации; полный HTML раздувает alert'ы и DB.error без пользы.
+      // `err.status` сохраняет numeric код для isFiveXxError → cascade-fallback.
+      const truncated = txt.length > 300 ? `${txt.slice(0, 300)}…[truncated]` : txt;
+      const err = new Error(`Evolink video poll error ${resp.status}: ${truncated}`) as Error & {
         status?: number;
       };
       err.status = resp.status;
