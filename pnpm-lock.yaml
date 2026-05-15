@@ -244,6 +244,9 @@ importers:
       '@metabox/shared-browser':
         specifier: workspace:*
         version: link:../shared-browser
+      zod:
+        specifier: 'catalog:'
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: ^5.8.3

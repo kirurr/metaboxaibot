@@ -29,7 +29,8 @@ export interface SubmitVideoParams {
   imageUrl?: string;
   /** Named media input slots: { [slotKey]: string[] } */
   mediaInputs?: Record<string, string[]>;
-  telegramChatId: number;
+  /** Telegram chat id; `null` для генераций, запущенных с веба. */
+  telegramChatId: number | null;
   /** Pre-translated label for the "Send as file" inline button. */
   sendOriginalLabel?: string;
   /** Aspect ratio chosen by user, e.g. "16:9". */

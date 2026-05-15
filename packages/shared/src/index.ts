@@ -10,6 +10,17 @@ export type {
   GenerationJobDto,
 } from "./types/dialog.js";
 export type { TransactionType, TransactionReason, TokenTransactionDto } from "./types/token.js";
+export {
+  JOB_NOTIFICATIONS_CHANNEL,
+  jobNotificationMessageSchema,
+  jobNotificationSuccessSchema,
+  jobNotificationErrorSchema,
+} from "./types/job-notifications.js";
+export type {
+  JobNotificationMessage,
+  JobNotificationSuccess,
+  JobNotificationError,
+} from "./types/job-notifications.js";
 export type {
   AIModel,
   MediaInputMode,

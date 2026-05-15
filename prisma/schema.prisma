@@ -53,6 +53,7 @@ model User {
   galleryFolders    GalleryFolder[]
   pendingGeneration PendingGeneration?
   generationJobs    GenerationJob[]
+  webNotifications  WebNotification[]
 
   @@map("users")
 }
@@ -267,8 +268,9 @@ model GenerationJob {
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
 
-  outputs     GenerationJobOutput[]
-  folderItems GalleryFolderItem[]
+  outputs          GenerationJobOutput[]
+  folderItems      GalleryFolderItem[]
+  webNotifications WebNotification[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -277,6 +279,36 @@ model GenerationJob {
   @@index([userId, sourceMessageId, status])
   @@index([errorCode]) // GROUP BY в admin-аналитике по видам отказов
   @@map("generation_jobs")
+}
+
+// ─────────────────────────────────────────────
+// Персистентные уведомления для веб-фронта (packages/web).
+// Дополняют эфемерный Redis pub/sub `job-notifications`: если фронт офлайн в
+// момент завершения джобы — событие сохраняется и подтянется при следующем
+// заходе в личный кабинет.
+// type: image_success | image_error | video_success | video_error | audio_success | audio_error
+// data — payload из JobNotificationMessage (outputs[], errorCode, partial, ...).
+// ─────────────────────────────────────────────
+model WebNotification {
+  id      String  @id @default(cuid())
+  userId  BigInt
+  jobId   String?
+  type    String
+  title   String
+  message String
+  isSeen  Boolean @default(false)
+  data    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  GenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, isSeen])
+  @@index([jobId])
+  @@map("web_notifications")
 }
 
 model GenerationJobOutput {

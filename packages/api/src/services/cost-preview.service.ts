@@ -57,12 +57,12 @@ export interface AudioCostPreview {
 
 export const costPreviewService = {
   async previewImage(params: SubmitImageParams): Promise<ImageCostPreview> {
-    const { userId, modelId, aspectRatio } = params;
+    const { userId, modelId, aspectRatio, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    const modelSettings = allModelSettings[modelId] ?? {};
+    const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const effectiveAspectRatio = (modelSettings.aspect_ratio as string | undefined) ?? aspectRatio;
 
     const estimatedMegapixels = model.costUsdPerMPixel ? 1.0 : undefined;
@@ -167,12 +167,12 @@ export const costPreviewService = {
   },
 
   async previewAudio(params: SubmitAudioParams): Promise<AudioCostPreview> {
-    const { userId, modelId, prompt } = params;
+    const { userId, modelId, prompt, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    let modelSettings = allModelSettings[modelId] ?? {};
+    let modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
 
     // Посекундный биллинг аудио (sounds-el / music-el): нормализуем
     // duration_seconds перед расчётом стоимости. Без этого:

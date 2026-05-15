@@ -12,7 +12,16 @@ import {
 import clsx from "clsx";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
-import type { ApiError } from "@/api/client";
+import { ApiError } from "@/api/client";
+import {
+  submitImageGeneration,
+  submitVideoGeneration,
+  submitAudioGeneration,
+  type SubmitImageGenerationBody,
+  type SubmitVideoGenerationBody,
+  type SubmitAudioGenerationBody,
+  type SubmitGenerationResponse,
+} from "@/api/generation";
 import { listVoices, type VoiceItem, type VoiceProvider } from "@/api/voices";
 import {
   listHeyGenAvatars,
@@ -593,6 +602,35 @@ function SettingPopBody({
   if (setting.type === "select" || setting.type === "dropdown") {
     const opts = setting.options ?? [];
     if (opts.length === 0) return null;
+    if (opts.length > 6) {
+      // Dropdown — нативный select для большого числа опций.
+      return (
+        <div className="gen-set">
+          <div className="gen-set-label">
+            <span>{setting.label}</span>
+          </div>
+          <select
+            className="gen-select"
+            value={String(value ?? setting.default ?? "")}
+            onChange={(e) => {
+              // Native <select> возвращает string — резолвим обратно в исходный
+              // тип опции (number/boolean/string), чтобы адаптеры на воркере
+              // не получили "1" вместо 1. Chip-row (≤6 опций) такого приёма
+              // не требует, там o.value передаётся напрямую.
+              const found = opts.find((o) => String(o.value) === e.target.value);
+              onChange(found ? found.value : e.target.value);
+            }}
+          >
+            {opts.map((o) => (
+              <option key={String(o.value)} value={String(o.value)}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    // Chip-row — компактно, видно всё сразу.
     return (
       <div className="gen-pop-body">
         {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
@@ -627,6 +665,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const modelPickRef = useRef<HTMLDivElement | null>(null);
 
@@ -980,11 +1019,61 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
         Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
   const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy;
 
-  function generate() {
-    if (!canGenerate) return;
+  async function generate() {
+    if (!canGenerate || !selectedModel) return;
     setBusy(true);
-    // Заглушка: бекенда для генерации с web ещё нет.
-    setTimeout(() => setBusy(false), 1600);
+    setSubmitError(null);
+    try {
+      // В payload — только ready-файлы (uploading/error пропускаем). Передаём
+      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит.
+      const mediaInputs: Record<string, string[]> = {};
+      for (const [slotKey, files] of Object.entries(slotFiles)) {
+        const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+        if (keys.length > 0) mediaInputs[slotKey] = keys;
+      }
+
+      const section = selectedModel.section;
+      const settingsField =
+        Object.keys(settingValues).length > 0 ? { settings: settingValues } : {};
+      const mediaField = Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
+
+      let result: SubmitGenerationResponse;
+      if (section === "design" || section === "image") {
+        const body: SubmitImageGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitImageGeneration(body);
+      } else if (section === "video") {
+        const body: SubmitVideoGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitVideoGeneration(body);
+      } else if (section === "audio") {
+        const body: SubmitAudioGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...settingsField,
+        };
+        result = await submitAudioGeneration(body);
+      } else {
+        throw new Error(`Unsupported section: ${section}`);
+      }
+      // TODO: следить за прогрессом через WS-событие на subscriber'е (job-notifications).
+      console.info("[generate] job submitted", section, result.dbJobId);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
+      setSubmitError(msg);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Активный picker — резолвим один раз для render'а.
@@ -1245,6 +1334,12 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               </span>
             )}
           </button>
+
+          {submitError && (
+            <div className="gen-error" role="alert">
+              {submitError}
+            </div>
+          )}
         </div>
       </div>
 

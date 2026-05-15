@@ -58,6 +58,7 @@ import {
   pickBatchErrorCode,
 } from "../utils/fallback-state.js";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { acquireForPoll } from "../utils/acquire-for-processor.js";
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
@@ -1274,12 +1275,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+            if (telegramChatId !== null) {
+              await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+            } else {
+              await apiNotifyError({
+                section: "image",
+                userId: userIdStr,
+                dbJobId,
+                userMessage: timeoutMsg,
+                errorCode: POLL_TIMEOUT_CODE,
+              }).catch(() => void 0);
+            }
             throw new UnrecoverableError("poll timeout 24h");
           }
           await delayJob(
@@ -1375,22 +1382,31 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+            if (telegramChatId !== null) {
+              await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+            } else {
+              await apiNotifyError({
+                section: "image",
+                userId: userIdStr,
+                dbJobId,
+                userMessage: timeoutMsg,
+                errorCode: POLL_TIMEOUT_CODE,
+              }).catch(() => void 0);
+            }
             throw new UnrecoverableError("poll timeout 24h");
           }
 
           if (job.data.lastIntervalMs !== undefined && interval !== job.data.lastIntervalMs) {
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationStillRunning.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            // "still running" hint имеет смысл только в TG-чате; web-клиент видит статус processing напрямую.
+            if (telegramChatId !== null) {
+              await telegram
+                .sendMessage(
+                  telegramChatId,
+                  t.errors.generationStillRunning.replace("{modelName}", modelName),
+                )
+                .catch(() => void 0);
+            }
           }
 
           await delayJob(
@@ -1442,7 +1458,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         userFacingBatchErrors.length > 0
           ? userFacingBatchErrors[0]!
           : pickGenerationFailedMessage(t, modelName, "design");
-      await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: text,
+        }).catch(() => void 0);
+      }
       logger.info(
         {
           dbJobId,
@@ -1456,82 +1481,98 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
     // Batch: multiple outputs → send as media group
     if (outputRecords.length > 1) {
-      const mediaGroup: Array<{
-        type: "photo";
-        media: string | InstanceType<typeof InputFile>;
-        caption?: string;
-        parse_mode?: "HTML";
-      }> = [];
+      if (telegramChatId !== null) {
+        const mediaGroup: Array<{
+          type: "photo";
+          media: string | InstanceType<typeof InputFile>;
+          caption?: string;
+          parse_mode?: "HTML";
+        }> = [];
 
-      const batchCaption = buildCaption();
-      const byteSizes: number[] = [];
-      for (let i = 0; i < outputRecords.length; i++) {
-        const rec = outputRecords[i];
-        const filename = `image-${i + 1}.png`;
-        const info = await resolveTelegramSource(rec.s3Key, rec.outputUrl ?? "");
-        byteSizes.push(info.byteSize);
-        const { source } = await prepareTelegramPhoto(info, rec.outputUrl ?? "", filename);
-        mediaGroup.push({
-          type: "photo",
-          media: source,
-          ...(i === 0 ? { caption: batchCaption, parse_mode: "HTML" as const } : {}),
-        });
-      }
-
-      // 2 попытки — multipart upload в Telegram изредка падает на network
-      // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
-      await withRetry("image.sendMediaGroup", 2, () =>
-        telegram.sendMediaGroup(telegramChatId, mediaGroup, replyToPrompt),
-      );
-
-      // Send a single message with refine + (orig|download) buttons for all outputs.
-      // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
-      {
-        const buttons: InlineKeyboardButton[] = [];
+        const batchCaption = buildCaption();
+        const byteSizes: number[] = [];
         for (let i = 0; i < outputRecords.length; i++) {
           const rec = outputRecords[i];
-          const n = i + 1;
-          buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
-          if (byteSizes[i] <= TELEGRAM_DOC_MAX_BYTES) {
-            buttons.push({ text: `${n}. 📎`, callback_data: `orig_${rec.id}` });
-          } else if (rec.s3Key) {
-            buttons.push(buildDownloadButton(`${n}. ⬇️`, rec.s3Key, userIdStr));
-          }
+          const filename = `image-${i + 1}.png`;
+          const info = await resolveTelegramSource(rec.s3Key, rec.outputUrl ?? "");
+          byteSizes.push(info.byteSize);
+          const { source } = await prepareTelegramPhoto(info, rec.outputUrl ?? "", filename);
+          mediaGroup.push({
+            type: "photo",
+            media: source,
+            ...(i === 0 ? { caption: batchCaption, parse_mode: "HTML" as const } : {}),
+          });
         }
-        // Layout: <3 pairs → 1 per row, even → 2 per row, odd → 3 per row
-        const rows: InlineKeyboardButton[][] = [];
-        const totalPairs = outputRecords.length;
-        const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
-        const chunkSize = 2 * pairsPerRow;
-        for (let i = 0; i < buttons.length; i += chunkSize) {
-          rows.push(buttons.slice(i, i + chunkSize));
-        }
-        // Drop the "⬇️ Скачать" line from the legend when no output produced
-        // a download button — happens whenever every photo fits under 50 MB
-        // (the common case), so we don't tease a button the user can't see.
-        const hasDownloadButton = buttons.some(
-          (b) => "url" in b || ("web_app" in b && b.web_app !== undefined),
-        );
-        const hintText = hasDownloadButton
-          ? t.design.batchActions
-          : t.design.batchActionsNoDownload;
-        await telegram.sendMessage(telegramChatId, hintText, {
-          reply_markup: { inline_keyboard: rows },
-        });
-      }
 
-      // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
-      // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
-      // равно один root-cause в 99% случаев — детали есть в ops alert).
-      if (batchErrors.length > 0) {
-        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
-        const text = t.design.batchPartialFooter
-          .replace("{success}", String(outputRecords.length))
-          .replace("{total}", String(requestedN))
-          .replace("{errors}", errorMessage);
-        await telegram
-          .sendMessage(telegramChatId, text)
-          .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+        // 2 попытки — multipart upload в Telegram изредка падает на network
+        // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
+        await withRetry("image.sendMediaGroup", 2, () =>
+          telegram.sendMediaGroup(telegramChatId, mediaGroup, replyToPrompt),
+        );
+
+        // Send a single message with refine + (orig|download) buttons for all outputs.
+        // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
+        {
+          const buttons: InlineKeyboardButton[] = [];
+          for (let i = 0; i < outputRecords.length; i++) {
+            const rec = outputRecords[i];
+            const n = i + 1;
+            buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
+            if (byteSizes[i] <= TELEGRAM_DOC_MAX_BYTES) {
+              buttons.push({ text: `${n}. 📎`, callback_data: `orig_${rec.id}` });
+            } else if (rec.s3Key) {
+              buttons.push(buildDownloadButton(`${n}. ⬇️`, rec.s3Key, userIdStr));
+            }
+          }
+          // Layout: <3 pairs → 1 per row, even → 2 per row, odd → 3 per row
+          const rows: InlineKeyboardButton[][] = [];
+          const totalPairs = outputRecords.length;
+          const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
+          const chunkSize = 2 * pairsPerRow;
+          for (let i = 0; i < buttons.length; i += chunkSize) {
+            rows.push(buttons.slice(i, i + chunkSize));
+          }
+          // Drop the "⬇️ Скачать" line from the legend when no output produced
+          // a download button — happens whenever every photo fits under 50 MB
+          // (the common case), so we don't tease a button the user can't see.
+          const hasDownloadButton = buttons.some(
+            (b) => "url" in b || ("web_app" in b && b.web_app !== undefined),
+          );
+          const hintText = hasDownloadButton
+            ? t.design.batchActions
+            : t.design.batchActionsNoDownload;
+          await telegram.sendMessage(telegramChatId, hintText, {
+            reply_markup: { inline_keyboard: rows },
+          });
+        }
+
+        // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
+        // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
+        // равно один root-cause в 99% случаев — детали есть в ops alert).
+        if (batchErrors.length > 0) {
+          const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
+          const text = t.design.batchPartialFooter
+            .replace("{success}", String(outputRecords.length))
+            .replace("{total}", String(requestedN))
+            .replace("{errors}", errorMessage);
+          await telegram
+            .sendMessage(telegramChatId, text)
+            .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+        }
+      } else {
+        await apiNotifySuccess({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          outputs: outputRecords.map((r) => ({
+            id: r.id,
+            outputUrl: r.outputUrl ?? null,
+            s3Key: r.s3Key ?? null,
+          })),
+          ...(batchErrors.length > 0
+            ? { partial: { success: outputRecords.length, total: requestedN } }
+            : {}),
+        }).catch(() => void 0);
       }
 
       if (dialogId) {
@@ -1590,61 +1631,79 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       }
     }
 
-    const filename = finalImageResult.filename ?? "image.png";
-    const info = await resolveTelegramSource(s3Key, finalImageResult.url);
-    const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
-      info,
-      finalImageResult.url,
-      filename,
-    );
-
-    const refineRow: InlineKeyboardButton[] = [
-      { text: t.design.refine, callback_data: `design_ref_${outputId}` },
-    ];
-    const actionRow: InlineKeyboardButton[] | null =
-      info.byteSize <= TELEGRAM_DOC_MAX_BYTES
-        ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
-        : s3Key
-          ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
-          : null;
-    const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
-    const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
-
-    const singleCaption = buildCaption();
-    if (isSvg) {
-      // 2 попытки — multipart upload в Telegram'е иногда падает на network
-      // blip'ах. Single retry — безопасный второй шанс.
-      await withRetry("image.sendDocument", 2, () =>
-        telegram.sendDocument(telegramChatId, tgImageSource, {
-          caption: singleCaption,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          ...replyToPrompt,
-        }),
+    if (telegramChatId !== null) {
+      const filename = finalImageResult.filename ?? "image.png";
+      const info = await resolveTelegramSource(s3Key, finalImageResult.url);
+      const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
+        info,
+        finalImageResult.url,
+        filename,
       );
+
+      const refineRow: InlineKeyboardButton[] = [
+        { text: t.design.refine, callback_data: `design_ref_${outputId}` },
+      ];
+      const actionRow: InlineKeyboardButton[] | null =
+        info.byteSize <= TELEGRAM_DOC_MAX_BYTES
+          ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
+          : s3Key
+            ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
+            : null;
+      const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
+      const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
+
+      const singleCaption = buildCaption();
+      if (isSvg) {
+        // 2 попытки — multipart upload в Telegram'е иногда падает на network
+        // blip'ах. Single retry — безопасный второй шанс.
+        await withRetry("image.sendDocument", 2, () =>
+          telegram.sendDocument(telegramChatId, tgImageSource, {
+            caption: singleCaption,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            ...replyToPrompt,
+          }),
+        );
+      } else {
+        await withRetry("image.sendPhoto", 2, () =>
+          telegram.sendPhoto(telegramChatId, tgImageSource, {
+            caption: singleCaption,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            ...replyToPrompt,
+          }),
+        );
+      }
+
+      // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
+      // К одиночному фото добавляем footer-сообщение с одним общим текстом
+      // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
+      if (batchErrors.length > 0) {
+        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
+        const text = t.design.batchPartialFooter
+          .replace("{success}", String(outputRecords.length))
+          .replace("{total}", String(requestedN))
+          .replace("{errors}", errorMessage);
+        await telegram
+          .sendMessage(telegramChatId, text)
+          .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+      }
     } else {
-      await withRetry("image.sendPhoto", 2, () =>
-        telegram.sendPhoto(telegramChatId, tgImageSource, {
-          caption: singleCaption,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          ...replyToPrompt,
-        }),
-      );
-    }
-
-    // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
-    // К одиночному фото добавляем footer-сообщение с одним общим текстом
-    // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
-    if (batchErrors.length > 0) {
-      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
-      const text = t.design.batchPartialFooter
-        .replace("{success}", String(outputRecords.length))
-        .replace("{total}", String(requestedN))
-        .replace("{errors}", errorMessage);
-      await telegram
-        .sendMessage(telegramChatId, text)
-        .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+      await apiNotifySuccess({
+        section: "image",
+        userId: userIdStr,
+        dbJobId,
+        outputs: [
+          {
+            id: outputId,
+            outputUrl: outputUrl || null,
+            s3Key: s3Key,
+          },
+        ],
+        ...(batchErrors.length > 0
+          ? { partial: { success: outputRecords.length, total: requestedN } }
+          : {}),
+      }).catch(() => void 0);
     }
 
     logger.info({ dbJobId }, "Image job completed");
@@ -1656,7 +1715,17 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         where: { id: dbJobId },
         data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     // Provider-side rate-limit/overload (например KIE 422 "high demand") —
@@ -1823,7 +1892,17 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           attempt: job.attemptsMade,
         });
       }
-      await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: userMsg,
+          errorCode: classifyError(err),
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(userMsg);
     }
 
@@ -1990,9 +2069,17 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         attempt: job.attemptsMade,
       });
 
-      await telegram
-        .sendMessage(telegramChatId, pickGenerationFailedMessage(t, modelName, "design"))
-        .catch(() => void 0);
+      const failureMsg = pickGenerationFailedMessage(t, modelName, "design");
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: failureMsg,
+        }).catch(() => void 0);
+      }
     }
 
     throw err;

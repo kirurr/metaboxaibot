@@ -12,8 +12,8 @@ export interface ImageJobData {
   sourceImageUrl?: string;
   /** Named media input slots: { [slotKey]: string[] } */
   mediaInputs?: Record<string, string[]>;
-  /** Telegram chat id to notify when done */
-  telegramChatId: number;
+  /** Telegram chat id to notify when done; null when generation originated outside Telegram (web). */
+  telegramChatId: number | null;
   /**
    * Telegram message_id of the user's prompt message. When set, the worker
    * sends the result as a reply to this message so the user can match
