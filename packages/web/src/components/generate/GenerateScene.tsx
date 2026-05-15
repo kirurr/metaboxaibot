@@ -1335,6 +1335,12 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               </span>
             )}
           </button>
+
+          {submitError && (
+            <div className="gen-error" role="alert">
+              {submitError}
+            </div>
+          )}
         </div>
       </div>
 
