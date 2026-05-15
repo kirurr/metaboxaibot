@@ -46,7 +46,12 @@ export function isProviderTemporaryUnavailable(err: unknown): boolean {
         ? (err as { message: string }).message
         : "";
   if (!msg) return false;
-  return /high demand|service is (currently )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed/i.test(
+  // `currently |temporarily ` — оба наречия в адверб-слоте между "is" и
+  // "unavailable" должны матчиться. Наблюдали KIE 2026-05: failCode=422 с
+  // failMsg "Service is temporarily unavailable. Please try again later. (E004)"
+  // — провайдер явно сигналит transient через эту фразу, regex без вариаций
+  // её пропускал, fallback не запускался → юзер ждал зря 3 ретрая.
+  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed/i.test(
     msg,
   );
 }
