@@ -50,7 +50,15 @@ export class OpenAiTtsAdapter implements AudioAdapter {
     } as OpenAI.Audio.Speech.SpeechCreateParams);
 
     const ext =
-      format === "opus" ? "ogg" : format === "aac" ? "aac" : format === "flac" ? "flac" : "mp3";
+      format === "opus"
+        ? "ogg"
+        : format === "aac"
+          ? "aac"
+          : format === "flac"
+            ? "flac"
+            : format === "wav"
+              ? "wav"
+              : "mp3";
     const buffer = Buffer.from(await response.arrayBuffer());
     return { buffer, ext, contentType: `audio/${ext === "mp3" ? "mpeg" : ext}` };
   }
