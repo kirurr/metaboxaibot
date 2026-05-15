@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { WebUser } from "@/api/types";
 import * as authApi from "@/api/auth";
+import { useNotificationsStore } from "@/stores/notificationsStore";
 
 interface AuthState {
   user: WebUser | null;
@@ -91,14 +92,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  clear: () =>
+  clear: () => {
     set({
       user: null,
       accessToken: null,
       csrfToken: null,
       accessTokenExpiresAt: null,
       isAuthenticated: false,
-    }),
+    });
+    // Сбрасываем уведомления, чтобы при logout/смене юзера в той же вкладке
+    // не светились записи предыдущего юзера до прихода свежего snapshot'а.
+    useNotificationsStore.getState().clear();
+  },
 
   logout: async () => {
     try {

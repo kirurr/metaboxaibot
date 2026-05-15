@@ -15,10 +15,12 @@ export function useInitNotifications() {
   const upsert = useNotificationsStore((s) => s.upsert);
 
   useEffect(() => {
-    ws.connect();
-
+    // Сначала регистрируем листенеры, потом коннектимся: иначе server-emit
+    // `notification:snapshot` (срабатывает на `connection`) может опередить
+    // регистрацию и пропасть.
     ws.on("notification:snapshot", setSnapshot);
     ws.on("notification:new", upsert);
+    ws.connect();
 
     return () => {
       ws.off("notification:snapshot");

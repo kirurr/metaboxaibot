@@ -6,6 +6,13 @@ interface NotificationsState {
   /** Дедупликация по id. Источник правды — server snapshot + push'и. */
   byId: Map<string, WebNotificationDTO>;
 
+  /**
+   * Отсортированный по createdAt desc список — newest first.
+   * Синхронизируется со `byId` в каждом действии. UI рендерит отсюда,
+   * чтобы свежеприбывший `upsert` не уезжал в конец Map-итерации.
+   */
+  list: WebNotificationDTO[];
+
   /** WS `notification:snapshot` — полностью заменяет содержимое. */
   setSnapshot: (rows: WebNotificationDTO[]) => void;
 
@@ -17,21 +24,30 @@ interface NotificationsState {
 
   /** Удаляет локально и отправляет на сервер. */
   remove: (id: string) => void;
+
+  /** Сброс при logout / смене юзера. */
+  clear: () => void;
+}
+
+// ISO 8601 строки лексикографически сортируются хронологически.
+function sortDesc(byId: Map<string, WebNotificationDTO>): WebNotificationDTO[] {
+  return Array.from(byId.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   byId: new Map(),
+  list: [],
 
   setSnapshot: (rows) => {
     const next = new Map<string, WebNotificationDTO>();
     for (const row of rows) next.set(row.id, row);
-    set({ byId: next });
+    set({ byId: next, list: sortDesc(next) });
   },
 
   upsert: (row) => {
     const next = new Map(get().byId);
     next.set(row.id, row);
-    set({ byId: next });
+    set({ byId: next, list: sortDesc(next) });
   },
 
   markAsSeen: (ids) => {
@@ -48,7 +64,7 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
       const row = next.get(id);
       if (row) next.set(id, { ...row, isSeen: true });
     }
-    set({ byId: next });
+    set({ byId: next, list: sortDesc(next) });
     ws.emit("notification:mark-seen", { ids: toMark });
   },
 
@@ -57,7 +73,9 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     if (!current.has(id)) return;
     const next = new Map(current);
     next.delete(id);
-    set({ byId: next });
+    set({ byId: next, list: sortDesc(next) });
     ws.emit("notification:delete", { id });
   },
+
+  clear: () => set({ byId: new Map(), list: [] }),
 }));

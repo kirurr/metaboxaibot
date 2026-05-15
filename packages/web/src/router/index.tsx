@@ -30,7 +30,6 @@ const AdminLayout = lazy(() => import("@/pages/AdminLayout"));
 const AdminKeysPage = lazy(() => import("@/pages/AdminKeys"));
 const AdminProxiesPage = lazy(() => import("@/pages/AdminProxies"));
 const AdminPricingPage = lazy(() => import("@/pages/AdminPricing"));
-const WebSocketPage = lazy(() => import("@/pages/WebSocket"));
 const PromptsPage = lazy(() => import("@/pages/PromptsPage"));
 
 function PageFallback() {
@@ -46,12 +45,6 @@ function withSuspense(node: React.ReactNode) {
 }
 
 export const router = createBrowserRouter([
-  // WebSocket
-  {
-    path: "/ws",
-    element: <WebSocketPage />,
-  },
-
   // Гостевые роуты
   {
     path: "/login",
