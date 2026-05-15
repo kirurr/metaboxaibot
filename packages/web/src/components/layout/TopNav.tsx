@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  Bell,
   ChevronDown,
   ChevronRight,
   CreditCard,
@@ -16,6 +15,7 @@ import clsx from "clsx";
 import { useAuthStore } from "@/stores/authStore";
 import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
 import { CapabilityTabs } from "./CapabilityTabs";
+import { Notifications } from "../Notifications";
 
 export function TopNav() {
   const navigate = useNavigate();
@@ -65,10 +65,7 @@ export function TopNav() {
             <Plus size={12} />
           </span>
         </button>
-        <button className="tn-icon-btn" title="Notifications">
-          <Bell size={18} />
-          <span className="pip" />
-        </button>
+        <Notifications />
 
         <div ref={menuRef} style={{ position: "relative" }}>
           <button className="account-btn" onClick={() => setOpen(!open)}>
