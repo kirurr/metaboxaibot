@@ -102,17 +102,18 @@ export const videoGenerationService = {
       if (byteLen > model.maxPromptLength) {
         // Юзеру показываем «символы», а не байты. Считаем реальный
         // bytes-per-char ratio для ЕГО промпта: 1.0 для ASCII, 2.0 для
-        // кириллицы, 3-4 для эмодзи/китайского/etc. Тогда отображаемый
-        // char-лимит = byteLimit / ratio — точно сколько символов **его
-        // языка** влезет в byteLimit. Без подгонки англоязычный юзер видел бы
-        // лимит вдвое меньше реального (если бы мы halve'или константно).
+        // кириллицы, 3-4 для эмодзи/китайского/etc. Отображаемый char-лимит =
+        // byteLimit / ratio — точно сколько символов его языка влезет.
         //
-        // charLen ≥ 1 здесь гарантированно: byteLen > maxPromptLength ≥ 1 →
-        // в промпте есть хотя бы один code point → деление безопасно.
+        // Возвращаем существующий ключ `promptTooLong` (есть в обоих
+        // i18n-namespace — `errors.*` и `video.*`), не вводим новый: исключаем
+        // риск рассинхрона namespace'ов и crash'а в `applyValidationParams`.
+        //
+        // charLen ≥ 1 гарантированно: byteLen > maxPromptLength ≥ 1 → деление безопасно.
         const charLen = [...params.prompt].length;
         const bytesPerChar = byteLen / charLen;
         const charLimit = Math.floor(model.maxPromptLength / bytesPerChar);
-        return { key: "promptTooLongUtf8", params: { limit: charLimit } };
+        return { key: "promptTooLong", params: { limit: charLimit } };
       }
     }
 

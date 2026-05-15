@@ -45,8 +45,8 @@ function rethrowFalApiError(err: unknown): never {
     // показал юзеру осмысленный текст и пометил job как UnrecoverableError.
     //
     // Спец-кейс: «Prompt length exceeds the maximum allowed length of N» →
-    // используем готовый ключ promptTooLongUtf8 c числом из ошибки провайдера,
-    // подогнанным под bytes-per-char ratio юзерского промпта (см. ниже).
+    // используем готовый ключ `promptTooLong` (в обоих i18n-namespace), число
+    // из ошибки провайдера подогнано под bytes-per-char ratio (см. ниже).
     if (e?.name === "ValidationError") {
       const limitMatch = /maximum allowed length of (\d+)/i.exec(rawMsg);
       if (limitMatch) {
@@ -55,6 +55,9 @@ function rethrowFalApiError(err: unknown): never {
         // оригинальный prompt, который мы только что послали. Это позволяет
         // показать юзеру char-лимит, точный для **его** языка: 1.0×byteLimit
         // для ASCII, 0.5× для русского, etc. Без эхо-промпта — fallback halve.
+        //
+        // Используем существующий ключ `promptTooLong` (уже в обоих
+        // i18n-namespace), не вводим новый — см. video-generation.service.ts.
         const inputPrompt = detail?.input?.prompt;
         const promptStr = typeof inputPrompt === "string" ? inputPrompt : undefined;
         const limitFromError = Number(limitMatch[1]);
@@ -68,7 +71,7 @@ function rethrowFalApiError(err: unknown): never {
           charLimit = Math.floor(limitFromError / 2);
         }
         throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
-          key: "promptTooLongUtf8",
+          key: "promptTooLong",
           params: { limit: charLimit },
         });
       }
