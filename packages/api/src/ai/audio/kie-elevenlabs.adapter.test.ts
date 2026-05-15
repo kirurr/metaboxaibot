@@ -385,8 +385,8 @@ describe("KieElevenLabsAdapter — onFallback visibility callback", () => {
   });
 });
 
-describe("KieElevenLabsAdapter — EL quota_exceeded", () => {
-  test("EL 401 quota_exceeded → UserFacingError(notifyOps), не plain Error", async () => {
+describe("KieElevenLabsAdapter — EL account blocked (billing)", () => {
+  test("401 quota_exceeded → UserFacingError(notifyOps, balance), не plain Error", async () => {
     const { fn, calls } = createMockFetch({
       elSound: () =>
         new Response(
@@ -404,14 +404,34 @@ describe("KieElevenLabsAdapter — EL quota_exceeded", () => {
     const err = await adapter.poll("el-fallback:error", baseInput()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UserFacingError);
     expect((err as UserFacingError).notifyOps).toBe(true);
-    expect((err as UserFacingError).opsAlertDedupKey).toBe("elevenlabs-credits-exhausted");
+    expect((err as UserFacingError).opsAlertDedupKey).toBe("elevenlabs-account-blocked");
     expect((err as UserFacingError).opsAlertChannel).toBe("balance");
     expect(calls.elSound).toBe(1);
     // фолбэк сработал и упал → onFallback(true)
     expect(onFallback).toHaveBeenCalledWith(true);
   });
 
-  test("EL 401 не-quota (битый ключ) → остаётся plain Error", async () => {
+  test("401 payment_issue → UserFacingError(notifyOps, balance)", async () => {
+    const { fn } = createMockFetch({
+      elSound: () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              status: "payment_issue",
+              message: "Your subscription has a failed or incomplete payment.",
+            },
+          }),
+          { status: 401 },
+        ),
+    });
+    const adapter = new KieElevenLabsAdapter("music-el", "test-kie-key", fn);
+    const err = await adapter.poll("el-fallback:error", baseInput()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).opsAlertChannel).toBe("balance");
+    expect((err as UserFacingError).opsAlertDedupKey).toBe("elevenlabs-account-blocked");
+  });
+
+  test("401 invalid_api_key → остаётся plain Error (не balance)", async () => {
     const { fn } = createMockFetch({
       elSound: () => new Response('{"detail":{"status":"invalid_api_key"}}', { status: 401 }),
     });
