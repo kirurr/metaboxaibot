@@ -1100,18 +1100,32 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     //     на poll-стадии не каскадировались на fal, и юзер получал generic
     //     "model is resting" + refund, хотя следующий fallback был свободен.
     //
-    // Защита от поспешного каскада: `isLastAttempt` — поодиночные 5xx-блипы
-    // (например Cloudflare 524 за одну poll-итерацию) сначала проходят
-    // обычные BullMQ ретраи, и только потом если 5xx стабильный — каскадим.
+    // Защита от поспешного каскада на ПЕРВОМ провайдере: `isLastAttempt` —
+    // поодиночные 5xx-блипы (например Cloudflare 524 за одну poll-итерацию)
+    // сначала проходят обычные BullMQ ретраи, и только потом если 5xx
+    // стабильный — каскадим.
+    //
+    // ⚠ Caveat — нет грейсфул-degradation на ПОСЛЕДУЮЩИХ провайдерах:
+    // `attemptsMade` не сбрасывается при cascade re-enqueue (delayJob /
+    // moveToDelayed его сохраняют). Поэтому у задачи на fallback-провайдере
+    // 0 BullMQ-ретраев в запасе: единичный блип у fal на сабмите или poll'е
+    // → fail без повторной попытки. Это НЕ регрессия (до этого фикса юзер
+    // вообще не доходил до fal'а), но и не «попробуем ещё раз через минуту».
     //
     // Защита от зацикливания: `currentEff` читается из inputData.fallback
     // (submit-with-fallback его пишет при каскаде на submit-стадии),
     // добавляется в attemptedProviders → submit-with-fallback на следующем
-    // запуске skip'нет его через skipProviders.
+    // запуске skip'нет его через skipProviders. Цепочка терминируется когда
+    // все зарегистрированные fallback-кандидаты в attemptedProviders.
     //
-    // Защита от несовместимого input'а: после re-enqueue submit-stage идёт
-    // через submitWithFallback, который ловит ProviderInputIncompatibleError
-    // от адаптера и сам переходит к следующему кандидату без штрафа ключу.
+    // ⚠ НЕТ защиты от несовместимого input'а на следующем провайдере:
+    // submitWithFallback ([:387]) формально умеет ловить
+    // ProviderInputIncompatibleError, но на момент коммита НИ ОДИН video-
+    // адаптер его не бросает. Если у fal-Kling другая структура
+    // modelSettings/mediaInputs, чем у evolink-Kling — fal ответит 400 и
+    // юзер получит generic failure. Trade-off принят сознательно: в худшем
+    // случае результат тот же, что был до фикса (generic + refund), в
+    // лучшем — fal отрабатывает и юзер получает видео.
     //
     // Пере-enqueue: stage сбрасываем на undefined (→ "generate" по умолчанию),
     // чистим providerJobId/Key. Затем delayJob throw'ит DelayedError →
