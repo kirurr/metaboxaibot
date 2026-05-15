@@ -221,6 +221,8 @@ export interface Translations {
     recraftImg2imgFileTooLarge: string;
     recraftImg2imgDimensionsTooLarge: string;
     recraftImg2imgResolutionTooLarge: string;
+    providerInputRejected: string;
+    promptTooLongUtf8: string;
     gptImageModerationBlocked: string;
     audioSensitiveWord: string;
     audioGenerateFailed: string;

@@ -1,6 +1,6 @@
 import { fal } from "@fal-ai/client";
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
@@ -31,12 +31,53 @@ function rethrowFalApiError(err: unknown): never {
   };
   if (e?.name === "ApiError" || e?.name === "ValidationError") {
     const status = typeof e.status === "number" && e.status >= 100 && e.status < 600 ? e.status : 0;
-    const body = e.body as { detail?: Array<{ msg?: string; type?: string }> } | undefined;
+    const body = e.body as
+      | { detail?: Array<{ msg?: string; type?: string; input?: { prompt?: unknown } }> }
+      | undefined;
     const detail = body?.detail?.[0];
     const errType = detail?.type ?? "unknown";
     const rawMsg =
       detail?.msg ?? (typeof e.message === "string" ? e.message.split("\n")[0] : "FAL error");
     const briefMsg = rawMsg.slice(0, 200);
+
+    // ValidationError (422) — это user-fault, BullMQ-ретраи бесполезны, ops
+    // алёртить незачем. Маппим в UserFacingError, чтобы video processor
+    // показал юзеру осмысленный текст и пометил job как UnrecoverableError.
+    //
+    // Спец-кейс: «Prompt length exceeds the maximum allowed length of N» →
+    // используем готовый ключ promptTooLongUtf8 c числом из ошибки провайдера,
+    // подогнанным под bytes-per-char ratio юзерского промпта (см. ниже).
+    if (e?.name === "ValidationError") {
+      const limitMatch = /maximum allowed length of (\d+)/i.exec(rawMsg);
+      if (limitMatch) {
+        // Считаем char-лимит из реального промпта юзера, эхающегося в body.
+        // fal в ValidationError возвращает `body.detail[0].input.prompt` —
+        // оригинальный prompt, который мы только что послали. Это позволяет
+        // показать юзеру char-лимит, точный для **его** языка: 1.0×byteLimit
+        // для ASCII, 0.5× для русского, etc. Без эхо-промпта — fallback halve.
+        const inputPrompt = detail?.input?.prompt;
+        const promptStr = typeof inputPrompt === "string" ? inputPrompt : undefined;
+        const limitFromError = Number(limitMatch[1]);
+        let charLimit: number;
+        if (promptStr) {
+          const charLen = [...promptStr].length;
+          const byteLen = Buffer.byteLength(promptStr, "utf8");
+          const bytesPerChar = charLen > 0 ? byteLen / charLen : 2;
+          charLimit = Math.floor(limitFromError / bytesPerChar);
+        } else {
+          charLimit = Math.floor(limitFromError / 2);
+        }
+        throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+          key: "promptTooLongUtf8",
+          params: { limit: charLimit },
+        });
+      }
+      throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+        key: "providerInputRejected",
+        params: { reason: briefMsg },
+      });
+    }
+
     const cleaned = new Error(`FAL ${status || "??"} ${errType}: ${briefMsg}`) as Error & {
       status?: number;
     };

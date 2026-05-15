@@ -84,15 +84,36 @@ export const videoGenerationService = {
     if (refError) return refError;
 
     // Pre-flight hardcap: ловим заведомо слишком длинный промпт до enqueue +
-    // submit'а в провайдер (e.g. xAI/Grok 4096 chars). Без этого юзер ждёт
-    // round-trip к провайдеру и получает generic «модель временно недоступна»
-    // вместо конкретного «промпт длиннее N — сократите».
+    // submit'а в провайдер (e.g. xAI/Grok 4096). Без этого юзер ждёт round-trip
+    // к провайдеру и получает generic «модель временно недоступна» вместо
+    // конкретного «промпт длиннее N — сократите».
     //
-    // Счёт по code points (`[...prompt].length`), а НЕ по `.length` (UTF-16
-    // code units): иначе один эмодзи стоит 2 unit'а и юзер с 4090 кириллицей
-    // + 4 эмодзи получает ложный отказ при реальной длине ≈ 4094 chars.
-    if (model?.maxPromptLength && [...params.prompt].length > model.maxPromptLength) {
-      return { key: "promptTooLong", params: { limit: model.maxPromptLength } };
+    // Меряем UTF-8 byte length, а НЕ code points / .length:
+    //  - xAI наблюдаемо отбивает русский промпт ~3500 chars как exceeding 4096,
+    //    что соответствует ~7000 UTF-8 bytes (Cyrillic = 2 байта на символ).
+    //    Code-point счёт (`[...prompt].length`) недосчитывал и пропускал такие
+    //    кейсы на сабмит → 422 от провайдера, юзер видел generic-error.
+    //  - Для ASCII-промптов поведение эквивалентно прежнему (1 char = 1 byte).
+    //  - Для не-ASCII промптов проверка чуть строже — это безопасно: точная
+    //    единица счёта у xAI задокументирована неточно, лучше консервативно
+    //    отказать в нашем коде с понятным сообщением, чем словить рандомный 422.
+    if (model?.maxPromptLength) {
+      const byteLen = Buffer.byteLength(params.prompt, "utf8");
+      if (byteLen > model.maxPromptLength) {
+        // Юзеру показываем «символы», а не байты. Считаем реальный
+        // bytes-per-char ratio для ЕГО промпта: 1.0 для ASCII, 2.0 для
+        // кириллицы, 3-4 для эмодзи/китайского/etc. Тогда отображаемый
+        // char-лимит = byteLimit / ratio — точно сколько символов **его
+        // языка** влезет в byteLimit. Без подгонки англоязычный юзер видел бы
+        // лимит вдвое меньше реального (если бы мы halve'или константно).
+        //
+        // charLen ≥ 1 здесь гарантированно: byteLen > maxPromptLength ≥ 1 →
+        // в промпте есть хотя бы один code point → деление безопасно.
+        const charLen = [...params.prompt].length;
+        const bytesPerChar = byteLen / charLen;
+        const charLimit = Math.floor(model.maxPromptLength / bytesPerChar);
+        return { key: "promptTooLongUtf8", params: { limit: charLimit } };
+      }
     }
 
     const adapter = createVideoAdapter(params.modelId);
