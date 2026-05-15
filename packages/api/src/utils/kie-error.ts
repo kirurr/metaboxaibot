@@ -44,14 +44,23 @@ export function isKieFiveXxError(err: unknown): boolean {
  * сработать как при 5xx. Без этой ветки fallback пропускался на последней
  * попытке, юзер получал generic «модель устала».
  *
+ * `400` + `"Internal Error, Please try again later."` — KIE нестандартно
+ * сигналит transient через 400-failCode (наблюдали 2026-05 на gpt-image-2).
+ * Сочетание «Internal Error» + «try again later» — однозначный transient-
+ * маркер (не модерация, не валидация), и под другие regex'ы (isPolicy /
+ * isProviderTemporaryUnavailable) не попадает. Без этой ветки cascade на
+ * evolink-fallback не запускался → юзер получал generic «модель устала».
+ *
  * Используется в image/video processor'ах в качестве fallback-trigger'а.
  */
 export function isKieTransientError(err: unknown): boolean {
   if (isKieFiveXxError(err)) return true;
   const message = err instanceof Error ? err.message : String(err ?? "");
   if (!/^KIE\b/i.test(message)) return false;
-  return (
+  const is422Transient =
     /\b422\b/.test(message) &&
-    /playground failed|task id is blank|client closed request/i.test(message)
-  );
+    /playground failed|task id is blank|client closed request/i.test(message);
+  const is400InternalRetry =
+    /\b400\b/.test(message) && /internal error.*try again later/i.test(message);
+  return is422Transient || is400InternalRetry;
 }
