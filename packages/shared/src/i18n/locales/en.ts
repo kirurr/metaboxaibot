@@ -451,6 +451,8 @@ export default {
     runwayRejected: "❌ Runway rejected your request. Please check your settings and try again.",
     runwayImageTooLarge:
       "❌ The image is too large ({size} MB) for Runway. Please send a photo under {limit} MB or compress it.",
+    runwayImageBadAspect:
+      "❌ Image is too elongated for Runway (aspect ratio {got}, minimum {min}). Send a less elongated image.",
     // Replicate
     replicateOom:
       "❌ Input data is too large for this model. Please try reducing the image size or text length.",
