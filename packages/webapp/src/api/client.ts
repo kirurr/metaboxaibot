@@ -33,17 +33,23 @@ export function setWebToken(token: string): void {
   _webToken = token;
 }
 
+/**
+ * Возвращает Authorization header для текущей сессии — Telegram initData
+ * (mini-app) или web JWT. Расшарено между `request()` и
+ * `notifyModelChangedBeacon` чтобы schema auth не дрейфовала между ними.
+ */
+function buildAuthHeader(): { Authorization: string } | Record<string, never> {
+  if (_initDataRaw) return { Authorization: `tma ${_initDataRaw}` };
+  if (_webToken) return { Authorization: `wtoken ${_webToken}` };
+  return {};
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
     ...(options.headers as Record<string, string>),
+    ...buildAuthHeader(),
   };
-
-  if (_initDataRaw) {
-    headers["Authorization"] = `tma ${_initDataRaw}`;
-  } else if (_webToken) {
-    headers["Authorization"] = `wtoken ${_webToken}`;
-  }
 
   const method = options.method ?? "GET";
   let res: Response;
@@ -79,12 +85,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (_initDataRaw) {
-    headers["Authorization"] = `tma ${_initDataRaw}`;
-  } else if (_webToken) {
-    headers["Authorization"] = `wtoken ${_webToken}`;
-  }
+  const headers: Record<string, string> = { ...buildAuthHeader() };
 
   let res: Response;
   try {
@@ -215,6 +216,43 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ section, modelId }),
       }),
+    selectModel: (section: string, modelId: string) =>
+      request<{ success: boolean }>("/state/select-model", {
+        method: "POST",
+        body: JSON.stringify({ section, modelId }),
+      }),
+    notifyModelChanged: (section: string, modelId: string) =>
+      request<{ success: boolean }>("/state/notify-model-changed", {
+        method: "POST",
+        body: JSON.stringify({ section, modelId }),
+      }),
+    /**
+     * Beacon-style вариант notifyModelChanged для pagehide / unload — фронт
+     * вызывает её когда юзер закрывает мини-аппу с pending debounced
+     * notification. `keepalive: true` позволяет fetch'у улететь и завершиться
+     * после закрытия страницы (sendBeacon не используем — он не несёт auth
+     * headers, а наш `/state/*` требует Telegram initData / web token).
+     * Возвращаемое значение игнорируется — fire-and-forget.
+     */
+    notifyModelChangedBeacon: (section: string, modelId: string): void => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...buildAuthHeader(),
+      };
+      try {
+        // .catch() — иначе async fail (например auth invalid → 401) даст
+        // unhandled rejection. На pagehide мы всё равно ничего показать не
+        // можем, просто проглатываем.
+        fetch(`${API_BASE}/state/notify-model-changed`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ section, modelId }),
+          keepalive: true,
+        }).catch(() => void 0);
+      } catch {
+        // mini-app уже закрывается — терять нечего
+      }
+    },
     setSelectedMode: (modelId: string, modeId: string) =>
       request<{ success: boolean }>("/state/selected-mode", {
         method: "POST",
