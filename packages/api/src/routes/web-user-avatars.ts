@@ -27,6 +27,7 @@ import {
   generateThumbnail,
 } from "../services/s3.service.js";
 import { HeyGenAvatarAdapter } from "../ai/avatar/heygen.avatar.adapter.js";
+import { getAvatarQueue } from "../queues/avatar.queue.js";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
@@ -326,14 +327,18 @@ export const webUserAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         sourceS3Keys: s3Keys,
       });
 
-      // TODO(next-dev): enqueue Soul-creation job. Worker должен:
-      //   1) acquireKey("higgsfield_soul")
-      //   2) скачать каждый из avatar.sourceS3Keys
-      //   3) загрузить в Higgsfield Soul API (`/v1/text2image/soul-id/create` или
-      //      аналог — спецификация в их доках), получить character_id
-      //      → userAvatarService.updateStatus(avatar.id, { externalId, providerKeyId })
-      //   4) опционально опросить статус (если их API асинхронный)
-      //   5) пометить "ready" + WS-уведомить web (ws.notify to user-room).
+      // Enqueue Soul-creation. `telegramChatId: null` маркирует web-источник —
+      // worker по этому флагу шлёт WS-уведомление через apiNotify вместо
+      // telegram.sendMessage (см. packages/worker/src/processors/avatar.processor.ts).
+      await getAvatarQueue().add("create", {
+        userAvatarId: avatar.id,
+        userId: aibUserId!.toString(),
+        provider: "higgsfield_soul",
+        action: "create",
+        s3Keys,
+        characterName: avatar.name,
+        telegramChatId: null,
+      });
 
       logger.info(
         {
@@ -341,7 +346,7 @@ export const webUserAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
           photoCount: s3Keys.length,
           aibUserId: aibUserId!.toString(),
         },
-        "[web user-avatars soul] pending record created (worker job TODO)",
+        "[web user-avatars soul] pending record created + Soul-create enqueued",
       );
 
       return buildAvatarDto(avatar);

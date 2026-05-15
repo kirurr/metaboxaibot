@@ -9,6 +9,8 @@ export const webNotificationType = z.enum([
   "video_error",
   "audio_success",
   "audio_error",
+  "avatar_success",
+  "avatar_error",
 ]);
 export type WebNotificationType = z.infer<typeof webNotificationType>;
 
