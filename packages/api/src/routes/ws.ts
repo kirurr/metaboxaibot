@@ -4,6 +4,10 @@ import socketioPlugin from "fastify-socket.io";
 import { logger } from "../logger.js";
 import { wsAuthMiddleware } from "../middlewares/ws-auth.js";
 import { setWsServer, userRoom } from "../services/ws-bus.service.js";
+import {
+  webNotificationService,
+  toWebNotificationDTO,
+} from "../services/web-notification.service.js";
 
 // Module redeclarations for websocket type safety
 declare module "fastify" {
@@ -31,11 +35,37 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
     // metaboxUserRoom().
     if (aibUserId !== null) {
       void socket.join(userRoom(aibUserId));
+
+      void webNotificationService
+        .listByUser(aibUserId)
+        .then((rows) => {
+          socket.emit("notification:snapshot", rows.map(toWebNotificationDTO));
+        })
+        .catch((err) => {
+          logger.warn(
+            { err, aibUserId: aibUserId.toString() },
+            "ws: notification snapshot failed",
+          );
+        });
     }
 
     socket.on("example:send", (msg) => {
       logger.info("we recieved message from client: " + msg.text);
       socket.emit("example:recieve", { text: "server recieved message from client" });
+    });
+
+    socket.on("notification:mark-seen", (msg) => {
+      if (aibUserId === null) return;
+      void webNotificationService.markAsSeen(msg.ids, aibUserId).catch((err) => {
+        logger.warn({ err, ids: msg.ids }, "ws: notification:mark-seen failed");
+      });
+    });
+
+    socket.on("notification:delete", (msg) => {
+      if (aibUserId === null) return;
+      void webNotificationService.delete(msg.id, aibUserId).catch((err) => {
+        logger.warn({ err, id: msg.id }, "ws: notification:delete failed");
+      });
     });
   });
 

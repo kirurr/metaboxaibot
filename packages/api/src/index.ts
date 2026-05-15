@@ -31,6 +31,7 @@ import { adminKeysRoutes } from "./routes/admin-keys.js";
 import { adminPricingRoutes } from "./routes/admin-pricing.js";
 import { initPricingConfig } from "./services/pricing-config.service.js";
 import { startJobNotificationsSubscriber } from "./services/job-notifications.subscriber.js";
+import { dispatchJobNotification } from "./services/web-notification.service.js";
 import { paymentsRoutes } from "./routes/payments.js";
 import { galleryRoutes } from "./routes/gallery.js";
 import { slidesRoutes } from "./routes/slides.js";
@@ -248,11 +249,9 @@ startSubscriptionScheduler();
 await initPricingConfig();
 
 // Subscribe to job-completion notifications from worker (web-source jobs).
-await startJobNotificationsSubscriber((msg) => {
-  // TODO: forward to socket.io / web client
-  logger.info({ msg }, "job notification received");
-  logger.warn(JSON.stringify(msg, null, 2));
-});
+// Каждое событие пишется в `web_notifications` и пушится подписанным сокетам
+// юзера через `notification:new`. Ошибки внутри dispatch ловит subscriber.
+await startJobNotificationsSubscriber(dispatchJobNotification);
 
 const port = config.api.port;
 await server.listen({ port, host: "0.0.0.0" });

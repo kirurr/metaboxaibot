@@ -7,6 +7,12 @@ export {
 export type { SendMessageParams, SendMessageResult } from "./chat.service.js";
 export { dialogService } from "./dialog.service.js";
 export type { CreateDialogParams, StoredAttachment } from "./dialog.service.js";
+export {
+  webNotificationService,
+  toWebNotificationDTO,
+  dispatchJobNotification,
+} from "./web-notification.service.js";
+export type { CreateWebNotificationParams } from "./web-notification.service.js";
 export { generationService } from "./generation.service.js";
 export type { SubmitImageParams, SubmitImageResult } from "./generation.service.js";
 export { userStateService } from "./user-state.service.js";
