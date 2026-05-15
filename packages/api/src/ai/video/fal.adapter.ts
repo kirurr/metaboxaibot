@@ -2,6 +2,7 @@ import { fal } from "@fal-ai/client";
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
 /**
@@ -296,8 +297,27 @@ export class FalVideoAdapter implements VideoAdapter {
       const isI2V = endpoint === FAL_I2V_ENDPOINTS[this.modelId];
       const isR2V = endpoint === FAL_R2V_ENDPOINTS[this.modelId];
 
-      const startUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
-      const endUrl = input.mediaInputs?.last_frame?.[0];
+      let startUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
+      let endUrl = input.mediaInputs?.last_frame?.[0];
+
+      // Pre-crop frames под выбранный aspect, если юзер включил
+      // `crop_to_aspect` (см. KLING_SETTINGS). FAL Kling-o3 принимает image
+      // URLs напрямую и сам качает, поэтому подменяем URL на cropped
+      // presigned URL ДО отправки. Кропаем только frame'ы (start/end) —
+      // elements.frontal_image_url / reference_image_urls на aspect не
+      // влияют, как и в KIE-адаптере. cropImageUrlAndMaterialize сам no-op'ит
+      // для unsupported aspect / aligned image / S3 misconfig / fetch fail.
+      const aspectForCrop = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio;
+      const cropEnabled = ms.crop_to_aspect === true;
+      if (cropEnabled && aspectForCrop && KLING_SUPPORTED_ASPECTS.includes(aspectForCrop)) {
+        const cropOne = (url: string | undefined): Promise<string | undefined> =>
+          url
+            ? cropImageUrlAndMaterialize(url, aspectForCrop, { userId: input.userId })
+            : Promise.resolve(undefined);
+        const [croppedStart, croppedEnd] = await Promise.all([cropOne(startUrl), cropOne(endUrl)]);
+        startUrl = croppedStart;
+        endUrl = croppedEnd;
+      }
 
       const klingBody: Record<string, unknown> = {};
       if (input.prompt) klingBody.prompt = translatePromptRefs(input.prompt, { dialect: "fal" });

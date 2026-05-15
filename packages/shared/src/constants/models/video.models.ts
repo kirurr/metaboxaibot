@@ -494,6 +494,14 @@ const WAN_MODES: ModelMode[] = [
 const KLING_SETTINGS: ModelSettingDef[] = [
   mkAspectRatio(["16:9", "9:16", "1:1"]),
   {
+    key: "crop_to_aspect",
+    label: "Автокроп фото под формат",
+    description:
+      "По умолчанию Kling подгоняет видео под пропорции фото. Включи, чтобы вместо этого обрезать фото под выбранный формат (края обрежутся).",
+    type: "toggle",
+    default: false,
+  },
+  {
     key: "duration",
     label: "Длительность",
     description: "Продолжительность видеоклипа в секундах.",
