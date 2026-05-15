@@ -25,6 +25,7 @@ import { acquireKey, acquireById } from "@metabox/api/services/key-pool";
 import type { AcquiredKey } from "@metabox/api/services/key-pool";
 import { buildProxyFetch } from "@metabox/api/ai/proxy-fetch";
 import { isPoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 
 const telegram = new Api(config.bot.token);
 
@@ -161,9 +162,17 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
           .then((u) => u?.language ?? "en")) as Language;
         const t = getT(userLang);
         const userMsg = resolveUserFacingMessage(err, t);
-        await telegram
-          .sendMessage(telegramChatId, userMsg ?? t.video.soulFailed)
-          .catch(() => void 0);
+        const failMsg = userMsg ?? t.video.soulFailed;
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, failMsg).catch(() => void 0);
+        } else {
+          await apiNotifyError({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            userMessage: failMsg,
+          });
+        }
       }
       return;
     }
@@ -192,7 +201,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
             "Soul poll: owning key gone, marking avatar orphaned",
           );
           await userAvatarService.markOrphaned(userAvatarId);
-          await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "avatar",
+              userId: userIdStr,
+              dbJobId: userAvatarId,
+              userMessage: t.video.soulFailed,
+            });
+          }
           return;
         }
         const soulAdapter = buildSoulAdapter(acquired);
@@ -237,19 +255,45 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
             { actualProvider: "higgsfield_soul", actualCostUsd: SOUL_COST_USD },
           );
 
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.video.soulReady.replace("{name}", avatar.name ?? characterName ?? ""),
-            )
-            .catch(() => void 0);
+          const readyText = t.video.soulReady.replace("{name}", avatar.name ?? characterName ?? "");
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, readyText).catch(() => void 0);
+          } else {
+            // previewUrl после updateMany: `avatar.previewUrl` (если был thumbnail
+            // от create) или `result.previewUrl` от провайдера, иначе null.
+            const finalPreviewKey = avatar.previewUrl ?? result.previewUrl ?? null;
+            const outputUrl = finalPreviewKey
+              ? await getFileUrl(finalPreviewKey).catch(() => null)
+              : null;
+            await apiNotifySuccess({
+              section: "avatar",
+              userId: userIdStr,
+              dbJobId: userAvatarId,
+              outputs: [
+                {
+                  id: avatar.externalId ?? userAvatarId,
+                  outputUrl,
+                  s3Key: finalPreviewKey,
+                },
+              ],
+            });
+          }
           logger.info({ userAvatarId }, "Soul character ready");
           return;
         }
 
         if (result.status === "failed") {
           await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
-          await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "avatar",
+              userId: userIdStr,
+              dbJobId: userAvatarId,
+              userMessage: t.video.soulFailed,
+            });
+          }
           logger.warn({ userAvatarId }, "Soul processing failed");
           return;
         }
@@ -258,7 +302,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
         const nextAttempt = pollAttempt + 1;
         if (nextAttempt >= MAX_POLL_ATTEMPTS) {
           await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
-          await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, t.video.soulFailed).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "avatar",
+              userId: userIdStr,
+              dbJobId: userAvatarId,
+              userMessage: t.video.soulFailed,
+            });
+          }
           logger.warn({ userAvatarId }, "Soul poll timed out");
           return;
         }
@@ -351,7 +404,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
           .findUnique({ where: { id: BigInt(userIdStr) }, select: { language: true } })
           .then((u) => u?.language ?? "en")) as Language;
         const t = getT(userLang);
-        await telegram.sendMessage(telegramChatId, t.video.avatarReady).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarReady).catch(() => void 0);
+        } else {
+          await apiNotifySuccess({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            outputs: [{ id: externalId, outputUrl: null, s3Key: null }],
+          });
+        }
         logger.info({ userAvatarId, externalId, keyId: acquired.keyId }, "HeyGen avatar ready");
         return;
       }
@@ -375,7 +437,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
       const t = getT(userLang);
       if (isRateLimitLongWindowError(err)) {
         await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
-        await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        } else {
+          await apiNotifyError({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            userMessage: t.video.avatarFailed,
+          });
+        }
         return;
       }
       // Throws DelayedError if rescheduled; returns silently otherwise → fall through.
@@ -383,7 +454,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
       logger.error({ userAvatarId, err }, "Avatar creation failed");
       await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
       await notifyTechError(err, { jobId: userAvatarId, section: "avatar", modelId: provider });
-      await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "avatar",
+          userId: userIdStr,
+          dbJobId: userAvatarId,
+          userMessage: t.video.avatarFailed,
+        });
+      }
     }
     return;
   }
@@ -411,7 +491,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
           "Avatar poll: owning key gone, marking avatar orphaned",
         );
         await userAvatarService.markOrphaned(userAvatarId);
-        await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        } else {
+          await apiNotifyError({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            userMessage: t.video.avatarFailed,
+          });
+        }
         return;
       }
       const adapter = buildHeyGenAdapter(acquired);
@@ -425,14 +514,42 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
           externalId: result.talkingPhotoId ?? undefined,
           previewUrl: result.previewUrl,
         });
-        await telegram.sendMessage(telegramChatId, t.video.avatarReady).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarReady).catch(() => void 0);
+        } else {
+          const finalPreviewKey = result.previewUrl ?? null;
+          const outputUrl = finalPreviewKey
+            ? await getFileUrl(finalPreviewKey).catch(() => null)
+            : null;
+          await apiNotifySuccess({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            outputs: [
+              {
+                id: result.talkingPhotoId ?? avatar.externalId ?? userAvatarId,
+                outputUrl,
+                s3Key: finalPreviewKey,
+              },
+            ],
+          });
+        }
         logger.info({ userAvatarId }, "Avatar ready");
         return;
       }
 
       if (result.status === "failed") {
         await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
-        await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        } else {
+          await apiNotifyError({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            userMessage: t.video.avatarFailed,
+          });
+        }
         logger.warn({ userAvatarId }, "Avatar processing failed");
         return;
       }
@@ -441,7 +558,16 @@ export async function processAvatarJob(job: Job<AvatarJobData>, token?: string):
       const nextAttempt = pollAttempt + 1;
       if (nextAttempt >= MAX_POLL_ATTEMPTS) {
         await userAvatarService.updateStatus(userAvatarId, { status: "failed" });
-        await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        if (telegramChatId !== null) {
+          await telegram.sendMessage(telegramChatId, t.video.avatarFailed).catch(() => void 0);
+        } else {
+          await apiNotifyError({
+            section: "avatar",
+            userId: userIdStr,
+            dbJobId: userAvatarId,
+            userMessage: t.video.avatarFailed,
+          });
+        }
         logger.warn({ userAvatarId }, "Avatar poll timed out");
         return;
       }

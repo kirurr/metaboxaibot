@@ -81,6 +81,7 @@ const SECTION_LABEL_RU: Record<JobNotificationMessage["section"], string> = {
   image: "изображения",
   video: "видео",
   audio: "аудио",
+  avatar: "аватара",
 };
 
 function buildText(msg: JobNotificationMessage): { title: string; message: string } {
@@ -120,13 +121,23 @@ export async function dispatchJobNotification(msg: JobNotificationMessage): Prom
   const type = `${msg.section}_${msg.kind}` as WebNotificationType;
   const { title, message } = buildText(msg);
 
+  // Аватар не пишется в `generation_jobs`, поэтому FK `WebNotification.jobId`
+  // ставим в null, а сам `userAvatarId` (приходит как msg.dbJobId) сохраняем
+  // внутри `data` — фронту хватит его для навигации/обновления карточки.
+  const isAvatar = msg.section === "avatar";
+  const baseData = buildData(msg);
   const row = await webNotificationService.create({
     userId,
-    jobId: msg.dbJobId,
+    jobId: isAvatar ? null : msg.dbJobId,
     type,
     title,
     message,
-    data: buildData(msg),
+    data: isAvatar
+      ? ({
+          ...(baseData as Record<string, unknown>),
+          userAvatarId: msg.dbJobId,
+        } as Prisma.InputJsonValue)
+      : baseData,
   });
 
   emitToUser(userId, "notification:new", toWebNotificationDTO(row));

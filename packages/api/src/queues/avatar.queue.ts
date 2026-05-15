@@ -12,8 +12,9 @@ export interface AvatarJobData {
   imageUrl?: string;
   /** S3 key of the source image (preferred over imageUrl) */
   s3Key?: string;
-  /** Telegram chat id to notify when done */
-  telegramChatId: number;
+  /** Telegram chat id to notify when done. `null` — джоб инициирован из web,
+   *  воркер должен слать WS-уведомление через apiNotify вместо Telegram. */
+  telegramChatId: number | null;
   /** Poll attempt counter (incremented on each retry) */
   pollAttempt?: number;
   /** S3 keys of multiple images (for Soul character creation) */
