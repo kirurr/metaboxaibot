@@ -133,6 +133,23 @@ export const config = {
   },
 
   /**
+   * Separate S3-compatible bucket for PUBLICLY readable assets.
+   * Independent credentials/endpoint from `s3` so the public bucket can live on
+   * a different provider (e.g. R2 public CDN), and so accidental misconfiguration
+   * of one does not leak the other. If `S3_PUBLIC_BUCKET` is unset, the public
+   * service treats itself as not configured (mirrors `s3` semantics).
+   */
+  s3Public: {
+    bucket: opt("S3_PUBLIC_BUCKET"),
+    region: optDefault("S3_PUBLIC_REGION", "auto"),
+    endpoint: opt("S3_PUBLIC_ENDPOINT"),
+    accessKeyId: opt("S3_PUBLIC_ACCESS_KEY_ID"),
+    secretAccessKey: opt("S3_PUBLIC_SECRET_ACCESS_KEY"),
+    /** Public base URL for direct downloads (e.g. https://cdn.example.com). */
+    publicUrl: opt("S3_PUBLIC_URL"),
+  },
+
+  /**
    * Admin alerts (optional) — tech errors, rate-limits, low-balance warnings.
    * Шлются через notifyTechError / notifyRateLimit / balance.monitor.
    *
@@ -184,6 +201,22 @@ export const config = {
   fallbackAlerts: {
     chatId: opt("FALLBACK_ALERT_CHAT_ID") ?? opt("ALERT_CHAT_ID"),
     threadId: optInt("FALLBACK_ALERT_THREAD_ID", 0) || optInt("ALERT_THREAD_ID", 0) || undefined,
+  },
+
+  /**
+   * Balance-алерты (optional) — всё про баланс/кредиты провайдеров: проактивные
+   * предупреждения о низком балансе (balance.monitor) и runtime-сбои из-за
+   * исчерпанного баланса (напр. ElevenLabs `quota_exceeded`). Отделены от alerts,
+   * чтобы баланс-сигналы шли в свою тему.
+   *
+   * Фоллбек: если BALANCE_ALERT_* не заданы, используется alerts.chatId / threadId.
+   *
+   * BALANCE_ALERT_CHAT_ID — отдельный канал для баланс-алертов; default — alerts.chatId.
+   * BALANCE_ALERT_THREAD_ID — message_thread_id; default — alerts.threadId.
+   */
+  balanceAlerts: {
+    chatId: opt("BALANCE_ALERT_CHAT_ID") ?? opt("ALERT_CHAT_ID"),
+    threadId: optInt("BALANCE_ALERT_THREAD_ID", 0) || optInt("ALERT_THREAD_ID", 0) || undefined,
   },
 
   /**

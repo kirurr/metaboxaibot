@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Key, Globe, Tags } from "lucide-react";
+import { Key, Globe, Tags, FileText } from "lucide-react";
 import clsx from "clsx";
+import { ToastContainer } from "@/components/common/ToastContainer";
 
 const links = [
   { to: "/admin/keys", label: "API-ключи", icon: Key },
   { to: "/admin/proxies", label: "Прокси", icon: Globe },
   { to: "/admin/pricing", label: "Цены моделей", icon: Tags },
+  { to: "/admin/prompts", label: "Промпты", icon: FileText },
 ];
 
 export default function AdminLayout() {
@@ -34,6 +36,7 @@ export default function AdminLayout() {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+      <ToastContainer />
     </div>
   );
 }

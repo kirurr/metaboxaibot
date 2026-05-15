@@ -16,7 +16,12 @@ enum Role {
 // Пользователь
 // ─────────────────────────────────────────────
 model User {
-  id                       BigInt  @id // Telegram user ID
+  id                       BigInt  @id @default(autoincrement())
+  // Telegram user ID — nullable, чтобы web-only юзеры существовали без привязки бота.
+  // У существующих/линкованных юзеров `telegramId` совпадает с историческим `id`
+  // (backfill в миграции). Все Telegram-операции (chat_id, ctx.from.id lookup) и
+  // записи `WelcomeBonusReceipt` / `GrantedMetaboxOrder` (ключ без FK) — по `telegramId`.
+  telegramId               BigInt? @unique
   username                 String?
   firstName                String?
   lastName                 String?
@@ -357,6 +362,12 @@ model UserAvatar {
   // (talking_photo_id и т.п.) живут в аккаунте конкретного API-ключа, поэтому
   // потреблять их можно только тем же ключом. null = был использован env-fallback.
   providerKeyId String?
+  // Исходные s3-ключи фото, из которых обучается Soul-персонаж. Заполняются
+  // при создании аватара через web-приложение (когда мы держим pending-record
+  // в status="creating" до того, как worker отправит их в Higgsfield Soul API).
+  // Для HeyGen остаётся пустым массивом — там аплоад синхронный, исходник
+  // потребляется сразу адаптером.
+  sourceS3Keys  String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -618,7 +629,8 @@ model DeletedUser {
   // НЕ unique: один и тот же telegramId может удалиться несколько раз
   // (юзер удалил аккаунт → /start создаёт новый → снова удаляет). Каждое
   // удаление — отдельный snapshot для аудита и retry-reconcile.
-  telegramId                BigInt
+  // Nullable: web-only юзер мог удалить аккаунт без TG-привязки.
+  telegramId                BigInt?
   username                  String?
   firstName                 String?
   lastName                  String?

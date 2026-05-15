@@ -8,7 +8,7 @@ import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
 import { db } from "@metabox/api/db";
 import { createAudioAdapter } from "@metabox/api/ai/audio";
-import type { AudioResult } from "@metabox/api/ai/audio";
+import type { AudioResult, AudioInput } from "@metabox/api/ai/audio";
 import {
   deductTokens,
   refundTokens,
@@ -34,6 +34,7 @@ import {
   resolveUserFacingMessage,
   shouldNotifyOps,
   getOpsAlertDedupKey,
+  getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -199,15 +200,15 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       return { primaryProvider: modelMeta?.provider ?? "", ...(raw ?? {}) };
     };
 
-    /** Записать fallback state в inputData (мерджится). */
-    const writeFallbackState = async (next: FallbackState): Promise<void> => {
+    /** Мерджит произвольные поля в inputData (read-merge-write). */
+    const mergeInputData = async (patch: Record<string, unknown>): Promise<void> => {
       const current = await db.generationJob.findUnique({
         where: { id: dbJobId },
         select: { inputData: true },
       });
       const merged = {
         ...((current?.inputData as Record<string, unknown> | null | undefined) ?? {}),
-        fallback: next,
+        ...patch,
       };
       await db.generationJob.update({
         where: { id: dbJobId },
@@ -216,6 +217,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       if (existingJob) {
         (existingJob.inputData as unknown) = merged;
       }
+    };
+
+    /** Записать fallback state в inputData (мерджится). */
+    const writeFallbackState = async (next: FallbackState): Promise<void> => {
+      await mergeInputData({ fallback: next });
     };
 
     let audioResult: AudioResult | null = null;
@@ -436,7 +442,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         // Sync adapter — generate inline, then fall through to finalize.
         audioResult = await submitWithThrottle({
           modelId,
-          provider: modelMeta?.provider,
+          // Sticky-voice path: effective adapter/key может быть Cartesia даже у
+          // kie-provider модели (tts-el с клонированным голосом). Throttle
+          // ключим на ФАКТИЧЕСКОМ провайдере, иначе rate-limit Cartesia ушёл бы
+          // в long-cooldown всему провайдеру kie.
+          provider: AI_MODELS[effectiveModelId]?.provider ?? modelMeta?.provider,
           section: "audio",
           job,
           token,
@@ -487,6 +497,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
               pollStartedAt: new Date(),
             },
           });
+          // Сохраняем (возможно переведённый) промпт в inputData — poll-стадия
+          // восстанавливает из него AudioInput для EL-фолбэка KieElevenLabsAdapter.
+          // Остальные поля AudioInput (voiceId / sourceAudioUrl / modelSettings)
+          // уже лежат в job.data.
+          await mergeInputData({ effectivePrompt });
           // Записываем effectiveProvider в inputData.fallback даже на legacy
           // пути — иначе после смены primary в каталоге poll-стадия не сможет
           // определить, на каком провайдере шёл submit (acquireForPoll получит
@@ -536,10 +551,35 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       const effKeyProvider = effModel ? resolveKeyProviderForModel(effModel) : keyProvider;
 
       const acquired = await acquireForPoll(existingJob?.providerKeyId, effKeyProvider);
-      const adapter = createAudioAdapter(effModel ?? modelId, acquired);
+      // Видимость фолбэка: KieElevenLabsAdapter дёргает этот колбэк на каждый
+      // EL-фолбэк (failed=false — EL вытянул, failed=true — EL тоже упал).
+      // notifyFallback шлёт в fallback-канал, как и Suno-фолбэк процессора.
+      const onElFallback = (failed: boolean): Promise<void> =>
+        notifyFallback({
+          section: "audio",
+          modelId,
+          primaryProvider: modelMeta?.provider ?? keyProvider,
+          fallbackProvider: failed ? null : "elevenlabs",
+          reason: failed ? "all_candidates_failed" : "primary_failed",
+          jobId: dbJobId,
+          userId: userIdStr,
+        });
+      const adapter = createAudioAdapter(effModel ?? modelId, acquired, onElFallback);
       if (!adapter.poll) throw new Error(`Adapter ${modelId} has no poll()`);
 
-      audioResult = await adapter.poll(providerJobId);
+      // Реконструируем AudioInput — адаптеры с фолбэком (KieElevenLabsAdapter →
+      // прямой ElevenLabs) используют его для регенерации. effectivePrompt был
+      // сохранён на submit-стадии; остальное лежит в job.data. Suno poll второй
+      // аргумент игнорирует.
+      const persistedPrompt = (existingJob?.inputData as Record<string, unknown> | null | undefined)
+        ?.effectivePrompt as string | undefined;
+      const pollInput: AudioInput = {
+        prompt: persistedPrompt ?? prompt,
+        voiceId,
+        sourceAudioUrl,
+        modelSettings,
+      };
+      audioResult = await adapter.poll(providerJobId, pollInput);
 
       if (!audioResult) {
         const elapsed = Date.now() - (job.data.pollStartedAt ?? Date.now());
@@ -692,7 +732,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         // Audit-метаданные: фактический provider (через fallback state) и
         // сырая USD-цена по нему БЕЗ pricing-коэффициентов.
         const fbStateActual = readFallbackState();
-        const activeProvider = fbStateActual?.effectiveProvider ?? model.provider;
+        // audioResult.actualProvider ставится адаптером, когда джоба ушла не на
+        // primary (KieElevenLabsAdapter → "elevenlabs" при EL-фолбэке) — он
+        // приоритетнее fallback-state.
+        const activeProvider =
+          audioResult.actualProvider ?? fbStateActual?.effectiveProvider ?? model.provider;
         const activeModel =
           activeProvider === model.provider
             ? model
@@ -871,10 +915,13 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           attempt: job.attemptsMade,
         };
         const dedupKey = getOpsAlertDedupKey(err);
+        // channel: "balance" роутит алерт в тему BALANCE (напр. EL quota_exceeded),
+        // по умолчанию "alerts" — общая тема tech-ошибок.
+        const channel = getOpsAlertChannel(err);
         if (dedupKey) {
-          await notifyTechErrorThrottled(err, ctx, dedupKey);
+          await notifyTechErrorThrottled(err, ctx, dedupKey, { channel });
         } else {
-          await notifyTechError(err, ctx);
+          await notifyTechError(err, ctx, channel);
         }
       }
       if (telegramChatId !== null) {

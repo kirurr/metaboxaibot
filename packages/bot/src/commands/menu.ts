@@ -25,7 +25,7 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
     clearActiveSlot(ctx.user.id);
   }
   await ctx.reply(ctx.t.start.mainMenuTitle, {
-    reply_markup: buildMainMenuKeyboard(ctx.t, ctx.user?.id),
+    reply_markup: buildMainMenuKeyboard(ctx.t, ctx.user?.telegramId),
   });
 }
 
@@ -48,7 +48,8 @@ export async function handleGpt(ctx: BotContext): Promise<void> {
   }
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const newDialogBtn = webappUrl
     ? {
         text: ctx.t.gpt.newDialog,
@@ -80,7 +81,8 @@ export async function handleDesign(ctx: BotContext): Promise<void> {
   const text = ctx.t.design.sectionTitle;
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.design.management,
@@ -110,7 +112,8 @@ export async function handleAudio(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "AUDIO_SECTION", "audio");
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.audio.management,
@@ -139,7 +142,8 @@ export async function handleVideo(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "VIDEO_SECTION", "video");
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.video.management,

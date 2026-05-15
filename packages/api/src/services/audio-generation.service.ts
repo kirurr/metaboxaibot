@@ -1,6 +1,11 @@
 import { db } from "../db.js";
 import { getAudioQueue } from "../queues/audio.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS, UserFacingError } from "@metabox/shared";
+import {
+  AI_MODELS,
+  KIE_ELEVENLABS_VOICE_IDS,
+  ONE_SHOT_SETTING_KEYS,
+  UserFacingError,
+} from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
 
@@ -79,6 +84,20 @@ export const audioGenerationService = {
           });
         }
         await ensureCartesiaVoiceResolvable(raw);
+      }
+    } else if (modelId === "tts-el") {
+      // tts-el через kie.ai принимает только фиксированный enum голосов. Старые
+      // ElevenLabs voice_id, осевшие в настройках юзеров, там невалидны (kie
+      // ответит 422). Гейтим до создания джобы и списания — юзер должен
+      // перевыбрать голос в настройках. Пустой voice_id ок: адаптер возьмёт дефолт.
+      const raw = modelSettings.voice_id ?? voiceId;
+      if (raw !== undefined && raw !== null && raw !== "") {
+        if (typeof raw !== "string" || !KIE_ELEVENLABS_VOICE_IDS.has(raw)) {
+          throw new UserFacingError("Selected voice is unavailable", {
+            key: "ttsVoiceUnavailable",
+            section: "audio",
+          });
+        }
       }
     }
 

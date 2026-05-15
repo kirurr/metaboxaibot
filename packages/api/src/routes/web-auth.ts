@@ -75,6 +75,7 @@ async function findAibUser(metaboxUserId: string) {
     where: { metaboxUserId },
     select: {
       id: true,
+      telegramId: true,
       username: true,
       firstName: true,
       lastName: true,
@@ -99,7 +100,12 @@ async function buildWebUserResponse(args: {
 }) {
   const aib = await findAibUser(args.metaboxUserId);
 
-  const telegramId = aib ? aib.id.toString() : (args.telegramOnSite?.telegramId ?? null);
+  // `aib.telegramId` — корректное поле после decoupling. Раньше читали `aib.id`
+  // (работало пока id == tgid), но у web-only юзеров id ≠ tgid, и `id` теперь
+  // вообще не tgid. Если у aib нет привязки tg — fallback на telegramOnSite.
+  const telegramId = aib?.telegramId
+    ? aib.telegramId.toString()
+    : (args.telegramOnSite?.telegramId ?? null);
   const telegramUsername = aib?.username ?? args.telegramOnSite?.telegramUsername ?? null;
 
   return {

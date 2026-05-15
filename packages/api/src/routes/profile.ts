@@ -12,8 +12,10 @@ import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openap
 
 type AuthRequest = FastifyRequest & {
   userId: bigint;
+  telegramId: bigint;
   user: {
     id: bigint;
+    telegramId: bigint | null;
     username: string | null;
     firstName: string | null;
     lastName: string | null;
@@ -175,7 +177,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
 
       const [user, transactions] = await Promise.all([
         db.user.findUnique({ where: { id: userId } }),
@@ -186,12 +188,18 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         }),
       ]);
 
-      // Referral count from Metabox (includes site referrals, not just bot)
+      // Referral count from Metabox (includes site referrals, not just bot).
+      // Metabox API ключуется по tgid; для web-only юзеров без tg-привязки
+      // сразу идём в local fallback.
       let referralCount = 0;
       try {
-        const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
-        const partnerData = await getPartnerBalance(userId);
-        referralCount = partnerData?.referralCount ?? 0;
+        if (telegramId) {
+          const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
+          const partnerData = await getPartnerBalance(telegramId);
+          referralCount = partnerData?.referralCount ?? 0;
+        } else {
+          referralCount = await db.user.count({ where: { referredById: userId } });
+        }
       } catch {
         // Fallback to local count
         referralCount = await db.user.count({ where: { referredById: userId } });
@@ -674,7 +682,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const { email, password, firstName, lastName, username } = request.body as {
         email: string;
         password: string;
@@ -695,7 +703,11 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       }
       const user = await db.user.findUnique({
         where: { id: userId },
-        select: { metaboxUserId: true, referredById: true },
+        select: {
+          metaboxUserId: true,
+          referredById: true,
+          referredBy: { select: { telegramId: true } },
+        },
       });
       if (user?.metaboxUserId) {
         // @ts-expect-error status number
@@ -706,11 +718,11 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         const result = await registerFromBot({
           email,
           password,
-          telegramId: userId,
+          telegramId,
           firstName,
           lastName,
           username,
-          referrerTelegramId: user?.referredById ?? undefined,
+          referrerTelegramId: user?.referredBy?.telegramId ?? undefined,
         });
         await db.user.update({
           where: { id: userId },
@@ -771,7 +783,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId, user } = request as AuthRequest;
+      const { userId, telegramId, user } = request as AuthRequest;
       const { email, password } = request.body as { email: string; password: string };
       if (!email || !password) {
         return reply.code(400).send({ error: "email and password are required" });
@@ -782,14 +794,23 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           where: { userId, type: "credit", reason: "purchase" },
           select: { id: true },
         });
+        // referredById — внутренний FK; для Metabox API нужен tgid реферрера.
+        let referrerTelegramId: bigint | null = null;
+        if (user.referredById) {
+          const referrer = await db.user.findUnique({
+            where: { id: user.referredById },
+            select: { telegramId: true },
+          });
+          referrerTelegramId = referrer?.telegramId ?? null;
+        }
         const result = await loginAndLink({
           email,
           password,
-          telegramId: userId,
+          telegramId,
           telegramUsername: user.username,
           firstName: user.firstName ?? undefined,
           lastName: user.lastName ?? undefined,
-          referrerTelegramId: user.referredById,
+          referrerTelegramId,
           botHasPurchase: !!botPurchase,
           botCreatedAt: user.createdAt,
         });

@@ -6,6 +6,7 @@ import type { User } from "@prisma/client";
 function mapUser(user: User): UserDto {
   return {
     id: user.id,
+    telegramId: user.telegramId ?? null,
     username: user.username ?? undefined,
     firstName: user.firstName ?? undefined,
     lastName: user.lastName ?? undefined,
@@ -20,8 +21,18 @@ function mapUser(user: User): UserDto {
 }
 
 export const userService = {
+  /** Lookup по внутреннему `User.id` (FK semantics). */
   async findById(id: bigint): Promise<UserDto | null> {
     const user = await db.user.findUnique({ where: { id } });
+    return user ? mapUser(user) : null;
+  },
+
+  /**
+   * Lookup по `telegramId` — для bot middleware (ctx.from.id → User).
+   * После decoupling-миграции PK у новых юзеров не совпадает с tgid.
+   */
+  async findByTelegramId(telegramId: bigint): Promise<UserDto | null> {
+    const user = await db.user.findUnique({ where: { telegramId } });
     return user ? mapUser(user) : null;
   },
 
@@ -39,16 +50,23 @@ export const userService = {
     });
   },
 
-  async upsert(params: {
-    id: bigint;
+  /**
+   * Upsert by telegramId — единственная точка регистрации tg-юзера в боте.
+   * `id` присваивается автоинкрементной sequence'ой (`users_id_seq`), не равен
+   * `telegramId`. Все callsite'ы, которым нужен tgid (Metabox bridge,
+   * wtoken-генерация, welcome-bonus receipt key), читают `user.telegramId`,
+   * а не `user.id`.
+   */
+  async upsertByTelegramId(params: {
+    telegramId: bigint;
     username?: string;
     firstName?: string;
     lastName?: string;
   }): Promise<UserDto> {
-    const { id, username, firstName, lastName } = params;
+    const { telegramId, username, firstName, lastName } = params;
     const user = await db.user.upsert({
-      where: { id },
-      create: { id, username, firstName, lastName },
+      where: { telegramId },
+      create: { telegramId, username, firstName, lastName },
       update: { username, firstName, lastName },
     });
     return mapUser(user);
@@ -68,13 +86,18 @@ export const userService = {
    * зачислены в этом вызове, `false` если был пропуск (дубль). Caller
    * использует возвращаемое значение, чтобы не показывать сообщение
    * «вот ваши N приветственных токенов», когда фактически начисления не было.
+   *
+   * `userId` — внутренний FK к User (для balance update + TokenTransaction).
+   * `telegramId` — ключ дедупликации в `welcome_bonus_receipts` (записи
+   *                переживают удаление аккаунта, ключ должен быть стабильным
+   *                tgid'ом, который Telegram не переиспользует).
    */
-  async creditWelcomeBonus(userId: bigint): Promise<boolean> {
+  async creditWelcomeBonus(userId: bigint, telegramId: bigint): Promise<boolean> {
     // Дедуп через welcome_bonus_receipts (без FK, переживает удаление User).
     // Кейс: юзер /start → бонус → удаление аккаунта → /start заново. Без
     // receipt'а isNew=true у новой User-строки → бонус выдавался повторно.
     const existingReceipt = await db.welcomeBonusReceipt.findUnique({
-      where: { telegramId: userId },
+      where: { telegramId },
     });
     if (existingReceipt) {
       // Выставляем isNew=false — иначе /start продолжит идти по new-ветке
@@ -113,7 +136,7 @@ export const userService = {
       }),
       db.welcomeBonusReceipt.create({
         data: {
-          telegramId: userId,
+          telegramId,
           amount: WELCOME_BONUS_TOKENS,
         },
       }),

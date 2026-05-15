@@ -52,7 +52,7 @@ export async function handleMergeCancel(ctx: BotContext): Promise<void> {
 export async function handleMergeConfirm(ctx: BotContext): Promise<void> {
   await ctx.answerCallbackQuery();
   const data = ctx.callbackQuery?.data;
-  if (!data || !ctx.user) return;
+  if (!data || !ctx.user || !ctx.user.telegramId) return;
 
   const [, choice, token] = data.split(":");
   if (!choice || !token) return;
@@ -60,7 +60,7 @@ export async function handleMergeConfirm(ctx: BotContext): Promise<void> {
   try {
     const result = await confirmMerge({
       token,
-      telegramId: ctx.user.id,
+      telegramId: ctx.user.telegramId,
       chosenMentor: choice as "site" | "bot",
     });
 

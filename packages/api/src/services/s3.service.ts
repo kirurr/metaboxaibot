@@ -30,7 +30,7 @@ const PRESIGN_TTL = 3600;
  * considered retryable. Logs both the failed first attempt and the final
  * outcome so silent drops are impossible.
  */
-async function withRetry<T>(
+export async function withRetry<T>(
   op: string,
   ctx: Record<string, unknown>,
   fn: () => Promise<T>,
@@ -225,22 +225,18 @@ export async function uploadFromUrl(
 }
 
 /**
- * Returns a URL to access the stored file:
- * - public URL (if S3_PUBLIC_URL is configured)
- * - presigned GET URL (valid for PRESIGN_TTL seconds)
- * Returns null if S3 is not configured.
+ * Returns a presigned GET URL for an object in the PRIVATE bucket
+ * (valid for PRESIGN_TTL seconds). Returns null if S3 is not configured.
+ *
+ * For publicly served assets, use `publicS3Service.getFileUrl` instead.
  *
  * Pass `downloadFilename` to force browser download via Content-Disposition: attachment.
  */
 export async function getFileUrl(key: string, downloadFilename?: string): Promise<string | null> {
-  const { bucket, publicUrl } = config.s3;
+  const { bucket } = config.s3;
   if (!bucket) {
     logger.warn({ key }, "getFileUrl: S3 bucket not configured");
     return null;
-  }
-
-  if (publicUrl) {
-    return `${publicUrl.replace(/\/$/, "")}/${key}`;
   }
 
   const client = makeClient();

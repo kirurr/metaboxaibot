@@ -661,8 +661,8 @@ async function buildPostCancelKeyboard(
   }
 
   const webappUrl = config.bot.webappUrl;
-  if (webappUrl) {
-    const wtoken = generateWebToken(ctx.user.id, config.bot.token);
+  if (webappUrl && ctx.user.telegramId) {
+    const wtoken = generateWebToken(ctx.user.telegramId, config.bot.token);
     const sectionParam = section === "image" ? "design" : "video";
     const mgmtLabel = section === "image" ? ctx.t.design.management : ctx.t.video.management;
     kb.webApp(mgmtLabel, `${webappUrl}?page=management&section=${sectionParam}&wtoken=${wtoken}`);

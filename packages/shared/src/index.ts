@@ -62,6 +62,13 @@ export {
   voiceCloneReturnRedisKey,
 } from "./constants/voice-clone-return.js";
 export type { VoiceCloneReturnTarget } from "./constants/voice-clone-return.js";
+export {
+  KIE_ELEVENLABS_VOICES,
+  KIE_ELEVENLABS_VOICE_IDS,
+  KIE_ELEVENLABS_DEFAULT_VOICE_ID,
+  kieElevenLabsVoicePreviewUrl,
+} from "./constants/kie-elevenlabs-voices.js";
+export type { KieElevenLabsVoice } from "./constants/kie-elevenlabs-voices.js";
 
 // Errors
 export {

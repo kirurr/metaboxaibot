@@ -364,6 +364,14 @@ select {
   font-size: 18px;
 }
 
+/* Hover-зона вокруг cap-tabs: padding 12px + margin -12px → визуально не меняет
+   layout, но расширяет hit-area, чтобы вертикальный overshoot курсором (выход
+   на 1-10px выше/ниже кнопок) не считался "leave" и не дёргал scheduleClose. */
+.cap-tabs-zone {
+  display: inline-flex;
+  padding: 12px;
+  margin: -12px;
+}
 .cap-tabs {
   display: inline-flex;
   align-items: center;
@@ -371,10 +379,16 @@ select {
   border: 1px solid var(--border);
   padding: 4px;
   border-radius: 12px;
-  gap: 2px;
+  /* gap: 0 — gap между cap-wrap'ами создавал dead-zone, где курсор не на одной
+     из кнопок. Вместо этого даём cap-wrap'ам internal padding (см. ниже). */
+  gap: 0;
 }
 .cap-wrap {
   position: relative;
+  /* 1px padding по горизонтали + 0 margin → между кнопками визуально 2px зазор
+     (1+1 от соседних cap-wrap'ов), а hit-area cap-wrap'ов смыкается → курсор
+     никогда не оказывается "между" cap-wrap'ами. */
+  padding: 0 1px;
 }
 .mega-menu {
   position: absolute;
@@ -4214,7 +4228,9 @@ select {
   gap: 14px;
 }
 
-.gen-panel {
+/* Legacy `.gen-page` grid (старый layout). Скоупим, чтобы не конфликтовать
+   с новым `.gen-panel` в `.gen-scene` (v2). */
+.gen-page .gen-panel {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -4226,7 +4242,7 @@ select {
   position: sticky;
   top: calc(var(--topbar-h) + 16px);
 }
-.app.mobile .gen-panel {
+.app.mobile .gen-page .gen-panel {
   position: static;
 }
 .gen-panel-head {
@@ -4406,14 +4422,22 @@ select {
   margin-right: -50vw;
   width: 100vw;
   max-width: 100vw;
-  min-height: calc(100vh - var(--topbar-h));
+  /* Фиксированная высота под viewport — страница не скроллится, скроллится
+     только `.gen-panel-scroll` внутри панели. */
+  height: calc(100vh - var(--topbar-h));
+  overflow: hidden;
   background: var(--bg);
-  padding: 32px 24px 48px;
+  padding: 24px 24px 24px 36px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start; /* панель слева, справа — место под результат */
+  align-items: stretch;
+  gap: 24px;
 }
 .app.mobile .gen-scene {
-  padding: 20px 14px calc(var(--mobile-nav-h) + 24px);
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-h));
+  padding: 14px;
+  /* Mobile: панель растягивается на всю ширину, gap не нужен. */
+  gap: 0;
 }
 .gen-bg {
   position: absolute;
@@ -4421,33 +4445,82 @@ select {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 80% at 50% 0%, var(--accent-lighter) 0%, transparent 60%),
-    radial-gradient(ellipse 40% 60% at 50% 100%, rgba(74, 141, 245, 0.04) 0%, transparent 70%);
+    radial-gradient(ellipse 60% 80% at 30% 0%, var(--accent-lighter) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 60% at 70% 100%, rgba(74, 141, 245, 0.04) 0%, transparent 70%);
 }
 
 .gen-panel {
   position: relative;
   z-index: 1;
-  width: 100%;
-  max-width: 520px;
+  flex: 0 0 auto;
+  width: 420px;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
+}
+.app.mobile .gen-panel {
+  width: 100%;
 }
 
+/* Скроллящийся middle-блок: слоты + промпт + chip-настройки. */
+.gen-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: visible; /* chip popover'ы могут торчать вправо */
+  /* Внутренний gap между блоками — slots / prompt / settings. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Невидимый скроллбар на webkit (видно только при hover'е). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  padding-right: 4px;
+}
+.gen-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.gen-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gen-panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* Прибитый low-pane: model picker + CTA. */
+.gen-panel-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.gen-head {
+  flex: 0 0 auto;
+}
 .gen-head h1 {
   font-family: var(--font-heading);
-  font-size: clamp(24px, 3vw, 32px);
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .gen-head .gen-sub {
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--text-secondary);
   margin: 0;
+}
+/* Mode tabs тоже фикс'нутые — над scroll-блоком. */
+.gen-scene .gen-mode-tabs {
+  flex: 0 0 auto;
 }
 
 /* Mode tabs — underline-style, как в референсе. */
@@ -4661,14 +4734,15 @@ select {
 /* Prompt textarea. */
 .gen-scene .gen-prompt {
   width: 100%;
-  min-height: 100px;
+  min-height: 80px;
+  max-height: 220px;
   resize: vertical;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 12px 14px;
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--text);
   font-family: var(--font-body);
   transition: border-color 150ms var(--ease);
@@ -4682,45 +4756,133 @@ select {
   color: var(--text-hint);
 }
 
-/* Settings card — стэк из контролов. */
-.gen-settings {
+/* Settings v2 — flex-row wrap из chip-pill'ов. Каждый chip отображает
+   `Label : Value` и при клике открывает popover с фактическим контролом.
+   Высота блока минимальная — chip'ы переносятся в новую строку. */
+.gen-settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.gen-chip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.gen-chip-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.gen-chip-pill.is-open {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.gen-chip-pill.is-on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.gen-chip-pill-label {
+  font-weight: 500;
+  color: var(--text-hint);
+}
+.gen-chip-pill.is-on .gen-chip-pill-label,
+.gen-chip-pill.is-open .gen-chip-pill-label {
+  color: var(--accent-light);
+}
+.gen-chip-pill-val {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gen-chip-pill.is-on .gen-chip-pill-val,
+.gen-chip-pill.is-open .gen-chip-pill-val {
+  color: var(--accent-light);
+}
+.gen-chip-pill-swatch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  text-transform: uppercase;
+  font-size: 11.5px;
+}
+.gen-chip-pill-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+/* Popover — рендерится в portal'е (document.body) с `position: fixed`,
+   позицию ставит ChipPopover через inline-style. Не клипается scroll-контейнерами. */
+.gen-chip-pop {
+  z-index: 60;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  padding: 12px;
+}
+.gen-pop-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px;
 }
-.gen-set {
+.gen-pop-desc {
+  font-size: 11.5px;
+  color: var(--text-hint);
+  line-height: 1.4;
+}
+
+/* Опции / step'ы slider'а — компактный список столбиком с вертикальным скроллом.
+   Один и тот же layout на desktop и mobile: chip на всю ширину popover'а,
+   длинный список вертикально scroll'ится. */
+.gen-pop-chips-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(50vh, 320px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
-.gen-set-toggle {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.gen-pop-chips-row::-webkit-scrollbar {
+  width: 6px;
 }
-.gen-set-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
+.gen-pop-chips-row::-webkit-scrollbar-track {
+  background: transparent;
 }
-.gen-set-desc {
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--text-hint);
+.gen-pop-chips-row::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
 }
-.gen-set-val {
-  font-size: 13px;
-  color: var(--accent-light);
-  font-weight: 600;
+.gen-pop-chips-row .gen-chip {
+  width: 100%;
+  justify-content: flex-start;
+  flex: 0 0 auto;
 }
 
 /* Chip-row для select/dropdown. */
@@ -5035,11 +5197,10 @@ select {
   z-index: 2;
   width: 360px;
   flex-shrink: 0;
-  align-self: flex-start;
-  /* Sticky чтобы при длинном .gen-panel'е picker не уплывал вниз. */
-  position: sticky;
-  top: calc(var(--topbar-h) + 16px);
-  max-height: calc(100vh - var(--topbar-h) - 64px);
+  align-self: stretch;
+  /* `.gen-scene` уже viewport-bound + overflow:hidden, поэтому sticky не нужен.
+     Picker растягивается на всю высоту scene'а; внутренний контент скроллится. */
+  max-height: 100%;
   background: var(--bg-secondary);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -5277,6 +5438,366 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 0 2px;
+}
+
+/* ── User-avatars section (Мои аватары / Мои персонажи) ────────────────── */
+.media-picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+.media-picker-section + .media-picker-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+.media-picker-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-hint);
+  padding: 0 2px;
+}
+.media-picker-create-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.media-picker-create-link:hover {
+  background: var(--surface-2);
+}
+
+/* User-tile отличается от каталога: внутри thumb — отдельная кнопка,
+   а под именем — actions-menu (rename/delete). */
+.media-pick-user-tile {
+  cursor: default;
+  background: var(--surface-2);
+  padding: 6px;
+  border-radius: 12px;
+}
+.media-pick-user-tile.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+.media-pick-user-tile.is-disabled .media-pick-thumb {
+  opacity: 0.55;
+}
+.media-pick-thumb-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.media-pick-thumb-btn:disabled {
+  cursor: not-allowed;
+}
+.media-pick-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.media-pick-overlay .spin {
+  animation: gen-spin 1s linear infinite;
+}
+@keyframes gen-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.media-pick-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 4px;
+  position: relative;
+}
+.media-pick-actions {
+  position: relative;
+}
+.media-pick-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-hint);
+  cursor: pointer;
+}
+.media-pick-actions-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.media-pick-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 150px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.media-pick-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.media-pick-menu button:hover {
+  background: var(--surface-2);
+}
+.media-pick-menu button.is-danger {
+  color: var(--error, #e25b5b);
+}
+.media-pick-tile.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* ── Create-avatar modal (HeyGen single / Soul multi) ─────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-hint);
+  cursor: pointer;
+}
+.modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-hint);
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-hint);
+}
+.modal-field input[type="text"] {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.modal-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.modal-error {
+  font-size: 13px;
+  color: var(--error, #e25b5b);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--error, #e25b5b) 12%, transparent);
+  border-radius: 8px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.modal-actions .btn {
+  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.modal-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.modal-actions .btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.modal-actions .btn--ghost:hover:not(:disabled) {
+  background: var(--surface);
+}
+.modal-actions .btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+.modal-actions .btn--primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.modal-actions .btn .spin {
+  animation: gen-spin 1s linear infinite;
+}
+.create-avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.create-avatar-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.create-avatar-tile.is-error {
+  border-color: var(--error, #e25b5b);
+}
+.create-avatar-tile.is-uploading {
+  opacity: 0.7;
+}
+.create-avatar-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.create-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px;
+}
+.create-avatar-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+.create-avatar-remove:hover {
+  background: var(--error, #e25b5b);
+}
+.create-avatar-add {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-hint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.create-avatar-add:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.create-avatar-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Color picker — native input + hex текст. */

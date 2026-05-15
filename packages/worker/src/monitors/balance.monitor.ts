@@ -62,7 +62,10 @@ async function checkFal(): Promise<ProviderStatus | null> {
 // ── Main check ────────────────────────────────────────────────────────────────
 
 export async function checkProviderBalances(): Promise<void> {
-  const chatId = config.alerts.chatId;
+  // Баланс-алерты идут в тему BALANCE (config.balanceAlerts), а не в общий
+  // alerts-канал. Пороги (elevenlabsThresholdChars / falThresholdUsd) при этом
+  // остаются на config.alerts — это настройки проверки, а не назначение.
+  const chatId = config.balanceAlerts.chatId;
   if (!chatId) return; // Feature not configured
 
   const checks: Array<() => Promise<ProviderStatus | null>> = [checkElevenlabs, checkFal];
@@ -92,7 +95,7 @@ export async function checkProviderBalances(): Promise<void> {
   const text = `⚠️ *Metabox — низкий баланс провайдера*\n\n${alerts.join("\n")}`;
   await telegram.sendMessage(chatId, text, {
     parse_mode: "Markdown",
-    message_thread_id: config.alerts.threadId,
+    message_thread_id: config.balanceAlerts.threadId,
   });
   logger.warn({ alerts }, "Low balance alert sent");
 }

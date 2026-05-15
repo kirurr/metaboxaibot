@@ -26,7 +26,10 @@ export async function handleNoTool(ctx: BotContext): Promise<void> {
 
   if (section === "gpt") {
     const webappUrl = config.bot.webappUrl;
-    const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+    const token =
+      webappUrl && ctx.user.telegramId
+        ? generateWebToken(ctx.user.telegramId, config.bot.token)
+        : "";
     const kb = new InlineKeyboard();
     if (webappUrl) {
       kb.webApp(ctx.t.gpt.management, `${webappUrl}?page=management&section=gpt&wtoken=${token}`);

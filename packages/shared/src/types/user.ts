@@ -32,7 +32,10 @@ export type BotState =
 export type Section = "gpt" | "design" | "audio" | "video";
 
 export interface UserDto {
+  /** Внутренний автоинкрементный `User.id` (FK semantics). */
   id: bigint;
+  /** Telegram user ID — null для web-only юзеров без TG-привязки. */
+  telegramId: bigint | null;
   username?: string;
   firstName?: string;
   lastName?: string;

@@ -1,5 +1,5 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
 
@@ -7,6 +7,53 @@ const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
 /** Default voice ID — Rachel */
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+
+/**
+ * Известные `detail.status` у EL-шного 401, означающие «аккаунт не может
+ * обслуживать запросы из-за биллинга»: кредиты кончились (`quota_exceeded`),
+ * инвойс не оплачен (`payment_issue`). Расширять по мере появления новых.
+ */
+const EL_ACCOUNT_BLOCKED_STATUSES = new Set(["quota_exceeded", "payment_issue"]);
+
+/**
+ * ElevenLabs отдаёт 401, когда аккаунт не может обслуживать запросы из-за
+ * биллинга (кредиты кончились, инвойс не оплачен и т.п.) — provider-wide
+ * состояние, бьёт по всем джобам до вмешательства, а не вина запроса.
+ * Превращаем в чистую терминальную `UserFacingError` с ops-алертом (дедуп) в
+ * тему BALANCE — вместо plain `Error`, который жёг бы BullMQ-ретраи и уходил в
+ * общий поток ошибок.
+ *
+ * Распознаём по известным `detail.status` + по биллинг-ключевым словам в
+ * `detail.message` (на случай новых статусов EL). Обычный auth-401
+ * (`invalid_api_key` и т.п.) сюда НЕ попадает — это конфиг-проблема, остаётся
+ * plain Error.
+ */
+function throwIfElAccountBlocked(modelId: string, status: number, body: string): void {
+  if (status !== 401) return;
+  let detail: { status?: string; message?: string } | undefined;
+  try {
+    detail = (JSON.parse(body) as { detail?: { status?: string; message?: string } }).detail;
+  } catch {
+    return; // не JSON — не наша форма, дальше пойдёт plain Error
+  }
+  if (!detail) return;
+  const blocked =
+    (detail.status !== undefined && EL_ACCOUNT_BLOCKED_STATUSES.has(detail.status)) ||
+    /quota|invoice|payment|subscription|billing/i.test(detail.message ?? "");
+  if (!blocked) return;
+  throw new UserFacingError(
+    `ElevenLabs account blocked (${detail.status ?? "?"}, ${modelId}): ${body.slice(0, 200)}`,
+    {
+      key: "modelTemporarilyUnavailable",
+      section: "audio",
+      params: { modelName: AI_MODELS[modelId]?.name ?? modelId },
+      notifyOps: true,
+      opsAlertDedupKey: "elevenlabs-account-blocked",
+      // Алерт про заблокированный баланс EL → тема BALANCE, не общий поток ошибок.
+      opsAlertChannel: "balance",
+    },
+  );
+}
 
 /**
  * ElevenLabs adapter.
@@ -67,6 +114,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
 
     if (!res.ok) {
       const text = await res.text();
+      throwIfElAccountBlocked(this.modelId, res.status, text);
       throw new Error(`ElevenLabs TTS failed: ${res.status} ${text}`);
     }
 
@@ -119,6 +167,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
           if (e instanceof UserFacingError) throw e;
         }
       }
+      throwIfElAccountBlocked(this.modelId, res.status, text);
       throw new Error(`ElevenLabs sound generation failed: ${res.status} ${text}`);
     }
 

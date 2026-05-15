@@ -123,9 +123,11 @@ const schedulePendingGenCleanup = (): void => {
 schedulePendingGenCleanup();
 
 // ── Balance monitor ───────────────────────────────────────────────────────────
-// Шлёт алерты в alerts.chatId; не запускается, если этот канал не настроен.
+// Шлёт алерты в balanceAlerts.chatId (тема BALANCE); не запускается, если этот
+// канал не настроен. balanceAlerts.chatId дефолтится на ALERT_CHAT_ID, так что
+// при обычной конфигурации (один ALERT_CHAT_ID) поведение не меняется.
 let balanceTimer: ReturnType<typeof setInterval> | undefined;
-if (config.alerts.chatId) {
+if (config.balanceAlerts.chatId) {
   const intervalMs = config.alerts.intervalHours * 60 * 60 * 1000;
   checkProviderBalances().catch((err) => logger.error({ err }, "Balance monitor error"));
   balanceTimer = setInterval(() => {
