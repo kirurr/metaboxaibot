@@ -40,26 +40,26 @@ export interface SubmitGenerationResponse {
 export function submitImageGeneration(
   body: SubmitImageGenerationBody,
 ): Promise<SubmitGenerationResponse> {
-  return apiClient<SubmitGenerationResponse, SubmitImageGenerationBody>(
-    "/web/generation/image",
-    { method: "POST", body },
-  );
+  return apiClient<SubmitGenerationResponse, SubmitImageGenerationBody>("/web/generation/image", {
+    method: "POST",
+    body,
+  });
 }
 
 export function submitVideoGeneration(
   body: SubmitVideoGenerationBody,
 ): Promise<SubmitGenerationResponse> {
-  return apiClient<SubmitGenerationResponse, SubmitVideoGenerationBody>(
-    "/web/generation/video",
-    { method: "POST", body },
-  );
+  return apiClient<SubmitGenerationResponse, SubmitVideoGenerationBody>("/web/generation/video", {
+    method: "POST",
+    body,
+  });
 }
 
 export function submitAudioGeneration(
   body: SubmitAudioGenerationBody,
 ): Promise<SubmitGenerationResponse> {
-  return apiClient<SubmitGenerationResponse, SubmitAudioGenerationBody>(
-    "/web/generation/audio",
-    { method: "POST", body },
-  );
+  return apiClient<SubmitGenerationResponse, SubmitAudioGenerationBody>("/web/generation/audio", {
+    method: "POST",
+    body,
+  });
 }

@@ -18,18 +18,14 @@ export function useInitNotifications() {
     // Сначала регистрируем листенеры, потом коннектимся: иначе server-emit
     // `notification:snapshot` (срабатывает на `connection`) может опередить
     // регистрацию и пропасть.
-    ws.on("notification:snapshot", 
-			(rows) => {
-				setSnapshot(rows);
-				console.log("snapshot", rows);
-			});
-    ws.on(
-			"notification:new",
-			(row) => {
-				upsert(row);
-				console.log("new", row);
-			}
-		);
+    ws.on("notification:snapshot", (rows) => {
+      setSnapshot(rows);
+      console.log("snapshot", rows);
+    });
+    ws.on("notification:new", (row) => {
+      upsert(row);
+      console.log("new", row);
+    });
     ws.connect();
 
     return () => {

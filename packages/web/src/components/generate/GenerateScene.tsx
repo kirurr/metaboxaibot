@@ -1035,8 +1035,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       const section = selectedModel.section;
       const settingsField =
         Object.keys(settingValues).length > 0 ? { settings: settingValues } : {};
-      const mediaField =
-        Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
+      const mediaField = Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
 
       let result: SubmitGenerationResponse;
       if (section === "design" || section === "image") {

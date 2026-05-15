@@ -9,15 +9,12 @@ import { useAuthStore } from "@/stores/authStore";
 // auth — динамический callback: socket.io вызывает его на каждый коннект
 // (включая reconnect), поэтому свежий access token подхватится после
 // authStore.tryRefresh без переинициализации сокета.
-export const ws: Socket<ServerToClientEvents, ClientToServerEvents> = io(
-  "http://localhost:3001",
-  {
-    autoConnect: false,
-    auth: (cb) => {
-      cb({ token: useAuthStore.getState().accessToken ?? "" });
-    },
+export const ws: Socket<ServerToClientEvents, ClientToServerEvents> = io("http://localhost:3001", {
+  autoConnect: false,
+  auth: (cb) => {
+    cb({ token: useAuthStore.getState().accessToken ?? "" });
   },
-);
+});
 
 ws.on("connect", () => {
   console.log("WS connected");

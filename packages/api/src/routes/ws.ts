@@ -1,10 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { Server, Socket } from "../utils/ws.js";
 import socketioPlugin from "fastify-socket.io";
-import {
-  notificationMarkSeenEvent,
-  notificationDeleteEvent,
-} from "@metabox/shared-browser/ws";
+import { notificationMarkSeenEvent, notificationDeleteEvent } from "@metabox/shared-browser/ws";
 import { logger } from "../logger.js";
 import { wsAuthMiddleware } from "../middlewares/ws-auth.js";
 import { setWsServer, userRoom } from "../services/ws-bus.service.js";
@@ -38,10 +35,7 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
     socket.on("notification:mark-seen", (raw) => {
       const parsed = notificationMarkSeenEvent.safeParse(raw);
       if (!parsed.success) {
-        logger.warn(
-          { err: parsed.error.flatten(), raw },
-          "ws: bad notification:mark-seen payload",
-        );
+        logger.warn({ err: parsed.error.flatten(), raw }, "ws: bad notification:mark-seen payload");
         return;
       }
       if (aibUserId === null) return;
@@ -75,10 +69,7 @@ export const wsRoutes: FastifyPluginAsync = async (fastify) => {
           const rows = await webNotificationService.listByUser(aibUserId);
           socket.emit("notification:snapshot", rows.map(toWebNotificationDTO));
         } catch (err) {
-          logger.warn(
-            { err, aibUserId: aibUserId.toString() },
-            "ws: notification snapshot failed",
-          );
+          logger.warn({ err, aibUserId: aibUserId.toString() }, "ws: notification snapshot failed");
         }
       })();
     }

@@ -29,9 +29,9 @@ async function resolveMediaInputs(
   return Object.fromEntries(
     await Promise.all(
       Object.entries(mediaInputs).map(async ([slotKey, s3Keys]) => {
-        const urls = (
-          await Promise.all(s3Keys.map((k) => getFileUrl(k).catch(() => null)))
-        ).filter((u): u is string => typeof u === "string" && u.length > 0);
+        const urls = (await Promise.all(s3Keys.map((k) => getFileUrl(k).catch(() => null)))).filter(
+          (u): u is string => typeof u === "string" && u.length > 0,
+        );
         return [slotKey, urls] as const;
       }),
     ),
