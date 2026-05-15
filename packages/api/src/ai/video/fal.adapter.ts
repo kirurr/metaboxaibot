@@ -5,6 +5,48 @@ import { logCall } from "../../utils/fetch.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
 /**
+ * Конвертирует ApiError из @fal-ai/client в чистый Error с коротким message
+ * и сохранённым numeric `status` (для isFiveXxError → cascade-fallback).
+ *
+ * Зачем: fal SDK строит `ApiError.message` как
+ * `"<short text>\nHTTP <code>\nbody: <full json>"`. Для `downstream_service_error`
+ * (xAI/Grok upstream down) body содержит полный input запроса — prompt +
+ * presigned S3 URL с `X-Amz-Signature`. Без обрезки это утекает в ops-алёрты
+ * многокилобайтной портянкой, плюс лёгкий security smell (signed URL — короткий
+ * credential). Чистая версия — статус + тип ошибки + первые 200 символов msg.
+ *
+ * Наши собственные `throw new Error("FAL …")` (валидация входа) пропускаются
+ * без изменений — у них `name === "Error"`, а fal SDK ставит `name = "ApiError"`
+ * или `"ValidationError"` (последний — subclass от ApiError, бросается на 422
+ * от pydantic-валидации входа; тоже несёт `body.detail` с эхом запроса).
+ *
+ * Возвращает `never` (всегда throw'ит) — для TS narrowing в catch-блоке вызова.
+ */
+function rethrowFalApiError(err: unknown): never {
+  const e = err as {
+    name?: unknown;
+    status?: unknown;
+    body?: unknown;
+    message?: unknown;
+  };
+  if (e?.name === "ApiError" || e?.name === "ValidationError") {
+    const status = typeof e.status === "number" && e.status >= 100 && e.status < 600 ? e.status : 0;
+    const body = e.body as { detail?: Array<{ msg?: string; type?: string }> } | undefined;
+    const detail = body?.detail?.[0];
+    const errType = detail?.type ?? "unknown";
+    const rawMsg =
+      detail?.msg ?? (typeof e.message === "string" ? e.message.split("\n")[0] : "FAL error");
+    const briefMsg = rawMsg.slice(0, 200);
+    const cleaned = new Error(`FAL ${status || "??"} ${errType}: ${briefMsg}`) as Error & {
+      status?: number;
+    };
+    if (status) cleaned.status = status;
+    throw cleaned;
+  }
+  throw err;
+}
+
+/**
  * Text-to-video endpoint for each model.
  *
  * Kling uses o3 (Omni) family — выбран как fallback для primary KIE kling[-pro].
@@ -111,6 +153,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async submit(input: VideoInput): Promise<string> {
+    try {
+      return await this._submitImpl(input);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _submitImpl(input: VideoInput): Promise<string> {
     const imageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
@@ -327,6 +377,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async poll(providerJobId: string): Promise<VideoResult | null> {
+    try {
+      return await this._pollImpl(providerJobId);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _pollImpl(providerJobId: string): Promise<VideoResult | null> {
     // Support legacy plain request_id format (pre-encoding) for backwards compat
     let endpoint: string;
     let requestId: string;
