@@ -334,8 +334,6 @@ export default {
       "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
     providerInputRejected:
       "❌ Provider rejected the request: {reason}. Try adjusting your parameters or prompt.",
-    promptTooLongUtf8:
-      "❌ Prompt is too long. Shorten it to about {limit} characters and try again.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:
