@@ -108,6 +108,7 @@ export interface Translations {
     voiceCloneProcessing: string;
     voiceCloneSuccess: string;
     voiceCloneFailed: string;
+    voiceCloneProviderUnavailable: string;
     musicActivated: string;
     musicElActivated: string;
     soundsActivated: string;

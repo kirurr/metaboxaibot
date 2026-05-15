@@ -225,7 +225,18 @@ export async function handleVoiceCloneUpload(ctx: BotContext): Promise<void> {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
     } else {
       logger.error(err, "Voice clone error");
-      await ctx.reply(ctx.t.audio.voiceCloneFailed);
+      // Detect transient (5xx HTTP / network) — Cartesia инфра-сбой, не наш
+      // баг и не юзера. Без ретраев (это интерактивный bot scene handler — нет
+      // смысла блокировать юзера на 20-30с): сразу показываем честный мессадж
+      // «провайдер временно недоступен, попробуйте через минуту», и алёртим ops
+      // — для них это всё ещё ценная info про состояние Cartesia.
+      const msg = err instanceof Error ? err.message.toLowerCase() : "";
+      const isTransient =
+        /\b5\d{2}\b/.test(msg) ||
+        /fetch failed|network|econnreset|etimedout|socket hang up/i.test(msg);
+      await ctx.reply(
+        isTransient ? ctx.t.audio.voiceCloneProviderUnavailable : ctx.t.audio.voiceCloneFailed,
+      );
       void notifyTechError(err, {
         section: "audio",
         modelId: "voice-clone",

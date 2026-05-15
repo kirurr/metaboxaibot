@@ -128,6 +128,8 @@ export default {
     voiceCloneSuccess:
       "✅ Voice «{name}» created! It is now available in speech synthesis and video avatar settings.",
     voiceCloneFailed: "❌ Failed to create voice. Please try again later.",
+    voiceCloneProviderUnavailable:
+      "❌ Voice cloning service is temporarily unavailable. Please try again in 1-2 minutes.",
     musicActivated:
       "🎵 Music generation (Suno) activated.\nDescribe the music you want (genre, mood, style) and I will create it.",
     musicElActivated:
