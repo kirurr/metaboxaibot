@@ -126,13 +126,22 @@ export function CapabilityTabs() {
     } satisfies Record<Capability["id"], WebModelDto[]>;
   }, [allModels]);
 
-  const openMenu = (id: string) => {
+  const openMenu = (id: string, hasMenu = true) => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    setHovered(id);
+    // Не переключаем `hovered` на cap без mega-меню (например Chat). Иначе при
+    // hover'е на edge соседней кнопки курсор задевает её cap-wrap, сбрасывает
+    // hovered → showMenu для текущего раздела становится false → попап
+    // моргает/исчезает на пересечении gap'а между cap-wrap'ами.
+    if (hasMenu) setHovered(id);
+  };
+  const cancelClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
   };
   const scheduleClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setHovered(null), 140);
+    // 220ms — даём юзеру шанс вернуть курсор в hover-зону, если он промахнулся
+    // мимо bridge'а на вертикальном overshoot'е.
+    closeTimer.current = setTimeout(() => setHovered(null), 220);
   };
 
   // Сдвиг popup, чтобы не вылезал за края viewport'а.
@@ -154,70 +163,76 @@ export function CapabilityTabs() {
   }
 
   return (
-    <div className="cap-tabs" onMouseLeave={scheduleClose}>
-      {CAPABILITIES.map((c) => {
-        const features = FEATURE_MENUS[c.id] ?? [];
-        const models = modelsByCap[c.id] ?? [];
-        const isMega = c.id !== "text" && features.length > 0;
-        const showMenu = hovered === c.id && isMega;
-        const active = isActiveRoute(c.route, location.pathname);
-        return (
-          <div key={c.id} className="cap-wrap" onMouseEnter={() => openMenu(c.id)}>
-            <button className={clsx("cap", active && "on")} onClick={() => pick(c)}>
-              <span className="cap-dot" />
-              <span>{c.label}</span>
-            </button>
-            {showMenu && (
-              <div
-                className="mega-menu"
-                ref={menuRef}
-                onMouseEnter={() => openMenu(c.id)}
-                onMouseLeave={scheduleClose}
-              >
-                <div className="mega-col">
-                  <div className="mega-col-head">Features</div>
-                  <div className="mega-list">
-                    {features.map((f, i) => (
-                      <button key={i} className="mega-item" onClick={() => pick(c)}>
-                        <span className="mega-ico">{f.glyph}</span>
-                        <span className="mega-body">
-                          <span className="mega-name">
-                            {f.name}
-                            {f.badge && (
-                              <span className={"mega-badge " + f.badge.toLowerCase()}>
-                                {f.badge}
-                              </span>
-                            )}
-                          </span>
-                          <span className="mega-desc">{f.desc}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="mega-col">
-                  <div className="mega-col-head">Models</div>
-                  <div className="mega-list">
-                    {models.length === 0 ? (
-                      <div className="mega-empty">Загрузка моделей…</div>
-                    ) : (
-                      models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
-                        <button key={m.id} className="mega-item" onClick={() => pick(c)}>
-                          <span className="mega-ico letter">{modelLetter(m)}</span>
+    // Wrapper-зона с padding'ом ±10px по периметру: расширяет hover-area вокруг
+    // cap-tabs так, чтобы вертикальный overshoot мышью (выход курсора на 1-5px
+    // выше/ниже кнопок) не считался "leave". Margin компенсирует визуально —
+    // layout не меняется.
+    <div className="cap-tabs-zone" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
+      <div className="cap-tabs">
+        {CAPABILITIES.map((c) => {
+          const features = FEATURE_MENUS[c.id] ?? [];
+          const models = modelsByCap[c.id] ?? [];
+          const isMega = c.id !== "text" && features.length > 0;
+          const showMenu = hovered === c.id && isMega;
+          const active = isActiveRoute(c.route, location.pathname);
+          return (
+            <div key={c.id} className="cap-wrap" onMouseEnter={() => openMenu(c.id, isMega)}>
+              <button className={clsx("cap", active && "on")} onClick={() => pick(c)}>
+                <span className="cap-dot" />
+                <span>{c.label}</span>
+              </button>
+              {showMenu && (
+                <div
+                  className="mega-menu"
+                  ref={menuRef}
+                  onMouseEnter={() => openMenu(c.id)}
+                  onMouseLeave={scheduleClose}
+                >
+                  <div className="mega-col">
+                    <div className="mega-col-head">Features</div>
+                    <div className="mega-list">
+                      {features.map((f, i) => (
+                        <button key={i} className="mega-item" onClick={() => pick(c)}>
+                          <span className="mega-ico">{f.glyph}</span>
                           <span className="mega-body">
-                            <span className="mega-name">{displayModelName(m)}</span>
-                            <span className="mega-desc">{displayModelDesc(m)}</span>
+                            <span className="mega-name">
+                              {f.name}
+                              {f.badge && (
+                                <span className={"mega-badge " + f.badge.toLowerCase()}>
+                                  {f.badge}
+                                </span>
+                              )}
+                            </span>
+                            <span className="mega-desc">{f.desc}</span>
                           </span>
                         </button>
-                      ))
-                    )}
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mega-col">
+                    <div className="mega-col-head">Models</div>
+                    <div className="mega-list">
+                      {models.length === 0 ? (
+                        <div className="mega-empty">Загрузка моделей…</div>
+                      ) : (
+                        models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                          <button key={m.id} className="mega-item" onClick={() => pick(c)}>
+                            <span className="mega-ico letter">{modelLetter(m)}</span>
+                            <span className="mega-body">
+                              <span className="mega-name">{displayModelName(m)}</span>
+                              <span className="mega-desc">{displayModelDesc(m)}</span>
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

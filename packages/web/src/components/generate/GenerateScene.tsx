@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   ChevronDown,
@@ -21,8 +22,15 @@ import {
   type MotionItem,
   type SoulStyleItem,
 } from "@/api/pickers";
+import {
+  listUserAvatars,
+  renameUserAvatar,
+  deleteUserAvatar,
+  type UserAvatarDto,
+} from "@/api/userAvatars";
 import { VoicePicker } from "./VoicePicker";
-import { MediaPicker, type MediaPickItem } from "./MediaPicker";
+import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
+import { CreateAvatarModal } from "./CreateAvatarModal";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -91,13 +99,9 @@ function isSettingVisible(s: ModelSettingDto, values: Record<string, unknown>): 
 /** Типы пикеров, которые web пока не реализует — прячем их. */
 const UNSUPPORTED_TYPES = new Set<string>([
   // Generic voice-picker (без конкретного провайдера) и d-id-voice-picker —
-  // пока не подключены. Остальные voice-picker'ы (cartesia/elevenlabs/openai)
-  // обрабатываются через VoicePicker. avatar-/motion-/soul-style-picker и color
-  // обрабатываются через MediaPicker. soul-picker (пользовательские soul-id'ы)
-  // оставлен — требует доп. логики на user-state.
+  // пока не подключены.
   "voice-picker",
   "did-voice-picker",
-  "soul-picker",
 ]);
 
 /** Map setting.type → провайдер каталога голосов. */
@@ -108,11 +112,14 @@ const VOICE_PROVIDER_BY_TYPE: Record<string, VoiceProvider> = {
 };
 
 /** Типы media-пикеров (картинки/видео-превью, не voice). */
-type MediaPickerKind = "avatar" | "motion" | "soul-style";
+type MediaPickerKind = "avatar" | "motion" | "soul-style" | "soul-character";
 const MEDIA_KIND_BY_TYPE: Record<string, MediaPickerKind> = {
   "avatar-picker": "avatar",
   "motion-picker": "motion",
   "soul-style-picker": "soul-style",
+  // soul-picker — выбор пользовательского Soul-персонажа (созданного через
+  // /web/user-avatars/higgsfield-soul). Каталога нет — только Мои персонажи.
+  "soul-picker": "soul-character",
 };
 
 /** Для motion-picker значение — массив `{ id, strength }`. Мы храним strength=1. */
@@ -248,7 +255,14 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
 
 // ── Sub: setting control ─────────────────────────────────────────────────────
 
-function SettingControl({
+/**
+ * Одна настройка = один chip с label + текущим значением.
+ * Клик по chip'у открывает popover с фактическим control'ом (slider / chip-row
+ * вариантов / input). Toggle и voice/media-pickers — спец-случаи без popover'а:
+ *  - toggle: клик мгновенно переключает значение
+ *  - voice/media: клик открывает существующий side-drawer
+ */
+function SettingChip({
   setting,
   value,
   onChange,
@@ -265,70 +279,231 @@ function SettingControl({
   openMediaPicker?: (kind: MediaPickerKind) => void;
   mediaNameLookup?: (kind: MediaPickerKind, id: string) => string | null;
 }) {
-  // Voice picker buttons — рендерим до общей логики, чтобы не уходить в неподходящие
-  // ветки (например select при пустых options).
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  // Outside-click закрывает popover. Учитываем и chip, и popover (portal).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chipRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  // ── Voice picker chip → открывает side-drawer (не popover) ────────────────
   const voiceProvider = VOICE_PROVIDER_BY_TYPE[setting.type];
   if (voiceProvider && openVoicePicker) {
     const currentId = String(value ?? setting.default ?? "");
     const name = currentId ? (voiceNameLookup?.(voiceProvider, currentId) ?? null) : null;
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button
-          className="gen-voice-btn"
-          onClick={() => openVoicePicker(voiceProvider)}
-          type="button"
-        >
-          <span className="gen-voice-btn-name">{name ?? currentId ?? "Выбрать голос"}</span>
-          <ChevronRight size={14} />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="gen-chip-pill"
+        onClick={() => openVoicePicker(voiceProvider)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-val">{name ?? "Не выбрано"}</span>
+        <ChevronRight size={11} />
+      </button>
     );
   }
 
-  // Media picker buttons (avatar / motion / soul-style).
+  // ── Media picker chip → открывает side-drawer ─────────────────────────────
   const mediaKind = MEDIA_KIND_BY_TYPE[setting.type];
   if (mediaKind && openMediaPicker) {
     let summary: string;
     if (mediaKind === "motion") {
       const entries = parseMotionValue(value ?? setting.default);
-      if (entries.length === 0) {
-        summary = "Не выбрано";
-      } else if (entries.length === 1) {
-        summary = mediaNameLookup?.(mediaKind, entries[0].id) ?? entries[0].id;
-      } else {
-        summary = `${entries.length} пресета`;
-      }
+      summary =
+        entries.length === 0
+          ? "Не выбрано"
+          : entries.length === 1
+            ? (mediaNameLookup?.(mediaKind, entries[0].id) ?? entries[0].id)
+            : `${entries.length} пресета`;
     } else {
       const currentId = String(value ?? setting.default ?? "");
       summary = currentId ? (mediaNameLookup?.(mediaKind, currentId) ?? currentId) : "Не выбрано";
     }
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button className="gen-voice-btn" onClick={() => openMediaPicker(mediaKind)} type="button">
-          <span className="gen-voice-btn-name">{summary}</span>
-          <ChevronRight size={14} />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="gen-chip-pill"
+        onClick={() => openMediaPicker(mediaKind)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-val">{summary}</span>
+        <ChevronRight size={11} />
+      </button>
     );
   }
 
-  // Color — native input inline. Без drawer'а, всё сразу видно.
+  // ── Toggle chip → клик переключает, popover не нужен ──────────────────────
+  if (setting.type === "toggle") {
+    const checked = Boolean(value);
+    return (
+      <button
+        type="button"
+        className={clsx("gen-chip-pill", checked && "is-on")}
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-val">{checked ? "Вкл" : "Выкл"}</span>
+      </button>
+    );
+  }
+
+  // ── Summary для chip-display ──────────────────────────────────────────────
+  let summary: React.ReactNode;
+  if (setting.type === "color") {
+    const hex = typeof value === "string" && value ? value : String(setting.default ?? "#000000");
+    summary = (
+      <span className="gen-chip-pill-swatch-wrap">
+        <span className="gen-chip-pill-swatch" style={{ background: hex }} />
+        <span>{hex}</span>
+      </span>
+    );
+  } else if (setting.type === "slider" || setting.type === "number") {
+    const num = typeof value === "number" ? value : Number(setting.default ?? 0);
+    summary = String(num);
+  } else if (setting.type === "text") {
+    const text = typeof value === "string" ? value : String(setting.default ?? "");
+    summary = text || "Не задано";
+  } else if (setting.type === "select" || setting.type === "dropdown") {
+    const opts = setting.options ?? [];
+    const cur = String(value ?? setting.default ?? "");
+    const found = opts.find((o) => String(o.value) === cur);
+    summary = found?.label ?? cur ?? "—";
+  } else {
+    return null; // unknown type
+  }
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className={clsx("gen-chip-pill", open && "is-open")}
+        onClick={() => setOpen((v) => !v)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-val">{summary}</span>
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <ChipPopover anchorRef={chipRef} popRef={popRef}>
+          <SettingPopBody setting={setting} value={value} onChange={onChange} />
+        </ChipPopover>
+      )}
+    </>
+  );
+}
+
+/**
+ * Popover в portal'е — рендерится поверх всего, не клипается scroll-контейнерами.
+ * Позиционируется по `getBoundingClientRect` anchor'а с auto-flip вверх если
+ * не помещается вниз. Реагирует на resize окна и scroll-события (capture, чтобы
+ * ловить scroll внутри `.gen-panel-scroll`).
+ */
+function ChipPopover({
+  anchorRef,
+  popRef,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  popRef: React.RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    function update() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const ar = anchor.getBoundingClientRect();
+      const pop = popRef.current;
+      // На первом проходе popover ещё не отрендерен — берём оценочные размеры,
+      // следующий effect-tick уточнит.
+      const pw = pop?.offsetWidth ?? 240;
+      const ph = pop?.offsetHeight ?? 100;
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      const GAP = 6;
+      const MARGIN = 8;
+
+      // Vertical: prefer below; flip up если не помещается.
+      const spaceBelow = vh - ar.bottom;
+      const top =
+        spaceBelow >= ph + GAP + MARGIN || spaceBelow >= ar.top
+          ? ar.bottom + GAP
+          : Math.max(MARGIN, ar.top - GAP - ph);
+
+      // Horizontal: prefer align-left; clamp в viewport.
+      let left = ar.left;
+      if (left + pw + MARGIN > vw) left = Math.max(MARGIN, vw - pw - MARGIN);
+      if (left < MARGIN) left = MARGIN;
+
+      setPos({ top, left });
+    }
+    update();
+    // Scroll любого внутреннего контейнера → reposition. capture обязателен —
+    // scroll-event не bubble'ится. Resize окна тоже двигает anchor.
+    const onScrollOrResize = () => update();
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    // Второй tick — после того как popover реально отрендерился с правильным размером.
+    const raf = requestAnimationFrame(update);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+      cancelAnimationFrame(raf);
+    };
+  }, [anchorRef, popRef]);
+
+  return createPortal(
+    <div
+      ref={popRef}
+      className="gen-chip-pop"
+      style={{
+        position: "fixed",
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        // До первого позиционирования прячем (иначе мелькает в (0,0)).
+        visibility: pos ? "visible" : "hidden",
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** Содержимое popover'а — фактический контрол для каждого типа настройки. */
+function SettingPopBody({
+  setting,
+  value,
+  onChange,
+}: {
+  setting: ModelSettingDto;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
   if (setting.type === "color") {
     const hex = typeof value === "string" && value ? value : String(setting.default ?? "#000000");
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
+      <div className="gen-pop-body">
+        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
         <div className="gen-color-row">
           <input
             type="color"
@@ -347,61 +522,55 @@ function SettingControl({
       </div>
     );
   }
-
-  if (setting.type === "toggle") {
-    const checked = Boolean(value);
-    return (
-      <div className="gen-set gen-set-toggle">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button
-          className={clsx("gen-toggle", checked && "on")}
-          onClick={() => onChange(!checked)}
-          role="switch"
-          aria-checked={checked}
-        >
-          <span className="gen-toggle-knob" />
-        </button>
-      </div>
-    );
-  }
   if (setting.type === "slider") {
     const min = setting.min ?? 0;
     const max = setting.max ?? 100;
     const step = setting.step ?? 1;
     const num = typeof value === "number" ? value : Number(setting.default ?? min);
+    // Кол-во знаков после запятой берём из step'а — формат chip'а согласован
+    // с тем, как UX выглядит для дробных шагов (0.05 → "0.10", "0.15").
+    const stepStr = String(step);
+    const dotIdx = stepStr.indexOf(".");
+    const decimals = dotIdx >= 0 ? stepStr.length - dotIdx - 1 : 0;
+    const values: number[] = [];
+    // Накопление через i*step вместо v+=step: избегаем float-drift на длинных диапазонах.
+    const count = Math.round((max - min) / step) + 1;
+    for (let i = 0; i < count; i++) {
+      const v = Number((min + i * step).toFixed(decimals));
+      values.push(v);
+    }
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          <span className="gen-set-val mono">{num}</span>
+      <div className="gen-pop-body">
+        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
+        <div className="gen-pop-chips-row">
+          {values.map((v) => {
+            const active = Number(num.toFixed(decimals)) === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                className={clsx("gen-chip", active && "on")}
+                onClick={() => onChange(v)}
+              >
+                {v}
+              </button>
+            );
+          })}
         </div>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={num}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="gen-slider"
-        />
       </div>
     );
   }
   if (setting.type === "number") {
+    const num = typeof value === "number" ? value : Number(setting.default ?? 0);
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
+      <div className="gen-pop-body">
+        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
         <input
           type="number"
           min={setting.min}
           max={setting.max}
           step={setting.step}
-          value={typeof value === "number" ? value : Number(setting.default ?? 0)}
+          value={num}
           onChange={(e) => onChange(Number(e.target.value))}
           className="gen-num"
         />
@@ -410,10 +579,8 @@ function SettingControl({
   }
   if (setting.type === "text") {
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
+      <div className="gen-pop-body">
+        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
         <input
           type="text"
           value={typeof value === "string" ? value : String(setting.default ?? "")}
@@ -423,43 +590,19 @@ function SettingControl({
       </div>
     );
   }
-  // select / dropdown — рендерим как chip-row (компактно) или dropdown для >6 опций.
   if (setting.type === "select" || setting.type === "dropdown") {
     const opts = setting.options ?? [];
     if (opts.length === 0) return null;
-    if (opts.length > 6) {
-      // Dropdown — нативный select для большого числа опций.
-      return (
-        <div className="gen-set">
-          <div className="gen-set-label">
-            <span>{setting.label}</span>
-          </div>
-          <select
-            className="gen-select"
-            value={String(value ?? setting.default ?? "")}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            {opts.map((o) => (
-              <option key={String(o.value)} value={String(o.value)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      );
-    }
-    // Chip-row — компактно, видно всё сразу.
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
-        <div className="gen-chips">
+      <div className="gen-pop-body">
+        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
+        <div className="gen-pop-chips-row">
           {opts.map((o) => {
             const active = String(value ?? setting.default) === String(o.value);
             return (
               <button
                 key={String(o.value)}
+                type="button"
                 className={clsx("gen-chip", active && "on")}
                 onClick={() => onChange(o.value)}
               >
@@ -510,6 +653,18 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [motionLoading, setMotionLoading] = useState(false);
   const [soulStyleCache, setSoulStyleCache] = useState<SoulStyleItem[] | null>(null);
   const [soulStyleLoading, setSoulStyleLoading] = useState(false);
+
+  // Пользовательские аватары — отдельные кеши per provider, отображаются в верхней
+  // секции пикера. Поллим если есть pending (status="creating") Soul-аватары.
+  const [heygenUserCache, setHeygenUserCache] = useState<UserAvatarDto[] | null>(null);
+  const [heygenUserLoading, setHeygenUserLoading] = useState(false);
+  const [soulUserCache, setSoulUserCache] = useState<UserAvatarDto[] | null>(null);
+  const [soulUserLoading, setSoulUserLoading] = useState(false);
+
+  // Модалка создания аватара — provider определяет UI (1 фото vs 10-30 фото).
+  const [createAvatarProvider, setCreateAvatarProvider] = useState<
+    "heygen" | "higgsfield_soul" | null
+  >(null);
 
   // Когда модели приехали — выставляем дефолт.
   useEffect(() => {
@@ -651,6 +806,32 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }
   }
 
+  // Пользовательские аватары — force-reload поддерживается через `reload=true`
+  // (после создания/удаления/переименования).
+  async function ensureUserAvatars(
+    provider: "heygen" | "higgsfield_soul",
+    opts?: { reload?: boolean },
+  ) {
+    const isHey = provider === "heygen";
+    if (!opts?.reload) {
+      if (isHey && (heygenUserCache || heygenUserLoading)) return;
+      if (!isHey && (soulUserCache || soulUserLoading)) return;
+    }
+    if (isHey) setHeygenUserLoading(true);
+    else setSoulUserLoading(true);
+    try {
+      const list = await listUserAvatars(provider);
+      if (isHey) setHeygenUserCache(list);
+      else setSoulUserCache(list);
+    } catch {
+      if (isHey) setHeygenUserCache([]);
+      else setSoulUserCache([]);
+    } finally {
+      if (isHey) setHeygenUserLoading(false);
+      else setSoulUserLoading(false);
+    }
+  }
+
   // Eager-prefetch media каталогов когда у модели есть соответствующие settings.
   useEffect(() => {
     if (!selectedModel) return;
@@ -659,25 +840,76 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       const k = MEDIA_KIND_BY_TYPE[s.type];
       if (k) kinds.add(k);
     }
-    if (kinds.has("avatar")) ensureAvatars();
+    if (kinds.has("avatar")) {
+      ensureAvatars();
+      ensureUserAvatars("heygen");
+    }
     if (kinds.has("motion")) ensureMotions();
     if (kinds.has("soul-style")) ensureSoulStyles();
+    if (kinds.has("soul-character")) ensureUserAvatars("higgsfield_soul");
     // Кеши намеренно вне deps — иначе после первой загрузки triggered бы заново.
   }, [selectedModel]);
 
   function mediaNameLookup(kind: MediaPickerKind, id: string): string | null {
-    const list = kind === "avatar" ? avatarCache : kind === "motion" ? motionCache : soulStyleCache;
-    if (!list) return null;
-    const found = list.find((x) => x.id === id);
-    return found ? found.name : null;
+    // Пользовательские пикеры — ищем по своему кешу, иначе фоллбэк на каталог.
+    if (kind === "avatar") {
+      const userHit = heygenUserCache?.find((x) => x.externalId === id || x.id === id);
+      if (userHit) return userHit.name;
+      const catalogHit = avatarCache?.find((x) => x.id === id);
+      return catalogHit?.name ?? null;
+    }
+    if (kind === "soul-character") {
+      const hit = soulUserCache?.find((x) => x.externalId === id || x.id === id);
+      return hit?.name ?? null;
+    }
+    if (kind === "motion") {
+      const hit = motionCache?.find((x) => x.id === id);
+      return hit?.name ?? null;
+    }
+    const hit = soulStyleCache?.find((x) => x.id === id);
+    return hit?.name ?? null;
   }
 
   function openMediaPicker(settingKey: string, kind: MediaPickerKind) {
-    if (kind === "avatar") ensureAvatars();
+    if (kind === "avatar") {
+      ensureAvatars();
+      ensureUserAvatars("heygen");
+    }
     if (kind === "motion") ensureMotions();
     if (kind === "soul-style") ensureSoulStyles();
+    if (kind === "soul-character") ensureUserAvatars("higgsfield_soul");
     setVoicePickerSetting(null);
     setMediaPickerSetting({ key: settingKey, kind });
+  }
+
+  async function handleRenameUserAvatar(id: string, currentName: string) {
+    const newName = window.prompt("Новое название", currentName)?.trim();
+    if (!newName || newName === currentName) return;
+    try {
+      await renameUserAvatar(id, newName);
+    } finally {
+      // reload оба кеша лениво — мы не знаем какой именно provider у id
+      if (heygenUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("heygen", { reload: true });
+      }
+      if (soulUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("higgsfield_soul", { reload: true });
+      }
+    }
+  }
+
+  async function handleDeleteUserAvatar(id: string) {
+    if (!window.confirm("Удалить аватар? Это действие нельзя отменить.")) return;
+    try {
+      await deleteUserAvatar(id);
+    } finally {
+      if (heygenUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("heygen", { reload: true });
+      }
+      if (soulUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("higgsfield_soul", { reload: true });
+      }
+    }
   }
 
   // Upload-handler: грузит файлы в S3 через chat-uploads endpoint, обновляет
@@ -783,13 +1015,47 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
         meta: m.category,
       }));
     }
-    return (soulStyleCache ?? []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      previewUrl: s.previewUrl,
-    }));
+    if (mediaPickerSetting.kind === "soul-style") {
+      return (soulStyleCache ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        previewUrl: s.previewUrl,
+      }));
+    }
+    // soul-character — каталога нет, только пользовательские; рендерится из user-section.
+    return [];
   }, [mediaPickerSetting, avatarCache, motionCache, soulStyleCache]);
+
+  // User-items: HeyGen-аватары для kind=avatar, Soul-персонажи для kind=soul-character.
+  // Передаём в picker как `userItems`; в value сохраняем `externalId` (HeyGen
+  // asset_id или Soul character_id) — именно его ждёт worker/адаптер при submit.
+  const mediaUserItems: MediaUserItem[] | undefined = useMemo(() => {
+    if (!mediaPickerSetting) return undefined;
+    const source =
+      mediaPickerSetting.kind === "avatar"
+        ? heygenUserCache
+        : mediaPickerSetting.kind === "soul-character"
+          ? soulUserCache
+          : null;
+    if (!source) return undefined;
+    return source.map((u) => ({
+      // Для выбора используем externalId (то, что пойдёт в провайдер). Пока
+      // status=creating externalId может быть null — используем cuid как
+      // временный id, но тогда tile disabled.
+      id: u.externalId ?? u.id,
+      name: u.name,
+      previewUrl: u.previewUrl,
+      status: u.status,
+    }));
+  }, [mediaPickerSetting, heygenUserCache, soulUserCache]);
+
+  const mediaUserItemsLoading =
+    mediaPickerSetting?.kind === "avatar"
+      ? heygenUserLoading
+      : mediaPickerSetting?.kind === "soul-character"
+        ? soulUserLoading
+        : false;
 
   const mediaPickerLoading =
     mediaPickerSetting?.kind === "avatar"
@@ -816,17 +1082,32 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const mediaPickerTitle = mediaPickerSetting
     ? mediaPickerSetting.kind === "avatar"
       ? "Выбор аватара"
-      : mediaPickerSetting.kind === "motion"
-        ? "Пресеты движения"
-        : "Стиль изображения"
+      : mediaPickerSetting.kind === "soul-character"
+        ? "Soul-персонаж"
+        : mediaPickerSetting.kind === "motion"
+          ? "Пресеты движения"
+          : "Стиль изображения"
     : "";
   const mediaPickerSubtitle = mediaPickerSetting
     ? mediaPickerSetting.kind === "avatar"
       ? "HeyGen"
-      : "HiggsField"
+      : mediaPickerSetting.kind === "soul-character"
+        ? "Higgsfield Soul"
+        : "HiggsField"
     : "";
   // motion-picker — multi, максимум 2 (из описания shared'-модели). Остальные — single.
   const mediaPickerMaxItems = mediaPickerSetting?.kind === "motion" ? 2 : 1;
+
+  // create-button: открывает модалку аплоада для соответствующего провайдера.
+  const mediaPickerOnCreate =
+    mediaPickerSetting?.kind === "avatar"
+      ? () => setCreateAvatarProvider("heygen")
+      : mediaPickerSetting?.kind === "soul-character"
+        ? () => setCreateAvatarProvider("higgsfield_soul")
+        : undefined;
+
+  // soul-character: каталога нет, скрываем нижнюю секцию.
+  const mediaPickerHideCatalog = mediaPickerSetting?.kind === "soul-character";
 
   function onMediaSelect(ids: string[]) {
     if (!mediaPickerSetting) return;
@@ -866,100 +1147,105 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
           </div>
         )}
 
-        {/* Media slots — фильтруются по активному режиму. */}
-        {activeSlots.length > 0 && (
-          <div
-            className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
-            style={{
-              gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
-            }}
-          >
-            {activeSlots.map((slot) => (
-              <SlotCard
-                key={slot.slotKey}
-                slot={slot}
-                files={slotFiles[slot.slotKey] ?? []}
-                onAdd={(fl) => addToSlot(slot.slotKey, fl)}
-                onRemove={(id) => removeFromSlot(slot.slotKey, id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Prompt. */}
-        <textarea
-          className="gen-prompt"
-          placeholder={promptPlaceholder}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={3}
-        />
-
-        {/* Настройки модели (все, что не aspect/duration — для них своя строка). */}
-        {visibleSettings.length > 0 && (
-          <div className="gen-settings">
-            {visibleSettings.map((s) => (
-              <SettingControl
-                key={s.key}
-                setting={s}
-                value={settingValues[s.key] ?? s.default}
-                onChange={(v) => setSettingValues((prev) => ({ ...prev, [s.key]: v }))}
-                openVoicePicker={(provider) => openVoicePicker(s.key, provider)}
-                voiceNameLookup={voiceNameLookup}
-                openMediaPicker={(kind) => openMediaPicker(s.key, kind)}
-                mediaNameLookup={mediaNameLookup}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Model picker (chip). */}
-        <div ref={modelPickRef} className="gen-model-row">
-          <button className="gen-model-btn" onClick={() => setModelOpen(!modelOpen)}>
-            <div className="gen-model-glyph">
-              {selectedModel ? modelLetter(selectedModel) : "·"}
+        {/* Скроллящийся блок с слотами / промптом / настройками.
+            Фикс'нутый footer ниже (model picker + CTA) всегда виден. */}
+        <div className="gen-panel-scroll">
+          {/* Media slots — фильтруются по активному режиму. */}
+          {activeSlots.length > 0 && (
+            <div
+              className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
+              }}
+            >
+              {activeSlots.map((slot) => (
+                <SlotCard
+                  key={slot.slotKey}
+                  slot={slot}
+                  files={slotFiles[slot.slotKey] ?? []}
+                  onAdd={(fl) => addToSlot(slot.slotKey, fl)}
+                  onRemove={(id) => removeFromSlot(slot.slotKey, id)}
+                />
+              ))}
             </div>
-            <div className="gen-model-text">
-              <span className="gen-model-meta">Model</span>
-              <span className="gen-model-name">
-                {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
-              </span>
-            </div>
-            <ChevronDown size={16} />
-          </button>
-          {modelOpen && (
-            <div className="gen-model-pop">
-              {models.map((m) => (
-                <button
-                  key={m.id}
-                  className={clsx("gen-model-row-item", m.id === modelId && "on")}
-                  onClick={() => {
-                    setModelId(m.id);
-                    setModelOpen(false);
-                  }}
-                >
-                  <div className="gen-model-glyph">{modelLetter(m)}</div>
-                  <div className="gen-model-item-body">
-                    <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                    <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                  </div>
-                  {m.id === modelId && <Check size={14} />}
-                </button>
+          )}
+
+          {/* Prompt. */}
+          <textarea
+            className="gen-prompt"
+            placeholder={promptPlaceholder}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={3}
+          />
+
+          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку. */}
+          {visibleSettings.length > 0 && (
+            <div className="gen-settings-chips">
+              {visibleSettings.map((s) => (
+                <SettingChip
+                  key={s.key}
+                  setting={s}
+                  value={settingValues[s.key] ?? s.default}
+                  onChange={(v) => setSettingValues((prev) => ({ ...prev, [s.key]: v }))}
+                  openVoicePicker={(provider) => openVoicePicker(s.key, provider)}
+                  voiceNameLookup={voiceNameLookup}
+                  openMediaPicker={(kind) => openMediaPicker(s.key, kind)}
+                  mediaNameLookup={mediaNameLookup}
+                />
               ))}
             </div>
           )}
         </div>
 
-        {/* Generate CTA. */}
-        <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
-          <Sparkles size={16} />
-          <span>{busy ? "Generating…" : "Generate"}</span>
-          {selectedModel && (
-            <span className="gen-cta-cost mono">
-              ≈ {Math.round(selectedModel.tokenCostApprox)} т
-            </span>
-          )}
-        </button>
+        {/* Footer: model picker + CTA. Sticky, всегда видны. */}
+        <div className="gen-panel-footer">
+          <div ref={modelPickRef} className="gen-model-row">
+            <button className="gen-model-btn" onClick={() => setModelOpen(!modelOpen)}>
+              <div className="gen-model-glyph">
+                {selectedModel ? modelLetter(selectedModel) : "·"}
+              </div>
+              <div className="gen-model-text">
+                <span className="gen-model-meta">Model</span>
+                <span className="gen-model-name">
+                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                </span>
+              </div>
+              <ChevronDown size={16} />
+            </button>
+            {modelOpen && (
+              <div className="gen-model-pop">
+                {models.map((m) => (
+                  <button
+                    key={m.id}
+                    className={clsx("gen-model-row-item", m.id === modelId && "on")}
+                    onClick={() => {
+                      setModelId(m.id);
+                      setModelOpen(false);
+                    }}
+                  >
+                    <div className="gen-model-glyph">{modelLetter(m)}</div>
+                    <div className="gen-model-item-body">
+                      <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                      <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                    </div>
+                    {m.id === modelId && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
+            <Sparkles size={16} />
+            <span>{busy ? "Generating…" : "Generate"}</span>
+            {selectedModel && (
+              <span className="gen-cta-cost mono">
+                ≈ {Math.round(selectedModel.tokenCostApprox)} т
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {voicePickerSetting && activePickerProvider && (
@@ -1001,8 +1287,33 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             previewKind={mediaPickerPreviewKind}
             onChange={onMediaSelect}
             onClose={() => setMediaPickerSetting(null)}
+            userItems={mediaUserItems}
+            userItemsLoading={mediaUserItemsLoading}
+            userItemsLabel={
+              mediaPickerSetting?.kind === "soul-character" ? "Мои персонажи" : "Мои аватары"
+            }
+            hideCatalog={mediaPickerHideCatalog}
+            onCreate={mediaPickerOnCreate}
+            onRename={mediaPickerOnCreate ? handleRenameUserAvatar : undefined}
+            onDelete={mediaPickerOnCreate ? handleDeleteUserAvatar : undefined}
           />
         </>
+      )}
+
+      {createAvatarProvider && (
+        <CreateAvatarModal
+          provider={createAvatarProvider}
+          onClose={() => setCreateAvatarProvider(null)}
+          onCreated={(_avatar) => {
+            // Свежесозданный аватар — reload соответствующего кеша. Это
+            // подхватит и status="ready" (HeyGen), и status="creating" (Soul).
+            if (createAvatarProvider === "heygen") {
+              void ensureUserAvatars("heygen", { reload: true });
+            } else {
+              void ensureUserAvatars("higgsfield_soul", { reload: true });
+            }
+          }}
+        />
       )}
     </div>
   );

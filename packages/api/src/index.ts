@@ -53,6 +53,7 @@ import { userVoicesRoutes } from "./routes/user-voices.js";
 import { downloadRoutes } from "./routes/download.js";
 import { wsRoutes } from "./routes/ws.js";
 import { webPromptsRoutes } from "./routes/web-prompts.js";
+import { webUserAvatarsRoutes } from "./routes/web-user-avatars.js";
 import { startRateScheduler } from "./services/exchange-rate.service.js";
 import { startSubscriptionScheduler } from "./services/subscription.service.js";
 import { config, preloadLocales, SUPPORTED_LANGUAGES } from "@metabox/shared";
@@ -234,6 +235,7 @@ await server.register(userVoicesRoutes);
 await server.register(downloadRoutes);
 await server.register(wsRoutes);
 await server.register(webPromptsRoutes);
+await server.register(webUserAvatarsRoutes);
 
 // Start USDT/RUB exchange rate scheduler (fetches from Binance 4× daily)
 startRateScheduler();
