@@ -460,6 +460,8 @@ export default {
       "❌ Failed to upload the file for generation. Please check the size (usually up to 50 MB) and file format.",
     replicateContentPolicy:
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
+    loraUrlInvalid:
+      "❌ The “Extra LoRA” field in model settings is filled incorrectly — it expects a LoRA file URL (HuggingFace / CivitAI / Replicate / .safetensors), not free-form text. Clear this field or replace it with a valid URL.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
     modelDoesNotSupportImages:

@@ -1,6 +1,6 @@
 import Replicate from "replicate";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logger } from "../../logger.js";
 import { logCall } from "../../utils/fetch.js";
 import { parseReplicatePredictionFailure } from "../../utils/replicate-error.js";
@@ -139,7 +139,34 @@ export class ReplicateAdapter implements ImageAdapter {
       msExtras.num_inference_steps = 10;
     }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
-    if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
+    if (ms.extra_lora !== undefined && ms.extra_lora !== null) {
+      // Replicate runtime LoRA-loader принимает только: <owner>/<name>[:version],
+      // huggingface.co/..., civitai.com/models/..., либо URL на .safetensors.
+      // Все валидные форматы — без whitespace и в пределах ~256 chars. Юзеры
+      // регулярно путают поле с «доп. промптом» и вписывают свободный текст —
+      // тогда мы платим Replicate за заведомо обречённый predict и юзер ждёт
+      // 30s polling'а ради «Ошибка генерации». Up-front guard: rejectim
+      // очевидно-не-URL значения сразу. Остальные кривые URL (валидный формат,
+      // но неподдерживаемый хост) дойдут до Replicate-rejection — тогда
+      // USER_FACING_TEXT_PATTERN в replicate-error.ts смапит на тот же ключ.
+      const rawValue = typeof ms.extra_lora === "string" ? ms.extra_lora.trim() : "";
+      if (rawValue) {
+        if (/\s/.test(rawValue) || rawValue.length > 256) {
+          logger.warn(
+            {
+              modelId: this.modelId,
+              extraLoraSample: rawValue.slice(0, 80),
+              extraLoraLength: rawValue.length,
+            },
+            "Replicate adapter: rejected invalid extra_lora value (not a URL/identifier)",
+          );
+          throw new UserFacingError("Invalid extra_lora value (not a URL/identifier)", {
+            key: "loraUrlInvalid",
+          });
+        }
+        msExtras.extra_lora = rawValue;
+      }
+    }
     if (ms.extra_lora_scale !== undefined) msExtras.extra_lora_scale = ms.extra_lora_scale;
     if (ms.seed != null) msExtras.seed = ms.seed;
     if (ms.disable_safety_checker !== undefined)

@@ -299,6 +299,7 @@ export interface Translations {
     replicateInvalidParams: string;
     replicateFileTooLarge: string;
     replicateContentPolicy: string;
+    loraUrlInvalid: string;
     promptNotEnglish: string;
     modelDoesNotSupportImages: string;
     // Fal
