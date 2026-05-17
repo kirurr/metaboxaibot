@@ -87,10 +87,10 @@ export function GenerationHistory({
     }
   }
 
-  // Fetch при смене семейства/секции.
+  // Fetch при смене семейства/секции. `refetch` намеренно не в deps —
+  // он замыкается над state'ом, всегда видит свежее значение.
   useEffect(() => {
     void refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyModelIds.join(","), section]);
 
   // Реакция на WS-нотификации: матчим по jobId с трекаемыми pending'ами.
@@ -109,8 +109,7 @@ export function GenerationHistory({
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notifications, pendingJobs]);
+  }, [notifications, pendingJobs, onJobResolved, onJobFailed]);
 
   // Скрываем pending'и, для которых job уже есть в history (race между
   // refetch'ем и pendingJobs cleanup из родителя — лучше не дублировать).
