@@ -85,13 +85,30 @@ export class ReplicateAdapter implements ImageAdapter {
     if (ms.guidance_scale !== undefined) msExtras.guidance_scale = ms.guidance_scale;
     if (ms.cfg !== undefined) msExtras.cfg = ms.cfg;
     if (ms.num_inference_steps !== undefined) msExtras.num_inference_steps = ms.num_inference_steps;
-    const stylePreset = ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
-    if (stylePreset) msExtras.style_preset = stylePreset;
     // Resolve image URL from structured media inputs, falling back to legacy imageUrl.
     // Ideogram models use "style_ref" slot; other models use "edit" slot.
+    // Считаем ДО style_preset — чтобы драгнуть style_preset при конфликте с
+    // загруженной картинкой (см. ниже).
     const imageUrl = IDEOGRAM_MODELS.has(this.modelId)
       ? (input.mediaInputs?.style_ref?.[0] ?? input.imageUrl)
       : (input.mediaInputs?.edit?.[0] ?? input.imageUrl);
+    // Ideogram взаимоисключает `style_preset` / `style_codes` / `style_reference_images` —
+    // Replicate отбивает payload с "Please provide just one of ...". UI знает про
+    // конфликт style_preset ↔ style_type (через unavailableIf), но НЕ про конфликт
+    // style_preset ↔ uploaded reference image. Если юзер загрузил картинку в slot
+    // `style_ref` — uploaded-картинка побеждает (это более явное действие чем
+    // saved-в-advanced preset), preset молча дропаем с warn'ом.
+    const stylePresetRaw =
+      ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
+    const ideogramHasUploadedRef = IDEOGRAM_MODELS.has(this.modelId) && !!imageUrl;
+    if (ideogramHasUploadedRef && stylePresetRaw) {
+      logger.warn(
+        { modelId: this.modelId, stylePreset: stylePresetRaw },
+        "Replicate adapter: dropped style_preset because style_ref image present (Ideogram mutex)",
+      );
+    }
+    const stylePreset = ideogramHasUploadedRef ? undefined : stylePresetRaw;
+    if (stylePreset) msExtras.style_preset = stylePreset;
     // Ideogram constraint: when style_preset, style_codes, or style_reference_images
     // is used, style_type must be Auto or General. A reference image sent by the
     // user becomes style_reference_images further down, so detect that here too.
