@@ -9,6 +9,8 @@
     "plans": "Тарифы",
     "tokens": "Токены",
     "profile": "Профиль",
+    "billing": "Платежи",
+    "settings": "Настройки",
     "logout": "Выйти"
   },
   "common": {
@@ -27,5 +29,41 @@
     "title": "Подключите Telegram-бот",
     "openBot": "Открыть Telegram-бот",
     "waiting": "Ожидаем подключение…"
+  },
+  "profile": {
+    "title": "Профиль",
+    "subtitle": "Как вы выглядите в AI Box и как сервис ведёт себя для вас.",
+    "sectionAccount": "Аккаунт",
+    "sectionBalance": "Баланс",
+    "firstName": "Имя",
+    "lastName": "Фамилия",
+    "email": "Email",
+    "telegram": "Telegram",
+    "telegramNotLinked": "Не привязан",
+    "telegramLinked": "Привязан",
+    "telegramNotLinkedChip": "Не привязан",
+    "balanceTotal": "Всего токенов",
+    "balanceTotalHint": "Купленные + по подписке",
+    "balancePurchased": "Купленные",
+    "balancePurchasedHint": "Не сгорают",
+    "balanceSubscription": "По подписке",
+    "balanceSubscriptionHint": "Списываются при истечении периода"
+  },
+  "generate": {
+    "familyVersion": "Версия",
+    "familyVariant": "Вариант"
+  },
+  "settings": {
+    "title": "Настройки",
+    "subtitle": "Язык интерфейса и управление данными аккаунта.",
+    "sectionPreferences": "Предпочтения",
+    "languageLabel": "Язык интерфейса",
+    "languageHint": "Переключает UI мгновенно. Хранится локально.",
+    "languageRu": "Русский",
+    "languageEn": "English",
+    "sectionDataPrivacy": "Данные и приватность",
+    "dataPrivacyHint": "Ваши диалоги не используются для обучения моделей. Экспорт и удаление доступны в любой момент.",
+    "exportData": "Экспортировать данные",
+    "deleteAccount": "Удалить аккаунт"
   }
 }

@@ -124,7 +124,9 @@ select {
 /* Headings — Comfortaa */
 .h1,
 .h2,
-.h3 {
+.h3,
+.h4
+{
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -1036,6 +1038,13 @@ select {
   justify-content: flex-end;
 }
 .msg .bubble {
+  /* fit-content нужен, иначе короткие сообщения (типа «Тест») сжимаются ниже
+     content-width: bubble — flex item в `.msg.user .msg-block` (column +
+     align-items:end + min-width:0), а `max-width: 78%` создаёт круговую
+     зависимость с auto-width → браузер резолвит в маленькую цифру и текст
+     вылезает за padding. `fit-content` заставляет считать ширину как
+     content+padding, при этом capается `max-width: 78%` для длинных строк. */
+  width: fit-content;
   max-width: 78%;
   padding: 14px 18px;
   border-radius: 18px;
@@ -1058,6 +1067,17 @@ select {
      («Тест», «ок») в `14px` смотрелись пухло. Горизонтальное padding'и
      одинаковые с AI, чтобы текст не упирался в рамку. */
   padding: 10px 18px;
+}
+.msg.user .msg-block {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+}
+.msg.ai .msg-block {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .msg .ai-mark {
   width: 32px;
@@ -5054,18 +5074,15 @@ select {
   text-overflow: ellipsis;
 }
 .gen-model-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  /* Позиционирование (top/left/width) и max-height/overflow задаются inline
+     из ChipPopover — динамически считаются по доступному пространству и
+     ширине anchor'а. */
+  z-index: 60;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 6px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-  max-height: 420px;
-  overflow-y: auto;
 }
 .gen-model-row-item {
   width: 100%;
@@ -5140,6 +5157,9 @@ select {
 }
 .gen-cta-cost {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12.5px;
   font-weight: 600;
   opacity: 0.85;
@@ -5516,6 +5536,11 @@ select {
   font-weight: 700;
 }
 .media-pick-overlay .spin {
+  animation: gen-spin 1s linear infinite;
+}
+/* Глобальный fallback — крутим любой `.spin` (Loader2 от lucide-react)
+   там, где скоупленные правила выше не покрывают. */
+.spin {
   animation: gen-spin 1s linear infinite;
 }
 @keyframes gen-spin {

@@ -680,7 +680,7 @@ export default function Chat() {
                       <Sparkles size={16} />
                     </div>
                   )}
-                  <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
+                  <div className="msg-block">
                     {m.attachments && m.attachments.length > 0 && (
                       <div className="msg-attachments">
                         {m.attachments.map((a, ai) => (
