@@ -37,12 +37,6 @@ const SECTION_SUBTITLE_KEY: Record<MediaSection, Parameters<ReturnType<typeof us
   audio: "audioSettings.subtitle",
 };
 
-// Длина окна ожидания «юзер закончил тыкать варианты» перед тем как дёрнуть
-// Telegram-нотификацию. 5с — компромисс: достаточно для серии быстрых
-// tap'ов (1с между нажатиями типично), но не настолько большой чтобы юзер
-// успел закрыть мини-аппу через крестик и не получить ping.
-const SELECT_NOTIFY_DEBOUNCE_MS = 5000;
-
 export function MediaSettingsView({
   section,
   initialModelId,
@@ -66,15 +60,6 @@ export function MediaSettingsView({
   const debounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Pending changes per model — batched and flushed as a single PATCH
   const pendingChangesRef = useRef<Record<string, Record<string, unknown>>>({});
-  // Debounce-таймер для notification после silent select (см. handleModelSelect).
-  // Один на всю карточку — если юзер быстро прыгает между версиями, нам нужно
-  // только последнее уведомление, на финальный выбор.
-  const selectNotifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Последний modelId, выбранный через handleModelSelect и ещё не
-  // подтверждённый нотификацией. Нужен для pagehide / unmount path: если
-  // юзер закроет мини-аппу до debounce-fire, мы успеем дослать notification.
-  // null когда нет pending'а (после fire или после full activate).
-  const lastSelectedRef = useRef<string | null>(null);
   // Цепочка in-flight selectModel вызовов. Activate await'ит её перед своим
   // собственным /state/activate — иначе late-arriving selectModel мог бы
   // переписать DB после activate (last-write-wins на сервере) и бот пошёл
@@ -82,10 +67,13 @@ export function MediaSettingsView({
   // GC коллапсирует её как только финальный promise resolved'ится — после
   // того как юзер прекращает тапать, ссылка на тейл рушится естественно.
   const selectChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  // Маркер pending silent-select для UI: пока true, кнопка «Активировать»
-  // остаётся кликабельной даже когда `isGloballyActive=true` — иначе после
-  // тапа по чипу в активной секции юзер теряет аффорданс «применить и
-  // закрыть» (кнопка disabled'ится с надписью «Активирована»).
+  // Маркер «юзер тыкнул вариант с момента открытия мини-аппы» — кнопка
+  // «Активировать» остаётся кликабельной даже когда `isGloballyActive=true`,
+  // иначе после тапа по чипу в активной секции теряется аффорданс «применить
+  // и закрыть» (кнопка disabled'ится с надписью «Активирована»). Сбрасывается
+  // только при full activate. Server-side trailing debounce сам решает,
+  // отправлять ли финальное Telegram-уведомление, поэтому клиенту хранить
+  // pending-таймер больше не нужно.
   const [hasPendingSelect, setHasPendingSelect] = useState(false);
 
   useEffect(() => {
@@ -112,6 +100,15 @@ export function MediaSettingsView({
       .finally(() => setLoading(false));
   }, [section]);
 
+  // hasPendingSelect — флаг «юзер тыкнул вариант» — относится к конкретной
+  // family-карточке. При переключении picker'а (юзер ушёл в другое семейство
+  // моделей) пометка не должна тащиться следом, иначе activate-кнопка
+  // активной модели В НОВОМ семействе ошибочно покажет «Активировать» вместо
+  // «Активирована». Сбрасываем при смене selectedPickerId.
+  useEffect(() => {
+    setHasPendingSelect(false);
+  }, [selectedPickerId]);
+
   const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
     design: "DESIGN_ACTIVE",
     video: "VIDEO_ACTIVE",
@@ -119,19 +116,14 @@ export function MediaSettingsView({
   };
 
   const handleModelActivate = async (modelId: string) => {
-    // Full activate шлёт свою notification — гасим pending debounce от
-    // прежних silent select'ов, иначе юзер получит два дубль-сообщения.
-    if (selectNotifyTimerRef.current) {
-      clearTimeout(selectNotifyTimerRef.current);
-      selectNotifyTimerRef.current = null;
-    }
-    lastSelectedRef.current = null;
     setHasPendingSelect(false);
     setActiveModelId(modelId);
     setState(SECTION_ACTIVE_STATE[section]);
     // Дождаться очереди silent-select'ов прежде чем отправить activate —
     // иначе late selectModel(A) может прилететь после activate(B) и
-    // переписать DB на A (бот тогда пойдёт по A, юзер ждал B).
+    // переписать DB на A (бот тогда пойдёт по A, юзер ждал B). Сервер,
+    // получив activate, сам гасит pending trailing-debounce этого юзера
+    // (cancelPendingNotify), так что дублёра уведомления не будет.
     await selectChainRef.current.catch(() => void 0);
     try {
       await api.state.activate(section, modelId);
@@ -151,78 +143,26 @@ export function MediaSettingsView({
    * следующем запросе уже использует выбранную модель. Кнопка
    * «Активировать» по-прежнему делает full activation.
    *
-   * Notification: schedule'им через 5с — даём юзеру допрыгать между
-   * вариантами без N сообщений, но если он закроет мини-аппу через крестик,
-   * через 5с всё равно прилетит подтверждение в чат и будет ясно что выбор
-   * сохранён. Каждый новый select reset'ит таймер; full activate его гасит.
+   * Telegram-уведомление полностью на сервере: server-side trailing-debounce
+   * в /state/select-model сбрасывается на каждый тап, после 5с тишины шлёт
+   * один пинг про финальную модель (с dedup'ом если юзер вернулся к
+   * исходной). Клиенту не нужны debounce-таймеры или pagehide-листенеры —
+   * X-close в Telegram WebView больше не теряет уведомление.
+   *
+   * `keepalive: true` на самом запросе (см. api.state.selectModel) гарантирует
+   * что фетч переживёт закрытие WebView, даже если юзер тапнул и сразу X.
    */
   const handleModelSelect = (modelId: string) => {
-    // No-op: тап по уже-активной модели не должен слать notification (юзер
-    // получил бы «X активирована» для модели которая и так была активна).
-    // Двойная проверка: `activeModelId` из closure может быть stale при
-    // двойном tap'е в одном тике (React batching), а `lastSelectedRef` —
-    // mutable, видит свежее значение из предыдущего вызова handleModelSelect.
-    if (modelId === activeModelId || lastSelectedRef.current === modelId) return;
+    if (modelId === activeModelId) return;
 
     setActiveModelId(modelId);
-    lastSelectedRef.current = modelId;
     setHasPendingSelect(true);
-    // Цепляем в `selectChainRef` — следующий activate будет ждать
-    // завершения серии silent select'ов.
     selectChainRef.current = selectChainRef.current.then(() =>
       api.state.selectModel(section, modelId).catch((e) => {
         console.error("[settings] select-model failed", modelId, e);
       }),
     );
-    if (selectNotifyTimerRef.current) {
-      clearTimeout(selectNotifyTimerRef.current);
-    }
-    selectNotifyTimerRef.current = setTimeout(() => {
-      selectNotifyTimerRef.current = null;
-      lastSelectedRef.current = null;
-      setHasPendingSelect(false);
-      api.state.notifyModelChanged(section, modelId).catch((e) => {
-        console.error("[settings] notify-model-changed failed", modelId, e);
-      });
-    }, SELECT_NOTIFY_DEBOUNCE_MS);
   };
-
-  // Если юзер закрывает мини-аппу через крестик / переключает таб до того
-  // как сработает 5-секундный debounce, его pending notification теряется и
-  // он не понимает, сохранился ли выбор. Слушаем оба события:
-  //  - `pagehide` — стандартное закрытие WebView, надёжно на Android.
-  //  - `visibilitychange` (hidden) — fallback для iOS Telegram WebView, где
-  //    `pagehide` может не сработать при swipe-close.
-  // Дослaём через keepalive fetch (sendBeacon не несёт auth headers).
-  // На unmount компонента (юзер свитчит секцию внутри мини-аппы): fire
-  // pending немедленно через обычный fetch — компонент уже исчез, но
-  // запрос успеет улететь.
-  useEffect(() => {
-    const fireIfPending = (beacon: boolean) => {
-      const lastId = lastSelectedRef.current;
-      const timer = selectNotifyTimerRef.current;
-      if (!timer || !lastId) return;
-      clearTimeout(timer);
-      selectNotifyTimerRef.current = null;
-      lastSelectedRef.current = null;
-      if (beacon) {
-        api.state.notifyModelChangedBeacon(section, lastId);
-      } else {
-        api.state.notifyModelChanged(section, lastId).catch(() => void 0);
-      }
-    };
-    const onHide = () => fireIfPending(true);
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") fireIfPending(true);
-    };
-    window.addEventListener("pagehide", onHide);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", onHide);
-      document.removeEventListener("visibilitychange", onVisibility);
-      fireIfPending(false);
-    };
-  }, [section]);
 
   const handleSettingChange = (modelId: string, key: string, value: unknown) => {
     const model = models.find((m) => m.id === modelId);
@@ -276,15 +216,6 @@ export function MediaSettingsView({
     if (modelId === activeModelId) {
       setActiveModelId("");
       setState(undefined);
-    }
-    // Гасим pending notification: если debounce таймер ещё крутится после
-    // прошлого silent select, без сброса юзер бы получил «X активирована»
-    // через 5с, хотя из-за смены mode модель уже не «активна» в смысле UI.
-    if (selectNotifyTimerRef.current && lastSelectedRef.current === modelId) {
-      clearTimeout(selectNotifyTimerRef.current);
-      selectNotifyTimerRef.current = null;
-      lastSelectedRef.current = null;
-      setHasPendingSelect(false);
     }
   };
 

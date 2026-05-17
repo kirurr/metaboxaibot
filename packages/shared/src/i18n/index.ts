@@ -483,6 +483,7 @@ export interface Translations {
   };
   modelModes: {
     pickerTitle: string;
+    pickModeFirstForMedia: string;
     activated: string;
     activatedTextOnly: string;
     change: string;
