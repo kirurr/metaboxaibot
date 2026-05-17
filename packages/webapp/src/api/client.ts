@@ -35,8 +35,8 @@ export function setWebToken(token: string): void {
 
 /**
  * Возвращает Authorization header для текущей сессии — Telegram initData
- * (mini-app) или web JWT. Расшарено между `request()` и
- * `notifyModelChangedBeacon` чтобы schema auth не дрейфовала между ними.
+ * (mini-app) или web JWT. Расшарено между `request()` и `uploadRequest()`
+ * чтобы schema auth не дрейфовала между ними.
  */
 function buildAuthHeader(): { Authorization: string } | Record<string, never> {
   if (_initDataRaw) return { Authorization: `tma ${_initDataRaw}` };
