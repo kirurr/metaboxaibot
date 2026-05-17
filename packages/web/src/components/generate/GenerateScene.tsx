@@ -1,14 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Image as ImageIcon,
-  Plus,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
@@ -17,6 +9,7 @@ import {
   submitImageGeneration,
   submitVideoGeneration,
   submitAudioGeneration,
+  previewGeneration,
   type SubmitImageGenerationBody,
   type SubmitVideoGenerationBody,
   type SubmitAudioGenerationBody,
@@ -317,9 +310,8 @@ function SettingChip({
         onClick={() => openVoicePicker(voiceProvider)}
         title={setting.description ?? setting.label}
       >
-        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-label">{setting.label}:</span>
         <span className="gen-chip-pill-val">{name ?? "Не выбрано"}</span>
-        <ChevronRight size={11} />
       </button>
     );
   }
@@ -347,9 +339,8 @@ function SettingChip({
         onClick={() => openMediaPicker(mediaKind)}
         title={setting.description ?? setting.label}
       >
-        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-label">{setting.label}:</span>
         <span className="gen-chip-pill-val">{summary}</span>
-        <ChevronRight size={11} />
       </button>
     );
   }
@@ -366,7 +357,7 @@ function SettingChip({
         onClick={() => onChange(!checked)}
         title={setting.description ?? setting.label}
       >
-        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-label">{setting.label}:</span>
         <span className="gen-chip-pill-val">{checked ? "Вкл" : "Выкл"}</span>
       </button>
     );
@@ -406,9 +397,8 @@ function SettingChip({
         onClick={() => setOpen((v) => !v)}
         title={setting.description ?? setting.label}
       >
-        <span className="gen-chip-pill-label">{setting.label}</span>
+        <span className="gen-chip-pill-label">{setting.label}:</span>
         <span className="gen-chip-pill-val">{summary}</span>
-        <ChevronDown size={11} />
       </button>
       {open && (
         <ChipPopover anchorRef={chipRef} popRef={popRef}>
@@ -429,12 +419,22 @@ function ChipPopover({
   anchorRef,
   popRef,
   children,
+  className = "gen-chip-pop",
+  matchAnchorWidth = false,
 }: {
   anchorRef: React.RefObject<HTMLElement | null>;
   popRef: React.RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
+  className?: string;
+  /** Подгонять ширину popover'а под anchor (для model-picker и аналогов). */
+  matchAnchorWidth?: boolean;
 }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    maxHeight: number;
+    width?: number;
+  } | null>(null);
 
   useLayoutEffect(() => {
     function update() {
@@ -442,28 +442,43 @@ function ChipPopover({
       if (!anchor) return;
       const ar = anchor.getBoundingClientRect();
       const pop = popRef.current;
-      // На первом проходе popover ещё не отрендерен — берём оценочные размеры,
-      // следующий effect-tick уточнит.
-      const pw = pop?.offsetWidth ?? 240;
-      const ph = pop?.offsetHeight ?? 100;
+      const pw = matchAnchorWidth ? ar.width : (pop?.offsetWidth ?? 240);
+      // scrollHeight — фактическая высота контента, не клампнутая max-height'ом
+      // самого popover'а. Нужно чтобы корректно решить "помещается ли".
+      const ph = pop?.scrollHeight ?? pop?.offsetHeight ?? 100;
       const vh = window.innerHeight;
       const vw = window.innerWidth;
       const GAP = 6;
       const MARGIN = 8;
+      const MIN_HEIGHT = 120;
 
-      // Vertical: prefer below; flip up если не помещается.
-      const spaceBelow = vh - ar.bottom;
-      const top =
-        spaceBelow >= ph + GAP + MARGIN || spaceBelow >= ar.top
-          ? ar.bottom + GAP
-          : Math.max(MARGIN, ar.top - GAP - ph);
+      // Выбираем направление: сначала пробуем вниз, если не помещается —
+      // вверх. Если ни там, ни там не влезает целиком — пускаем в сторону с
+      // бо́льшим запасом и клампим max-height.
+      const spaceBelow = vh - ar.bottom - GAP - MARGIN;
+      const spaceAbove = ar.top - GAP - MARGIN;
+      let top: number;
+      let maxHeight: number;
+      if (ph <= spaceBelow) {
+        top = ar.bottom + GAP;
+        maxHeight = spaceBelow;
+      } else if (ph <= spaceAbove) {
+        top = ar.top - GAP - ph;
+        maxHeight = spaceAbove;
+      } else if (spaceBelow >= spaceAbove) {
+        top = ar.bottom + GAP;
+        maxHeight = Math.max(MIN_HEIGHT, spaceBelow);
+      } else {
+        maxHeight = Math.max(MIN_HEIGHT, spaceAbove);
+        top = Math.max(MARGIN, ar.top - GAP - maxHeight);
+      }
 
       // Horizontal: prefer align-left; clamp в viewport.
       let left = ar.left;
       if (left + pw + MARGIN > vw) left = Math.max(MARGIN, vw - pw - MARGIN);
       if (left < MARGIN) left = MARGIN;
 
-      setPos({ top, left });
+      setPos({ top, left, maxHeight, width: matchAnchorWidth ? ar.width : undefined });
     }
     update();
     // Scroll любого внутреннего контейнера → reposition. capture обязателен —
@@ -478,16 +493,19 @@ function ChipPopover({
       window.removeEventListener("resize", onScrollOrResize);
       cancelAnimationFrame(raf);
     };
-  }, [anchorRef, popRef]);
+  }, [anchorRef, popRef, matchAnchorWidth]);
 
   return createPortal(
     <div
       ref={popRef}
-      className="gen-chip-pop"
+      className={className}
       style={{
         position: "fixed",
         top: pos?.top ?? -9999,
         left: pos?.left ?? -9999,
+        width: pos?.width,
+        maxHeight: pos?.maxHeight,
+        overflowY: "auto",
         // До первого позиционирования прячем (иначе мелькает в (0,0)).
         visibility: pos ? "visible" : "hidden",
       }}
@@ -602,35 +620,6 @@ function SettingPopBody({
   if (setting.type === "select" || setting.type === "dropdown") {
     const opts = setting.options ?? [];
     if (opts.length === 0) return null;
-    if (opts.length > 6) {
-      // Dropdown — нативный select для большого числа опций.
-      return (
-        <div className="gen-set">
-          <div className="gen-set-label">
-            <span>{setting.label}</span>
-          </div>
-          <select
-            className="gen-select"
-            value={String(value ?? setting.default ?? "")}
-            onChange={(e) => {
-              // Native <select> возвращает string — резолвим обратно в исходный
-              // тип опции (number/boolean/string), чтобы адаптеры на воркере
-              // не получили "1" вместо 1. Chip-row (≤6 опций) такого приёма
-              // не требует, там o.value передаётся напрямую.
-              const found = opts.find((o) => String(o.value) === e.target.value);
-              onChange(found ? found.value : e.target.value);
-            }}
-          >
-            {opts.map((o) => (
-              <option key={String(o.value)} value={String(o.value)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      );
-    }
-    // Chip-row — компактно, видно всё сразу.
     return (
       <div className="gen-pop-body">
         {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
@@ -667,7 +656,8 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
-  const modelPickRef = useRef<HTMLDivElement | null>(null);
+  const modelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const modelPopRef = useRef<HTMLDivElement | null>(null);
 
   // Voice picker state: какой setting сейчас открыт и кеш каталогов голосов.
   // Кеш живёт в локальном стейте компонента — не глобальный, чтобы при logout
@@ -704,6 +694,14 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [createAvatarProvider, setCreateAvatarProvider] = useState<
     "heygen" | "higgsfield_soul" | null
   >(null);
+
+  // Динамическая стоимость генерации — пересчитывается после изменения
+  // настроек/слотов/промпта/модели (с дебаунсом). `null` до первого ответа —
+  // тогда UI использует статический `tokenCostApprox` из каталога.
+  const [previewCost, setPreviewCost] = useState<number | null>(null);
+  const [previewPricingMode, setPreviewPricingMode] = useState<"total" | "per_second">("total");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
 
   // Когда модели приехали — выставляем дефолт.
   useEffect(() => {
@@ -753,13 +751,14 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     });
   }, [selectedModel]);
 
-  // Outside-click для popover'а моделей.
+  // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
   useEffect(() => {
     if (!modelOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (modelPickRef.current && !modelPickRef.current.contains(e.target as Node)) {
-        setModelOpen(false);
-      }
+      const t = e.target as Node;
+      if (modelBtnRef.current?.contains(t)) return;
+      if (modelPopRef.current?.contains(t)) return;
+      setModelOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -1017,7 +1016,72 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     (selectedModel?.promptOptional &&
       (!selectedModel.promptOptionalRequiresMedia ||
         Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
-  const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy;
+  // Аплоад в процессе → дизейблим CTA. Без этого юзер может стартовать
+  // генерацию с пустым/неполным набором ассетов (s3Key'и ещё не выданы).
+  const uploadInProgress = useMemo(
+    () => Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "uploading")),
+    [slotFiles],
+  );
+  const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy && !uploadInProgress;
+
+  // ── Debounced cost preview ─────────────────────────────────────────────────
+  // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
+  // дебаунсом. На последовательные изменения отменяем предыдущий запрос через
+  // AbortController — на сервер не уходят устаревшие комбинации.
+  // Не зовём пока есть незавершённые аплоады: после готовности slotFiles
+  // обновится и effect перезапустится с актуальными s3Key'ами.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (uploadInProgress) return;
+
+    const mediaInputs: Record<string, string[]> = {};
+    for (const [slotKey, files] of Object.entries(slotFiles)) {
+      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+      if (keys.length > 0) mediaInputs[slotKey] = keys;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      previewAbortRef.current?.abort();
+      previewAbortRef.current = controller;
+      setPreviewLoading(true);
+      previewGeneration(
+        {
+          modelId: selectedModel.id,
+          ...(modeId ? { modeId } : {}),
+          prompt,
+          ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
+          ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
+        },
+        { signal: controller.signal },
+      )
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          setPreviewCost(res.cost);
+          setPreviewPricingMode(res.pricingMode);
+        })
+        .catch((err) => {
+          // Прерванный — никакой обработки. Прочие ошибки тоже игнорируем:
+          // оставляем последнюю валидную оценку (или фоллбэк tokenCostApprox).
+          if ((err as ApiError)?.code === "TIMEOUT") return;
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setPreviewLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [selectedModel, modeId, prompt, settingValues, slotFiles, uploadInProgress]);
+
+  // Reset preview при смене модели — старая цифра не имеет смысла для новой
+  // модели, лучше показать фоллбэк tokenCostApprox чем устаревшую оценку.
+  useEffect(() => {
+    setPreviewCost(null);
+    setPreviewPricingMode("total");
+  }, [selectedModel?.id]);
 
   async function generate() {
     if (!canGenerate || !selectedModel) return;
@@ -1289,8 +1353,12 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
         <div className="gen-panel-footer">
-          <div ref={modelPickRef} className="gen-model-row">
-            <button className="gen-model-btn" onClick={() => setModelOpen(!modelOpen)}>
+          <div className="gen-model-row">
+            <button
+              ref={modelBtnRef}
+              className="gen-model-btn"
+              onClick={() => setModelOpen(!modelOpen)}
+            >
               <div className="gen-model-glyph">
                 {selectedModel ? modelLetter(selectedModel) : "·"}
               </div>
@@ -1303,7 +1371,12 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               <ChevronDown size={16} />
             </button>
             {modelOpen && (
-              <div className="gen-model-pop">
+              <ChipPopover
+                anchorRef={modelBtnRef}
+                popRef={modelPopRef}
+                className="gen-model-pop"
+                matchAnchorWidth
+              >
                 {models.map((m) => (
                   <button
                     key={m.id}
@@ -1321,16 +1394,22 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                     {m.id === modelId && <Check size={14} />}
                   </button>
                 ))}
-              </div>
+              </ChipPopover>
             )}
           </div>
 
           <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
-            <Sparkles size={16} />
-            <span>{busy ? "Generating…" : "Generate"}</span>
+            {busy || uploadInProgress ? (
+              <Loader2 size={16} className="spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            <span>{busy ? "Generating…" : uploadInProgress ? "Загрузка файлов…" : "Generate"}</span>
             {selectedModel && (
               <span className="gen-cta-cost mono">
-                ≈ {Math.round(selectedModel.tokenCostApprox)} т
+                {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
+                {Math.round(previewCost ?? selectedModel.tokenCostApprox)} т
+                {previewPricingMode === "per_second" ? " / сек" : ""}
               </span>
             )}
           </button>

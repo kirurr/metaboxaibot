@@ -15,6 +15,7 @@ import { webTelegramLinkedPreHandler } from "../middlewares/web-auth.js";
 import { generationService } from "../services/generation.service.js";
 import { videoGenerationService } from "../services/video-generation.service.js";
 import { audioGenerationService } from "../services/audio-generation.service.js";
+import { costPreviewService } from "../services/cost-preview.service.js";
 import { getFileUrl } from "../services/s3.service.js";
 import { AI_MODELS, UserFacingError } from "@metabox/shared";
 import { logger } from "../logger.js";
@@ -217,6 +218,120 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           "web-generation/video failed",
         );
         return reply.code(500).send({ code: "INTERNAL_ERROR", error: "Что-то пошло не так" });
+      }
+    },
+  );
+
+  // ── POST /web/generation/preview ──────────────────────────────────────────
+  // Динамический предпросмотр стоимости — UI зовёт после каждого изменения
+  // настроек/слотов (с дебаунсом). Под капотом тот же `costPreviewService`,
+  // что и при сабмите, поэтому цифра на кнопке гарантированно совпадает с
+  // фактическим списанием. Для video дополнительно прогоняется
+  // probeHeygenAudioDuration — поэтому s3Key'и нужно резолвить в URL'ы.
+  fastify.post<{
+    Body: {
+      modelId: string;
+      modeId?: string;
+      prompt?: string;
+      settings?: Record<string, unknown>;
+      mediaInputs?: Record<string, string[]>;
+    };
+  }>(
+    "/web/generation/preview",
+    {
+      schema: {
+        description: "Estimate generation cost for the current inputs",
+        body: {
+          type: "object",
+          required: ["modelId"],
+          properties: {
+            modelId: { type: "string" },
+            modeId: { type: "string" },
+            prompt: { type: "string" },
+            settings: { type: "object", additionalProperties: true },
+            mediaInputs: {
+              type: "object",
+              additionalProperties: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              cost: { type: "number" },
+              pricingMode: { type: "string" },
+              durationSec: { type: "number" },
+              numImages: { type: "number" },
+            },
+          },
+          400: badRequestResponse,
+          500: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      const { modelId, prompt, settings, mediaInputs } = request.body;
+
+      const model = AI_MODELS[modelId];
+      if (!model) {
+        return reply.code(400).send({ code: "BAD_REQUEST", error: "Unknown model" });
+      }
+
+      try {
+        const section = model.section;
+        if (section === "design" || section === "image") {
+          const preview = await costPreviewService.previewImage({
+            userId: aibUserId!,
+            modelId,
+            prompt: prompt ?? "",
+            telegramChatId: null,
+            ...(settings ? { extraModelSettings: settings } : {}),
+          });
+          return {
+            cost: preview.cost,
+            pricingMode: "total" as const,
+            numImages: preview.numImages,
+          };
+        }
+        if (section === "video") {
+          // Для video нужны URL'ы аудио-слотов чтобы ffprobe мог измерить длину
+          // (HeyGen биллится посекундно). Если слотов нет — pricingMode станет
+          // "per_second" и UI покажет «≈ N ✦ / sec».
+          const resolvedMediaInputs = await resolveMediaInputs(mediaInputs);
+          const preview = await costPreviewService.previewVideo({
+            userId: aibUserId!,
+            modelId,
+            prompt: prompt ?? "",
+            telegramChatId: null,
+            ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
+            ...(settings ? { extraModelSettings: settings } : {}),
+          });
+          return {
+            cost: preview.cost,
+            pricingMode: preview.pricingMode,
+            durationSec: preview.effectiveDuration,
+          };
+        }
+        if (section === "audio") {
+          const preview = await costPreviewService.previewAudio({
+            userId: aibUserId!,
+            modelId,
+            prompt: prompt ?? "",
+            telegramChatId: null,
+            ...(settings ? { extraModelSettings: settings } : {}),
+          });
+          return { cost: preview.cost, pricingMode: "total" as const };
+        }
+        return reply.code(400).send({ code: "BAD_REQUEST", error: "Unsupported section" });
+      } catch (err) {
+        logger.warn(
+          { err, modelId, userId: aibUserId?.toString() },
+          "web-generation/preview failed",
+        );
+        return reply.code(500).send({ code: "INTERNAL_ERROR", error: "Preview failed" });
       }
     },
   );

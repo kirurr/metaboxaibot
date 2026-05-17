@@ -5054,18 +5054,15 @@ select {
   text-overflow: ellipsis;
 }
 .gen-model-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  /* Позиционирование (top/left/width) и max-height/overflow задаются inline
+     из ChipPopover — динамически считаются по доступному пространству и
+     ширине anchor'а. */
+  z-index: 60;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 6px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-  max-height: 420px;
-  overflow-y: auto;
 }
 .gen-model-row-item {
   width: 100%;
@@ -5140,6 +5137,9 @@ select {
 }
 .gen-cta-cost {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12.5px;
   font-weight: 600;
   opacity: 0.85;
@@ -5516,6 +5516,11 @@ select {
   font-weight: 700;
 }
 .media-pick-overlay .spin {
+  animation: gen-spin 1s linear infinite;
+}
+/* Глобальный fallback — крутим любой `.spin` (Loader2 от lucide-react)
+   там, где скоупленные правила выше не покрывают. */
+.spin {
   animation: gen-spin 1s linear infinite;
 }
 @keyframes gen-spin {
