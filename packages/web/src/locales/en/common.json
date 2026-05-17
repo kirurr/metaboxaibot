@@ -9,7 +9,9 @@
     "plans": "Plans",
     "tokens": "Tokens",
     "profile": "Profile",
-    "logout": "Log out"
+    "billing": "Billing",
+    "settings": "Settings",
+    "logout": "Sign out"
   },
   "common": {
     "save": "Save",
@@ -27,5 +29,41 @@
     "title": "Connect the Telegram bot",
     "openBot": "Open Telegram bot",
     "waiting": "Waiting for connection…"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "How you appear inside AI Box and how the product behaves for you.",
+    "sectionAccount": "Account",
+    "sectionBalance": "Balance",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "email": "Email",
+    "telegram": "Telegram",
+    "telegramNotLinked": "Not linked",
+    "telegramLinked": "Linked",
+    "telegramNotLinkedChip": "Not linked",
+    "balanceTotal": "Total tokens",
+    "balanceTotalHint": "Purchased + subscription",
+    "balancePurchased": "Purchased",
+    "balancePurchasedHint": "Don't expire",
+    "balanceSubscription": "From subscription",
+    "balanceSubscriptionHint": "Expire when period ends"
+  },
+  "generate": {
+    "familyVersion": "Version",
+    "familyVariant": "Variant"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Language preferences and account data controls.",
+    "sectionPreferences": "Preferences",
+    "languageLabel": "Interface language",
+    "languageHint": "Switches the UI immediately. Stored locally.",
+    "languageRu": "Русский",
+    "languageEn": "English",
+    "sectionDataPrivacy": "Data & privacy",
+    "dataPrivacyHint": "Your conversations are never used to train models. Export or delete everything any time.",
+    "exportData": "Export data",
+    "deleteAccount": "Delete account"
   }
 }

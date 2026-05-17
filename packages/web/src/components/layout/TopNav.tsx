@@ -12,12 +12,14 @@ import {
   User,
 } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/authStore";
 import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
 import { CapabilityTabs } from "./CapabilityTabs";
 import { Notifications } from "../Notifications";
 
 export function TopNav() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -83,29 +85,33 @@ export function TopNav() {
                 </div>
               </div>
               <MenuLink to="/profile" icon={<User size={16} />} onSelect={() => setOpen(false)}>
-                Profile
+                {t("nav.profile")}
               </MenuLink>
               <MenuLink
                 to="/billing"
                 icon={<CreditCard size={16} />}
                 onSelect={() => setOpen(false)}
               >
-                Billing
+                {t("nav.billing")}
               </MenuLink>
               <MenuLink to="/plans" icon={<Layers size={16} />} onSelect={() => setOpen(false)}>
-                Plans
+                {t("nav.plans")}
               </MenuLink>
               <MenuLink
                 to="/history"
                 icon={<HistoryIcon size={16} />}
                 onSelect={() => setOpen(false)}
               >
-                History
+                {t("nav.history")}
               </MenuLink>
               <div className="menu-sep" />
-              <button className="menu-item">
-                <Settings size={16} /> Settings <ChevronRight size={14} className="chev" />
-              </button>
+              <MenuLink
+                to="/settings"
+                icon={<Settings size={16} />}
+                onSelect={() => setOpen(false)}
+              >
+                {t("nav.settings")}
+              </MenuLink>
               <div className="menu-sep" />
               <button
                 className="menu-item danger"
@@ -115,7 +121,7 @@ export function TopNav() {
                   navigate("/login", { replace: true });
                 }}
               >
-                <LogOut size={16} /> Sign out
+                <LogOut size={16} /> {t("nav.logout")}
               </button>
             </div>
           )}

@@ -1,23 +1,14 @@
 import { useMemo } from "react";
 import { GenerateScene } from "@/components/generate/GenerateScene";
 import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
-import type { WebModelDto } from "@/api/models";
 
 export default function Image() {
   const allModels = useModelsStore((s) => s.models);
 
-  // Дедуп по family (Flux Pro / Flux LoRA — одна строка).
-  const models = useMemo<WebModelDto[]>(() => {
-    const seen = new Set<string>();
-    const out: WebModelDto[] = [];
-    for (const m of modelsForCapability(allModels, "image")) {
-      const key = m.familyId ?? m.id;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(m);
-    }
-    return out;
-  }, [allModels]);
+  // Передаём весь список секции БЕЗ дедупа: GenerateScene сама группирует по
+  // familyId для дропдауна моделей и достаёт siblings (по version/variant) для
+  // chip'ов в блоке настроек.
+  const models = useMemo(() => modelsForCapability(allModels, "image"), [allModels]);
 
   return (
     <GenerateScene

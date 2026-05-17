@@ -111,6 +111,17 @@ export type WebModelDto = {
   promptOptionalRequiresMedia: boolean;
 };
 
-export function getModels(section?: ModelSection) {
-  return apiClient<WebModelDto[]>("/web/models", section ? { query: { section } } : undefined);
+/**
+ * Каталог моделей. `lang` пробрасывается в `?lang=` чтобы бэк отдал
+ * локализованные `modes[].label` / `mediaInputs[].label` под текущий
+ * UI-язык (а не под user.language из БД).
+ */
+export function getModels(section?: ModelSection, lang?: string) {
+  const query: Record<string, string> = {};
+  if (section) query.section = section;
+  if (lang) query.lang = lang;
+  return apiClient<WebModelDto[]>(
+    "/web/models",
+    Object.keys(query).length > 0 ? { query } : undefined,
+  );
 }

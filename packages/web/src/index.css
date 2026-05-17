@@ -1038,6 +1038,13 @@ select {
   justify-content: flex-end;
 }
 .msg .bubble {
+  /* fit-content нужен, иначе короткие сообщения (типа «Тест») сжимаются ниже
+     content-width: bubble — flex item в `.msg.user .msg-block` (column +
+     align-items:end + min-width:0), а `max-width: 78%` создаёт круговую
+     зависимость с auto-width → браузер резолвит в маленькую цифру и текст
+     вылезает за padding. `fit-content` заставляет считать ширину как
+     content+padding, при этом capается `max-width: 78%` для длинных строк. */
+  width: fit-content;
   max-width: 78%;
   padding: 14px 18px;
   border-radius: 18px;
@@ -1060,6 +1067,17 @@ select {
      («Тест», «ок») в `14px` смотрелись пухло. Горизонтальное padding'и
      одинаковые с AI, чтобы текст не упирался в рамку. */
   padding: 10px 18px;
+}
+.msg.user .msg-block {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+}
+.msg.ai .msg-block {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .msg .ai-mark {
   width: 32px;

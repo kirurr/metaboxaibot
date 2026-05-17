@@ -17,12 +17,18 @@ import {
   AI_MODELS,
   MODELS_BY_SECTION,
   MODEL_FAMILIES,
+  SUPPORTED_LANGUAGES,
   getResolvedModes,
   defaultModeId,
   getT,
   type Section,
   type Language,
 } from "@metabox/shared";
+
+// Set для O(1)-валидации `?lang=` query param. Без проверки `langOverride as Language`
+// мог бы прокинуть мусор в getT() — getT() сам бы вернул en-фоллбэк, но юзер бы
+// не понял почему его явный `?lang=fr` молча проигнорирован.
+const SUPPORTED_LANG_SET = new Set<string>(SUPPORTED_LANGUAGES);
 import { webAuthPreHandler } from "../middlewares/web-auth.js";
 import { calculateCost } from "../services/token.service.js";
 import { db } from "../db.js";
@@ -129,8 +135,11 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webAuthPreHandler);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-models"]));
 
-  /** GET /web/models?section=image — список моделей опц. фильтрованный по секции. */
-  fastify.get<{ Querystring: { section?: string } }>(
+  /** GET /web/models?section=image&lang=ru — список моделей.
+   * `lang` опционален: если задан — переопределяет язык локализации модов/слотов
+   * (используется фронтом для синхронизации с UI-переключателем языка).
+   * Иначе — берётся `user.language` из БД, иначе fallback "ru". */
+  fastify.get<{ Querystring: { section?: string; lang?: string } }>(
     "/web/models",
     {
       schema: {
@@ -141,6 +150,11 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
             section: {
               type: "string",
               description: "Filter by section: gpt | design | video | audio",
+            },
+            lang: {
+              type: "string",
+              description:
+                "UI language override (ru/en/...). Без него используется user.language из БД.",
             },
           },
         },
@@ -186,14 +200,22 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request: FastifyRequest) => {
-      const { section } = request.query as { section?: string };
+      const { section, lang: langOverride } = request.query as {
+        section?: string;
+        lang?: string;
+      };
       const { aibUserId } = request.webUser!;
-      // Lang берём из User записи если Telegram привязан, иначе ru —
-      // mediaInput.labelKey'и без перевода смотрелись бы как `firstFrame`/etc.
-      const user = aibUserId
-        ? await db.user.findUnique({ where: { id: aibUserId }, select: { language: true } })
-        : null;
-      const lang = (user?.language ?? "ru") as Language;
+      // Приоритет: явный ?lang= (UI-переключатель веба) > user.language (DB) > ru.
+      // Без какого-либо lang'а mediaInput.labelKey'и смотрелись бы как `firstFrame`/etc.
+      let lang: Language;
+      if (langOverride && SUPPORTED_LANG_SET.has(langOverride)) {
+        lang = langOverride as Language;
+      } else {
+        const user = aibUserId
+          ? await db.user.findUnique({ where: { id: aibUserId }, select: { language: true } })
+          : null;
+        lang = (user?.language ?? "ru") as Language;
+      }
       const all = section
         ? (MODELS_BY_SECTION[section as Section] ?? [])
         : Object.values(AI_MODELS);

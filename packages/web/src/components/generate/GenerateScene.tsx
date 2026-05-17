@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
@@ -410,6 +411,80 @@ function SettingChip({
 }
 
 /**
+ * Chip-выбор для оси семейства моделей (версия / вариант). Структурно — то же
+ * самое, что generic `SettingChip` для select, но значение не идёт в
+ * `settingValues`: клик меняет `modelId` сцены (свопаем сиблинга семейства).
+ *
+ * Если в семействе только одно значение на оси (например все Recraft-сиблинги
+ * имеют `versionLabel="v4"`), компонент возвращает `null` — лишний chip без
+ * выбора прятать чище, чем показывать noop-кнопку.
+ */
+function FamilyAxisChip({
+  label,
+  current,
+  options,
+  onSelect,
+}: {
+  label: string;
+  current: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chipRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  if (options.length <= 1) return null;
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className={clsx("gen-chip-pill", open && "is-open")}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="gen-chip-pill-label">{label}:</span>
+        <span className="gen-chip-pill-val">{current}</span>
+      </button>
+      {open && (
+        <ChipPopover anchorRef={chipRef} popRef={popRef}>
+          <div className="gen-pop-body">
+            <div className="gen-pop-chips-row">
+              {options.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  className={clsx("gen-chip", o === current && "on")}
+                  onClick={() => {
+                    onSelect(o);
+                    setOpen(false);
+                  }}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+          </div>
+        </ChipPopover>
+      )}
+    </>
+  );
+}
+
+/**
  * Popover в portal'е — рендерится поверх всего, не клипается scroll-контейнерами.
  * Позиционируется по `getBoundingClientRect` anchor'а с auto-flip вверх если
  * не помещается вниз. Реагирует на resize окна и scroll-события (capture, чтобы
@@ -647,8 +722,26 @@ function SettingPopBody({
 // ── Main scene ───────────────────────────────────────────────────────────────
 
 export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+  const { t } = useTranslation();
+
+  // ── Family grouping ───────────────────────────────────────────────────────
+  // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
+  // здесь делаем дедуп по familyId для дропдауна моделей в footer'е и считаем
+  // siblings + версии/варианты для chip'ов в блоке настроек.
+  const families = useMemo(() => {
+    const seen = new Set<string>();
+    const out: WebModelDto[] = [];
+    for (const m of models) {
+      const key = m.familyId ?? m.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }, [models]);
+
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(models[0]?.id ?? "");
+  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
@@ -703,15 +796,71 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  // Когда модели приехали — выставляем дефолт.
+  // Когда модели приехали — выставляем дефолт (первый из дедуплированных
+  // семейств, не из полного списка: иначе можно случайно стартовать с
+  // not-default-варианта).
   useEffect(() => {
-    if (!modelId && models.length > 0) setModelId(models[0].id);
-  }, [models, modelId]);
+    if (!modelId && families.length > 0) setModelId(families[0].id);
+  }, [families, modelId]);
 
+  // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
+  // дропдаун показывает только families[0] на семейство, но юзер может
+  // переключиться на sibling через version/variant chip'ы.
   const selectedModel = useMemo(
-    () => models.find((m) => m.id === modelId) ?? models[0],
-    [models, modelId],
+    () => models.find((m) => m.id === modelId) ?? families[0],
+    [models, families, modelId],
   );
+
+  // ── Family axis (version / variant) ────────────────────────────────────────
+  // Считаем siblings выбранной модели и доступные version/variant под them.
+  // Возвращаем null если у модели нет familyId или в семействе всего 1 модель.
+  const familyAxis = useMemo(() => {
+    if (!selectedModel?.familyId) return null;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    if (siblings.length <= 1) return null;
+    // Уникальные version'ы в порядке появления (Set сохраняет insertion order).
+    const versions = Array.from(
+      new Set(siblings.map((m) => m.versionLabel).filter((v): v is string => !!v)),
+    );
+    const currentVersion = selectedModel.versionLabel ?? null;
+    const variantsInCurrent = currentVersion
+      ? Array.from(
+          new Set(
+            siblings
+              .filter((m) => m.versionLabel === currentVersion)
+              .map((m) => m.variantLabel)
+              .filter((v): v is string => !!v),
+          ),
+        )
+      : [];
+    return {
+      versions,
+      currentVersion,
+      variants: variantsInCurrent,
+      currentVariant: selectedModel.variantLabel ?? null,
+    };
+  }, [models, selectedModel]);
+
+  // Свопаем modelId на sibling с указанной версией. Стараемся сохранить
+  // вариант (Pro→Pro), иначе берём первый sibling в новой версии.
+  function selectFamilyVersion(version: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target =
+      siblings.find(
+        (m) => m.versionLabel === version && m.variantLabel === selectedModel.variantLabel,
+      ) ?? siblings.find((m) => m.versionLabel === version);
+    if (target) setModelId(target.id);
+  }
+
+  function selectFamilyVariant(variant: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target = siblings.find(
+      (m) => m.versionLabel === selectedModel.versionLabel && m.variantLabel === variant,
+    );
+    if (target) setModelId(target.id);
+  }
 
   // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
   useEffect(() => {
@@ -1332,9 +1481,29 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             rows={3}
           />
 
-          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку. */}
-          {visibleSettings.length > 0 && (
+          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
+              Family axis chip'ы (version / variant) идут первыми — это про
+              «какую модель из семейства взять», логически выше per-model
+              tuning settings. FamilyAxisChip сам прячется если выбора нет
+              (1 версия/вариант). */}
+          {(familyAxis || visibleSettings.length > 0) && (
             <div className="gen-settings-chips">
+              {familyAxis && familyAxis.currentVersion && (
+                <FamilyAxisChip
+                  label={t("generate.familyVersion")}
+                  current={familyAxis.currentVersion}
+                  options={familyAxis.versions}
+                  onSelect={selectFamilyVersion}
+                />
+              )}
+              {familyAxis && familyAxis.currentVariant && (
+                <FamilyAxisChip
+                  label={t("generate.familyVariant")}
+                  current={familyAxis.currentVariant}
+                  options={familyAxis.variants}
+                  onSelect={selectFamilyVariant}
+                />
+              )}
               {visibleSettings.map((s) => (
                 <SettingChip
                   key={s.key}
@@ -1377,23 +1546,30 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                 className="gen-model-pop"
                 matchAnchorWidth
               >
-                {models.map((m) => (
-                  <button
-                    key={m.id}
-                    className={clsx("gen-model-row-item", m.id === modelId && "on")}
-                    onClick={() => {
-                      setModelId(m.id);
-                      setModelOpen(false);
-                    }}
-                  >
-                    <div className="gen-model-glyph">{modelLetter(m)}</div>
-                    <div className="gen-model-item-body">
-                      <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                      <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                    </div>
-                    {m.id === modelId && <Check size={14} />}
-                  </button>
-                ))}
+                {families.map((m) => {
+                  // Active = выбранная модель из этого семейства (даже если
+                  // юзер переключился на sibling-вариант через chip'ы).
+                  const isActive = selectedModel?.familyId
+                    ? m.familyId === selectedModel.familyId
+                    : m.id === modelId;
+                  return (
+                    <button
+                      key={m.id}
+                      className={clsx("gen-model-row-item", isActive && "on")}
+                      onClick={() => {
+                        setModelId(m.id);
+                        setModelOpen(false);
+                      }}
+                    >
+                      <div className="gen-model-glyph">{modelLetter(m)}</div>
+                      <div className="gen-model-item-body">
+                        <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                        <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                      </div>
+                      {isActive && <Check size={14} />}
+                    </button>
+                  );
+                })}
               </ChipPopover>
             )}
           </div>
