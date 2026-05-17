@@ -100,6 +100,15 @@ export function MediaSettingsView({
       .finally(() => setLoading(false));
   }, [section]);
 
+  // hasPendingSelect — флаг «юзер тыкнул вариант» — относится к конкретной
+  // family-карточке. При переключении picker'а (юзер ушёл в другое семейство
+  // моделей) пометка не должна тащиться следом, иначе activate-кнопка
+  // активной модели В НОВОМ семействе ошибочно покажет «Активировать» вместо
+  // «Активирована». Сбрасываем при смене selectedPickerId.
+  useEffect(() => {
+    setHasPendingSelect(false);
+  }, [selectedPickerId]);
+
   const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
     design: "DESIGN_ACTIVE",
     video: "VIDEO_ACTIVE",
