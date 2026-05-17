@@ -282,7 +282,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
 
       try {
         const section = model.section;
-        if (section === "design" || section === "image") {
+        if (section === "design") {
           const preview = await costPreviewService.previewImage({
             userId: aibUserId!,
             modelId,
