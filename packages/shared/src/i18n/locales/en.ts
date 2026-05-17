@@ -677,6 +677,7 @@ export default {
   },
   modelModes: {
     pickerTitle: "Choose mode:",
+    pickModeFirstForMedia: "Pick a mode first — without one you can't upload photo/file:",
     activated:
       "Mode «{mode}» activated.\n✉️ Send a text prompt to start generation.\n🖼 To attach images — use the slot buttons below.",
     activatedTextOnly: "Mode «{mode}» activated. Send a text prompt to start generation.",

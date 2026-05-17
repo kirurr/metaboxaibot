@@ -869,7 +869,34 @@ export async function executeVideoPrompt(
 
 export async function handleVideoMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
+  // Если у multi-mode модели ещё не выбран режим (юзер активировал модель,
+  // увидел mode picker, но проигнорировал и сразу написал текст) — тихо
+  // выставляем textOnly режим. Без этого executeVideoPrompt пойдёт по
+  // дефолтному режиму, который может требовать обязательный media-слот
+  // (например i2v на Seedance), и юзер получит "сначала загрузите кадр"
+  // вместо генерации.
+  await autoPickTextOnlyModeIfUnset(ctx);
   await executeVideoPrompt(ctx, ctx.message.text, undefined, ctx.message.message_id);
+}
+
+/**
+ * Если у юзера активна multi-mode video-модель и режим ещё не выбран
+ * явно (selectedModeId === null), а в модели есть textOnly-режим — выбираем
+ * его молча. No-op для single-mode моделей и для случая когда мод уже выбран.
+ */
+async function autoPickTextOnlyModeIfUnset(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  const state = await userStateService.get(ctx.user.id);
+  const modelId = state?.videoModelId;
+  if (!modelId) return;
+  const model = AI_MODELS[modelId];
+  const modes = model ? getResolvedModes(model) : null;
+  if (!modes) return;
+  const saved = await userStateService.getSelectedMode(ctx.user.id, modelId);
+  if (saved) return;
+  const textOnly = modes.find((m) => m.textOnly);
+  if (!textOnly) return;
+  await userStateService.setSelectedMode(ctx.user.id, modelId, textOnly.id);
 }
 
 // ── New video dialog ──────────────────────────────────────────────────────────
@@ -964,6 +991,22 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId ?? "kling";
   const model = AI_MODELS[modelId];
+
+  // Multi-mode модель активирована, но юзер ещё не тапнул режим в picker'е —
+  // фото класть некуда (слоты появляются только после выбора режима).
+  // Шлём алерт и пере-показываем picker, фото в этот раз не сохраняем.
+  // Парный auto-pick для текстового входа лежит в handleVideoMessage.
+  if (model) {
+    const modes = getResolvedModes(model);
+    if (modes) {
+      const saved = await userStateService.getSelectedMode(ctx.user.id, modelId);
+      if (!saved) {
+        await ctx.reply(ctx.t.modelModes.pickModeFirstForMedia);
+        await sendVideoModePicker(ctx, modelId, modes);
+        return;
+      }
+    }
+  }
 
   // Auto-slot mode (no active slot, model has slots, not an avatar model) wants
   // every sibling in an album to be distributed across slots. Active-slot mode
