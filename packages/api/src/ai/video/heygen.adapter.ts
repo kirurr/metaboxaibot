@@ -103,6 +103,97 @@ export class HeyGenAdapter implements VideoAdapter {
     return { "X-Api-Key": this.apiKey, "Content-Type": "application/json" };
   }
 
+  /**
+   * Synthesize speech via HeyGen Starfish TTS (`POST /v3/voices/speech`).
+   *
+   * Длительность нужна всегда (для `checkBalance`), а сам mp3 — опционально.
+   * Если `skipAudioFetch=true` (pitch-bypass) или скачивание `audio_url`
+   * сорвалось — возвращаем `buffer: null`. Caller должен в этом случае
+   * НЕ класть `voice_audio` в submit и дать HeyGen сделать inline-TTS при
+   * рендере видео (тот же результат, +1 их TTS-вызов). Без этого CDN-flake
+   * после успешного TTS убивал бы весь submit, хотя HeyGen уже всё знает
+   * и мог бы сам перегенерить.
+   */
+  async generateSpeech(
+    text: string,
+    voiceId: string,
+    opts?: { speed?: number; language?: string; locale?: string; skipAudioFetch?: boolean },
+  ): Promise<{ buffer: Buffer | null; durationSec: number }> {
+    if (!text.trim()) throw new Error("HeyGen TTS: empty text");
+    if (!voiceId.trim()) throw new Error("HeyGen TTS: empty voice_id");
+
+    const body: Record<string, unknown> = {
+      text,
+      voice_id: voiceId,
+      input_type: "text",
+    };
+    if (opts?.speed !== undefined) body.speed = opts.speed;
+    if (opts?.language) body.language = opts.language;
+    if (opts?.locale) body.locale = opts.locale;
+
+    // `fetchWithLog(url, init, this.fetchFn)` — паттерн остальных методов в
+    // этом адаптере (см. :472, :502): дебаг-логирование + proxy через
+    // `this.fetchFn`. Без 3-го аргумента в proxy-режиме мы теряли логи.
+    const res = await fetchWithLog(
+      `${HEYGEN_API}/v3/voices/speech`,
+      {
+        method: "POST",
+        headers: this.jsonHeaders,
+        body: JSON.stringify(body),
+      },
+      this.fetchFn,
+    );
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`HeyGen /v3/voices/speech failed: ${res.status} ${txt}`);
+    }
+    const json = (await res.json()) as {
+      data?: { audio_url?: string; duration?: number };
+      error?: { message?: string } | null;
+    };
+    const audioUrl = json?.data?.audio_url;
+    const duration = json?.data?.duration;
+    if (!audioUrl || typeof duration !== "number" || !isFinite(duration) || duration <= 0) {
+      throw new Error(`HeyGen /v3/voices/speech: malformed response: ${JSON.stringify(json)}`);
+    }
+    // Sanity clamp: HeyGen видео-генерация не поддерживает >10 мин. Если
+    // duration > 600s — значит API вернул ms или иной мусор (тогда
+    // `Math.ceil(audioSec) * per_sec` дал бы катастрофический over-charge).
+    if (duration > 600) {
+      throw new Error(
+        `HeyGen /v3/voices/speech: implausible duration=${duration} (expected seconds, max 600)`,
+      );
+    }
+
+    // Pitch-bypass: длительность мы получили из JSON, mp3 не нужен.
+    if (opts?.skipAudioFetch) {
+      return { buffer: null, durationSec: duration };
+    }
+
+    // CDN download — best-effort, через тот же proxy-aware fetchWithLog.
+    // Транзиентный фейл здесь = graceful degrade в режим "знаем длительность,
+    // но аудио нет" → caller пустит inline-TTS.
+    try {
+      const audioRes = await fetchWithLog(audioUrl, undefined, this.fetchFn);
+      if (!audioRes.ok) {
+        logger.warn(
+          { audioUrl, status: audioRes.status },
+          "HeyGen TTS: audio_url fetch returned non-ok, degrading to inline-TTS path",
+        );
+        return { buffer: null, durationSec: duration };
+      }
+      const buffer = Buffer.from(await audioRes.arrayBuffer()) as Buffer;
+      if (!buffer.byteLength) {
+        logger.warn({ audioUrl }, "HeyGen TTS: audio_url returned empty body, degrading");
+        return { buffer: null, durationSec: duration };
+      }
+      return { buffer, durationSec: duration };
+    } catch (err) {
+      logger.warn({ err, audioUrl }, "HeyGen TTS: audio_url fetch threw, degrading");
+      return { buffer: null, durationSec: duration };
+    }
+  }
+
   /** Upload audio file to HeyGen asset storage (v1). Returns asset id. */
   private async uploadAudioAsset(audioUrl: string): Promise<string> {
     const audioRes = await fetchWithLog(audioUrl);

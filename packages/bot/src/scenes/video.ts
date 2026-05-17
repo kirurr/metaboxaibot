@@ -777,6 +777,10 @@ export async function executeVideoPrompt(
       }
     }
 
+    // HeyGen native voice (Jenny и т.п.): EL TTS не отрабатывает, voice_audio
+    // пуст. Дальнейший `videoGenerationService.submitVideo` сам синтезирует
+    // через HeyGen Starfish (см. heygen-tts.service.ts), чтобы probe увидел
+    // реальную длительность и checkBalance не пропустил юзера в минус.
     const submitParams = elTtsS3Key
       ? {
           ...submitParamsBase,
@@ -1262,6 +1266,8 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
       }
 
+      // HeyGen native voice добивается уже внутри submitVideo (см.
+      // executeVideoPrompt выше / heygen-tts.service.ts).
       const submitParams = elTtsS3Key
         ? {
             ...submitParamsBase,

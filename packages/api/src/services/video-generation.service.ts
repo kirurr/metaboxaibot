@@ -3,6 +3,7 @@ import { getVideoQueue } from "../queues/video.queue.js";
 import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
+import { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 import { createVideoAdapter } from "../ai/video/factory.js";
 import { validatePromptRefs } from "./prompt-ref.service.js";
 import type {
@@ -43,6 +44,13 @@ export interface SubmitVideoParams {
   sourceMessageId?: string;
   /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
   promptMessageId?: number;
+  /**
+   * Pre-known duration of `mediaInputs.voice_audio[0]` в секундах. Заполняется
+   * `ensureHeygenTtsForVideo` после вызова HeyGen TTS endpoint'а (HeyGen
+   * возвращает `duration` в ответе). Если задан — `previewVideo` пропускает
+   * повторный fetch+ffprobe того же mp3 (экономит ~200–500ms на HeyGen-сабмите).
+   */
+  audioDurationSecHint?: number;
 }
 
 export interface SubmitVideoResult {
@@ -133,10 +141,19 @@ export const videoGenerationService = {
   },
 
   async submitVideo(params: SubmitVideoParams): Promise<SubmitVideoResult> {
-    const { userId, modelId, prompt, imageUrl, telegramChatId, sendOriginalLabel } = params;
+    const model = AI_MODELS[params.modelId];
+    if (!model) throw new Error(`Unknown model: ${params.modelId}`);
 
-    const model = AI_MODELS[modelId];
-    if (!model) throw new Error(`Unknown model: ${modelId}`);
+    // HeyGen native voice (без EL/Cartesia и без юзерского аудио): синтезим
+    // речь у себя ДО `previewVideo`, чтобы probe увидел реальную длительность
+    // и `checkBalance` сравнил с настоящей ценой. Без этого HeyGen TTS
+    // происходил бы внутри генерации, цена была бы известна постфактум, и
+    // юзер с пустым балансом запускал бы генерацию которую мы не сможем
+    // полностью списать (`deductTokens` клампится до баланса → мы съедаем
+    // убыток). См. heygen-tts.service.ts.
+    params = await ensureHeygenTtsForVideo(params);
+
+    const { userId, modelId, prompt, imageUrl, telegramChatId, sendOriginalLabel } = params;
 
     const preview = await costPreviewService.previewVideo(params);
     const modelSettings = preview.effectiveModelSettings;

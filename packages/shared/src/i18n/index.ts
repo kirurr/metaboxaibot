@@ -197,6 +197,7 @@ export interface Translations {
     mediaSlotAspectRatioOutOfRange: string;
     mediaSlotFramePixelsOutOfRange: string;
     mediaSlotReadMetadataFailed: string;
+    promptTooLong: string;
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
@@ -457,6 +458,7 @@ export interface Translations {
   };
   confirmGeneration: {
     message: string;
+    messagePerSecond: string;
     voicePrompt: string;
     start: string;
     cancel: string;
