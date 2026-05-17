@@ -626,6 +626,12 @@ select {
 .tn-balance .b-lbl {
   color: var(--text-secondary);
 }
+/* Иконка-замена для «tokens»: показываем `Sparkles` в цвете акцента,
+   чтобы было визуально консистентно с CTA на кнопке Generate. */
+.tn-balance .b-ico {
+  color: var(--accent-light);
+  flex-shrink: 0;
+}
 .tn-balance .b-plus {
   width: 22px;
   height: 22px;

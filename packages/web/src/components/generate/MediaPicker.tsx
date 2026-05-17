@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Check, Loader2, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 
 /**
  * Универсальный picker с сеткой превью (avatars / motions / soul styles).
@@ -69,13 +70,15 @@ export function MediaPicker({
   onClose,
   userItems,
   userItemsLoading,
-  userItemsLabel = "Мои аватары",
+  userItemsLabel,
   hideCatalog = false,
   onCreate,
   onRename,
   onDelete,
 }: MediaPickerProps) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
+  const resolvedUserItemsLabel = userItemsLabel ?? t("mediaPicker.myAvatars");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const isMulti = maxItems > 1;
   const showUserSection = !!userItems || !!onCreate;
@@ -172,11 +175,11 @@ export function MediaPicker({
     const isSelected = selectedIds.includes(it.id);
     const statusLabel =
       it.status === "creating"
-        ? "Создаётся…"
+        ? t("mediaPicker.userStatus.creating")
         : it.status === "failed"
-          ? "Не удалось"
+          ? t("mediaPicker.userStatus.failed")
           : it.status === "orphaned"
-            ? "Недоступен"
+            ? t("mediaPicker.userStatus.orphaned")
             : null;
     return (
       <div
@@ -220,7 +223,7 @@ export function MediaPicker({
               <button
                 className="media-pick-actions-btn"
                 onClick={() => setOpenMenuId(openMenuId === it.id ? null : it.id)}
-                aria-label="Действия"
+                aria-label={t("common.actions")}
                 type="button"
               >
                 <MoreHorizontal size={14} />
@@ -235,7 +238,7 @@ export function MediaPicker({
                         onRename(it.id, it.name);
                       }}
                     >
-                      <Pencil size={12} /> Переименовать
+                      <Pencil size={12} /> {t("mediaPicker.rename")}
                     </button>
                   )}
                   {onDelete && (
@@ -247,7 +250,7 @@ export function MediaPicker({
                         onDelete(it.id);
                       }}
                     >
-                      <Trash2 size={12} /> Удалить
+                      <Trash2 size={12} /> {t("mediaPicker.delete")}
                     </button>
                   )}
                 </div>
@@ -268,35 +271,41 @@ export function MediaPicker({
           {subtitle && <div className="voice-picker-sub">{subtitle}</div>}
           {isMulti && (
             <div className="voice-picker-sub">
-              Выбрано {selectedIds.length}/{maxItems}
+              {t("mediaPicker.selectedOf", { n: selectedIds.length, max: maxItems })}
             </div>
           )}
         </div>
-        <button className="voice-picker-close" onClick={onClose} aria-label="Закрыть">
+        <button className="voice-picker-close" onClick={onClose} aria-label={t("common.close")}>
           <X size={16} />
         </button>
       </div>
 
       <div className="voice-picker-search">
         <Search size={14} />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("mediaPicker.searchPlaceholder")}
+        />
       </div>
 
       {showUserSection && (
         <div className="media-picker-section">
           <div className="media-picker-section-head">
-            <span>{userItemsLabel}</span>
+            <span>{resolvedUserItemsLabel}</span>
             {onCreate && (
               <button type="button" className="media-picker-create-link" onClick={onCreate}>
-                <Plus size={12} /> Создать
+                <Plus size={12} /> {t("mediaPicker.create")}
               </button>
             )}
           </div>
           <div className="media-picker-grid">
-            {userItemsLoading && <div className="voice-picker-empty">Загрузка…</div>}
+            {userItemsLoading && (
+              <div className="voice-picker-empty">{t("mediaPicker.loading")}</div>
+            )}
             {!userItemsLoading && filteredUserItems.length === 0 && (
               <div className="voice-picker-empty">
-                {search ? "Ничего не найдено" : "Пока нет своих аватаров"}
+                {search ? t("common.empty") : t("mediaPicker.noOwn")}
               </div>
             )}
             {filteredUserItems.map((it) => renderUserTile(it))}
@@ -306,11 +315,15 @@ export function MediaPicker({
 
       {!hideCatalog && (
         <div className="media-picker-section">
-          {showUserSection && <div className="media-picker-section-head">Каталог</div>}
+          {showUserSection && (
+            <div className="media-picker-section-head">{t("mediaPicker.catalog")}</div>
+          )}
           <div className="media-picker-grid">
-            {isLoading && <div className="voice-picker-empty">Загрузка…</div>}
+            {isLoading && <div className="voice-picker-empty">{t("mediaPicker.loading")}</div>}
             {!isLoading && filtered.length === 0 && (
-              <div className="voice-picker-empty">{search ? "Ничего не найдено" : "Пусто"}</div>
+              <div className="voice-picker-empty">
+                {search ? t("common.empty") : t("mediaPicker.empty")}
+              </div>
             )}
             {filtered.map((it) => renderTile(it))}
           </div>

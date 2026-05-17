@@ -1742,7 +1742,9 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             userItems={mediaUserItems}
             userItemsLoading={mediaUserItemsLoading}
             userItemsLabel={
-              mediaPickerSetting?.kind === "soul-character" ? "Мои персонажи" : "Мои аватары"
+              mediaPickerSetting?.kind === "soul-character"
+                ? t("mediaPicker.myCharacters")
+                : t("mediaPicker.myAvatars")
             }
             hideCatalog={mediaPickerHideCatalog}
             onCreate={mediaPickerOnCreate}

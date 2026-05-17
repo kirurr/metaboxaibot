@@ -9,6 +9,7 @@ import {
   LogOut,
   Plus,
   Settings,
+  Sparkles,
   User,
 } from "lucide-react";
 import clsx from "clsx";
@@ -59,10 +60,14 @@ export function TopNav() {
       <CapabilityTabs />
 
       <div className="tn-right">
-        <button className="tn-balance" onClick={() => navigate("/tokens")} title="Tokens balance">
+        <button
+          className="tn-balance"
+          onClick={() => navigate("/tokens")}
+          title={t("nav.tokensBalance")}
+        >
           <span className="b-dot" />
           <span className="b-val mono">{displayBalance}</span>
-          <span className="b-lbl">tokens</span>
+          <Sparkles size={14} className="b-ico" aria-hidden />
           <span className="b-plus">
             <Plus size={12} />
           </span>

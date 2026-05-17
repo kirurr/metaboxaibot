@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ImagePlus, Loader2, Trash2, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { uploadChatFile } from "@/api/uploads";
 import { createHeyGenAvatar, createSoulAvatar, type UserAvatarDto } from "@/api/userAvatars";
 
@@ -34,6 +35,7 @@ export type CreateAvatarModalProps = {
 };
 
 export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatarModalProps) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<UploadEntry[]>([]);
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -44,10 +46,10 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
   const isSoul = provider === "higgsfield_soul";
   const maxFiles = isSoul ? SOUL_MAX : 1;
   const minFiles = isSoul ? SOUL_MIN : 1;
-  const titleText = isSoul ? "Создать Soul-персонажа" : "Создать HeyGen-аватар";
+  const titleText = isSoul ? t("avatarModal.soulTitle") : t("avatarModal.heygenTitle");
   const hintText = isSoul
-    ? `Загрузите ${SOUL_MIN}–${SOUL_MAX} разных фото человека (разные ракурсы, освещение, эмоции).`
-    : "Загрузите одно фото лица. Аватар будет готов сразу.";
+    ? t("avatarModal.soulHint", { min: SOUL_MIN, max: SOUL_MAX })
+    : t("avatarModal.heygenHint");
 
   // Cleanup local blob: URLs при unmount.
   useEffect(() => {
@@ -88,7 +90,7 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
             prev.map((x) => (x.id === entry.id ? { ...x, status: "ready", s3Key: dto.s3Key } : x)),
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "Ошибка загрузки";
+          const msg = err instanceof Error ? err.message : t("avatarModal.uploadError");
           setEntries((prev) =>
             prev.map((x) => (x.id === entry.id ? { ...x, status: "error", error: msg } : x)),
           );
@@ -130,7 +132,7 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
       onCreated(avatar);
       onClose();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Не удалось создать аватар";
+      const msg = err instanceof Error ? err.message : t("avatarModal.createError");
       setSubmitError(msg);
       setSubmitting(false);
     }
@@ -141,7 +143,7 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
       <div className="modal create-avatar-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{titleText}</h3>
-          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+          <button className="modal-close" onClick={onClose} aria-label={t("common.close")}>
             <X size={16} />
           </button>
         </div>
@@ -149,11 +151,15 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
           <p className="modal-hint">{hintText}</p>
 
           <label className="modal-field">
-            <span>Название</span>
+            <span>{t("avatarModal.name")}</span>
             <input
               type="text"
               value={name}
-              placeholder={isSoul ? "Мой персонаж" : "Мой аватар"}
+              placeholder={
+                isSoul
+                  ? t("avatarModal.namePlaceholderSoul")
+                  : t("avatarModal.namePlaceholderHeygen")
+              }
               onChange={(e) => setName(e.target.value)}
               disabled={submitting}
             />
@@ -183,7 +189,7 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
                   className="create-avatar-remove"
                   onClick={() => removeEntry(entry.id)}
                   disabled={submitting}
-                  aria-label="Убрать фото"
+                  aria-label={t("avatarModal.removePhoto")}
                 >
                   <Trash2 size={11} />
                 </button>
@@ -197,7 +203,11 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
                 disabled={submitting}
               >
                 <ImagePlus size={20} />
-                <span>{isSoul ? `Добавить (${entries.length}/${maxFiles})` : "Выбрать фото"}</span>
+                <span>
+                  {isSoul
+                    ? t("avatarModal.addMore", { n: entries.length, max: maxFiles })
+                    : t("avatarModal.addPhoto")}
+                </span>
               </button>
             )}
           </div>
@@ -215,7 +225,7 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
         </div>
         <div className="modal-actions">
           <button type="button" className="btn btn--ghost" onClick={onClose} disabled={submitting}>
-            Отмена
+            {t("avatarModal.cancel")}
           </button>
           <button
             type="button"
@@ -225,10 +235,10 @@ export function CreateAvatarModal({ provider, onClose, onCreated }: CreateAvatar
           >
             {submitting ? (
               <>
-                <Loader2 size={14} className="spin" /> Создание…
+                <Loader2 size={14} className="spin" /> {t("avatarModal.creating")}
               </>
             ) : (
-              "Создать"
+              t("avatarModal.create")
             )}
           </button>
         </div>
