@@ -45,7 +45,17 @@ type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
  */
 const pendingNotifyTimers = new Map<bigint, NodeJS.Timeout>();
 
-const NOTIFY_DEBOUNCE_MS = 5000;
+/**
+ * In-memory дубль `last-notified:{userId}` Redis-ключа. Нужен потому что
+ * `setLastNotified` глотает ошибки Redis (.catch warn) — если Redis в этот
+ * момент моргнул, ключ не записался, и на следующий silent-select для той же
+ * модели сработает duplicate notify. Map работает как fallback: даже при
+ * полном падении Redis dedup остаётся корректным внутри одного процесса.
+ * На рестарте API теряется вместе с pendingNotifyTimers — приемлемо.
+ */
+const inMemoryLastNotified = new Map<bigint, string>();
+
+const NOTIFY_DEBOUNCE_MS = 3000;
 /** Сколько Redis помнит «последняя модель про которую слали пинг» для дедупа. */
 const LAST_NOTIFIED_TTL_SEC = 24 * 60 * 60;
 
@@ -58,6 +68,10 @@ function lastNotifiedRedisKey(userId: bigint): string {
  * Cancel pending model-changed notification для этого юзера, если есть.
  * Вызывать из /state/activate — full activate шлёт своё уведомление, pending
  * silent-select notify ему дублём не нужен.
+ *
+ * Удаление из Map — это и есть «сигнал отмены» для уже-запущенного таймера:
+ * IIFE внутри scheduleModelChangedNotify проверяет `pendingNotifyTimers.get`
+ * перед/после await'ов и тихо выходит, если запись пропала или заменена.
  */
 function cancelPendingNotify(userId: bigint): void {
   const existing = pendingNotifyTimers.get(userId);
@@ -67,16 +81,32 @@ function cancelPendingNotify(userId: bigint): void {
   }
 }
 
+/** Читаем last-notified из Redis, при ошибке/отсутствии — fallback на in-memory. */
+async function getLastNotified(userId: bigint): Promise<string | null> {
+  const fromRedis = await getRedis()
+    .get(lastNotifiedRedisKey(userId))
+    .catch((err) => {
+      logger.warn({ err, userId: userId.toString() }, "getLastNotified Redis read failed");
+      return null;
+    });
+  if (fromRedis !== null) return fromRedis;
+  return inMemoryLastNotified.get(userId) ?? null;
+}
+
 /**
  * Сохранить «последняя модель про которую отправили пинг» — для последующего
  * dedup'а в trailing-debounce: если юзер попрыгал по моделям и вернулся к этой
  * же, второго одинакового пинга мы не шлём (старое сообщение в чате уже
- * корректное).
+ * корректное). In-memory обновление синхронное и без catch — оно надёжное
+ * даже когда Redis отвалился.
  */
 async function setLastNotified(userId: bigint, modelId: string): Promise<void> {
+  inMemoryLastNotified.set(userId, modelId);
   await getRedis()
     .set(lastNotifiedRedisKey(userId), modelId, "EX", LAST_NOTIFIED_TTL_SEC)
-    .catch((err) => logger.warn({ err, userId: userId.toString() }, "setLastNotified failed"));
+    .catch((err) =>
+      logger.warn({ err, userId: userId.toString() }, "setLastNotified Redis write failed"),
+    );
 }
 
 /**
@@ -84,16 +114,22 @@ async function setLastNotified(userId: bigint, modelId: string): Promise<void> {
  * NOTIFY_DEBOUNCE_MS тишины сравниваем с last-notified — если модель та же,
  * молчим (юзер вернулся к исходной); иначе шлём уведомление и обновляем
  * last-notified.
+ *
+ * Race-guard: IIFE дважды проверяет `pendingNotifyTimers.get(userId) === timer`
+ * — один раз сразу при входе, второй раз после await Redis-read. Если за это
+ * время пришёл `cancelPendingNotify` (от /state/activate) или новый
+ * scheduleModelChangedNotify (новый select-model заменил наш timer), мы тихо
+ * выходим без отправки. Полностью атомарным это не делает — но окно гонки
+ * сжимается до микросекунд между check и собственно sendModelActivatedNotification.
  */
 function scheduleModelChangedNotify(userId: bigint, section: string, modelId: string): void {
   cancelPendingNotify(userId);
-  const timer = setTimeout(() => {
-    pendingNotifyTimers.delete(userId);
+  const timer: NodeJS.Timeout = setTimeout(() => {
     void (async () => {
+      if (pendingNotifyTimers.get(userId) !== timer) return;
       try {
-        const lastNotified = await getRedis()
-          .get(lastNotifiedRedisKey(userId))
-          .catch(() => null);
+        const lastNotified = await getLastNotified(userId);
+        if (pendingNotifyTimers.get(userId) !== timer) return;
         if (lastNotified === modelId) return;
         await sendModelActivatedNotification(userId, section, modelId, false);
         await setLastNotified(userId, modelId);
@@ -102,6 +138,10 @@ function scheduleModelChangedNotify(userId: bigint, section: string, modelId: st
           { err, userId: userId.toString(), section, modelId },
           "scheduleModelChangedNotify: fire failed",
         );
+      } finally {
+        if (pendingNotifyTimers.get(userId) === timer) {
+          pendingNotifyTimers.delete(userId);
+        }
       }
     })();
   }, NOTIFY_DEBOUNCE_MS);
@@ -896,11 +936,6 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       const { userId } = request as AuthRequest;
       const { section, modelId } = request.body;
 
-      // Full activate шлёт собственное уведомление — гасим pending
-      // trailing-debounce от предыдущих silent select'ов, иначе юзер получит
-      // дубль через NOTIFY_DEBOUNCE_MS после активации.
-      cancelPendingNotify(userId);
-
       if (section === "gpt") {
         await userStateService.setGptModel(userId, modelId);
       } else {
@@ -933,6 +968,11 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
         await userStateService.setState(userId, newState, section as Section);
       }
 
+      // Гасим pending trailing-debounce ПОСЛЕ всех DB-write'ов, но до своего
+      // notify. Если что-то выше throw'нет — exception вернётся 500, pending
+      // таймер мы не трогаем и юзер всё равно получит notify через debounce
+      // (от silent select'ов, которые предшествовали этой активации).
+      cancelPendingNotify(userId);
       await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
       // Запоминаем что про эту модель только что прислали пинг — последующий
       // silent select на ту же модель внутри 24ч окна не задублирует сообщение.
