@@ -9,6 +9,7 @@ import {
   checkBalance,
   usdToTokens,
   probeImageMetadata,
+  probeAudioDurationSec,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import { buildCostLine } from "../utils/cost-line.js";
@@ -91,6 +92,9 @@ interface AvatarVoiceEntry {
   tgUrl: string;
   /** message_id of the voice/audio message — so the result reply targets it. */
   voiceMessageId?: number;
+  /** Длительность аудио в секундах — ffprobe на байтах (не metadata) при
+   *  загрузке. Прокидывается как `audioDurationSecHint` в cost-preview. */
+  durationSec?: number;
   expiresAt: number;
 }
 
@@ -112,6 +116,45 @@ function getAvatarVoice(userId: bigint, id: string): AvatarVoiceEntry | null {
     return null;
   }
   return entry;
+}
+
+/**
+ * Достоверная длительность TG-аудио для cost-preview hint.
+ *
+ *  - Скачиваем по tgUrl, прогоняем ffprobe. Не доверяем `metaDuration` для
+ *    type=audio: пользователь контролирует metadata загруженного файла и
+ *    может занизить → billing exploit. Probe на байтах достоверен.
+ *  - Если probe сорвался: для `isVoiceType` (запись через TG-микрофон —
+ *    duration ставит сам Telegram) возвращаем `metaDuration` как fallback.
+ *    Для audio-файлов возвращаем `null` — лучше per_second режим, чем
+ *    подделанная цена.
+ *
+ * Вернёт `null` если ничего достоверного получить не удалось.
+ */
+async function probeTelegramAudioDurationSec(
+  tgUrl: string,
+  isVoiceType: boolean,
+  metaDuration: number | undefined,
+): Promise<number | null> {
+  try {
+    const res = await fetch(tgUrl);
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.byteLength > 0) {
+        const probed = await probeAudioDurationSec(buf);
+        if (probed && probed > 0) return Math.ceil(probed);
+      }
+    } else {
+      logger.warn({ status: res.status }, "probeTelegramAudioDurationSec: fetch !ok");
+    }
+  } catch (err) {
+    logger.warn({ err }, "probeTelegramAudioDurationSec: fetch/probe failed");
+  }
+  // Probe не получился — fallback только для voice (TG-server set), не для audio (user-controlled).
+  if (isVoiceType && typeof metaDuration === "number" && metaDuration > 0) {
+    return metaDuration;
+  }
+  return null;
 }
 
 // ── Model selection keyboard ──────────────────────────────────────────────────
@@ -703,7 +746,12 @@ export async function executeVideoPrompt(
   // resolve once — `resolveSlotValue` handles `tg:`-fileIds and bare S3 keys
   // uniformly, returning fresh URLs.
   const pendingMediaInputs: Record<string, string[]> = hasMediaInputs ? { ...mediaInputs } : {};
-  if (rawVoiceS3Key) pendingMediaInputs.voice_audio = [rawVoiceS3Key];
+  if (rawVoiceS3Key) {
+    pendingMediaInputs.voice_audio = [rawVoiceS3Key];
+    // Scratchpad override — другое аудио чем то, для которого мы стэшили
+    // длительность в slot-upload. Чистим, чтобы не подсунуть hint от чужого файла.
+    await userStateService.clearVideoVoiceDurationSec(ctx.user.id);
+  }
   const hasAnyPending = Object.keys(pendingMediaInputs).length > 0;
   const resolvedMediaInputs = hasAnyPending
     ? await resolveMediaInputUrls(pendingMediaInputs)
@@ -713,6 +761,14 @@ export async function executeVideoPrompt(
   // avatar_photo slot.
   const routed = routeAvatarPhoto(modelId, scratchpadImageUrl, resolvedMediaInputs);
   const imageUrl = routed.imageUrl;
+
+  // Hint: достоверная длительность загруженного юзером voice'а. Использую
+  // ТОЛЬКО если в submit'е реально есть voice_audio — иначе stale значение
+  // в БД (от прошлой загрузки) применилось бы к submit'у без аудио.
+  const hasVoiceAudioForSubmit = !!routed.mediaInputs?.voice_audio?.[0];
+  const audioDurationSecHint = hasVoiceAudioForSubmit
+    ? ((await userStateService.getVideoVoiceDurationSec(ctx.user.id)) ?? undefined)
+    : undefined;
 
   // Build submitParams without EL TTS — preGen is deferred until after the gate
   // so that cancelling the confirmation costs the user $0 in EL spend.
@@ -729,6 +785,7 @@ export async function executeVideoPrompt(
     extraModelSettings: driverUrl ? { driver_url: driverUrl } : undefined,
     sourceMessageId,
     promptMessageId,
+    ...(audioDurationSecHint !== undefined ? { audioDurationSecHint } : {}),
   };
 
   if (
@@ -1218,6 +1275,11 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
 
     // Build submitParams without EL TTS — preGen is deferred until after the gate.
     const routed = routeAvatarPhoto(modelId, supportsImages ? tgUrl : undefined, mediaInputs);
+    // См. executeVideoPrompt — DB hint для cost-preview, только если slot-voice реально в submit'е.
+    const hasVoiceAudioForSubmit = !!routed.mediaInputs?.voice_audio?.[0];
+    const audioDurationSecHint = hasVoiceAudioForSubmit
+      ? ((await userStateService.getVideoVoiceDurationSec(ctx.user.id)) ?? undefined)
+      : undefined;
     const submitParamsBase = {
       userId: ctx.user.id,
       modelId,
@@ -1229,6 +1291,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       aspectRatio: modelSettings?.aspectRatio,
       duration: modelSettings?.duration,
       promptMessageId,
+      ...(audioDurationSecHint !== undefined ? { audioDurationSecHint } : {}),
     };
 
     if (
@@ -1681,6 +1744,28 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
       if (slot.mode === "driving_audio") {
         await userStateService.clearMediaInputSlot(userId, slotModelId, activeSlot.slotKey);
         await userStateService.addMediaInput(userId, slotModelId, activeSlot.slotKey, tgSlotValue);
+        // Замеряем длительность для cost-preview hint (см. probeTelegramAudioDurationSec).
+        // Только для моделей с per-second биллингом по входному аудио (HeyGen).
+        //
+        // ВАЖНО: чистим DB ПЕРЕД probe — иначе если getFile / probe сорвётся
+        // (транзиентный TG fail), старая duration осталась бы в DB и применилась
+        // бы к НОВОМУ файлу на сабмите → exploit vector (можно подменить voice
+        // на длинный, заранее залив короткий с известной duration).
+        if (slotModelId === "heygen") {
+          await userStateService.clearVideoVoiceDurationSec(userId);
+          const tgFile = await ctx.api.getFile(audioMsg.file_id).catch(() => null);
+          if (tgFile?.file_path) {
+            const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${tgFile.file_path}`;
+            const durSec = await probeTelegramAudioDurationSec(
+              tgUrl,
+              !!ctx.message?.voice,
+              audioMsg.duration,
+            );
+            if (durSec) {
+              await userStateService.setVideoVoiceDurationSec(userId, durSec);
+            }
+          }
+        }
         clearActiveSlot(userId);
         await consumeMediaHint(ctx, "video");
         await sendVideoMediaInputStatus(ctx);
@@ -1737,12 +1822,16 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
   const s3Key = `voice/${userId.toString()}/${file.file_id}.${ext}`;
   const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
 
+  // Достоверная длительность для cost-preview hint (см. probeTelegramAudioDurationSec).
+  const durationSec = await probeTelegramAudioDurationSec(tgUrl, isVoice, audioMsg.duration);
+
   // Generate an ID and store voice data for both callback paths
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   storeAvatarVoice(userId, id, {
     uploadedKey,
     tgUrl,
     voiceMessageId: ctx.message?.message_id,
+    ...(durationSec ? { durationSec } : {}),
   });
 
   const kb = new InlineKeyboard()
@@ -1828,6 +1917,8 @@ export async function handleVideoAvatarVoiceCallback(ctx: BotContext): Promise<v
     aspectRatio: modelSettings?.aspectRatio,
     duration: modelSettings?.duration,
     promptMessageId: entry.voiceMessageId,
+    // Достоверная длительность от ffprobe-at-upload (или TG-server для voice'ов).
+    ...(entry.durationSec !== undefined ? { audioDurationSecHint: entry.durationSec } : {}),
   };
 
   if (

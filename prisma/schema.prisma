@@ -112,6 +112,15 @@ model UserState {
   // Голосовое сообщение для HeyGen audio voice: Telegram file URL (one-shot, сбрасывается после использования)
   videoRefVoiceUrl String?
 
+  // Длительность последнего загруженного юзером аудио для HeyGen voice_audio
+  // слота (в секундах, ffprobe'нута на байтах при загрузке — не доверяем
+  // metadata-полю Telegram audio messages, чтобы не было billing-exploit'а).
+  // Используется как `audioDurationSecHint` в cost-preview, чтобы не падать
+  // в per_second режим из-за flaky probe в submit-time. Перезаписывается на
+  // каждой новой загрузке voice'а; не очищается при сабмите — `hasVoiceAudio`
+  // guard в боте отсекает stale значения когда mediaInputs.voice_audio пуст.
+  videoVoiceDurationSec Int?
+
   // Настройки генерации изображений: { [modelId]: { aspectRatio: string } }
   imageSettings Json?
 

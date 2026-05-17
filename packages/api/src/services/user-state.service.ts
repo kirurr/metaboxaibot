@@ -143,6 +143,44 @@ export const userStateService = {
     return state.videoRefVoiceUrl;
   },
 
+  /**
+   * Сохранить длительность только что загруженного в HeyGen voice_audio слот
+   * аудио (в секундах). Перезаписывается на каждой новой загрузке. НЕ
+   * очищается на submit — `hasVoiceAudio` guard в боте отсекает stale значения
+   * когда в submit'е mediaInputs.voice_audio пуст.
+   */
+  async setVideoVoiceDurationSec(userId: bigint, durationSec: number): Promise<void> {
+    // Defensive: только положительные значения. Если caller передал 0/отриц./NaN —
+    // это сигнал «нечего стэшить», эквивалент clear (иначе stale 0 в DB подсунул
+    // бы фейковый hint=0 в cost-preview).
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
+      await this.clearVideoVoiceDurationSec(userId);
+      return;
+    }
+    await db.userState.upsert({
+      where: { userId },
+      create: { userId, state: "IDLE", videoVoiceDurationSec: durationSec },
+      update: { videoVoiceDurationSec: durationSec },
+    });
+  },
+
+  /** Прочитать сохранённую длительность; null если не задана. */
+  async getVideoVoiceDurationSec(userId: bigint): Promise<number | null> {
+    const state = await db.userState.findUnique({ where: { userId } });
+    return state?.videoVoiceDurationSec ?? null;
+  },
+
+  /** Сбросить (явно). Используется когда rawVoiceS3Key override подменяет
+   *  слот-voice — иначе подсунули бы duration от старого файла к новому. */
+  async clearVideoVoiceDurationSec(userId: bigint): Promise<void> {
+    const state = await db.userState.findUnique({
+      where: { userId },
+      select: { videoVoiceDurationSec: true },
+    });
+    if (state?.videoVoiceDurationSec == null) return;
+    await db.userState.update({ where: { userId }, data: { videoVoiceDurationSec: null } });
+  },
+
   /** Returns per-model image settings: { [modelId]: { aspectRatio: string } } */
   async getImageSettings(userId: bigint): Promise<Record<string, { aspectRatio: string }>> {
     const state = await db.userState.findUnique({ where: { userId } });

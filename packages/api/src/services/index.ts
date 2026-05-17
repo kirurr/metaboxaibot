@@ -55,6 +55,7 @@ export {
   measureImageMegapixels,
   probeImageMetadata,
 } from "./s3.service.js";
+export { probeAudioDurationSec } from "../utils/audio-transcode.js";
 export type { ImageProbeInfo } from "./s3.service.js";
 export {
   verifyLinkToken,
