@@ -190,6 +190,7 @@ export interface Translations {
     mediaSlotExpired: string;
     mediaSlotDurationTooShort: string;
     mediaSlotDurationTooLong: string;
+    firstClipExceedsOutputDuration: string;
     mediaSlotDurationOutOfRange: string;
     mediaSlotFileTooLarge: string;
     mediaSlotImageTooSmall: string;

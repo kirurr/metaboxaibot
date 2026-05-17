@@ -272,6 +272,8 @@ export default {
       "❌ Video is too short ({actual} s). Minimum duration is {min} s. Please upload a different file.",
     mediaSlotDurationTooLong:
       "❌ Video is too long ({actual} s). Maximum duration is {max} s. Trim the video and try again.",
+    firstClipExceedsOutputDuration:
+      "❌ Reference clip duration ({actual} s) must be shorter than the output duration ({requested} s). Trim the clip or increase the output duration setting.",
     mediaSlotDurationOutOfRange:
       "❌ Video length of {actual} s is not accepted. Allowed duration is {min}–{max} s.",
     mediaSlotFileTooLarge: "❌ File is too large ({actualMb} MB). Maximum size is {maxMb} MB.",

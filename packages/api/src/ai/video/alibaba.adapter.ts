@@ -1,5 +1,5 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 
 const DASHSCOPE_BASE = "https://dashscope-intl.aliyuncs.com/api/v1";
@@ -180,7 +180,44 @@ export class AlibabaVideoAdapter implements VideoAdapter {
     const { task_status, video_url, message } = data.output;
 
     if (task_status === "FAILED") {
-      throw new Error(`Alibaba Wan generation failed: ${message ?? "unknown error"}`);
+      const errMsg = message ?? "unknown error";
+      // Wan I2V жёстко ограничивает input-video <=10s. Когда юзер грузит более
+      // длинное — submit проходит, fail приходит только на poll'е. Мапим в
+      // UserFacingError(mediaSlotDurationTooLong), чтобы юзер увидел понятное
+      // «обрежьте видео», а не generic «generationFailed» + ops-alert.
+      // Формат сообщения от Wan: «<url> duration should be at most 10s, got 14.2s».
+      const durationMatch =
+        /duration should be at most (\d+(?:\.\d+)?)s, got (\d+(?:\.\d+)?)s/i.exec(errMsg);
+      if (durationMatch) {
+        const max = durationMatch[1]!;
+        const actual = Math.round(Number(durationMatch[2]!));
+        throw new UserFacingError(`Alibaba Wan: input video duration exceeds limit (${errMsg})`, {
+          key: "mediaSlotDurationTooLong",
+          params: { actual, max },
+        });
+      }
+      // Wan i2v `first_clip` mode требует чтобы длительность референс-клипа
+      // была меньше параметра выходной длительности (`parameters.duration`).
+      // Юзер выбрал output=2s, грузит клип на 6s — Wan отбивает. Решение
+      // двойное: либо клип короче, либо output длиннее. Отдельный ключ
+      // (не mediaSlotDurationTooLong), чтобы сообщение объяснило оба пути.
+      // Формат: «first_clip duration (6.05s) must be less than the requested duration (2s)».
+      const firstClipMatch =
+        /first_clip duration \((\d+(?:\.\d+)?)s\) must be less than the requested duration \((\d+(?:\.\d+)?)s\)/i.exec(
+          errMsg,
+        );
+      if (firstClipMatch) {
+        const actual = Math.round(Number(firstClipMatch[1]!));
+        const requested = Math.round(Number(firstClipMatch[2]!));
+        throw new UserFacingError(
+          `Alibaba Wan: first_clip duration exceeds output duration (${errMsg})`,
+          {
+            key: "firstClipExceedsOutputDuration",
+            params: { actual, requested },
+          },
+        );
+      }
+      throw new Error(`Alibaba Wan generation failed: ${errMsg}`);
     }
     if (task_status !== "SUCCEEDED") return null;
     if (!video_url) throw new Error("Alibaba Wan: no video URL in result");
