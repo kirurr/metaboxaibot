@@ -77,6 +77,16 @@ export default defineConfig(({ mode }) => {
             }
           },
         },
+        // Socket.IO handshake + WebSocket upgrade. Default-path сервера —
+        // `/socket.io/`. Без этой записи фронт стучался бы на localhost:5174
+        // и handshake возвращал 404. `ws: true` обязателен для апгрейда
+        // (polling fallback ходит по тому же пути).
+        "/socket.io": {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+          secure: false,
+        },
       },
     },
     build: {
