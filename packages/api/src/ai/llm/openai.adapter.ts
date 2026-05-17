@@ -245,10 +245,6 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       //  - "An error occurred while processing your request … Please include
       //    the request ID req_…" — generic OpenAI 5xx, проброшенный через SSE.
       //    Сам провайдер советует «You can retry your request» — transient.
-      //  - "There was an issue with your request. Please check your inputs
-      //    and try again" — ещё одна generic server-side формулировка на
-      //    Responses API / o-моделях; несмотря на «check your inputs» по факту
-      //    transient (повтор того же payload'а проходит).
       if (err instanceof Error) {
         const status = (err as Error & { status?: unknown }).status;
         const hasNumericStatus = typeof status === "number";
@@ -256,8 +252,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
           const msg = err.message ?? "";
           if (
             /overloaded/i.test(msg) ||
-            /An error occurred while processing your request/i.test(msg) ||
-            /There was an issue with your request/i.test(msg)
+            /An error occurred while processing your request/i.test(msg)
           ) {
             (err as Error & { status: number }).status = 503;
           }
