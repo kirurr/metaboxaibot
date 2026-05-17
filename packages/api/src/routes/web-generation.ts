@@ -85,6 +85,12 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
       const take = Math.min(parseInt(limit, 10) || 20, 50);
       const modelIdsArr = modelIds ? modelIds.split(",").filter(Boolean) : null;
 
+      // Section mismatch fix: в каталоге моделей design-секция называется
+      // "design" (AI_MODELS[*].section = "design"), но в `generation_jobs.section`
+      // хардкодится "image" (см. generation.service.ts). Фронт берёт section из
+      // model'и → передаёт "design" → Prisma matchит 0 rows. Маппим на лету.
+      const normalizedSection = section === "design" ? "image" : section;
+
       try {
         const jobs = await db.generationJob.findMany({
           where: {
@@ -93,7 +99,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
             // Pending/processing с web-стороны не тянем: они трекаются локально
             // по dbJobId сразу после submit'а (`pendingJobs` в GenerateScene).
             status: { in: ["done", "failed"] },
-            ...(section ? { section } : {}),
+            ...(normalizedSection ? { section: normalizedSection } : {}),
             ...(modelIdsArr ? { modelId: { in: modelIdsArr } } : {}),
           },
           orderBy: { createdAt: "desc" },

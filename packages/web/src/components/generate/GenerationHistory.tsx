@@ -21,12 +21,25 @@ import type { WebModelDto } from "@/api/models";
  * добавляет туда задачу сразу после `submitXxxGeneration()`.
  */
 
+/** Output, восстановленный из WS-уведомления (`data.outputs[]`). */
+export interface TrackedJobOutput {
+  id: string;
+  url: string | null;
+  thumbnailUrl: string | null;
+}
+
 export interface PendingJob {
   /** dbJobId, возвращённый submit-эндпоинтом. */
   id: string;
   modelId: string;
+  /** "image" | "video" | "audio" — нужно знать как рендерить outputs success-карточки. */
+  section: string;
   prompt: string;
   startedAt: number;
+  /** WS-driven статус. По умолчанию `pending`, переключается на success/error через колбэки. */
+  status?: "pending" | "success" | "error";
+  /** Заполняется на success — рисуем outputs из WS-уведомления, не дожидаясь refetch'а. */
+  outputs?: TrackedJobOutput[];
   /** Если приходит error-нотификация — переключаем сюда. */
   errorMessage?: string;
 }
@@ -38,10 +51,12 @@ interface Props {
   allModels: readonly WebModelDto[];
   /** Локально-трекаемые job'ы между submit'ом и финальным WS-event'ом. */
   pendingJobs: PendingJob[];
-  /** Колбэк когда job завершился (success/error) — родитель чистит pendingJobs. */
+  /** Колбэк дисмисса (error-карточка по кнопке закрытия). */
   onJobResolved: (jobId: string) => void;
-  /** Колбэк когда pending получил error из WS — родитель помечает errorMessage. */
+  /** Колбэк когда pending получил error из WS. */
   onJobFailed: (jobId: string, errorMessage: string) => void;
+  /** Колбэк когда pending получил success из WS — родитель апдейтит карточку. */
+  onJobSucceeded: (jobId: string, outputs: TrackedJobOutput[]) => void;
 }
 
 export function GenerationHistory({
@@ -50,6 +65,7 @@ export function GenerationHistory({
   pendingJobs,
   onJobResolved,
   onJobFailed,
+  onJobSucceeded,
 }: Props) {
   const { t } = useTranslation();
   const [history, setHistory] = useState<GenerationJobDto[]>([]);
@@ -97,19 +113,31 @@ export function GenerationHistory({
   useEffect(() => {
     if (pendingJobs.length === 0) return;
     for (const pending of pendingJobs) {
+      // Уже success/error — повторно не обрабатываем.
+      if (pending.status === "success") continue;
       const notif = notifications.find((n) => n.jobId === pending.id);
       if (!notif) continue;
       if (notif.type.endsWith("_success")) {
-        // Refetch — свежий job появится в списке с outputs'ами.
+        // Парсим outputs прямо из WS — рисуем результат сразу, не дожидаясь
+        // refetch'а истории (он может быть медленным/сорваться). DB-снапшот
+        // придёт фоном и дедупом заменит локальную карточку.
+        const data = (notif.data ?? {}) as {
+          outputs?: Array<{ id: string; s3Key?: string; outputUrl?: string | null }>;
+        };
+        const outputs: TrackedJobOutput[] = (data.outputs ?? []).map((o) => ({
+          id: o.id,
+          url: o.outputUrl ?? null,
+          thumbnailUrl: null,
+        }));
+        onJobSucceeded(pending.id, outputs);
         void refetch();
-        onJobResolved(pending.id);
       } else if (notif.type.endsWith("_error")) {
         if (pending.errorMessage !== notif.message) {
           onJobFailed(pending.id, notif.message);
         }
       }
     }
-  }, [notifications, pendingJobs, onJobResolved, onJobFailed]);
+  }, [notifications, pendingJobs, onJobSucceeded, onJobFailed]);
 
   // Скрываем pending'и, для которых job уже есть в history (race между
   // refetch'ем и pendingJobs cleanup из родителя — лучше не дублировать).
@@ -138,32 +166,50 @@ export function GenerationHistory({
   );
 }
 
+/**
+ * Карточка трекаемой джобы. Три состояния:
+ *  - pending: лоадер «Генерация…», до прихода WS-уведомления
+ *  - success: outputs из `data.outputs[]` WS-уведомления (рендерим сразу)
+ *  - error: красная карточка + сообщение + кнопка закрытия
+ */
 function PendingCard({ job, onDismiss }: { job: PendingJob; onDismiss: () => void }) {
   const { t } = useTranslation();
-  const isError = !!job.errorMessage;
+  const status = job.errorMessage ? "error" : (job.status ?? "pending");
+
+  let className = "gen-history-card";
+  if (status === "pending") className += " is-pending";
+  if (status === "error") className += " is-error";
+
   return (
-    <div className={isError ? "gen-history-card is-error" : "gen-history-card is-pending"}>
+    <div className={className}>
       <div className="gen-history-card-head">
-        {isError ? (
+        {status === "error" ? (
           <>
             <AlertCircle size={14} />
             <span>{t("generate.historyError")}</span>
           </>
-        ) : (
+        ) : status === "pending" ? (
           <>
             <Loader2 size={14} className="spin" />
             <span>{t("generate.historyGenerating")}</span>
           </>
-        )}
+        ) : null}
       </div>
       <div className="gen-history-card-prompt">{job.prompt || "—"}</div>
-      {isError && (
+      {status === "error" && (
         <>
           <div className="gen-history-card-error">{job.errorMessage}</div>
           <button type="button" className="gen-history-card-dismiss" onClick={onDismiss}>
             {t("common.close")}
           </button>
         </>
+      )}
+      {status === "success" && job.outputs && job.outputs.length > 0 && (
+        <div className="gen-history-card-outputs">
+          {job.outputs.map((o) => (
+            <OutputThumb key={o.id} url={o.url} thumb={o.thumbnailUrl} section={job.section} />
+          ))}
+        </div>
       )}
     </div>
   );

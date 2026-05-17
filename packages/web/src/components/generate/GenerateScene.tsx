@@ -1304,12 +1304,18 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       }
       // Локально трекаем pending-job: GenerationHistory подхватит её и
       // переключит в success/error когда придёт `notification:new`.
+      // section пишем нормализованный под DB-словарь ("image"/"video"/"audio"),
+      // т.к. модель имеет "design" в каталоге — у success-карточки рендер
+      // outputs зависит от типа медиа.
+      const trackedSection = section === "design" || section === "image" ? "image" : section;
       setPendingJobs((prev) => [
         {
           id: result.dbJobId,
           modelId: selectedModel.id,
+          section: trackedSection,
           prompt,
           startedAt: Date.now(),
+          status: "pending",
         },
         ...prev,
       ]);
@@ -1550,20 +1556,6 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               ))}
             </div>
           )}
-
-          {/* История генераций по текущему семейству моделей. Pending'и
-              отображаются сверху, успех/ошибка приходит через WS-нотификацию. */}
-          <GenerationHistory
-            selectedModel={selectedModel}
-            allModels={models}
-            pendingJobs={pendingJobs}
-            onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
-            onJobFailed={(jobId, errorMessage) =>
-              setPendingJobs((prev) =>
-                prev.map((p) => (p.id === jobId ? { ...p, errorMessage } : p)),
-              )
-            }
-          />
         </div>
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
@@ -1642,6 +1634,28 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             </div>
           )}
         </div>
+      </div>
+
+      {/* История генераций — отдельная пэйн справа от `.gen-panel`. Занимает
+          всё оставшееся пустое место экрана. На мобильных скрывается через
+          CSS (там панель и так full-width). */}
+      <div className="gen-history-pane">
+        <GenerationHistory
+          selectedModel={selectedModel}
+          allModels={models}
+          pendingJobs={pendingJobs}
+          onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
+          onJobFailed={(jobId, errorMessage) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
+            )
+          }
+          onJobSucceeded={(jobId, outputs) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
+            )
+          }
+        />
       </div>
 
       {voicePickerSetting && activePickerProvider && (
