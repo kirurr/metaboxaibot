@@ -661,15 +661,31 @@ export async function executeVideoPrompt(
   prompt: string,
   sourceMessageId?: string,
   promptMessageId?: number,
+  options: { skipModeGate?: boolean } = {},
 ): Promise<void> {
   if (!ctx.user) return;
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
+  // Dedup сначала: если у юзера уже летит активная генерация с этого же
+  // sourceMessageId — выходим тихо, без побочных эффектов (включая picker
+  // ниже). Без этого дубль-тап мог бы отправить picker сверху "уже
+  // генерируется" уведомления.
   if (sourceMessageId) {
     const active = await generationService.hasActiveJobForSource(ctx.user.id, sourceMessageId);
     if (active) return;
   }
+
+  // Mode gate здесь, а не в `handleVideoMessage` — этот же entry point
+  // используют voice-prompt callback (`handlers/voice-prompt.handler.ts`) и
+  // album/caption flows из `handleVideoPhoto`/`handleVideoVideo`. Без gate в
+  // executeVideoPrompt voice-prompt у multi-mode модели без textOnly режима
+  // молча падал бы на required-slot validation.
+  //
+  // `skipModeGate` передают caption-flow'ы из handleVideoPhoto/handleVideoVideo
+  // — там media gate уже отработал и гарантирует что mode выбран; повторный
+  // gate здесь дал бы 2 лишних DB-read'а на каждое captioned-фото в альбоме.
+  if (!options.skipModeGate && !(await ensureVideoModeSelected(ctx, "text"))) return;
 
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId ?? "kling";
@@ -869,7 +885,8 @@ export async function executeVideoPrompt(
 
 export async function handleVideoMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
-  if (!(await ensureVideoModeSelected(ctx, "text"))) return;
+  // Mode gate выполняется внутри executeVideoPrompt — единая точка для всех
+  // text entry'ев (текстовое сообщение, voice-prompt callback, generate-no-prompt).
   await executeVideoPrompt(ctx, ctx.message.text, undefined, ctx.message.message_id);
 }
 
@@ -924,8 +941,20 @@ async function ensureVideoModeSelected(
     }
   }
 
-  await ctx.reply(ctx.t.modelModes.pickModeFirstForMedia);
-  await sendVideoModePicker(ctx, modelId, modes);
+  // Dedup picker'а: при загрузке альбома (10-30 фоток подряд) старый код слал
+  // picker на каждую. Acquire Redis-lock на 15с — только первый вызов в окне
+  // фактически рендерит picker, остальные тихо возвращают false (upload
+  // блокируется, но без спама). 15с покрывает типичную загрузку большого
+  // альбома (~10-15с). Если юзер за это время выбрал mod — gate выйдет рано
+  // по `saved !== null`, lock не трогаем; так что увеличение TTL не вредит
+  // legitimate flow. Fail-open: если Redis недоступен, рендерим picker (лучше
+  // спам чем потерянный алерт).
+  const pickerLockKey = `mode-picker-shown:${ctx.user.id}:video`;
+  const acquired = await acquireLock(pickerLockKey, 15).catch(() => true);
+  if (acquired) {
+    await ctx.reply(ctx.t.modelModes.pickModeFirstForMedia);
+    await sendVideoModePicker(ctx, modelId, modes);
+  }
   return false;
 }
 
@@ -1170,7 +1199,10 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       }
 
       if (caption) {
-        await executeVideoPrompt(ctx, caption, undefined, promptMessageId);
+        // skipModeGate: media gate выше уже отработал, повтор — лишние DB-read'ы.
+        await executeVideoPrompt(ctx, caption, undefined, promptMessageId, {
+          skipModeGate: true,
+        });
       }
     });
     return;
@@ -1258,7 +1290,10 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
+          // skipModeGate: media gate в handleVideoPhoto уже отработал.
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId, {
+            skipModeGate: true,
+          });
         }
       }
     });
@@ -1640,7 +1675,10 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
+          // skipModeGate: media gate в handleVideoVideo уже отработал.
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId, {
+            skipModeGate: true,
+          });
         }
       }
     });
