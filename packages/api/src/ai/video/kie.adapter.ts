@@ -11,6 +11,7 @@ import {
   uploadFileUrl,
   uploadFileUrlCroppedToAspect,
 } from "../../utils/kie-upload.js";
+import { KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
@@ -200,13 +201,16 @@ export class KieVideoAdapter implements VideoAdapter {
       // output под dimensions входной картинки (kling3.md §"Aspect Ratio
       // Auto-Adaptation"). Чтобы выбор юзера всегда побеждал, центр-кропаем
       // все картинки попадающие в image_urls под target aspect ПЕРЕД upload —
-      // тогда auto-adapt даёт ровно тот ratio, что выбран. Кропаем только
-      // если aspect ∈ Kling-поддерживаемые: parseAspectRatio пропустил бы
-      // "4:3"/"21:9" (валидный формат, но Kling всё равно отдаст 400 потом —
-      // wasted CPU на crop). Для unsupported → uncropped upload (KIE сам
-      // ответит 400 быстро, без нашей лишней работы).
-      const KLING_SUPPORTED_ASPECTS = ["16:9", "9:16", "1:1"];
-      const isCroppableAspect = KLING_SUPPORTED_ASPECTS.includes(targetAspect);
+      // тогда auto-adapt даёт ровно тот ratio, что выбран. Кроп — opt-in
+      // (setting `crop_to_aspect`, default OFF): по умолчанию юзер получает
+      // прежнее поведение (видео в формате фото), а тогл явно сигнализирует
+      // что он готов потерять края кадра ради выбранного aspect. Кропаем
+      // только если aspect ∈ KLING_SUPPORTED_ASPECTS: остальные ratio'и
+      // ("4:3"/"21:9" и т.п.) Kling всё равно отдаёт 400 — wasted CPU на
+      // crop. Для unsupported → uncropped upload (KIE сам ответит 400
+      // быстро, без нашей лишней работы).
+      const cropEnabled = ms.crop_to_aspect === true;
+      const isCroppableAspect = cropEnabled && KLING_SUPPORTED_ASPECTS.includes(targetAspect);
       const uploadForImageUrls = (url: string): Promise<string> =>
         isCroppableAspect
           ? uploadFileUrlCroppedToAspect(this.apiKey, url, targetAspect, buildKieUploadName(url))

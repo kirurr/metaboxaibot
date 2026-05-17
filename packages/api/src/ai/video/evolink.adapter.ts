@@ -6,6 +6,7 @@ import type {
 } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import {
   translatePromptRefs,
@@ -170,7 +171,7 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       case "kling-o3": {
         const mi = input.mediaInputs ?? {};
         body = hasAnyKlingImageInput(mi, input.imageUrl)
-          ? this.buildKlingO3I2VBody(input, mapping)
+          ? await this.buildKlingO3I2VBody(input, mapping)
           : this.buildKlingO3T2VBody(input, mapping);
         break;
       }
@@ -299,20 +300,43 @@ export class EvolinkVideoAdapter implements VideoAdapter {
    * kling-custom-element flow (10+ минут на создание). Для fallback'а
    * реализуем degraded режим через image_urls — см. doc strings flattenRefElementsFirstOnly.
    */
-  private buildKlingO3I2VBody(
+  private async buildKlingO3I2VBody(
     input: VideoInput,
     mapping: Extract<EvolinkVideoMapping, { family: "kling-o3" }>,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     const ms = input.modelSettings ?? {};
     const mi = input.mediaInputs ?? {};
 
-    const imageStart = mi.first_frame?.[0] ?? input.imageUrl;
-    const imageEnd = mi.last_frame?.[0];
+    let imageStart: string | undefined = mi.first_frame?.[0] ?? input.imageUrl;
+    let imageEnd: string | undefined = mi.last_frame?.[0];
     const refImages = flattenRefElementsFirstOnly(mi);
     const elementPositions = buildEvolinkElementPositions(mi);
     let remappedPrompt = input.prompt
       ? translatePromptRefs(input.prompt, { dialect: "evolink", elementPositions })
       : undefined;
+
+    // Pre-crop frames под выбранный aspect, если юзер включил `crop_to_aspect`
+    // (см. KLING_SETTINGS). Evolink принимает image URLs напрямую и сам качает,
+    // так что подменяем URL на cropped presigned URL ДО сборки body.
+    // Кропаем только frame'ы (image_start / image_end) — reference images
+    // (ref_element_*) на aspect не влияют, как и в KIE-адаптере.
+    // cropImageUrlAndMaterialize сам no-op'ит для unsupported aspect /
+    // aligned image / S3 misconfig / fetch fail — возвращает исходный URL,
+    // submit не ломается.
+    const aspectForCrop = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio;
+    const cropEnabled = ms.crop_to_aspect === true;
+    if (cropEnabled && aspectForCrop && KLING_SUPPORTED_ASPECTS.includes(aspectForCrop)) {
+      const cropOne = (url: string | undefined): Promise<string | undefined> =>
+        url
+          ? cropImageUrlAndMaterialize(url, aspectForCrop, { userId: input.userId })
+          : Promise.resolve(undefined);
+      const [croppedStart, croppedEnd] = await Promise.all([
+        cropOne(imageStart),
+        cropOne(imageEnd),
+      ]);
+      imageStart = croppedStart;
+      imageEnd = croppedEnd;
+    }
 
     // Evolink reject'ит `image_end` (он же "end_frame") когда total image count > 2:
     //   "end_frame is not supported when image count exceeds 2 (current: 3 images)"

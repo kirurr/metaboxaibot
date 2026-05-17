@@ -493,6 +493,11 @@ export const SETTING_TRANSLATIONS_EN: Record<string, SettingTranslation> = {
       "1584:672": "Wide 21:9",
     },
   },
+  crop_to_aspect: {
+    label: "Auto-crop photos to format",
+    description:
+      "By default Kling matches the video to the photo's aspect ratio. Enable to crop the photo to the chosen format instead (edges will be cut).",
+  },
   duration: {
     label: "Duration",
     description: "Duration of the video clip in seconds.",

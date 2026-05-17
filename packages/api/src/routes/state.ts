@@ -688,6 +688,143 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  /**
+   * POST /state/select-model — silent variant of /state/activate.
+   *
+   * Меняет только активную модель в секции (designModelId / videoModelId /
+   * audioModelId / gptModelId). НЕ переводит state бота в *_ACTIVE и НЕ шлёт
+   * Telegram-уведомление — это для случая когда юзер просто кликает по
+   * варианту/версии в мини-аппе (карусели «Nano Banana 2 PRO/2/1»), и мы
+   * хотим чтобы выбор немедленно сохранился без спама в чат и без закрытия
+   * мини-аппы. Кнопка «Активировать» по-прежнему вызывает /state/activate
+   * для full activation (state + notification + miniapp close).
+   */
+  fastify.post<{
+    Body: { section: string; modelId: string };
+  }>(
+    "/state/select-model",
+    {
+      schema: {
+        description: "Silently set model for section without state change or notification",
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            section: { type: "string", description: "Section (gpt, design, audio, video)" },
+            modelId: { type: "string", description: "Model ID to select" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          400: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { section, modelId } = request.body;
+
+      // Reject unknown / mismatched modelId — иначе клиент (баг или малициоз)
+      // может воткнуть image-модель в video slot, и бот при следующем запросе
+      // упадёт на `AI_MODELS[invalidId] === undefined`. Аналогично
+      // `/state/selected-mode` валидирует модель перед записью.
+      const model = AI_MODELS[modelId];
+      const validSection = ["design", "audio", "video", "gpt"].includes(section);
+      if (!validSection || !model || model.section !== section) {
+        return reply.code(400).send({ error: "invalid section/modelId" });
+      }
+
+      if (section === "gpt") {
+        await userStateService.setGptModel(userId, modelId);
+      } else {
+        await userStateService.setModelForSection(
+          userId,
+          section as "design" | "audio" | "video",
+          modelId,
+        );
+      }
+
+      return { success: true };
+    },
+  );
+
+  /**
+   * POST /state/notify-model-changed — fire just the Telegram activation
+   * message, без изменений в БД. Используется фронтом после серии
+   * /state/select-model вызовов: чтобы юзер, закрывший мини-аппу через
+   * крестик (без явного «Активировать»), всё равно получил подтверждение в
+   * чате о том, что выбор сохранён. Фронт debounce'ит этот вызов на 5с
+   * после последнего select, чтобы быстрые тапы (PRO → 2 → PRO) не давали
+   * N сообщений подряд.
+   *
+   * Передаёт `sectionSwitched=false` — silent select не меняет section,
+   * только модель внутри неё; section-switch keyboard здесь не нужна.
+   */
+  fastify.post<{
+    Body: { section: string; modelId: string };
+  }>(
+    "/state/notify-model-changed",
+    {
+      schema: {
+        description: "Send model-changed Telegram notification without state mutation",
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            section: { type: "string" },
+            modelId: { type: "string" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { section, modelId } = request.body;
+
+      const model = AI_MODELS[modelId];
+      const validSection = ["design", "audio", "video", "gpt"].includes(section);
+      if (!validSection || !model || model.section !== section) {
+        return reply.code(400).send({ error: "invalid section/modelId" });
+      }
+
+      // Per-(user, model) cooldown 5с — клиент дебаунсит на 5с тоже, но без
+      // серверного gate auth'd клиент мог бы херачить эндпоинт под global
+      // rate limit (120/min) и спамить **свой собственный** Telegram-чат.
+      // Telegram bot API замутит бота за такой абуз.
+      //
+      // Ключ включает modelId, чтобы legit «change of mind» (тап PRO → пинг
+      // → передумал → тап 2 → пинг про 2) не дропался — каждая новая модель
+      // имеет свой cooldown. Дубль того же modelId в окне 5с silently
+      // дропается (юзер не должен получить два одинаковых пинга подряд).
+      // SETNX с TTL = atomic check-and-set.
+      const cooldownKey = `notify-model-changed:${userId}:${modelId}`;
+      const acquired = await getRedis().set(cooldownKey, "1", "EX", 5, "NX");
+      if (acquired !== "OK") {
+        return { success: true };
+      }
+
+      await sendModelActivatedNotification(userId, section, modelId, false);
+      return { success: true };
+    },
+  );
+
   /** POST /state/activate — set model for section and send Telegram notification */
   fastify.post<{
     Body: { section: string; modelId: string };
