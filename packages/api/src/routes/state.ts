@@ -29,6 +29,86 @@ import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 /**
+ * Per-user trailing-edge debounce таймеры для уведомления «модель сменилась».
+ * Ключ — User.id; значение — pending setTimeout. Каждый /state/select-model
+ * сбрасывает старый таймер и взводит новый на NOTIFY_DEBOUNCE_MS. После окна
+ * тишины (юзер закрыл миниапп или перестал тыкать варианты) таймер фаерится
+ * один раз с финальной моделью.
+ *
+ * Map module-scope-овый и живёт всё время процесса. На рестарте API pending
+ * таймеры теряются — модель уже сохранена в БД через select-model, теряем
+ * только уведомление в чат. Acceptable trade-off vs тащить BullMQ-очередь.
+ *
+ * Multi-instance: API в проде однопроцессный (см. docker-compose.prod.yml,
+ * `api` без `replicas`/`deploy.scale`). Если поедем в кластер — заменить на
+ * BullMQ delayed job с jobId=`notify-model:{userId}`.
+ */
+const pendingNotifyTimers = new Map<bigint, NodeJS.Timeout>();
+
+const NOTIFY_DEBOUNCE_MS = 5000;
+/** Сколько Redis помнит «последняя модель про которую слали пинг» для дедупа. */
+const LAST_NOTIFIED_TTL_SEC = 24 * 60 * 60;
+
+/** Redis key для дедупа повторных уведомлений о той же модели. */
+function lastNotifiedRedisKey(userId: bigint): string {
+  return `state:last-notified-model:${userId}`;
+}
+
+/**
+ * Cancel pending model-changed notification для этого юзера, если есть.
+ * Вызывать из /state/activate — full activate шлёт своё уведомление, pending
+ * silent-select notify ему дублём не нужен.
+ */
+function cancelPendingNotify(userId: bigint): void {
+  const existing = pendingNotifyTimers.get(userId);
+  if (existing) {
+    clearTimeout(existing);
+    pendingNotifyTimers.delete(userId);
+  }
+}
+
+/**
+ * Сохранить «последняя модель про которую отправили пинг» — для последующего
+ * dedup'а в trailing-debounce: если юзер попрыгал по моделям и вернулся к этой
+ * же, второго одинакового пинга мы не шлём (старое сообщение в чате уже
+ * корректное).
+ */
+async function setLastNotified(userId: bigint, modelId: string): Promise<void> {
+  await getRedis()
+    .set(lastNotifiedRedisKey(userId), modelId, "EX", LAST_NOTIFIED_TTL_SEC)
+    .catch((err) => logger.warn({ err, userId: userId.toString() }, "setLastNotified failed"));
+}
+
+/**
+ * Trailing-edge debounce: каждый вызов сбрасывает предыдущий таймер. После
+ * NOTIFY_DEBOUNCE_MS тишины сравниваем с last-notified — если модель та же,
+ * молчим (юзер вернулся к исходной); иначе шлём уведомление и обновляем
+ * last-notified.
+ */
+function scheduleModelChangedNotify(userId: bigint, section: string, modelId: string): void {
+  cancelPendingNotify(userId);
+  const timer = setTimeout(() => {
+    pendingNotifyTimers.delete(userId);
+    void (async () => {
+      try {
+        const lastNotified = await getRedis()
+          .get(lastNotifiedRedisKey(userId))
+          .catch(() => null);
+        if (lastNotified === modelId) return;
+        await sendModelActivatedNotification(userId, section, modelId, false);
+        await setLastNotified(userId, modelId);
+      } catch (err) {
+        logger.warn(
+          { err, userId: userId.toString(), section, modelId },
+          "scheduleModelChangedNotify: fire failed",
+        );
+      }
+    })();
+  }, NOTIFY_DEBOUNCE_MS);
+  pendingNotifyTimers.set(userId, timer);
+}
+
+/**
  * Build localised cost line with optional min–max range.
  * Range is derived from costVariants or costMatrix when they differ.
  */
@@ -692,12 +772,24 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /state/select-model — silent variant of /state/activate.
    *
    * Меняет только активную модель в секции (designModelId / videoModelId /
-   * audioModelId / gptModelId). НЕ переводит state бота в *_ACTIVE и НЕ шлёт
-   * Telegram-уведомление — это для случая когда юзер просто кликает по
-   * варианту/версии в мини-аппе (карусели «Nano Banana 2 PRO/2/1»), и мы
-   * хотим чтобы выбор немедленно сохранился без спама в чат и без закрытия
-   * мини-аппы. Кнопка «Активировать» по-прежнему вызывает /state/activate
-   * для full activation (state + notification + miniapp close).
+   * audioModelId / gptModelId). НЕ переводит state бота в *_ACTIVE.
+   *
+   * Telegram-уведомление: НЕ шлём сразу — взводим server-side trailing
+   * debounce. Пока юзер тыкает варианты в мини-аппе (карусель «PRO / 2 / 1»),
+   * каждый тап сбрасывает таймер. После NOTIFY_DEBOUNCE_MS тишины (= юзер
+   * либо закрыл миниапп, либо просто перестал переключаться) фаерится одно
+   * уведомление с финальной моделью — и то только если она отличается от
+   * `last-notified` (юзер не вернулся к исходной).
+   *
+   * Раньше debounce жил на клиенте (5с setTimeout в MediaSettingsView +
+   * pagehide-beacon на закрытие). Telegram WebView X-close не даёт JS
+   * выстрелить надёжно — notify терялся. Теперь таймер на сервере, fast-close
+   * не страшен; клиент шлёт `selectModel` с `keepalive:true` чтобы сам запрос
+   * пережил закрытие WebView.
+   *
+   * Кнопка «Активировать» по-прежнему вызывает /state/activate для full
+   * activation (state + notification + miniapp close) — там pending debounce
+   * этого юзера гасится через `cancelPendingNotify`.
    */
   fastify.post<{
     Body: { section: string; modelId: string };
@@ -705,7 +797,7 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     "/state/select-model",
     {
       schema: {
-        description: "Silently set model for section without state change or notification",
+        description: "Silently set model for section; trailing-debounced notify scheduled",
         body: {
           type: "object",
           additionalProperties: true,
@@ -753,74 +845,18 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
         );
       }
 
-      return { success: true };
-    },
-  );
-
-  /**
-   * POST /state/notify-model-changed — fire just the Telegram activation
-   * message, без изменений в БД. Используется фронтом после серии
-   * /state/select-model вызовов: чтобы юзер, закрывший мини-аппу через
-   * крестик (без явного «Активировать»), всё равно получил подтверждение в
-   * чате о том, что выбор сохранён. Фронт debounce'ит этот вызов на 5с
-   * после последнего select, чтобы быстрые тапы (PRO → 2 → PRO) не давали
-   * N сообщений подряд.
-   *
-   * Передаёт `sectionSwitched=false` — silent select не меняет section,
-   * только модель внутри неё; section-switch keyboard здесь не нужна.
-   */
-  fastify.post<{
-    Body: { section: string; modelId: string };
-  }>(
-    "/state/notify-model-changed",
-    {
-      schema: {
-        description: "Send model-changed Telegram notification without state mutation",
-        body: {
-          type: "object",
-          additionalProperties: true,
-          properties: {
-            section: { type: "string" },
-            modelId: { type: "string" },
-          },
-          required: ["section", "modelId"],
-        },
-        response: {
-          200: {
-            type: "object",
-            additionalProperties: true,
-            properties: { success: { type: "boolean" } },
-          },
-        },
-      },
-    },
-    async (request, reply) => {
-      const { userId } = request as AuthRequest;
-      const { section, modelId } = request.body;
-
-      const model = AI_MODELS[modelId];
-      const validSection = ["design", "audio", "video", "gpt"].includes(section);
-      if (!validSection || !model || model.section !== section) {
-        return reply.code(400).send({ error: "invalid section/modelId" });
+      // Зеркало /state/activate: при выборе voice-clone стираем pending
+      // return-сценарий, иначе бот при следующем тапе voice-clone будет тянуть
+      // данные предыдущей сессии. До этого фикса /state/select-model
+      // расходился с /state/activate — silent select оставлял Redis-key.
+      if (modelId === "voice-clone") {
+        await getRedis()
+          .del(voiceCloneReturnRedisKey(userId))
+          .catch(() => void 0);
       }
 
-      // Per-(user, model) cooldown 5с — клиент дебаунсит на 5с тоже, но без
-      // серверного gate auth'd клиент мог бы херачить эндпоинт под global
-      // rate limit (120/min) и спамить **свой собственный** Telegram-чат.
-      // Telegram bot API замутит бота за такой абуз.
-      //
-      // Ключ включает modelId, чтобы legit «change of mind» (тап PRO → пинг
-      // → передумал → тап 2 → пинг про 2) не дропался — каждая новая модель
-      // имеет свой cooldown. Дубль того же modelId в окне 5с silently
-      // дропается (юзер не должен получить два одинаковых пинга подряд).
-      // SETNX с TTL = atomic check-and-set.
-      const cooldownKey = `notify-model-changed:${userId}:${modelId}`;
-      const acquired = await getRedis().set(cooldownKey, "1", "EX", 5, "NX");
-      if (acquired !== "OK") {
-        return { success: true };
-      }
+      scheduleModelChangedNotify(userId, section, modelId);
 
-      await sendModelActivatedNotification(userId, section, modelId, false);
       return { success: true };
     },
   );
@@ -860,6 +896,11 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       const { userId } = request as AuthRequest;
       const { section, modelId } = request.body;
 
+      // Full activate шлёт собственное уведомление — гасим pending
+      // trailing-debounce от предыдущих silent select'ов, иначе юзер получит
+      // дубль через NOTIFY_DEBOUNCE_MS после активации.
+      cancelPendingNotify(userId);
+
       if (section === "gpt") {
         await userStateService.setGptModel(userId, modelId);
       } else {
@@ -893,6 +934,9 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
+      // Запоминаем что про эту модель только что прислали пинг — последующий
+      // silent select на ту же модель внутри 24ч окна не задублирует сообщение.
+      await setLastNotified(userId, modelId);
 
       return { success: true };
     },
