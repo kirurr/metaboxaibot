@@ -36,5 +36,13 @@ ws.on("connect", () => {
 });
 
 ws.on("connect_error", (err) => {
-  console.error("WS connection error:\n", err);
+  // err.message содержит текст от middleware (например "Unauthorized" из
+  // wsAuthMiddleware). err.data — опциональный structured payload.
+  // У socket.io-client типы `Error` без data — кастуем для логирования.
+  const e = err as Error & { data?: unknown };
+  console.error("WS connect_error:", {
+    message: e.message,
+    name: e.name,
+    data: e.data,
+  });
 });
