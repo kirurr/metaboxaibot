@@ -124,7 +124,9 @@ select {
 /* Headings — Comfortaa */
 .h1,
 .h2,
-.h3 {
+.h3,
+.h4
+{
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.3px;

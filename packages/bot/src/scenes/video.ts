@@ -119,23 +119,33 @@ function getAvatarVoice(userId: bigint, id: string): AvatarVoiceEntry | null {
 }
 
 /**
+ * Верхняя граница плаусибельного аудио-битрейта для sanity-check. 64 KB/s ≈
+ * 512 kbps — покрывает high-quality stereo mp3/opus/m4a с запасом. Реальные
+ * аудио-файлы в Telegram редко идут выше 192 kbps = 24 KB/s.
+ */
+const MAX_PLAUSIBLE_AUDIO_BYTES_PER_SEC = 64 * 1024;
+
+/**
  * Достоверная длительность TG-аудио для cost-preview hint.
  *
  * Переиспользует существующий `probeHeygenAudioDuration` (он же используется
- * для сайта — `cost-preview.service.ts`). Добавляет safety-логику:
+ * для сайта). Добавляет safety-логику:
  *  - Когда ffprobe вернул значение: `max(ceil(ffprobe), metaDuration)`.
  *    ffprobe служит floor'ом против exploit'а с занижением metaDuration;
  *    meta перевешивает когда больше — компенсирует под-репорт ffprobe
  *    (опус voice часто занижается на 0.5-1s vs реальная длительность).
  *  - Когда ffprobe сорвался + voice: trust `metaDuration` (Telegram-server
  *    ставит при записи, юзер подделать не может).
- *  - Когда ffprobe сорвался + audio: `null` (за `audio.duration` отвечает
- *    клиент юзера → возможен exploit). Caller уйдёт в per_second mode.
+ *  - Когда ffprobe сорвался + audio: sanity-check `metaDuration` против
+ *    `fileSize` (defense-in-depth: если файл 5MB но meta=1сек — это явно
+ *    подделанные метаданные, реальный 5MB at min audio bitrate >> 1 sec).
+ *    Если правдоподобно → trust meta. Иначе → null → per_second mode.
  */
 async function probeTelegramAudioDurationSec(
   tgUrl: string,
   isVoiceType: boolean,
   metaDuration: number | undefined,
+  fileSize: number | undefined,
 ): Promise<number | null> {
   const probed = await probeHeygenAudioDuration({}, { voice_audio: [tgUrl] });
   const probedSec = probed && probed > 0 ? Math.ceil(probed) : 0;
@@ -154,9 +164,27 @@ async function probeTelegramAudioDurationSec(
     return Math.max(probedSec, meta);
   }
 
-  // Probe failed. Trust metaDuration only for voice (server-controlled).
-  if (isVoiceType && meta > 0) return meta;
-  return null;
+  if (meta <= 0) return null;
+
+  // Probe сорвался. Voice — TG-server ставит meta, доверяем безусловно.
+  if (isVoiceType) return meta;
+
+  // Audio — meta под контролем юзера, проверяем через file_size:
+  // занижение meta для exploit'а арифметически невозможно если файл реально
+  // содержит больше данных. Используем верхнюю границу битрейта чтобы
+  // вычислить минимально-возможную длительность для этого размера.
+  if (typeof fileSize === "number" && fileSize > 0) {
+    const minPlausibleSec = fileSize / MAX_PLAUSIBLE_AUDIO_BYTES_PER_SEC;
+    // 50% margin — на накладные расходы контейнера (header'ы и т.п.).
+    if (meta < minPlausibleSec * 0.5) {
+      logger.warn(
+        { meta, fileSize, minPlausibleSec },
+        "probeTelegramAudioDurationSec: metaDuration implausibly small vs file_size — rejecting",
+      );
+      return null;
+    }
+  }
+  return meta;
 }
 
 // ── Model selection keyboard ──────────────────────────────────────────────────
@@ -1762,6 +1790,7 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
               tgUrl,
               !!ctx.message?.voice,
               audioMsg.duration,
+              audioMsg.file_size,
             );
             if (durSec) {
               await userStateService.setVideoVoiceDurationSec(userId, durSec);
@@ -1825,7 +1854,12 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
   const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
 
   // Достоверная длительность для cost-preview hint (см. probeTelegramAudioDurationSec).
-  const durationSec = await probeTelegramAudioDurationSec(tgUrl, isVoice, audioMsg.duration);
+  const durationSec = await probeTelegramAudioDurationSec(
+    tgUrl,
+    isVoice,
+    audioMsg.duration,
+    audioMsg.file_size,
+  );
 
   // Generate an ID and store voice data for both callback paths
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
