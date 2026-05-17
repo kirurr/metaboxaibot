@@ -122,14 +122,15 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         });
 
-        // Презайнднутые URL'ы — outputUrl уже может быть в БД (некоторые
-        // провайдеры пишут публичный URL напрямую), иначе подписываем s3Key.
+        // URL priority: presigned S3 (наш storage) > outputUrl (провайдер).
+        // Линки провайдеров временные и недоступны для скачивания напрямую через
+        // приложение — для UX нужен стабильный URL из нашего S3.
         const items = await Promise.all(
           jobs.map(async (job) => {
             const outputs = await Promise.all(
               job.outputs.map(async (o) => {
                 const url =
-                  o.outputUrl ?? (o.s3Key ? await getFileUrl(o.s3Key).catch(() => null) : null);
+                  (o.s3Key ? await getFileUrl(o.s3Key).catch(() => null) : null) ?? o.outputUrl;
                 const thumbnailUrl = o.thumbnailS3Key
                   ? await getFileUrl(o.thumbnailS3Key).catch(() => null)
                   : null;

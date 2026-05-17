@@ -4925,9 +4925,68 @@ select {
   aspect-ratio: 1 / 1;
   border: 1px dashed var(--border);
 }
-.gen-history-output-link {
+.gen-history-output-btn {
   display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
   line-height: 0;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.gen-history-output-btn:hover .gen-history-output {
+  filter: brightness(1.05);
+}
+
+/* ── Media preview lightbox (in-app) ─────────────────────────────────────
+   Открывается кликом по output-thumb. Backdrop кликабельный (close), сам
+   контент — нет (stopPropagation на враппере). */
+.gen-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.gen-preview-content {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+}
+.gen-preview-media {
+  display: block;
+  max-width: 100%;
+  /* На всю высоту окна минус paddings backdrop'а. */
+  max-height: calc(100vh - 48px);
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  background: #000;
+}
+.gen-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 120ms var(--ease);
+}
+.gen-preview-close:hover {
+  background: rgba(0, 0, 0, 0.85);
 }
 
 .gen-chip-pill {

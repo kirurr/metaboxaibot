@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertCircle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNotificationsStore } from "@/stores/notificationsStore";
 import { listGenerations, type GenerationJobDto } from "@/api/generation";
@@ -112,11 +113,23 @@ export function GenerationHistory({
   // Реакция на WS-нотификации: матчим по jobId с трекаемыми pending'ами.
   useEffect(() => {
     if (pendingJobs.length === 0) return;
+    console.debug("[gen-history] WS effect", {
+      notifications: notifications.length,
+      pending: pendingJobs.map((p) => ({ id: p.id, status: p.status })),
+    });
     for (const pending of pendingJobs) {
       // Уже success/error — повторно не обрабатываем.
       if (pending.status === "success") continue;
       const notif = notifications.find((n) => n.jobId === pending.id);
-      if (!notif) continue;
+      if (!notif) {
+        console.debug("[gen-history] no notif yet for", pending.id);
+        continue;
+      }
+      console.debug("[gen-history] matched notif", {
+        jobId: pending.id,
+        type: notif.type,
+        data: notif.data,
+      });
       if (notif.type.endsWith("_success")) {
         // Парсим outputs прямо из WS — рисуем результат сразу, не дожидаясь
         // refetch'а истории (он может быть медленным/сорваться). DB-снапшот
@@ -129,6 +142,7 @@ export function GenerationHistory({
           url: o.outputUrl ?? null,
           thumbnailUrl: null,
         }));
+        console.debug("[gen-history] success → calling onJobSucceeded", outputs);
         onJobSucceeded(pending.id, outputs);
         void refetch();
       } else if (notif.type.endsWith("_error")) {
@@ -144,6 +158,10 @@ export function GenerationHistory({
   const historyIds = useMemo(() => new Set(history.map((h) => h.id)), [history]);
   const visiblePending = pendingJobs.filter((p) => !historyIds.has(p.id));
 
+  // In-app preview lightbox. Открывается кликом по image/video-output'у;
+  // audio проигрывается inline и в модалке не нуждается.
+  const [preview, setPreview] = useState<{ url: string; section: string } | null>(null);
+
   if (visiblePending.length === 0 && history.length === 0 && !loading) {
     return null;
   }
@@ -156,12 +174,28 @@ export function GenerationHistory({
       </div>
       <div className="gen-history-list">
         {visiblePending.map((p) => (
-          <PendingCard key={p.id} job={p} onDismiss={() => onJobResolved(p.id)} />
+          <PendingCard
+            key={p.id}
+            job={p}
+            onDismiss={() => onJobResolved(p.id)}
+            onPreview={(url) => setPreview({ url, section: p.section })}
+          />
         ))}
         {history.map((j) => (
-          <HistoryCard key={j.id} job={j} />
+          <HistoryCard
+            key={j.id}
+            job={j}
+            onPreview={(url) => setPreview({ url, section: j.section })}
+          />
         ))}
       </div>
+      {preview && (
+        <MediaPreviewModal
+          url={preview.url}
+          section={preview.section}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }
@@ -172,7 +206,15 @@ export function GenerationHistory({
  *  - success: outputs из `data.outputs[]` WS-уведомления (рендерим сразу)
  *  - error: красная карточка + сообщение + кнопка закрытия
  */
-function PendingCard({ job, onDismiss }: { job: PendingJob; onDismiss: () => void }) {
+function PendingCard({
+  job,
+  onDismiss,
+  onPreview,
+}: {
+  job: PendingJob;
+  onDismiss: () => void;
+  onPreview: (url: string) => void;
+}) {
   const { t } = useTranslation();
   const status = job.errorMessage ? "error" : (job.status ?? "pending");
 
@@ -207,7 +249,13 @@ function PendingCard({ job, onDismiss }: { job: PendingJob; onDismiss: () => voi
       {status === "success" && job.outputs && job.outputs.length > 0 && (
         <div className="gen-history-card-outputs">
           {job.outputs.map((o) => (
-            <OutputThumb key={o.id} url={o.url} thumb={o.thumbnailUrl} section={job.section} />
+            <OutputThumb
+              key={o.id}
+              url={o.url}
+              thumb={o.thumbnailUrl}
+              section={job.section}
+              onPreview={onPreview}
+            />
           ))}
         </div>
       )}
@@ -215,7 +263,13 @@ function PendingCard({ job, onDismiss }: { job: PendingJob; onDismiss: () => voi
   );
 }
 
-function HistoryCard({ job }: { job: GenerationJobDto }) {
+function HistoryCard({
+  job,
+  onPreview,
+}: {
+  job: GenerationJobDto;
+  onPreview: (url: string) => void;
+}) {
   const { t } = useTranslation();
   const isFailed = job.status === "failed";
 
@@ -234,7 +288,13 @@ function HistoryCard({ job }: { job: GenerationJobDto }) {
       ) : (
         <div className="gen-history-card-outputs">
           {job.outputs.map((o) => (
-            <OutputThumb key={o.id} url={o.url} thumb={o.thumbnailUrl} section={job.section} />
+            <OutputThumb
+              key={o.id}
+              url={o.url}
+              thumb={o.thumbnailUrl}
+              section={job.section}
+              onPreview={onPreview}
+            />
           ))}
         </div>
       )}
@@ -246,33 +306,92 @@ function OutputThumb({
   url,
   thumb,
   section,
+  onPreview,
 }: {
   url: string | null;
   thumb: string | null;
   section: string;
+  onPreview: (url: string) => void;
 }) {
   if (!url) {
     return <div className="gen-history-output gen-history-output--placeholder" />;
   }
   if (section === "video") {
+    // Видео — миниатюра-постер, по клику открываем модалку с плеером.
+    // Inline-controls убраны: с ними клик уезжал в video-controls.
     return (
-      <video
-        className="gen-history-output"
-        src={url}
-        poster={thumb ?? undefined}
-        controls
-        playsInline
-        preload="metadata"
-      />
+      <button
+        type="button"
+        className="gen-history-output-btn"
+        onClick={() => onPreview(url)}
+        aria-label="Open video"
+      >
+        {thumb ? (
+          <img className="gen-history-output" src={thumb} alt="" loading="lazy" />
+        ) : (
+          <video className="gen-history-output" src={url} preload="metadata" muted playsInline />
+        )}
+      </button>
     );
   }
   if (section === "audio") {
+    // Audio — inline-плеер, без модалки (контролы и так все есть).
     return <audio className="gen-history-output gen-history-output--audio" src={url} controls />;
   }
-  // image / design (default)
+  // image / design (default) — клик открывает lightbox с полным размером.
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="gen-history-output-link">
+    <button
+      type="button"
+      className="gen-history-output-btn"
+      onClick={() => onPreview(url)}
+      aria-label="Open image"
+    >
       <img className="gen-history-output" src={thumb ?? url} alt="" loading="lazy" />
-    </a>
+    </button>
+  );
+}
+
+/**
+ * Lightbox для просмотра output'ов прямо в приложении (без target="_blank").
+ * Закрытие: backdrop / X / Esc. Контент в портале → не клипается контейнерами.
+ */
+function MediaPreviewModal({
+  url,
+  section,
+  onClose,
+}: {
+  url: string;
+  section: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    // Лочим scroll body на время модалки.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="gen-preview-backdrop" onClick={onClose} role="dialog" aria-modal="true">
+      <button type="button" className="gen-preview-close" onClick={onClose} aria-label="Close">
+        <X size={20} />
+      </button>
+      <div className="gen-preview-content" onClick={(e) => e.stopPropagation()}>
+        {section === "video" ? (
+          <video className="gen-preview-media" src={url} controls autoPlay playsInline />
+        ) : (
+          // image / design — full-size
+          <img className="gen-preview-media" src={url} alt="" />
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
