@@ -51,7 +51,17 @@
   },
   "generate": {
     "familyVersion": "Версия",
-    "familyVariant": "Вариант"
+    "familyVariant": "Вариант",
+    "btnGenerate": "Сгенерировать",
+    "btnGenerating": "Генерация…",
+    "btnUploading": "Загрузка файлов…",
+    "btnSelectModel": "Выберите модель",
+    "btnAddToSlot": "Загрузите файл: {{slot}}",
+    "btnEnterPrompt": "Введите запрос",
+    "btnPromptOrMedia": "Введите запрос или загрузите файл",
+    "historyTitle": "Недавние генерации",
+    "historyGenerating": "Генерация…",
+    "historyError": "Ошибка генерации"
   },
   "settings": {
     "title": "Настройки",

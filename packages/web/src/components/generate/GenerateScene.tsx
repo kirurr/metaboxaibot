@@ -34,6 +34,7 @@ import {
 import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
+import { GenerationHistory, type PendingJob } from "./GenerationHistory";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -796,6 +797,11 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewAbortRef = useRef<AbortController | null>(null);
 
+  // Локально трекаемые job'ы между submit'ом и финальным WS-event'ом.
+  // GenerationHistory сама подписывается на notification:new и зовёт
+  // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
+  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
+
   // Когда модели приехали — выставляем дефолт (первый из дедуплированных
   // семейств, не из полного списка: иначе можно случайно стартовать с
   // not-default-варианта).
@@ -1155,23 +1161,40 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }));
   }
 
-  // Готовность к отправке: prompt непустой ИЛИ модель позволяет пустой prompt при
-  // наличии обязательного слота. Все required-слоты должны быть заполнены.
-  const requiredSlotsOk = activeSlots
-    .filter((s) => s.required)
-    .every((s) => (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) > 0);
-  const promptOk =
-    prompt.trim().length > 0 ||
-    (selectedModel?.promptOptional &&
-      (!selectedModel.promptOptionalRequiresMedia ||
-        Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
   // Аплоад в процессе → дизейблим CTA. Без этого юзер может стартовать
   // генерацию с пустым/неполным набором ассетов (s3Key'и ещё не выданы).
   const uploadInProgress = useMemo(
     () => Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "uploading")),
     [slotFiles],
   );
-  const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy && !uploadInProgress;
+
+  // Если генерация недоступна — на кнопке отображается ПРИЧИНА (а не дизейбл-стилистика
+  // с opacity), чтобы юзер понял, что именно нужно доделать. `null` = всё готово.
+  const blockerReason = useMemo<string | null>(() => {
+    if (busy) return t("generate.btnGenerating");
+    if (uploadInProgress) return t("generate.btnUploading");
+    if (!selectedModel) return t("generate.btnSelectModel");
+
+    const missingSlot = activeSlots.find(
+      (s) =>
+        s.required && (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) === 0,
+    );
+    if (missingSlot) return t("generate.btnAddToSlot", { slot: missingSlot.label });
+
+    const hasReadyMedia = Object.values(slotFiles).some((arr) =>
+      arr.some((f) => f.status === "ready"),
+    );
+    const promptIsEmpty = prompt.trim().length === 0;
+    if (promptIsEmpty) {
+      if (!selectedModel.promptOptional) return t("generate.btnEnterPrompt");
+      if (selectedModel.promptOptionalRequiresMedia && !hasReadyMedia) {
+        return t("generate.btnPromptOrMedia");
+      }
+    }
+    return null;
+  }, [busy, uploadInProgress, selectedModel, activeSlots, slotFiles, prompt, t]);
+
+  const canGenerate = blockerReason === null;
 
   // ── Debounced cost preview ─────────────────────────────────────────────────
   // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
@@ -1279,8 +1302,17 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       } else {
         throw new Error(`Unsupported section: ${section}`);
       }
-      // TODO: следить за прогрессом через WS-событие на subscriber'е (job-notifications).
-      console.info("[generate] job submitted", section, result.dbJobId);
+      // Локально трекаем pending-job: GenerationHistory подхватит её и
+      // переключит в success/error когда придёт `notification:new`.
+      setPendingJobs((prev) => [
+        {
+          id: result.dbJobId,
+          modelId: selectedModel.id,
+          prompt,
+          startedAt: Date.now(),
+        },
+        ...prev,
+      ]);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
       setSubmitError(msg);
@@ -1518,6 +1550,20 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               ))}
             </div>
           )}
+
+          {/* История генераций по текущему семейству моделей. Pending'и
+              отображаются сверху, успех/ошибка приходит через WS-нотификацию. */}
+          <GenerationHistory
+            selectedModel={selectedModel}
+            allModels={models}
+            pendingJobs={pendingJobs}
+            onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
+            onJobFailed={(jobId, errorMessage) =>
+              setPendingJobs((prev) =>
+                prev.map((p) => (p.id === jobId ? { ...p, errorMessage } : p)),
+              )
+            }
+          />
         </div>
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
@@ -1580,11 +1626,11 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             ) : (
               <Sparkles size={16} />
             )}
-            <span>{busy ? "Generating…" : uploadInProgress ? "Загрузка файлов…" : "Generate"}</span>
+            <span>{blockerReason ?? t("generate.btnGenerate")}</span>
             {selectedModel && (
               <span className="gen-cta-cost mono">
                 {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
-                {Math.round(previewCost ?? selectedModel.tokenCostApprox)} т
+                {(previewCost ?? selectedModel.tokenCostApprox).toFixed(2)}
                 {previewPricingMode === "per_second" ? " / сек" : ""}
               </span>
             )}

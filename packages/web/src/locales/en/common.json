@@ -51,7 +51,17 @@
   },
   "generate": {
     "familyVersion": "Version",
-    "familyVariant": "Variant"
+    "familyVariant": "Variant",
+    "btnGenerate": "Generate",
+    "btnGenerating": "Generating…",
+    "btnUploading": "Uploading files…",
+    "btnSelectModel": "Select a model",
+    "btnAddToSlot": "Add file to {{slot}}",
+    "btnEnterPrompt": "Enter a prompt",
+    "btnPromptOrMedia": "Enter a prompt or add a file",
+    "historyTitle": "Recent generations",
+    "historyGenerating": "Generating…",
+    "historyError": "Generation failed"
   },
   "settings": {
     "title": "Settings",

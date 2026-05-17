@@ -17,6 +17,7 @@ import { videoGenerationService } from "../services/video-generation.service.js"
 import { audioGenerationService } from "../services/audio-generation.service.js";
 import { costPreviewService } from "../services/cost-preview.service.js";
 import { getFileUrl } from "../services/s3.service.js";
+import { db } from "../db.js";
 import { AI_MODELS, UserFacingError } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
@@ -42,6 +43,118 @@ async function resolveMediaInputs(
 export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-generation"]));
+
+  // ── GET /web/generations?modelIds=a,b&limit=20 ─────────────────────────────
+  // История генераций юзера (done + failed) с пресайнднутыми URL'ами outputs'ов.
+  // Web-эквивалент `/gallery` без telegram-download-токенов: всё через прямые
+  // S3 presigned URL'ы. Фильтр `modelIds` — CSV из members семейства (на фронте
+  // ресолвим из `family.members` чтобы вкладки Standard/Pro/etc. шарили историю).
+  fastify.get<{
+    Querystring: { modelIds?: string; section?: string; limit?: string };
+  }>(
+    "/web/generations",
+    {
+      schema: {
+        description: "List user's recent generations (done + failed) with presigned outputs",
+        querystring: {
+          type: "object",
+          properties: {
+            modelIds: {
+              type: "string",
+              description: "Comma-separated modelId filter (e.g. 'flux,flux-pro')",
+            },
+            section: { type: "string", description: "design | video | audio | gpt" },
+            limit: { type: "string", description: "Page size, default 20, max 50" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              items: { type: "array", items: { type: "object", additionalProperties: true } },
+            },
+          },
+          500: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      const { modelIds, section, limit = "20" } = request.query;
+      const take = Math.min(parseInt(limit, 10) || 20, 50);
+      const modelIdsArr = modelIds ? modelIds.split(",").filter(Boolean) : null;
+
+      try {
+        const jobs = await db.generationJob.findMany({
+          where: {
+            userId: aibUserId!,
+            // Включаем и done и failed — failed нужно показать с error-карточкой.
+            // Pending/processing с web-стороны не тянем: они трекаются локально
+            // по dbJobId сразу после submit'а (`pendingJobs` в GenerateScene).
+            status: { in: ["done", "failed"] },
+            ...(section ? { section } : {}),
+            ...(modelIdsArr ? { modelId: { in: modelIdsArr } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take,
+          select: {
+            id: true,
+            section: true,
+            modelId: true,
+            prompt: true,
+            status: true,
+            error: true,
+            errorCode: true,
+            tokensSpent: true,
+            createdAt: true,
+            completedAt: true,
+            outputs: {
+              orderBy: { index: "asc" },
+              select: { id: true, s3Key: true, outputUrl: true, thumbnailS3Key: true },
+            },
+          },
+        });
+
+        // Презайнднутые URL'ы — outputUrl уже может быть в БД (некоторые
+        // провайдеры пишут публичный URL напрямую), иначе подписываем s3Key.
+        const items = await Promise.all(
+          jobs.map(async (job) => {
+            const outputs = await Promise.all(
+              job.outputs.map(async (o) => {
+                const url =
+                  o.outputUrl ?? (o.s3Key ? await getFileUrl(o.s3Key).catch(() => null) : null);
+                const thumbnailUrl = o.thumbnailS3Key
+                  ? await getFileUrl(o.thumbnailS3Key).catch(() => null)
+                  : null;
+                return { id: o.id, url, thumbnailUrl };
+              }),
+            );
+            return {
+              id: job.id,
+              section: job.section,
+              modelId: job.modelId,
+              prompt: job.prompt,
+              status: job.status,
+              error: job.error,
+              errorCode: job.errorCode,
+              tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
+              createdAt: job.createdAt.toISOString(),
+              completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+              outputs,
+            };
+          }),
+        );
+
+        return { items };
+      } catch (err) {
+        logger.error({ err, userId: aibUserId?.toString() }, "web-generations list failed");
+        return reply
+          .code(500)
+          .send({ code: "INTERNAL_ERROR", error: "Не удалось загрузить историю" });
+      }
+    },
+  );
 
   // ── POST /web/generation/image ─────────────────────────────────────────────
   fastify.post<{
