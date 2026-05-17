@@ -438,11 +438,14 @@ export async function gateLowIqMode(input: GateInput): Promise<boolean> {
   if (!user || !user.confirmBeforeGenerate) return false;
 
   let cost: number;
+  let videoPricingMode: "total" | "per_second" = "total";
   try {
     if (kind === "image") {
       cost = (await costPreviewService.previewImage(submitParams as SubmitImageParams)).cost;
     } else if (kind === "video") {
-      cost = (await costPreviewService.previewVideo(submitParams as SubmitVideoParams)).cost;
+      const preview = await costPreviewService.previewVideo(submitParams as SubmitVideoParams);
+      cost = preview.cost;
+      videoPricingMode = preview.pricingMode;
     } else {
       cost = (await costPreviewService.previewAudio(submitParams as SubmitAudioParams)).cost;
     }
@@ -457,7 +460,11 @@ export async function gateLowIqMode(input: GateInput): Promise<boolean> {
   const model = AI_MODELS[modelId];
   const modelName = model ? resolveModelDisplay(modelId, ctx.user.language, model).name : modelId;
   const displayedPrompt = promptDisplay ?? clampPromptForDisplay(prompt);
-  const text = ctx.t.confirmGeneration.message
+  const messageTpl =
+    videoPricingMode === "per_second"
+      ? ctx.t.confirmGeneration.messagePerSecond
+      : ctx.t.confirmGeneration.message;
+  const text = messageTpl
     .replace("{model}", escapeHtml(modelName))
     .replace("{prompt}", escapeHtml(displayedPrompt))
     .replace("{cost}", cost.toFixed(2));
@@ -522,8 +529,9 @@ async function runReplaySubmit(
     if (kind === "image") {
       await generationService.submitImage(params as SubmitImageParams);
     } else if (kind === "video") {
-      // EL TTS pre-gen for HeyGen+EL is deferred until here so cancelling the
-      // confirm message costs the user $0 in EL spend.
+      // EL/Cartesia TTS pre-gen откладывается до сюда (после Confirm), чтобы
+      // Cancel ничего нам не стоил. HeyGen native voice (Jenny и т.п.)
+      // синтезируется уже внутри `submitVideo` — см. heygen-tts.service.ts.
       const videoParams = await ensureELTtsForVideo(params as SubmitVideoParams);
       await videoGenerationService.submitVideo(videoParams);
     } else {

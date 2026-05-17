@@ -649,6 +649,8 @@ export default {
   confirmGeneration: {
     message:
       "Модель: {model}\n💬 Промпт:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Предварительная цена: {cost} ✦\n\nНачать генерацию?",
+    messagePerSecond:
+      "Модель: {model}\n💬 Промпт:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Стоимость 1 секунды видео: {cost} ✦\nИтоговая цена зависит от длительности и будет рассчитана по факту.\n\nНачать генерацию?",
     voicePrompt: "🎵 голосовое сообщение",
     start: "✅ Начать",
     cancel: "❌ Отмена",
