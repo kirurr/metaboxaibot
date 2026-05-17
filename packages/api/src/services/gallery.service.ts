@@ -18,6 +18,13 @@ import { db } from "../db.js";
 import { getFileUrl, deleteFile } from "./s3.service.js";
 import { generateDownloadToken } from "../utils/download-token.js";
 import { AI_MODELS, config } from "@metabox/shared";
+import type {
+  GalleryJob,
+  GalleryOutput,
+  GalleryFolder,
+  GalleryListResponse,
+  ListGalleryJobsQuery,
+} from "@metabox/shared-browser/dto";
 
 export class GalleryNotFoundError extends Error {
   constructor(message = "Not found") {
@@ -40,50 +47,20 @@ export class GalleryBadRequestError extends Error {
   }
 }
 
-export interface ListJobsParams {
-  section?: string;
-  page?: number;
-  limit?: number;
-  modelId?: string;
-  modelIds?: string;
-  folderId?: string;
-}
-
-export interface GalleryOutputDto {
-  id: string;
-  s3Key: string | null;
-  outputUrl: string | null;
-  previewUrl: string | null;
-  thumbnailUrl: string | null;
-}
-
-export interface GalleryJobDto {
-  id: string;
-  section: string;
-  modelId: string;
-  modelName: string;
-  prompt: string;
-  modelSettings: Record<string, unknown>;
-  tokensSpent: string | null;
-  completedAt: Date | null;
-  folderIds: string[];
-  outputs: GalleryOutputDto[];
-}
-
-export interface GalleryFolderDto {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  isPinned: boolean;
-  pinnedAt: Date | null;
-  itemCount: number;
-  createdAt: Date;
-}
+// Wire-формат DTO (Date → ISO string) живёт в @metabox/shared-browser/dto.
+// На сервисе мы конвертим Date'ы перед return, чтобы тип service-функций
+// совпадал с тем, что увидит фронт. JSON.stringify сам сериализует Date так
+// же — wire bytes до/после рефакторинга идентичны, что важно для Telegram
+// мини-аппы, чей клиент уже типизирует эти поля как string.
+type GalleryOutputDto = GalleryOutput;
+type GalleryJobDto = GalleryJob;
+type GalleryFolderDto = GalleryFolder;
+export type ListJobsParams = ListGalleryJobsQuery;
 
 async function listJobs(
   userId: bigint,
   params: ListJobsParams,
-): Promise<{ items: GalleryJobDto[]; total: number; page: number; limit: number }> {
+): Promise<GalleryListResponse> {
   const { section, modelId, modelIds, folderId } = params;
   const take = Math.min(params.limit ?? 20, 100);
   const skip = (Math.max(params.page ?? 1, 1) - 1) * take;
@@ -158,7 +135,7 @@ async function listJobs(
       prompt: job.prompt,
       modelSettings,
       tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
-      completedAt: job.completedAt,
+      completedAt: job.completedAt ? job.completedAt.toISOString() : null,
       folderIds: job.folderItems.map((fi) => fi.folderId),
       outputs,
     };
@@ -273,9 +250,9 @@ async function listFolders(userId: bigint): Promise<GalleryFolderDto[]> {
     name: f.name,
     isDefault: f.isDefault,
     isPinned: f.isPinned,
-    pinnedAt: f.pinnedAt,
+    pinnedAt: f.pinnedAt ? f.pinnedAt.toISOString() : null,
     itemCount: f._count.items,
-    createdAt: f.createdAt,
+    createdAt: f.createdAt.toISOString(),
   }));
 }
 
@@ -293,7 +270,7 @@ async function createFolder(userId: bigint, name: string): Promise<GalleryFolder
     isPinned: false,
     pinnedAt: null,
     itemCount: 0,
-    createdAt: folder.createdAt,
+    createdAt: folder.createdAt.toISOString(),
   };
 }
 
@@ -325,9 +302,9 @@ async function updateFolder(
     name: updated.name,
     isDefault: updated.isDefault,
     isPinned: updated.isPinned,
-    pinnedAt: updated.pinnedAt,
+    pinnedAt: updated.pinnedAt ? updated.pinnedAt.toISOString() : null,
     itemCount: updated._count.items,
-    createdAt: updated.createdAt,
+    createdAt: updated.createdAt.toISOString(),
   };
 }
 
