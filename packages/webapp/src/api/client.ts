@@ -405,12 +405,9 @@ export const api = {
      * приемлемо).
      */
     previewBlobUrl: async (voiceId: string): Promise<string> => {
-      const headers: Record<string, string> = {};
-      if (_initDataRaw) headers["Authorization"] = `tma ${_initDataRaw}`;
-      else if (_webToken) headers["Authorization"] = `wtoken ${_webToken}`;
       const res = await fetch(
         `${API_BASE}/cartesia-voices/${encodeURIComponent(voiceId)}/preview`,
-        { headers, cache: "no-store" },
+        { headers: buildAuthHeader(), cache: "no-store" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
