@@ -899,7 +899,12 @@ async function ensureVideoModeSelected(
   ctx: BotContext,
   inputKind: "text" | "media",
 ): Promise<boolean> {
-  if (!ctx.user) return false;
+  // `false` означает «алерт+picker отправлены, дальше не идти». Когда нет
+  // ctx.user — ничего не отправили, поэтому возвращаем `true` (no-op, иди
+  // как обычно). Все текущие вызывающие сами проверяют ctx.user перед
+  // обращением, так что эта ветка по факту недостижима — но семантика
+  // должна быть корректной для будущих вызовов без guard'а.
+  if (!ctx.user) return true;
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId;
   if (!modelId) return true;
