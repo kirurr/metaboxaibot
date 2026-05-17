@@ -21,7 +21,7 @@ export type { SubmitVideoParams, SubmitVideoResult } from "./video-generation.se
 export { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 export { audioGenerationService } from "./audio-generation.service.js";
 export type { SubmitAudioParams, SubmitAudioResult } from "./audio-generation.service.js";
-export { costPreviewService } from "./cost-preview.service.js";
+export { costPreviewService, probeHeygenAudioDuration } from "./cost-preview.service.js";
 export type {
   ImageCostPreview,
   VideoCostPreview,
