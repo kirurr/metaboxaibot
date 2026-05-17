@@ -9,7 +9,7 @@ import {
   checkBalance,
   usdToTokens,
   probeImageMetadata,
-  probeAudioDurationSec,
+  probeHeygenAudioDuration,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import { buildCostLine } from "../utils/cost-line.js";
@@ -121,39 +121,41 @@ function getAvatarVoice(userId: bigint, id: string): AvatarVoiceEntry | null {
 /**
  * Достоверная длительность TG-аудио для cost-preview hint.
  *
- *  - Скачиваем по tgUrl, прогоняем ffprobe. Не доверяем `metaDuration` для
- *    type=audio: пользователь контролирует metadata загруженного файла и
- *    может занизить → billing exploit. Probe на байтах достоверен.
- *  - Если probe сорвался: для `isVoiceType` (запись через TG-микрофон —
- *    duration ставит сам Telegram) возвращаем `metaDuration` как fallback.
- *    Для audio-файлов возвращаем `null` — лучше per_second режим, чем
- *    подделанная цена.
- *
- * Вернёт `null` если ничего достоверного получить не удалось.
+ * Переиспользует существующий `probeHeygenAudioDuration` (он же используется
+ * для сайта — `cost-preview.service.ts`). Добавляет safety-логику:
+ *  - Когда ffprobe вернул значение: `max(ceil(ffprobe), metaDuration)`.
+ *    ffprobe служит floor'ом против exploit'а с занижением metaDuration;
+ *    meta перевешивает когда больше — компенсирует под-репорт ffprobe
+ *    (опус voice часто занижается на 0.5-1s vs реальная длительность).
+ *  - Когда ffprobe сорвался + voice: trust `metaDuration` (Telegram-server
+ *    ставит при записи, юзер подделать не может).
+ *  - Когда ffprobe сорвался + audio: `null` (за `audio.duration` отвечает
+ *    клиент юзера → возможен exploit). Caller уйдёт в per_second mode.
  */
 async function probeTelegramAudioDurationSec(
   tgUrl: string,
   isVoiceType: boolean,
   metaDuration: number | undefined,
 ): Promise<number | null> {
-  try {
-    const res = await fetch(tgUrl);
-    if (res.ok) {
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.byteLength > 0) {
-        const probed = await probeAudioDurationSec(buf);
-        if (probed && probed > 0) return Math.ceil(probed);
-      }
-    } else {
-      logger.warn({ status: res.status }, "probeTelegramAudioDurationSec: fetch !ok");
+  const probed = await probeHeygenAudioDuration({}, { voice_audio: [tgUrl] });
+  const probedSec = probed && probed > 0 ? Math.ceil(probed) : 0;
+  const meta =
+    typeof metaDuration === "number" && isFinite(metaDuration) && metaDuration > 0
+      ? metaDuration
+      : 0;
+
+  if (probedSec > 0) {
+    if (meta > 0 && probedSec < meta * 0.5) {
+      logger.warn(
+        { probedSec, meta },
+        "probeTelegramAudioDurationSec: ffprobe disagrees with metaDuration",
+      );
     }
-  } catch (err) {
-    logger.warn({ err }, "probeTelegramAudioDurationSec: fetch/probe failed");
+    return Math.max(probedSec, meta);
   }
-  // Probe не получился — fallback только для voice (TG-server set), не для audio (user-controlled).
-  if (isVoiceType && typeof metaDuration === "number" && metaDuration > 0) {
-    return metaDuration;
-  }
+
+  // Probe failed. Trust metaDuration only for voice (server-controlled).
+  if (isVoiceType && meta > 0) return meta;
   return null;
 }
 

@@ -650,9 +650,9 @@ export default {
   },
   confirmGeneration: {
     message:
-      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Estimated price: {cost} ✦\n\nStart generation?",
+      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Estimated price: ~{cost} ✦\n\nStart generation?",
     messagePerSecond:
-      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Price per 1 second of video: {cost} ✦\nThe final price depends on the duration and is charged after generation.\n\nStart generation?",
+      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Price per 1 second of video: {cost} ✦\nThe final price depends on the duration of the generated video and is charged after generation.\n\nStart generation?",
     voicePrompt: "🎵 voice message",
     start: "✅ Start",
     cancel: "❌ Cancel",
