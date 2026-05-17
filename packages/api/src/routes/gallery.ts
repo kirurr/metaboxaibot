@@ -1,10 +1,28 @@
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
 import { db } from "../db.js";
-import { getFileUrl, deleteFile, compressForTelegramPhoto } from "../services/s3.service.js";
-import { buildDownloadButton, generateDownloadToken } from "../utils/download-token.js";
+import { getFileUrl, compressForTelegramPhoto } from "../services/s3.service.js";
+import { buildDownloadButton } from "../utils/download-token.js";
 import { AI_MODELS, config, getT, buildResultCaption } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+import {
+  galleryService,
+  GalleryBadRequestError,
+  GalleryForbiddenError,
+  GalleryNotFoundError,
+} from "../services/gallery.service.js";
+
+/**
+ * Maps `galleryService` typed errors to HTTP responses. Returns the reply
+ * so handlers can `return mapGalleryError(...)` directly; re-throws unknown
+ * errors so Fastify's default handler logs them.
+ */
+function mapGalleryError(err: unknown, reply: FastifyReply): FastifyReply {
+  if (err instanceof GalleryNotFoundError) return reply.code(404).send({ error: err.message });
+  if (err instanceof GalleryForbiddenError) return reply.code(403).send({ error: err.message });
+  if (err instanceof GalleryBadRequestError) return reply.code(400).send({ error: err.message });
+  throw err;
+}
 
 // `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
 // прямых вызовов `https://api.telegram.org/.../sendXxx`. После decoupling-миграции
@@ -157,87 +175,14 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   }>("/gallery", async (request) => {
     const userId = (request as AuthRequest).userId;
     const { section, page = "1", limit = "20", modelId, modelIds, folderId } = request.query;
-
-    const take = Math.min(parseInt(limit, 10) || 20, 100);
-    const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
-
-    const modelIdsArray = modelIds ? modelIds.split(",").filter(Boolean) : null;
-    const where = {
-      userId,
-      status: "done",
-      ...(section ? { section } : {}),
-      ...(modelIdsArray ? { modelId: { in: modelIdsArray } } : modelId ? { modelId } : {}),
-      ...(folderId ? { folderItems: { some: { folderId } } } : {}),
-    };
-
-    const [rawJobs, total] = await Promise.all([
-      db.generationJob.findMany({
-        where,
-        orderBy: { completedAt: "desc" },
-        take,
-        skip,
-        select: {
-          id: true,
-          section: true,
-          modelId: true,
-          prompt: true,
-          inputData: true,
-          tokensSpent: true,
-          completedAt: true,
-          folderItems: { select: { folderId: true } },
-          outputs: {
-            orderBy: { index: "asc" },
-            select: {
-              id: true,
-              s3Key: true,
-              thumbnailS3Key: true,
-              outputUrl: true,
-            },
-          },
-        },
-      }),
-      db.generationJob.count({ where }),
-    ]);
-
-    const base = config.api.publicUrl;
-    const items = rawJobs.map((job) => {
-      const model = AI_MODELS[job.modelId];
-      const inputData = (job.inputData ?? {}) as Record<string, unknown>;
-      const modelSettings = (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
-
-      const outputs = job.outputs.map((output) => {
-        const previewUrl =
-          job.section !== "design" && output.s3Key && base
-            ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
-            : output.outputUrl;
-        const thumbnailUrl =
-          output.thumbnailS3Key && base
-            ? `${base}/download/${generateDownloadToken(output.thumbnailS3Key, userId)}`
-            : null;
-        return {
-          id: output.id,
-          s3Key: output.s3Key,
-          outputUrl: output.outputUrl,
-          previewUrl,
-          thumbnailUrl,
-        };
-      });
-
-      return {
-        id: job.id,
-        section: job.section,
-        modelId: job.modelId,
-        modelName: model?.name ?? job.modelId,
-        prompt: job.prompt,
-        modelSettings,
-        tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
-        completedAt: job.completedAt,
-        folderIds: job.folderItems.map((fi) => fi.folderId),
-        outputs,
-      };
+    return galleryService.listJobs(userId, {
+      section,
+      page: parseInt(page, 10) || 1,
+      limit: parseInt(limit, 10) || 20,
+      modelId,
+      modelIds,
+      folderId,
     });
-
-    return { items, total, page: parseInt(page, 10), limit: take };
   });
 
   /**
@@ -542,19 +487,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   }>("/gallery/model-counts", async (request) => {
     const userId = (request as AuthRequest).userId;
     const { section } = request.query;
-
-    const rows = await db.generationJob.groupBy({
-      by: ["modelId"],
-      where: {
-        userId,
-        status: "done",
-        ...(section ? { section } : {}),
-      },
-      _count: { id: true },
-      orderBy: { _count: { id: "desc" } },
-    });
-
-    return rows.map((r) => ({ modelId: r.modelId, count: r._count.id }));
+    return galleryService.getModelCounts(userId, section);
   });
 
   /**
@@ -599,23 +532,14 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { id } = request.params;
-
-      const output = await db.generationJobOutput.findUnique({
-        where: { id },
-        include: { job: { select: { userId: true } } },
-      });
-
-      if (!output) return reply.code(404).send({ error: "Not found" });
-      if (output.job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const base = config.api.publicUrl;
-      const url =
-        output.s3Key && base
-          ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
-          : output.outputUrl;
-
-      if (!url) return reply.code(422).send({ error: "File not available" });
-      return { url };
+      try {
+        const url = await galleryService.getOutputPreviewUrl(userId, id);
+        return { url };
+      } catch (err) {
+        if (err instanceof GalleryBadRequestError)
+          return reply.code(422).send({ error: err.message });
+        return mapGalleryError(err, reply);
+      }
     },
   );
 
@@ -662,24 +586,14 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { id } = request.params;
-
-      const output = await db.generationJobOutput.findUnique({
-        where: { id },
-        include: { job: { select: { userId: true } } },
-      });
-
-      if (!output) return reply.code(404).send({ error: "Not found" });
-      if (output.job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      let url: string | null = null;
-      if (output.s3Key) {
-        const filename = output.s3Key.split("/").pop() ?? "file";
-        url = await getFileUrl(output.s3Key, filename);
+      try {
+        const url = await galleryService.getOutputOriginalUrl(userId, id);
+        return { url };
+      } catch (err) {
+        if (err instanceof GalleryBadRequestError)
+          return reply.code(422).send({ error: err.message });
+        return mapGalleryError(err, reply);
       }
-      if (!url) url = output.outputUrl;
-
-      if (!url) return reply.code(422).send({ error: "File not available" });
-      return { url };
     },
   );
 
@@ -690,29 +604,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.delete<{ Params: { id: string } }>("/gallery/jobs/:id", async (request, reply) => {
     const userId = (request as AuthRequest).userId;
     const { id } = request.params;
-
-    const job = await db.generationJob.findUnique({
-      where: { id },
-      select: {
-        userId: true,
-        outputs: { select: { s3Key: true, thumbnailS3Key: true } },
-      },
-    });
-
-    if (!job) return reply.code(404).send({ error: "Not found" });
-    if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-    await Promise.all(
-      job.outputs.flatMap((o) => [
-        o.s3Key ? deleteFile(o.s3Key) : Promise.resolve(),
-        o.thumbnailS3Key ? deleteFile(o.thumbnailS3Key) : Promise.resolve(),
-      ]),
-    );
-
-    // outputs cascade-delete via the FK on GenerationJobOutput
-    await db.generationJob.delete({ where: { id } });
-
-    return { success: true };
+    try {
+      await galleryService.deleteJob(userId, id);
+      return { success: true };
+    } catch (err) {
+      return mapGalleryError(err, reply);
+    }
   });
 
   // ── Gallery Folders ──────────────────────────────────────────────────────────
@@ -749,27 +646,7 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request) => {
       const userId = (request as AuthRequest).userId;
-
-      const folders = await db.galleryFolder.findMany({
-        where: { userId },
-        include: { _count: { select: { items: true } } },
-        orderBy: [
-          { isPinned: "desc" },
-          { pinnedAt: "asc" },
-          { isDefault: "desc" },
-          { name: "asc" },
-        ],
-      });
-
-      return folders.map((f) => ({
-        id: f.id,
-        name: f.name,
-        isDefault: f.isDefault,
-        isPinned: f.isPinned,
-        pinnedAt: f.pinnedAt,
-        itemCount: f._count.items,
-        createdAt: f.createdAt,
-      }));
+      return galleryService.listFolders(userId);
     },
   );
 
@@ -808,22 +685,11 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { name } = request.body;
-
-      if (!name || !name.trim()) return reply.code(400).send({ error: "Name is required" });
-
-      const folder = await db.galleryFolder.create({
-        data: { userId, name: name.trim() },
-      });
-
-      return {
-        id: folder.id,
-        name: folder.name,
-        isDefault: false,
-        isPinned: false,
-        pinnedAt: null,
-        itemCount: 0,
-        createdAt: folder.createdAt,
-      };
+      try {
+        return await galleryService.createFolder(userId, name);
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
     },
   );
 
@@ -838,33 +704,11 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request as AuthRequest).userId;
     const { folderId } = request.params;
     const { name, isPinned } = request.body;
-
-    const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-    if (!folder) return reply.code(404).send({ error: "Not found" });
-    if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-    if (name !== undefined && folder.isDefault)
-      return reply.code(400).send({ error: "Cannot rename default folder" });
-    if (name !== undefined && !name.trim())
-      return reply.code(400).send({ error: "Name is required" });
-
-    const updated = await db.galleryFolder.update({
-      where: { id: folderId },
-      data: {
-        ...(name !== undefined ? { name: name.trim() } : {}),
-        ...(isPinned !== undefined ? { isPinned, pinnedAt: isPinned ? new Date() : null } : {}),
-      },
-      include: { _count: { select: { items: true } } },
-    });
-
-    return {
-      id: updated.id,
-      name: updated.name,
-      isDefault: updated.isDefault,
-      isPinned: updated.isPinned,
-      pinnedAt: updated.pinnedAt,
-      itemCount: updated._count.items,
-      createdAt: updated.createdAt,
-    };
+    try {
+      return await galleryService.updateFolder(userId, folderId, { name, isPinned });
+    } catch (err) {
+      return mapGalleryError(err, reply);
+    }
   });
 
   /**
@@ -904,14 +748,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId } = request.params;
-
-      const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-      if (!folder) return reply.code(404).send({ error: "Not found" });
-      if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-      if (folder.isDefault) return reply.code(400).send({ error: "Cannot delete default folder" });
-
-      await db.galleryFolder.delete({ where: { id: folderId } });
-      return { success: true };
+      try {
+        await galleryService.deleteFolder(userId, folderId);
+        return { success: true };
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
     },
   );
 
@@ -960,25 +802,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
       const userId = (request as AuthRequest).userId;
       const { folderId } = request.params;
       const { jobId } = request.body;
-
-      const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-      if (!folder) return reply.code(404).send({ error: "Not found" });
-      if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const job = await db.generationJob.findUnique({
-        where: { id: jobId },
-        select: { userId: true },
-      });
-      if (!job) return reply.code(404).send({ error: "Job not found" });
-      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      await db.galleryFolderItem.upsert({
-        where: { folderId_jobId: { folderId, jobId } },
-        create: { folderId, jobId },
-        update: {},
-      });
-
-      return { success: true };
+      try {
+        await galleryService.addJobToFolder(userId, folderId, jobId);
+        return { success: true };
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
     },
   );
 
@@ -1021,13 +850,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId, jobId } = request.params;
-
-      const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
-      if (!folder) return reply.code(404).send({ error: "Not found" });
-      if (folder.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      await db.galleryFolderItem.deleteMany({ where: { folderId, jobId } });
-      return { success: true };
+      try {
+        await galleryService.removeJobFromFolder(userId, folderId, jobId);
+        return { success: true };
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
     },
   );
 
@@ -1068,28 +896,11 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { jobId } = request.body;
-
-      const job = await db.generationJob.findUnique({
-        where: { id: jobId },
-        select: { userId: true },
-      });
-      if (!job) return reply.code(404).send({ error: "Job not found" });
-      if (job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      let favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
-      if (!favorites) {
-        favorites = await db.galleryFolder.create({
-          data: { userId, name: "Избранное", isDefault: true },
-        });
+      try {
+        return await galleryService.addToFavorites(userId, jobId);
+      } catch (err) {
+        return mapGalleryError(err, reply);
       }
-
-      await db.galleryFolderItem.upsert({
-        where: { folderId_jobId: { folderId: favorites.id, jobId } },
-        create: { folderId: favorites.id, jobId },
-        update: {},
-      });
-
-      return { folderId: favorites.id };
     },
   );
 
@@ -1124,12 +935,12 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { jobId } = request.params;
-
-      const favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
-      if (!favorites) return reply.code(404).send({ error: "No favorites folder" });
-
-      await db.galleryFolderItem.deleteMany({ where: { folderId: favorites.id, jobId } });
-      return { success: true };
+      try {
+        await galleryService.removeFromFavorites(userId, jobId);
+        return { success: true };
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
     },
   );
 };
