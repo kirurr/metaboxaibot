@@ -1,15 +1,18 @@
 import { Download, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
+import { updatePreferences } from "@/api/auth";
 
 /**
  * Settings — единственный страничный экран с UI-предпочтениями (язык
  * интерфейса) и блоком Data & Privacy (экспорт/удаление). Профиль освобождён
  * от этих секций: там осталась только идентификация + баланс.
  *
- * Язык хранится в localStorage'е (ключ `i18n-lang`, см. `src/i18n.ts`). Смена —
- * через `i18n.changeLanguage(...)`, она же триггерит ре-рендер всего дерева
- * через react-i18next.
+ * Язык: 1) `i18n.changeLanguage(...)` обновляет UI и пишет в localStorage
+ *       2) PATCH `/auth/web-me` синкает в БД, потому что воркеры читают
+ *          `user.language` для формирования локализованных ошибок генераций.
+ *          Без шага 2 пользователь видел бы свой UI на en, но ошибки приходили
+ *          бы на старом языке из DB.
  */
 export default function Settings() {
   const { t, i18n } = useTranslation();
@@ -20,6 +23,9 @@ export default function Settings() {
   const setLang = (lang: "ru" | "en") => {
     if (lang === current) return;
     void i18n.changeLanguage(lang);
+    // Fire-and-forget: на ошибку (например web-only юзер без User-row → 204
+    // или сеть упала) не валим UI — localStorage уже хранит новый выбор.
+    updatePreferences({ language: lang }).catch(() => void 0);
   };
 
   return (

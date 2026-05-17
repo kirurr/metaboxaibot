@@ -49,6 +49,26 @@
     "balanceSubscription": "From subscription",
     "balanceSubscriptionHint": "Expire when period ends"
   },
+  "plans": {
+    "title": "Pick the plan that fits.",
+    "subtitle": "Subscriptions refill tokens monthly. Top-ups extend your active subscription.",
+    "subscriptions": "Subscriptions",
+    "tokenPackages": "Token packages",
+    "tokensPerMonth": "tokens / month",
+    "tokensTotal": "tokens",
+    "period": {
+      "M1": "1 mo",
+      "M3": "3 mo",
+      "M6": "6 mo",
+      "M12": "12 mo"
+    },
+    "buy": "Buy",
+    "processing": "Processing…",
+    "loadError": "Couldn't load the catalog. Try again later.",
+    "linkTelegram": "Link Telegram to make purchases.",
+    "badgeTop": "Top",
+    "badgeProfitable": "Best value"
+  },
   "generate": {
     "familyVersion": "Version",
     "familyVariant": "Variant",

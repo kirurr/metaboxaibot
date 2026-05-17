@@ -157,9 +157,13 @@ export function CapabilityTabs() {
     if (shift) el.style.setProperty("--mm-shift", shift + "px");
   }, [hovered]);
 
-  function pick(cap: Capability) {
+  function pick(cap: Capability, modelId?: string) {
     setHovered(null);
-    navigate(cap.route);
+    // Передаём modelId как ?model=...: если юзер уже в этом разделе и кликает
+    // другую модель в mega-menu, route не меняется и страница без query-param
+    // не узнала бы о смене. GenerateScene читает `?model=` и синкает modelId.
+    const target = modelId ? `${cap.route}?model=${encodeURIComponent(modelId)}` : cap.route;
+    navigate(target);
   }
 
   return (
@@ -216,7 +220,7 @@ export function CapabilityTabs() {
                         <div className="mega-empty">Загрузка моделей…</div>
                       ) : (
                         models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
-                          <button key={m.id} className="mega-item" onClick={() => pick(c)}>
+                          <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
                             <span className="mega-ico letter">{modelLetter(m)}</span>
                             <span className="mega-body">
                               <span className="mega-name">{displayModelName(m)}</span>

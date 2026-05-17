@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
@@ -809,6 +810,43 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     if (!modelId && families.length > 0) setModelId(families[0].id);
   }, [families, modelId]);
 
+  // ── URL → modelId sync ────────────────────────────────────────────────────
+  // `?model=<id>` в URL — источник правды для навигации (mega-menu в navbar'е,
+  // shareable links). Когда юзер уже в текущем разделе и кликает другую модель
+  // в navbar'е, route не меняется → размонта нет → без этого effect'а modelId
+  // не переключился бы.
+  //
+  // Обратный синк (state → URL) делаем НЕ через effect, а атомарным `pickModel`
+  // helper'ом — иначе два effect'а отвечающие друг другу зациклились бы
+  // (state="A" эхает в URL "A", тем временем URL="B" эхает в state "B" → swap).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlModelId = searchParams.get("model");
+
+  useEffect(() => {
+    if (!urlModelId) return;
+    if (urlModelId === modelId) return;
+    // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
+    // (например юзер вручную набил кривой ?model=, не валим default-flow).
+    if (models.some((m) => m.id === urlModelId)) {
+      setModelId(urlModelId);
+    }
+  }, [urlModelId, models, modelId]);
+
+  // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
+  // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
+  // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  function pickModel(id: string) {
+    setModelId(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("model", id);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
   // дропдаун показывает только families[0] на семейство, но юзер может
   // переключиться на sibling через version/variant chip'ы.
@@ -820,6 +858,11 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   // ── Family axis (version / variant) ────────────────────────────────────────
   // Считаем siblings выбранной модели и доступные version/variant под them.
   // Возвращаем null если у модели нет familyId или в семействе всего 1 модель.
+  //
+  // Не у всех семейств есть version-ось: например kling имеет только variantLabel
+  // (Standard/Pro), без versionLabel. В этом случае variants берутся из ВСЕХ
+  // siblings, а не из подмножества с тем же versionLabel'ом — иначе chip не
+  // рендерился бы (variantSource был бы пуст).
   const familyAxis = useMemo(() => {
     if (!selectedModel?.familyId) return null;
     const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
@@ -829,20 +872,19 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       new Set(siblings.map((m) => m.versionLabel).filter((v): v is string => !!v)),
     );
     const currentVersion = selectedModel.versionLabel ?? null;
-    const variantsInCurrent = currentVersion
-      ? Array.from(
-          new Set(
-            siblings
-              .filter((m) => m.versionLabel === currentVersion)
-              .map((m) => m.variantLabel)
-              .filter((v): v is string => !!v),
-          ),
-        )
-      : [];
+    // Если у семейства есть version-ось — фильтруем variants по текущей версии,
+    // иначе берём из всех siblings.
+    const variantSource =
+      versions.length > 0 && currentVersion
+        ? siblings.filter((m) => m.versionLabel === currentVersion)
+        : siblings;
+    const variants = Array.from(
+      new Set(variantSource.map((m) => m.variantLabel).filter((v): v is string => !!v)),
+    );
     return {
       versions,
       currentVersion,
-      variants: variantsInCurrent,
+      variants,
       currentVariant: selectedModel.variantLabel ?? null,
     };
   }, [models, selectedModel]);
@@ -856,7 +898,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       siblings.find(
         (m) => m.versionLabel === version && m.variantLabel === selectedModel.variantLabel,
       ) ?? siblings.find((m) => m.versionLabel === version);
-    if (target) setModelId(target.id);
+    if (target) pickModel(target.id);
   }
 
   function selectFamilyVariant(variant: string) {
@@ -865,7 +907,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     const target = siblings.find(
       (m) => m.versionLabel === selectedModel.versionLabel && m.variantLabel === variant,
     );
-    if (target) setModelId(target.id);
+    if (target) pickModel(target.id);
   }
 
   // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
@@ -1595,7 +1637,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                       key={m.id}
                       className={clsx("gen-model-row-item", isActive && "on")}
                       onClick={() => {
-                        setModelId(m.id);
+                        pickModel(m.id);
                         setModelOpen(false);
                       }}
                     >

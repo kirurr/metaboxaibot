@@ -814,7 +814,12 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "audio");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        },
       });
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
@@ -1027,19 +1032,8 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
 
-      await db.generationJob.update({
-        where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
-      });
-
-      if (tokensSpent > 0) {
-        await refundTokens(BigInt(userIdStr), tokensSpent, modelId, "ai_audio_undelivered").catch(
-          (refundErr) =>
-            logger.error({ refundErr, dbJobId, tokensSpent }, "Audio failed: refund attempt threw"),
-        );
-        logger.warn({ dbJobId, tokensSpent }, "Audio failed after deduct: tokens refunded to user");
-      }
-
+      // Локализованное user-facing сообщение вычисляем ДО update'а, чтобы
+      // записать его в `errorUserMessage` одним запросом вместе с `error`.
       const errMsg = err instanceof Error ? err.message : String(err);
 
       let userMessage: string | null = null;
@@ -1054,6 +1048,25 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       }
 
       const isKnownError = userMessage !== null;
+      const finalMsg = userMessage ?? pickGenerationFailedMessage(t, modelName, "audio");
+
+      await db.generationJob.update({
+        where: { id: dbJobId },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: finalMsg,
+          errorCode: classifyError(err),
+        },
+      });
+
+      if (tokensSpent > 0) {
+        await refundTokens(BigInt(userIdStr), tokensSpent, modelId, "ai_audio_undelivered").catch(
+          (refundErr) =>
+            logger.error({ refundErr, dbJobId, tokensSpent }, "Audio failed: refund attempt threw"),
+        );
+        logger.warn({ dbJobId, tokensSpent }, "Audio failed after deduct: tokens refunded to user");
+      }
 
       if (!isKnownError) {
         await notifyTechError(err, {
@@ -1064,8 +1077,6 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           attempt: job.attemptsMade,
         });
       }
-
-      const finalMsg = userMessage ?? pickGenerationFailedMessage(t, modelName, "audio");
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, finalMsg).catch(() => void 0);
       } else {

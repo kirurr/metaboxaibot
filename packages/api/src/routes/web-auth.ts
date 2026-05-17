@@ -36,7 +36,12 @@ import {
   checkLinkTelegramLinked,
 } from "../services/web-session.service.js";
 import { extractWebUserFromRequest, webAuthPreHandler } from "../middlewares/web-auth.js";
-import { config } from "@metabox/shared";
+import { config, SUPPORTED_LANGUAGES } from "@metabox/shared";
+
+// Set для O(1) валидации `language` в `/web/me` PATCH. Без проверки фронт мог бы
+// прислать кривой код → запись в DB → воркер при `getT(unknown)` упал бы в
+// en-фоллбэк молча. Лучше отбить на API-уровне.
+const SUPPORTED_LANG_SET = new Set<string>(SUPPORTED_LANGUAGES);
 import { validateEmail } from "../utils/email-validation.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
@@ -551,6 +556,55 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       return reply.send({ user, csrfToken });
+    },
+  );
+
+  // ── PATCH /auth/web-me ─────────────────────────────────────────────────
+  // Обновление пользовательских предпочтений web-юзера. Сейчас поддерживается
+  // только `language` — он же source of truth для воркеров: при формировании
+  // user-facing сообщений об ошибках они зовут `getT(user.language)`. Без
+  // sync'а DB после смены языка в Settings UI юзер видел бы свою историю
+  // в одном языке, а ошибки в другом.
+  //
+  // Web-only юзеры без линкованного TG (`aibUserId === null`) — нет `User`-row
+  // в нашей БД (только metabox-аккаунт), обновлять нечего → 204.
+  fastify.patch<{ Body: { language?: string } }>(
+    "/auth/web-me",
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Update web user preferences (language).",
+        body: {
+          type: "object",
+          properties: { language: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" }, language: { type: "string" } },
+          },
+          204: { type: "null" },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      const language = request.body?.language;
+      if (!language) {
+        return reply.code(400).send({ error: "language is required" });
+      }
+      if (!SUPPORTED_LANG_SET.has(language)) {
+        return reply.code(400).send({ error: "Unsupported language" });
+      }
+      if (aibUserId === null) {
+        // Web-only без User-row — менять негде; фронт уже держит выбор в
+        // localStorage, этого достаточно для UI до момента линковки TG.
+        return reply.code(204).send();
+      }
+      await db.user.update({ where: { id: aibUserId }, data: { language } });
+      return reply.send({ ok: true, language });
     },
   );
 

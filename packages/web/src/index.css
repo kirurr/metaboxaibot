@@ -2542,6 +2542,10 @@ select {
   transition: transform 220ms var(--ease), border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   overflow: hidden;
+  /* Flex column → нижняя CTA-кнопка с `margin-top: auto` прижимается к низу
+     карточки даже когда контента у соседей больше. */
+  display: flex;
+  flex-direction: column;
 }
 .plan:hover {
   transform: translateY(-3px);
@@ -2592,6 +2596,54 @@ select {
   font-size: 24px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/* Period selector — горизонтальный ряд chip'ов внутри `.plan` (1мес/3мес/...). */
+.plan-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.plan-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.plan-period:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period.on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period-off {
+  font-size: 11px;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+/* Зачёркнутая «была-цена» под актуальной — для подписок 3/6/12 мес. */
+.plan-old-price {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.plan-save {
+  color: var(--accent-light);
+  font-weight: 600;
+  margin-left: 8px;
 }
 .plan .feat-list {
   display: flex;

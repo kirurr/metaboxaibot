@@ -22,6 +22,31 @@ import { AI_MODELS, UserFacingError } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
+/**
+ * Эвристика: похожа ли строка `GenerationJob.error` на локализованное
+ * user-facing сообщение, а не на сырой `String(err)`.
+ *
+ * Worker'ские локализованные тексты в `packages/shared/src/i18n/locales/*.ts`
+ * единообразно начинаются с эмодзи (❌ / ⚠️ / 🎨 / 🎬 / 🎧 / 🔔 …) — это
+ * визуальный маркер ошибки для юзера. `String(err)` из JS-исключений всегда
+ * начинается с ASCII-символов: «Error:», «Fetch failed:», провайдерским JSON
+ * и т.п. Различаем по codepoint первого non-whitespace символа.
+ *
+ * Если бы worker когда-нибудь стал писать локализацию без emoji-префикса —
+ * этот фильтр ложно отнесёт её к raw. Пока такого нет, поэтому проще, чем
+ * полноценный i18n-перевод по errorCode на нашей стороне.
+ */
+function isUserFacingErrorText(text: string | null): text is string {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  // codePointAt возвращает корректный codepoint для surrogate-pair эмодзи.
+  const cp = trimmed.codePointAt(0) ?? 0;
+  // Всё что выше Latin-1 (> 0xFF) — non-ASCII, включая эмодзи и кириллицу.
+  // Сырые JS-исключения этого диапазона не задевают.
+  return cp > 0xff;
+}
+
 /** Резолвит s3Key'и из payload'а в presigned URL'ы. Дропающиеся ключи молча
  * скипаются — лучше отдать неполный слот провайдеру, чем 500. */
 async function resolveMediaInputs(
@@ -111,6 +136,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
             prompt: true,
             status: true,
             error: true,
+            errorUserMessage: true,
             errorCode: true,
             tokensSpent: true,
             createdAt: true,
@@ -121,6 +147,26 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
             },
           },
         });
+
+        // Legacy fallback для старых job'ов (до выкатки колонки `errorUserMessage`):
+        // достаём свежее `WebNotification.message` по jobId. Новые job'ы пишут
+        // локализацию прямо в `errorUserMessage` — для них этот lookup no-op.
+        const legacyIds = jobs
+          .filter((j) => j.status === "failed" && !j.errorUserMessage)
+          .map((j) => j.id);
+        const notifMessages = new Map<string, string>();
+        if (legacyIds.length > 0) {
+          const notifs = await db.webNotification.findMany({
+            where: { userId: aibUserId!, jobId: { in: legacyIds } },
+            select: { jobId: true, message: true, createdAt: true },
+            orderBy: { createdAt: "desc" },
+          });
+          for (const n of notifs) {
+            if (n.jobId && !notifMessages.has(n.jobId)) {
+              notifMessages.set(n.jobId, n.message);
+            }
+          }
+        }
 
         // URL priority: presigned S3 (наш storage) > outputUrl (провайдер).
         // Линки провайдеров временные и недоступны для скачивания напрямую через
@@ -137,13 +183,24 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
                 return { id: o.id, url, thumbnailUrl };
               }),
             );
+            // Приоритет источников локализованной ошибки:
+            //   1. `errorUserMessage` — новая колонка, worker пишет туда явно
+            //   2. WebNotification.message — legacy fallback для старых job'ов
+            //      (до выкатки колонки), берётся из notif'и того же jobId
+            //   3. job.error если выглядит локализованным (эвристика по эмодзи) —
+            //      покрывает совсем древние данные без notif'ей
+            //   4. null → фронт покажет generic `t("generate.historyError")`
+            const localized =
+              job.errorUserMessage ??
+              notifMessages.get(job.id) ??
+              (isUserFacingErrorText(job.error) ? job.error : null);
             return {
               id: job.id,
               section: job.section,
               modelId: job.modelId,
               prompt: job.prompt,
               status: job.status,
-              error: job.error,
+              error: localized,
               errorCode: job.errorCode,
               tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
               createdAt: job.createdAt.toISOString(),

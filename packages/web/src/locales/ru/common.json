@@ -49,6 +49,26 @@
     "balanceSubscription": "По подписке",
     "balanceSubscriptionHint": "Списываются при истечении периода"
   },
+  "plans": {
+    "title": "Выберите подходящий тариф.",
+    "subtitle": "Подписки пополняют токены ежемесячно. Пакеты докупаются поверх активной подписки.",
+    "subscriptions": "Подписки",
+    "tokenPackages": "Пакеты токенов",
+    "tokensPerMonth": "токенов в месяц",
+    "tokensTotal": "токенов",
+    "period": {
+      "M1": "1 мес",
+      "M3": "3 мес",
+      "M6": "6 мес",
+      "M12": "12 мес"
+    },
+    "buy": "Купить",
+    "processing": "Обработка…",
+    "loadError": "Не удалось загрузить каталог. Попробуйте позже.",
+    "linkTelegram": "Привяжите Telegram, чтобы совершать покупки.",
+    "badgeTop": "Топ",
+    "badgeProfitable": "Выгодно"
+  },
   "generate": {
     "familyVersion": "Версия",
     "familyVariant": "Вариант",

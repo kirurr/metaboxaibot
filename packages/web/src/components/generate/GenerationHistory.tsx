@@ -113,23 +113,11 @@ export function GenerationHistory({
   // Реакция на WS-нотификации: матчим по jobId с трекаемыми pending'ами.
   useEffect(() => {
     if (pendingJobs.length === 0) return;
-    console.debug("[gen-history] WS effect", {
-      notifications: notifications.length,
-      pending: pendingJobs.map((p) => ({ id: p.id, status: p.status })),
-    });
     for (const pending of pendingJobs) {
       // Уже success/error — повторно не обрабатываем.
       if (pending.status === "success") continue;
       const notif = notifications.find((n) => n.jobId === pending.id);
-      if (!notif) {
-        console.debug("[gen-history] no notif yet for", pending.id);
-        continue;
-      }
-      console.debug("[gen-history] matched notif", {
-        jobId: pending.id,
-        type: notif.type,
-        data: notif.data,
-      });
+      if (!notif) continue;
       if (notif.type.endsWith("_success")) {
         // Парсим outputs прямо из WS — рисуем результат сразу, не дожидаясь
         // refetch'а истории (он может быть медленным/сорваться). DB-снапшот
@@ -142,7 +130,6 @@ export function GenerationHistory({
           url: o.outputUrl ?? null,
           thumbnailUrl: null,
         }));
-        console.debug("[gen-history] success → calling onJobSucceeded", outputs);
         onJobSucceeded(pending.id, outputs);
         void refetch();
       } else if (notif.type.endsWith("_error")) {
