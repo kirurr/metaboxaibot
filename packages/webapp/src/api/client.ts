@@ -237,6 +237,13 @@ export const api = {
       request<{ success: boolean }>("/state/selected-mode", {
         method: "POST",
         body: JSON.stringify({ modelId, modeId }),
+        // Симметрично с selectModel: юзер может тапнуть mode-чип и сразу X-close
+        // webview до того как запрос дойдёт до сервера. Без keepalive WebView
+        // убивает in-flight fetch → выбор mode'а теряется и bot работает по
+        // старому mode. Auto-activate через 3с (handleModeChange) при быстром
+        // X-close тоже отменится, поэтому keepalive здесь — единственная
+        // гарантия что mode change долетит.
+        keepalive: true,
       }),
   },
 
