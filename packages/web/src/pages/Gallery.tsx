@@ -976,10 +976,7 @@ export default function GalleryPage() {
     setPage(1);
   }, []);
 
-  const handleOpen = useCallback(
-    (job: GalleryJob) => navigate(`/gallery/${job.id}`),
-    [navigate],
-  );
+  const handleOpen = useCallback((job: GalleryJob) => navigate(`/gallery/${job.id}`), [navigate]);
 
   // Закрытие лайтбокса всегда ведёт на /gallery — не на предыдущий URL,
   // чтобы пользователь возвращался в галерею (а не, скажем, на /image).
@@ -1023,9 +1020,7 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      {jobId && detail.data && (
-        <Lightbox job={detail.data} onClose={handleCloseLightbox} />
-      )}
+      {jobId && detail.data && <Lightbox job={detail.data} onClose={handleCloseLightbox} />}
     </div>
   );
 }

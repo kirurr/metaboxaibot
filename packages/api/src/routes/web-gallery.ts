@@ -76,7 +76,14 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request: FastifyRequest) => {
       const aibUserId = request.webUser!.aibUserId!;
-      const { section, page = "1", limit = "20", modelId, modelIds, folderId } = request.query as {
+      const {
+        section,
+        page = "1",
+        limit = "20",
+        modelId,
+        modelIds,
+        folderId,
+      } = request.query as {
         section?: string;
         page?: string;
         limit?: string;

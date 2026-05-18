@@ -85,16 +85,12 @@ export async function getGalleryModelCounts(
 }
 
 export async function getGalleryPreviewUrl(outputId: string): Promise<GalleryUrlResponse> {
-  const data = await apiClient(
-    `/web/gallery/${encodeURIComponent(outputId)}/preview-url`,
-  );
+  const data = await apiClient(`/web/gallery/${encodeURIComponent(outputId)}/preview-url`);
   return galleryUrlResponseSchema.parse(data);
 }
 
 export async function getGalleryOriginalUrl(outputId: string): Promise<GalleryUrlResponse> {
-  const data = await apiClient(
-    `/web/gallery/outputs/${encodeURIComponent(outputId)}/original-url`,
-  );
+  const data = await apiClient(`/web/gallery/outputs/${encodeURIComponent(outputId)}/original-url`);
   return galleryUrlResponseSchema.parse(data);
 }
 
@@ -104,10 +100,9 @@ export async function getGalleryJob(jobId: string, signal?: AbortSignal): Promis
 }
 
 export function deleteGalleryJob(jobId: string) {
-  return apiClient<{ success: boolean }>(
-    `/web/gallery/jobs/${encodeURIComponent(jobId)}`,
-    { method: "DELETE" },
-  );
+  return apiClient<{ success: boolean }>(`/web/gallery/jobs/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
 }
 
 // ── Folders ─────────────────────────────────────────────────────────────────
@@ -134,10 +129,9 @@ export async function updateGalleryFolder(
 }
 
 export function deleteGalleryFolder(folderId: string) {
-  return apiClient<{ success: boolean }>(
-    `/web/gallery/folders/${encodeURIComponent(folderId)}`,
-    { method: "DELETE" },
-  );
+  return apiClient<{ success: boolean }>(`/web/gallery/folders/${encodeURIComponent(folderId)}`, {
+    method: "DELETE",
+  });
 }
 
 export function addJobToGalleryFolder(folderId: string, jobId: string) {
@@ -165,10 +159,9 @@ export async function addToGalleryFavorites(jobId: string): Promise<GalleryFavor
 }
 
 export function removeFromGalleryFavorites(jobId: string) {
-  return apiClient<{ success: boolean }>(
-    `/web/gallery/favorites/${encodeURIComponent(jobId)}`,
-    { method: "DELETE" },
-  );
+  return apiClient<{ success: boolean }>(`/web/gallery/favorites/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
 }
 
 // ── Query keys ──────────────────────────────────────────────────────────────

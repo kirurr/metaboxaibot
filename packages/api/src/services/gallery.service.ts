@@ -348,12 +348,7 @@ async function listFolders(userId: bigint): Promise<GalleryFolderDto[]> {
   const folders = await db.galleryFolder.findMany({
     where: { userId },
     include: { _count: { select: { items: true } } },
-    orderBy: [
-      { isPinned: "desc" },
-      { pinnedAt: "asc" },
-      { isDefault: "desc" },
-      { name: "asc" },
-    ],
+    orderBy: [{ isPinned: "desc" }, { pinnedAt: "asc" }, { isDefault: "desc" }, { name: "asc" }],
   });
 
   return folders.map((f) => ({
@@ -428,11 +423,7 @@ async function deleteFolder(userId: bigint, folderId: string): Promise<void> {
   await db.galleryFolder.delete({ where: { id: folderId } });
 }
 
-async function addJobToFolder(
-  userId: bigint,
-  folderId: string,
-  jobId: string,
-): Promise<void> {
+async function addJobToFolder(userId: bigint, folderId: string, jobId: string): Promise<void> {
   const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
   if (!folder) throw new GalleryNotFoundError();
   if (folder.userId !== userId) throw new GalleryForbiddenError();
@@ -451,11 +442,7 @@ async function addJobToFolder(
   });
 }
 
-async function removeJobFromFolder(
-  userId: bigint,
-  folderId: string,
-  jobId: string,
-): Promise<void> {
+async function removeJobFromFolder(userId: bigint, folderId: string, jobId: string): Promise<void> {
   const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
   if (!folder) throw new GalleryNotFoundError();
   if (folder.userId !== userId) throw new GalleryForbiddenError();

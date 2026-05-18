@@ -47,7 +47,7 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   },
 
   upsert: (row) => {
-		// invalidate gallery queries
+    // invalidate gallery queries
     const qc = useQueryClient();
     qc.invalidateQueries({ queryKey: galleryKeys.all });
 
