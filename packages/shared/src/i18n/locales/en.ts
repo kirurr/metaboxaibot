@@ -621,6 +621,8 @@ export default {
     tooManyMediaMultiSlot:
       "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} {fileNoun}:\n{breakdown}\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
+    klingHeavyCropWarning:
+      "⚠️ Your photo's aspect ratio differs significantly from the selected format {aspect} — with “Autocrop photo to format” enabled, about {percent}% of the image will be cropped. Disable autocrop or pick a format closer to the photo's proportions.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",
     remove: "Remove",

@@ -429,6 +429,7 @@ export interface Translations {
     uploadPromptVideoRefAudios: string;
     imageSaved: string;
     imageSavedSingle: string;
+    klingHeavyCropWarning: string;
     tooManyMediaSingleSlot: string;
     tooManyMediaMultiSlot: string;
     slotRequired: string;
