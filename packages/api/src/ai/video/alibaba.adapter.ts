@@ -1,6 +1,8 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { probeVideoMetadata } from "../../utils/mp4-duration.js";
+import { logger } from "../../logger.js";
 
 const DASHSCOPE_BASE = "https://dashscope-intl.aliyuncs.com/api/v1";
 const SUBMIT_PATH = "/services/aigc/video-generation/video-synthesis";
@@ -119,6 +121,41 @@ export class AlibabaVideoAdapter implements VideoAdapter {
     const dashscopeModel = isI2V ? I2V_MODEL : T2V_MODEL;
     const resolution = (ms.resolution as string | undefined) ?? "720P";
     const duration = (ms.duration as number | undefined) ?? input.duration ?? 5;
+
+    // Pre-validation для first_clip mode. Pattern 1 (clip >10s) уже отбит на
+    // upload'е через slot constraint, но если клип попал в payload каким-то
+    // другим путём (webapp / direct API) — страхуемся здесь же. Pattern 2
+    // (clip ≥ output duration) — динамический констрейнт, slot его не ловит.
+    // На probe-failure → не блокируем submit, post-poll mapping страхует.
+    if (isI2V && firstClip) {
+      try {
+        const probed = await probeVideoMetadata(firstClip);
+        const clipDur = probed.durationSec;
+        if (clipDur !== null) {
+          if (clipDur > 10) {
+            throw new UserFacingError(`Wan: first_clip duration ${clipDur}s exceeds 10s limit`, {
+              key: "mediaSlotDurationTooLong",
+              params: { actual: Math.round(clipDur), max: 10 },
+            });
+          }
+          if (clipDur >= duration) {
+            throw new UserFacingError(
+              `Wan: first_clip (${clipDur}s) >= output duration (${duration}s)`,
+              {
+                key: "firstClipExceedsOutputDuration",
+                params: { actual: Math.round(clipDur), requested: duration },
+              },
+            );
+          }
+        }
+      } catch (err) {
+        if (err instanceof UserFacingError) throw err;
+        logger.warn(
+          { err, firstClipUrl: firstClip },
+          "Wan adapter: first_clip probe failed, deferring duration check to post-poll",
+        );
+      }
+    }
 
     const apiInput: Record<string, unknown> = { prompt: input.prompt };
     if (isI2V) apiInput.media = media;
