@@ -124,11 +124,14 @@ export const api = {
 
   profile: {
     get: () => request<UserProfile>("/profile"),
-    updatePreferences: (body: { confirmBeforeGenerate?: boolean }) =>
-      request<{ ok: boolean; confirmBeforeGenerate: boolean }>("/profile/preferences", {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+    updatePreferences: (body: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean }) =>
+      request<{ ok: boolean; confirmBeforeGenerate: boolean; autoActivateModel: boolean }>(
+        "/profile/preferences",
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
     partnerBalance: () =>
       request<{
         balance: number;

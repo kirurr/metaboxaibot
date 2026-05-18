@@ -1930,7 +1930,11 @@ function AccountTab(props: { profile: UserProfile }) {
   const [confirmBeforeGenerate, setConfirmBeforeGenerate] = useState<boolean>(
     props.profile.confirmBeforeGenerate,
   );
+  const [autoActivateModel, setAutoActivateModel] = useState<boolean>(
+    props.profile.autoActivateModel,
+  );
   const [showGenerationModeInfo, setShowGenerationModeInfo] = useState(false);
+  const [showAutoActivateInfo, setShowAutoActivateInfo] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteInstruction, setShowDeleteInstruction] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1961,6 +1965,15 @@ function AccountTab(props: { profile: UserProfile }) {
       await api.profile.updatePreferences({ confirmBeforeGenerate: next });
     } catch {
       setConfirmBeforeGenerate(!next);
+    }
+  };
+
+  const handleAutoActivateModelChange = async (next: boolean) => {
+    setAutoActivateModel(next);
+    try {
+      await api.profile.updatePreferences({ autoActivateModel: next });
+    } catch {
+      setAutoActivateModel(!next);
     }
   };
 
@@ -2007,6 +2020,53 @@ function AccountTab(props: { profile: UserProfile }) {
             </button>
             <div className="modal-title">{t("account.generationMode")}</div>
             <div className="modal-text account-info-text">{t("account.generationModeInfo")}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Model auto-activation toggle */}
+      <div className="account-section">
+        <div className="account-label account-label--with-info">
+          <span>{t("account.autoActivateModel")}</span>
+          <button
+            type="button"
+            className="account-info-btn"
+            onClick={() => setShowAutoActivateInfo(true)}
+            aria-label={t("account.autoActivateModelInfoAria")}
+          >
+            i
+          </button>
+        </div>
+        <div className="account-value account-toggle-stack">
+          <label className="settings-panel__toggle-label">
+            <input
+              type="checkbox"
+              checked={autoActivateModel}
+              onChange={(e) => handleAutoActivateModelChange(e.target.checked)}
+            />
+            <span className="settings-panel__toggle-track" />
+          </label>
+          <span className="account-toggle-state">
+            {autoActivateModel
+              ? t("account.autoActivateModelOn")
+              : t("account.autoActivateModelOff")}
+          </span>
+        </div>
+      </div>
+
+      {showAutoActivateInfo && (
+        <div className="modal-overlay" onClick={() => setShowAutoActivateInfo(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="modal-close"
+              onClick={() => setShowAutoActivateInfo(false)}
+              aria-label="close"
+            >
+              ×
+            </button>
+            <div className="modal-title">{t("account.autoActivateModel")}</div>
+            <div className="modal-text account-info-text">{t("account.autoActivateModelInfo")}</div>
           </div>
         </div>
       )}

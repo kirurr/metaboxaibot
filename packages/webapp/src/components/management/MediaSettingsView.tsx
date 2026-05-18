@@ -107,10 +107,20 @@ export function MediaSettingsView({
   // Popup-таймер на «Активирована» — храним чтобы очистить на unmount,
   // иначе setState отрабатывает на размонтированном компоненте.
   const popupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // User-pref toggle (Account tab → «Активация моделей»). Default true чтобы
+  // до загрузки профиля поведение совпадало с дефолтом сервера. При false —
+  // scheduleAutoActivate становится no-op; юзер активирует модель кнопкой.
+  const [autoActivateEnabled, setAutoActivateEnabled] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.models.list(section), api.state.get(), api.modelSettings.get()])
-      .then(([ms, state, ms2]) => {
+    Promise.all([
+      api.models.list(section),
+      api.state.get(),
+      api.modelSettings.get(),
+      api.profile.get(),
+    ])
+      .then(([ms, state, ms2, profile]) => {
+        setAutoActivateEnabled(profile.autoActivateModel);
         setModels(ms);
         setAllModelSettings(ms2);
         setSelectedModes(state.selectedModes ?? {});
@@ -203,6 +213,11 @@ export function MediaSettingsView({
 
   const scheduleAutoActivate = (modelId: string) => {
     if (!modelId) return;
+    // Юзер отключил авто-активацию в профиле (Account tab) — переключения
+    // в picker'е/карусели только сохраняют выбор через silent-select, а full
+    // activate остаётся за кнопкой «Активировать». Инкремент op тоже пропускаем,
+    // чтобы случайно не дёрнуть rollback в неактивном пути.
+    if (!autoActivateEnabled) return;
     // Инкремент op ДО dedup-check — это инвалидирует любой pending in-flight
     // autoActivate даже если новый вызов сам ничего не запустит (dedup).
     // Без этого: in-flight autoActivate(A,op=N) висит, прилетает scheduleAutoActivate(A)
@@ -390,16 +405,24 @@ export function MediaSettingsView({
       .setSelectedMode(modelId, modeId)
       .catch((e) => console.error("[settings] setSelectedMode failed", modelId, modeId, e));
     // Mode change инвалидирует текущую активацию — бот должен заново спросить
-    // слоты под новый mode. Раньше тут активная модель локально сбрасывалась
-    // и юзер должен был жать «Активировать»; теперь реактивируем сразу.
-    // lastActivatedRef ресетим: иначе scheduleAutoActivate задедупит на ту же
-    // модель (она уже считается активной) и activate не запустится. Сам
-    // activeModelId НЕ сбрасываем — picker'у нельзя видеть "" иначе на
-    // следующем тике он подхватит familyDefault как target и активирует
-    // чужую модель внутри семейства.
+    // слоты под новый mode.
+    //
+    // Auto-режим: ресетим lastActivatedRef (иначе scheduleAutoActivate
+    // задедупит на ту же модель) и реактивируем сразу. activeModelId НЕ
+    // сбрасываем — picker'у нельзя видеть "" иначе на следующем тике он
+    // подхватит familyDefault как target и активирует чужую модель.
+    //
+    // Manual-режим (тогл «Активация моделей» = Вручную): возвращаемся к
+    // pre-autosave поведению — локально сбрасываем активную модель, чтобы
+    // кнопка «Активировать» снова появилась и юзер сам подтвердил новый mode.
     if (modelId === activeModelId) {
-      lastActivatedRef.current = null;
-      scheduleAutoActivate(modelId);
+      if (autoActivateEnabled) {
+        lastActivatedRef.current = null;
+        scheduleAutoActivate(modelId);
+      } else {
+        setActiveModelId("");
+        setState(undefined);
+      }
     }
   };
 
