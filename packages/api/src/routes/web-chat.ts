@@ -636,19 +636,14 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         send("chunk", { text: result.value });
       }
 
-      const balance = await db.user.findUnique({
-        where: { id: aibUserId! },
-        select: {
-          tokenBalance: true,
-          subscriptionTokenBalance: true,
-        },
-      });
-
+      // Post-deduct balance уже лежит в `result.value` (см. `SendMessageResult`
+      // в chat.service.ts) — отдельный `db.user.findUnique` повторял бы работу,
+      // которую только что сделал `deductTokens`. Берём прямо из стрима.
       send("done", {
         tokensUsed: result.value?.tokensUsed ?? 0,
         balance: {
-          tokenBalance: balance?.tokenBalance.toString() ?? "0",
-          subscriptionTokenBalance: balance?.subscriptionTokenBalance.toString() ?? "0",
+          tokenBalance: result.value?.tokenBalance?.toString() ?? "0",
+          subscriptionTokenBalance: result.value?.subscriptionTokenBalance?.toString() ?? "0",
         },
       });
     } catch (err) {

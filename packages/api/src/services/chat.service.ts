@@ -105,6 +105,10 @@ export interface SendMessageParams {
 export interface SendMessageResult {
   text: string;
   tokensUsed: number;
+  /** Post-deduct subscription token balance. */
+  subscriptionTokenBalance: number;
+  /** Post-deduct regular (paid) token balance. */
+  tokenBalance: number;
 }
 
 export const chatService = {
@@ -1009,13 +1013,27 @@ export const chatService = {
           )
         : undefined;
 
-    // Deduct tokens
-    await deductTokens(userId, tokensUsed, dialog.modelId, dialogId, undefined, {
-      actualProvider,
-      actualCostUsd,
-    });
+    // Deduct tokens. Капчуем post-deduct balance чтобы клиент мог показать
+    // юзеру «списано X, осталось Y» без дополнительного DB-round-trip'а
+    // (зеркалит результат-caption на image/video с `generationCostLine`).
+    const deductResult = await deductTokens(
+      userId,
+      tokensUsed,
+      dialog.modelId,
+      dialogId,
+      undefined,
+      {
+        actualProvider,
+        actualCostUsd,
+      },
+    );
 
-    return { text: responseText, tokensUsed };
+    return {
+      text: responseText,
+      tokensUsed,
+      subscriptionTokenBalance: deductResult.subscriptionTokenBalance,
+      tokenBalance: deductResult.tokenBalance,
+    };
   },
 };
 

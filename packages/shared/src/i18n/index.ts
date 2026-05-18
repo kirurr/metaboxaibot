@@ -583,6 +583,24 @@ function formatTokens(n: number): string {
 }
 
 /**
+ * Возвращает standalone строку «💸 Списано: X ✦\n💳 Баланс: Y ✦» по тому же
+ * шаблону `t.common.generationCostLine`, что и cost-блок в caption'ах
+ * image/video результатов. Используется когда нужно показать списание
+ * отдельным сообщением (например, после ответа LLM в чате — там caption'а нет).
+ */
+export function formatGenerationCostLine(
+  t: Translations,
+  cost: number,
+  subscriptionBalance: number,
+  tokenBalance: number,
+): string {
+  const total = subscriptionBalance + tokenBalance;
+  return t.common.generationCostLine
+    .replace("{cost}", formatTokens(cost))
+    .replace("{total}", formatTokens(total));
+}
+
+/**
  * Telegram caption limit (sendPhoto / sendVideo / sendDocument / sendAudio /
  * media group items). Считается ПО РЕНДЕР-длине после parse_mode: HTML — теги
  * `<blockquote>` и `<b>` не учитываются, видимый текст да.
