@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNotificationsStore } from "@/stores/notificationsStore";
+import { galleryKeys } from "@/api/gallery";
 import { listGenerations, type GenerationJobDto } from "@/api/generation";
 import type { WebModelDto } from "@/api/models";
 
@@ -72,6 +74,7 @@ export function GenerationHistory({
   const [history, setHistory] = useState<GenerationJobDto[]>([]);
   const [loading, setLoading] = useState(false);
   const notifications = useNotificationsStore((s) => s.list);
+  const qc = useQueryClient();
 
   // Members семейства — фильтр для backend'а. Без семейства — только сам modelId.
   const familyModelIds = useMemo(() => {
@@ -132,6 +135,10 @@ export function GenerationHistory({
         }));
         onJobSucceeded(pending.id, outputs);
         void refetch();
+        // Новый job — данные в /web/gallery устарели. Дёргаем invalidation,
+        // чтобы при следующем визите на страницу галереи (или если она уже
+        // открыта в другой вкладке/мониторе) пришла свежая лента.
+        void qc.invalidateQueries({ queryKey: galleryKeys.all });
       } else if (notif.type.endsWith("_error")) {
         if (pending.errorMessage !== notif.message) {
           onJobFailed(pending.id, notif.message);
