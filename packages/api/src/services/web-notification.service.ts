@@ -4,6 +4,7 @@ import type { Prisma, WebNotification } from "@prisma/client";
 import { db } from "../db.js";
 import { logger } from "../logger.js";
 import { emitToUser } from "./ws-bus.service.js";
+import { getFileUrl } from "./s3.service.js";
 
 export interface CreateWebNotificationParams {
   userId: bigint;
@@ -98,10 +99,24 @@ function buildText(msg: JobNotificationMessage): { title: string; message: strin
   return { title: `Генерация ${section} готова`, message: "Результат готов" };
 }
 
-function buildData(msg: JobNotificationMessage): Prisma.InputJsonValue {
+async function buildData(msg: JobNotificationMessage): Promise<Prisma.InputJsonValue> {
   if (msg.kind === "success") {
+    // Заменяем provider-URL на presigned S3 URL ещё на этапе диспатча: фронт
+    // получает стабильную ссылку на наш storage, а не временный provider-link
+    // (последний может быть закрыт CDN'ом или экспайрнуться к моменту клика).
+    // s3Key оставляем — фронт может перепресайнить через `/web/generations`.
+    const outputs = await Promise.all(
+      msg.outputs.map(async (o) => {
+        const presigned = o.s3Key ? await getFileUrl(o.s3Key).catch(() => null) : null;
+        return {
+          id: o.id,
+          s3Key: o.s3Key,
+          outputUrl: presigned ?? o.outputUrl,
+        };
+      }),
+    );
     return {
-      outputs: msg.outputs,
+      outputs,
       ...(msg.partial ? { partial: msg.partial } : {}),
     } as unknown as Prisma.InputJsonValue;
   }
@@ -125,7 +140,7 @@ export async function dispatchJobNotification(msg: JobNotificationMessage): Prom
   // ставим в null, а сам `userAvatarId` (приходит как msg.dbJobId) сохраняем
   // внутри `data` — фронту хватит его для навигации/обновления карточки.
   const isAvatar = msg.section === "avatar";
-  const baseData = buildData(msg);
+  const baseData = await buildData(msg);
   const row = await webNotificationService.create({
     userId,
     jobId: isAvatar ? null : msg.dbJobId,

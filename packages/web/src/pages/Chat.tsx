@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
@@ -56,12 +57,10 @@ type PendingAttachment =
 
 const SECTION = "gpt";
 
-const STARTER_PROMPTS = [
-  "Напиши план запуска продукта",
-  "Объясни этот код строка за строкой",
-  "Придумай название для бренда чая",
-  "Сожми финансовый отчёт в 5 пунктов",
-];
+/** Локализованный fallback для title диалога (когда `title === null`). */
+function dialogTitle(d: DialogDto, fallback: string): string {
+  return d.title ?? fallback;
+}
 
 function modelDisplayName(m: WebModelDto): string {
   return m.familyName ?? m.name;
@@ -86,31 +85,31 @@ function modelRate(m: WebModelDto): string {
   return `≈ ${n.toLocaleString("ru-RU")} т ${unit}`;
 }
 
-function dialogTitle(d: DialogDto): string {
-  return d.title ?? "Новый диалог";
-}
-
-/** "сейчас" / "5м" / "2ч" / "Yest" / "Mon" / "Apr 28" — компактная подпись справа от треда. */
-function formatRelative(iso: string): string {
+/**
+ * "сейчас" / "5м" / "2ч" / "Вчера" / "Пн" / "Apr 28" — компактная подпись справа.
+ * `t` обязателен, потому что часть строк (now/yesterday/weekday) локализована.
+ */
+function formatRelative(
+  iso: string,
+  t: (k: string, opts?: Record<string, unknown>) => string,
+): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1) return "сейчас";
-  if (diffMin < 60) return `${diffMin}м`;
+  if (diffMin < 1) return t("chat.relTime.now");
+  if (diffMin < 60) return t("chat.relTime.minutes", { n: diffMin });
   const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}ч`;
+  if (diffH < 24) return t("chat.relTime.hours", { n: diffH });
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const dayStart = new Date(d);
   dayStart.setHours(0, 0, 0, 0);
   const diffDays = Math.floor((today.getTime() - dayStart.getTime()) / 86_400_000);
-  if (diffDays === 1) return "Вчера";
-  if (diffDays < 7) {
-    return ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][d.getDay()];
-  }
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  if (diffDays === 1) return t("chat.relTime.yesterday");
+  if (diffDays < 7) return t(`chat.relTime.weekday.${d.getDay()}`);
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
 /**
@@ -121,9 +120,21 @@ function formatRelative(iso: string): string {
  * модалка открывается автоматически из `apiClient`.
  */
 export default function Chat() {
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const location = useLocation();
   const prefill = (location.state as { prefill?: string } | null)?.prefill ?? "";
+
+  // Стартовые промпты — массив из 4 ключей, чтобы локализовалось.
+  const STARTER_PROMPTS = useMemo(
+    () => [
+      t("chat.starterPrompts.0"),
+      t("chat.starterPrompts.1"),
+      t("chat.starterPrompts.2"),
+      t("chat.starterPrompts.3"),
+    ],
+    [t],
+  );
 
   const allModels = useModelsStore((s) => s.models);
   const chatModels = useMemo(() => {
@@ -330,10 +341,10 @@ export default function Chat() {
           const e = err as ApiError;
           const msg =
             e.code === "UNSUPPORTED_MEDIA_TYPE"
-              ? "Тип файла не поддерживается"
+              ? t("chat.errorUnsupportedMedia")
               : e.code === "FILE_TOO_LARGE"
-                ? "Файл слишком большой (макс. 25 МБ)"
-                : e.message || "Ошибка загрузки";
+                ? t("chat.errorFileTooLarge")
+                : e.message || t("chat.errorUploadFailed");
           setPendingAttachments((prev) =>
             prev.map((x) =>
               x.id === p.id ? { id: p.id, status: "error", file: p.file, error: msg } : x,
@@ -355,11 +366,11 @@ export default function Chat() {
     // Можно отправить только с текстом ИЛИ только с вложениями. Без всего — no-op.
     if ((!text && readyAttachments.length === 0) || sending) return;
     if (uploadingCount > 0) {
-      setSendError("Дождитесь окончания загрузки файлов");
+      setSendError(t("chat.waitUploads"));
       return;
     }
     if (!selectedModel) {
-      setSendError("Модель ещё не загрузилась");
+      setSendError(t("chat.errorModelLoading"));
       return;
     }
 
@@ -385,7 +396,7 @@ export default function Chat() {
       } catch (err) {
         const e = err as ApiError;
         setSending(false);
-        setSendError(e.message || "Не удалось создать диалог");
+        setSendError(e.message || t("chat.errorCreateDialog"));
         return;
       }
     }
@@ -486,7 +497,7 @@ export default function Chat() {
     } catch (err) {
       const e = err as ApiError;
       if (e.code !== "TELEGRAM_NOT_LINKED") {
-        setSendError(e.message || "Ошибка отправки");
+        setSendError(e.message || t("chat.errorSend"));
       }
       setMessages((m) => m.filter((x) => x.localId !== localId + ".ai"));
     } finally {
@@ -499,8 +510,8 @@ export default function Chat() {
   async function handleRename(id: string) {
     const current = dialogs.find((d) => d.id === id);
     const next = window.prompt(
-      "Новое название",
-      dialogTitle(current ?? ({ title: null } as DialogDto)),
+      t("chat.renamePrompt"),
+      dialogTitle(current ?? ({ title: null } as DialogDto), t("chat.newDialog")),
     );
     if (!next || next.trim().length === 0) return;
     const title = next.trim();
@@ -509,14 +520,14 @@ export default function Chat() {
       renameInStore(id, title);
     } catch (err) {
       const e = err as ApiError;
-      setSendError(e.message || "Не удалось переименовать");
+      setSendError(e.message || t("chat.errorRename"));
     } finally {
       setMenuForId(null);
     }
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Удалить диалог? Историю восстановить нельзя.")) return;
+    if (!window.confirm(t("chat.deletePrompt"))) return;
     try {
       await dialogsApi.deleteDialog(id);
       removeFromStore(id);
@@ -526,7 +537,7 @@ export default function Chat() {
       }
     } catch (err) {
       const e = err as ApiError;
-      setSendError(e.message || "Не удалось удалить");
+      setSendError(e.message || t("chat.errorDelete"));
     } finally {
       setMenuForId(null);
     }
@@ -535,8 +546,8 @@ export default function Chat() {
   const filteredDialogs = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return dialogs;
-    return dialogs.filter((d) => dialogTitle(d).toLowerCase().includes(q));
-  }, [dialogs, search]);
+    return dialogs.filter((d) => dialogTitle(d, t("chat.newDialog")).toLowerCase().includes(q));
+  }, [dialogs, search, t]);
 
   return (
     <div className={clsx("chat-shell", !isMobile && sideCollapsed && "side-collapsed")}>
@@ -544,11 +555,11 @@ export default function Chat() {
         <aside ref={sideRef} className={clsx("chat-side", sideOpen && "open open-backdrop")}>
           <div className="cs-head">
             <button className="btn btn-primary btn-sm cs-new" onClick={newChat}>
-              <Plus size={14} /> Новый диалог
+              <Plus size={14} /> {t("chat.newDialogBtn")}
             </button>
             <button
               className="cs-collapse"
-              title={isMobile ? "Закрыть" : "Свернуть"}
+              title={isMobile ? t("chat.dialogsClose") : t("chat.dialogsCollapse")}
               onClick={() => {
                 if (isMobile) setSideOpen(false);
                 else setSideCollapsed(true);
@@ -562,20 +573,22 @@ export default function Chat() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Поиск по диалогам"
+              placeholder={t("chat.searchDialogs")}
             />
           </div>
           <div className="cs-list">
-            {!dialogsLoaded && dialogsLoading && <div className="cs-group">Загрузка…</div>}
+            {!dialogsLoaded && dialogsLoading && (
+              <div className="cs-group">{t("chat.loadingDialogs")}</div>
+            )}
             {dialogsLoaded && dialogsErrorCode === "TELEGRAM_NOT_LINKED" && (
               <div className="cs-group" style={{ color: "var(--text-secondary)" }}>
-                Привяжите Telegram, чтобы видеть историю диалогов.
+                {t("chat.linkTgToSeeDialogs")}
               </div>
             )}
             {dialogsLoaded && filteredDialogs.length === 0 && !dialogsErrorCode && (
-              <div className="cs-group">{search ? "Ничего не найдено" : "Пока нет диалогов"}</div>
+              <div className="cs-group">{search ? t("common.empty") : t("chat.noDialogs")}</div>
             )}
-            {filteredDialogs.length > 0 && <div className="cs-group">Недавние</div>}
+            {filteredDialogs.length > 0 && <div className="cs-group">{t("chat.recent")}</div>}
             {filteredDialogs.map((d) => (
               <div key={d.id} style={{ position: "relative" }}>
                 <button
@@ -585,15 +598,15 @@ export default function Chat() {
                     setSideOpen(false);
                   }}
                 >
-                  <div className="cs-title">{dialogTitle(d)}</div>
+                  <div className="cs-title">{dialogTitle(d, t("chat.newDialog"))}</div>
                   <div className="cs-meta">
                     <span className="mono">{d.modelId}</span>
-                    <span>{formatRelative(d.updatedAt)}</span>
+                    <span>{formatRelative(d.updatedAt, t)}</span>
                   </div>
                 </button>
                 <button
                   className="cs-item-menu"
-                  aria-label="Действия"
+                  aria-label={t("common.actions")}
                   onClick={(e) => {
                     e.stopPropagation();
                     setMenuForId(menuForId === d.id ? null : d.id);
@@ -604,10 +617,10 @@ export default function Chat() {
                 {menuForId === d.id && (
                   <div className="cs-item-pop" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => handleRename(d.id)}>
-                      <Pencil size={13} /> Переименовать
+                      <Pencil size={13} /> {t("common.rename")}
                     </button>
                     <button className="danger" onClick={() => handleDelete(d.id)}>
-                      <Trash2 size={13} /> Удалить
+                      <Trash2 size={13} /> {t("common.delete")}
                     </button>
                   </div>
                 )}
@@ -622,7 +635,7 @@ export default function Chat() {
           {(isMobile ? !sideOpen : sideCollapsed) && (
             <button
               className="expand-side"
-              title="Диалоги"
+              title={t("chat.dialogsExpand")}
               onClick={() => {
                 if (isMobile) setSideOpen(true);
                 else setSideCollapsed(false);
@@ -633,22 +646,22 @@ export default function Chat() {
           )}
           <div className="chat-title">
             <div className="ct-name">
-              {activeDialog ? dialogTitle(activeDialog) : "Новый диалог"}
+              {activeDialog ? dialogTitle(activeDialog, t("chat.newDialog")) : t("chat.newDialog")}
             </div>
             <div className="ct-sub">
               {messagesLoading
-                ? "Загрузка истории…"
+                ? t("chat.loadingHistory")
                 : messages.length === 0
-                  ? "Начните новый диалог"
-                  : `${messages.length} сообщений`}
+                  ? t("chat.startNew")
+                  : t("chat.messagesCount", { count: messages.length })}
             </div>
           </div>
           <div className="ch-actions">
             <button className="btn btn-ghost btn-sm" onClick={newChat}>
-              <Plus size={15} /> Новый
+              <Plus size={15} /> {t("chat.newShort")}
             </button>
             {!isMobile && activeDialog && (
-              <button className="btn btn-ghost btn-sm" disabled title="Скоро">
+              <button className="btn btn-ghost btn-sm" disabled title={t("chat.exportSoon")}>
                 <Download size={15} /> Export
               </button>
             )}
@@ -661,8 +674,8 @@ export default function Chat() {
               <div className="ce-mark">
                 <Sparkles size={28} />
               </div>
-              <h2>Начните новый диалог</h2>
-              <p>Спросите, попросите написать или проанализировать — модель выбирается ниже.</p>
+              <h2>{t("chat.startNew")}</h2>
+              <p>{t("chat.startNewHint")}</p>
               <div className="ce-suggest">
                 {STARTER_PROMPTS.map((s) => (
                   <button key={s} onClick={() => setDraft(s)}>
@@ -680,7 +693,7 @@ export default function Chat() {
                       <Sparkles size={16} />
                     </div>
                   )}
-                  <div style={{ minWidth: 0, flex: m.role === "user" ? "0 1 auto" : "1 1 auto" }}>
+                  <div className="msg-block">
                     {m.attachments && m.attachments.length > 0 && (
                       <div className="msg-attachments">
                         {m.attachments.map((a, ai) => (
@@ -726,7 +739,7 @@ export default function Chat() {
                     <Sparkles size={16} />
                   </div>
                   <div className="bubble">
-                    <span className="msg-typing">Загрузка…</span>
+                    <span className="msg-typing">{t("common.loading")}</span>
                   </div>
                 </div>
               )}
@@ -737,7 +750,7 @@ export default function Chat() {
         {sendError && (
           <div className="chat-error">
             <span>{sendError}</span>
-            <button onClick={() => setSendError(null)} aria-label="Закрыть">
+            <button onClick={() => setSendError(null)} aria-label={t("common.close")}>
               <X size={14} />
             </button>
           </div>
@@ -767,7 +780,7 @@ export default function Chat() {
               />
               <button
                 className="tool"
-                title="Прикрепить файл"
+                title={t("chat.promptAttach")}
                 onClick={openFilePicker}
                 disabled={sending}
               >
@@ -775,7 +788,7 @@ export default function Chat() {
               </button>
               <textarea
                 ref={taRef}
-                placeholder="Спросить AI Box…"
+                placeholder={t("chat.promptPlaceholder")}
                 value={draft}
                 rows={1}
                 onInput={autosize}
@@ -795,10 +808,10 @@ export default function Chat() {
                 onClick={send}
                 title={
                   sending
-                    ? "Отправка…"
+                    ? t("chat.sending")
                     : uploadingCount > 0
-                      ? "Дождитесь загрузки файлов"
-                      : "Отправить"
+                      ? t("chat.waitUploads")
+                      : t("chat.send")
                 }
               >
                 {sending ? <RefreshCw size={18} className="anim-spin" /> : <ArrowUp size={18} />}
@@ -812,7 +825,7 @@ export default function Chat() {
               >
                 <span className="mp-dot" />
                 <span className="mp-name">
-                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                  {selectedModel ? modelDisplayName(selectedModel) : t("common.loading")}
                 </span>
                 <ChevronDown size={13} />
                 {modelOpen && (
@@ -838,7 +851,8 @@ export default function Chat() {
                 )}
               </div>
               <span className="hint" style={{ marginLeft: "auto" }}>
-                ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span> токенов
+                ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span>{" "}
+                {t("chat.tokensEst")}
               </span>
             </div>
           </div>
@@ -856,15 +870,16 @@ function messageDtoToMsg(m: MessageDto): Msg {
   };
 }
 
-function formatBytes(bytes?: number | null): string {
+function formatBytes(bytes: number | null | undefined, t: (k: string) => string): string {
   if (!bytes || bytes < 0) return "";
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+  if (bytes < 1024) return `${bytes} ${t("chat.byteShort")}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ${t("chat.kbShort")}`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} ${t("chat.mbShort")}`;
 }
 
 /** Chip pending-загрузки в composer'е (uploading / ready / error). */
 function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemove: () => void }) {
+  const { t } = useTranslation();
   const isImage =
     pending.status === "ready"
       ? pending.dto.kind === "image"
@@ -897,13 +912,13 @@ function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemo
         </div>
         <div className="att-chip-meta">
           {pending.status === "uploading"
-            ? "Загрузка…"
+            ? t("chat.uploading")
             : pending.status === "error"
               ? pending.error
-              : formatBytes(pending.file.size)}
+              : formatBytes(pending.file.size, t)}
         </div>
       </div>
-      <button className="att-chip-remove" onClick={onRemove} aria-label="Удалить">
+      <button className="att-chip-remove" onClick={onRemove} aria-label={t("chat.removeFile")}>
         <X size={12} />
       </button>
     </div>
@@ -912,6 +927,7 @@ function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemo
 
 /** Chip уже-сохранённого вложения внутри bubble треда. */
 function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
+  const { t } = useTranslation();
   const isImage = attachment.kind === "image" && !!attachment.url;
   if (isImage) {
     // Картинку показываем превью с возможностью открыть полноразмер.
@@ -936,7 +952,7 @@ function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
         <div className="att-chip-name" title={attachment.name}>
           {attachment.name}
         </div>
-        <div className="att-chip-meta">{formatBytes(attachment.size)}</div>
+        <div className="att-chip-meta">{formatBytes(attachment.size, t)}</div>
       </div>
     </>
   );

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Clock, CheckCircle2, XCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/common/Button";
 import { getOrderStatus } from "@/api/billing";
 
 export default function PaymentPending() {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const orderId = params.get("order") ?? params.get("_order") ?? "";
@@ -44,10 +46,8 @@ export default function PaymentPending() {
         {status === "pending" && (
           <>
             <Clock size={64} className="text-accent mx-auto mb-4" />
-            <h1 className="text-2xl font-bold mb-2">Ждём подтверждение</h1>
-            <p className="text-text-secondary mb-6">
-              Оплата обрабатывается. Страница обновится автоматически.
-            </p>
+            <h1 className="text-2xl font-bold mb-2">{t("payment.pendingTitle")}</h1>
+            <p className="text-text-secondary mb-6">{t("payment.pendingDescription")}</p>
             <div className="flex justify-center">
               <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
             </div>
@@ -56,14 +56,14 @@ export default function PaymentPending() {
         {status === "paid" && (
           <>
             <CheckCircle2 size={64} className="text-success mx-auto mb-4" />
-            <h1 className="text-2xl font-bold mb-2">Оплата получена</h1>
+            <h1 className="text-2xl font-bold mb-2">{t("payment.pendingPaidTitle")}</h1>
           </>
         )}
         {status === "failed" && (
           <>
             <XCircle size={64} className="text-danger mx-auto mb-4" />
-            <h1 className="text-2xl font-bold mb-2">Оплата не прошла</h1>
-            <Button onClick={() => navigate("/plans")}>Попробовать снова</Button>
+            <h1 className="text-2xl font-bold mb-2">{t("payment.failedTitle")}</h1>
+            <Button onClick={() => navigate("/plans")}>{t("payment.tryAgain")}</Button>
           </>
         )}
       </div>

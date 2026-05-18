@@ -17,6 +17,7 @@ import {
   AI_MODELS,
   config,
   generateWebToken,
+  getResolvedModes,
   resolveModelDisplay,
   UserFacingError,
   resolveUserFacingErrorVariant,
@@ -27,7 +28,7 @@ import { InlineKeyboard, InputFile } from "grammy";
 import { replyNoSubscription, replyInsufficientTokens } from "./reply-error.js";
 import { ensureELTtsForVideo } from "./el-tts.js";
 import { pickVideoPending, pickDesignPending } from "./pending-messages.js";
-import { buildMediaInputStatusMenu } from "./media-input-state.js";
+import { buildMediaInputStatusMenu, getActiveModelSlots } from "./media-input-state.js";
 import { logger } from "../logger.js";
 
 export type ConfirmKind = "image" | "video" | "audio";
@@ -650,11 +651,17 @@ async function buildPostCancelKeyboard(
   if (!model) return undefined;
 
   const kb = new InlineKeyboard();
-  if (model.mediaInputs?.length) {
+  // Фильтруем слоты по активному моду юзера. Без этого `model.mediaInputs`
+  // содержит ВСЕ слоты модели (first_frame, last_frame, ref-* и т.п.), и в
+  // text-only режиме (например text→video на Seedance) после Cancel вылазит
+  // пачка кнопок, которые callback-хендлер молча отшивает — у юзера ощущение,
+  // что бот завис.
+  const activeSlots = await getActiveModelSlots(ctx.user.id, modelId);
+  if (activeSlots.length) {
     const filledInputs = await userStateService.getMediaInputs(ctx.user.id, modelId);
     const sceneSection = section === "image" ? "design" : "video";
     const { kb: slotsKb } = buildMediaInputStatusMenu(
-      model.mediaInputs,
+      activeSlots,
       filledInputs,
       sceneSection,
       ctx.t,
@@ -668,12 +675,19 @@ async function buildPostCancelKeyboard(
     }
   }
 
+  // «Сменить режим» — только когда у модели реально есть multi-mode picker.
+  // Иначе кнопка ведёт в пустоту (`handleChangeMode` отвалится на отсутствии
+  // resolved modes).
+  const sceneSection = section === "image" ? "design" : "video";
+  if (getResolvedModes(model)) {
+    kb.text(ctx.t.modelModes.change, `change_mode:${sceneSection}:${modelId}`).row();
+  }
+
   const webappUrl = config.bot.webappUrl;
   if (webappUrl && ctx.user.telegramId) {
     const wtoken = generateWebToken(ctx.user.telegramId, config.bot.token);
-    const sectionParam = section === "image" ? "design" : "video";
     const mgmtLabel = section === "image" ? ctx.t.design.management : ctx.t.video.management;
-    kb.webApp(mgmtLabel, `${webappUrl}?page=management&section=${sectionParam}&wtoken=${wtoken}`);
+    kb.webApp(mgmtLabel, `${webappUrl}?page=management&section=${sceneSection}&wtoken=${wtoken}`);
   }
 
   return kb.inline_keyboard.length ? kb : undefined;

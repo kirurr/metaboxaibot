@@ -1744,7 +1744,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "design");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        },
       });
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
@@ -1912,7 +1917,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Image job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: userMsg,
+          errorCode: classifyError(err),
+        },
       });
       if (shouldNotifyOps(err)) {
         await notifyTechError(
@@ -2082,10 +2092,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+      const failureMsg = pickGenerationFailedMessage(t, modelName, "design");
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: failureMsg,
+          errorCode: classifyError(err),
+        },
       });
 
       if (tokensSpent > 0) {
@@ -2103,8 +2119,6 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         userId: userIdStr,
         attempt: job.attemptsMade,
       });
-
-      const failureMsg = pickGenerationFailedMessage(t, modelName, "design");
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {

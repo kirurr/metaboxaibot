@@ -259,7 +259,14 @@ model GenerationJob {
   sourceMessageId String? // "{chatId}:{messageId}" of the inline button that triggered this job
   pollStartedAt   DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
   tokensSpent     Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
+  // Сырое exception-сообщение для ops/debugging. Никогда не показывается
+  // пользователю напрямую — для UI используется `errorUserMessage` ниже.
   error           String?
+  // Локализованное user-facing сообщение об ошибке (из `resolveUserFacingMessage`
+  // / `pickGenerationFailedMessage`). То же, что бот шлёт в чат и что пишется
+  // в WS-нотификацию. Web-UI читает это поле для истории генераций. null =
+  // job ещё не упал или старая job до выкатки колонки.
+  errorUserMessage String?
   // Структурированная категория ошибки для статистики. Значения — из
   // `GenerationErrorCode` в `packages/shared/src/error-codes.ts`:
   // INPUT_MODERATION, OUTPUT_MODERATION, INPUT_VALIDATION, INPUT_MEDIA_FORMAT,

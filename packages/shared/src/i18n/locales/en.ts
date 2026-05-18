@@ -272,6 +272,8 @@ export default {
       "❌ Video is too short ({actual} s). Minimum duration is {min} s. Please upload a different file.",
     mediaSlotDurationTooLong:
       "❌ Video is too long ({actual} s). Maximum duration is {max} s. Trim the video and try again.",
+    firstClipExceedsOutputDuration:
+      "❌ Reference clip duration ({actual} s) must be shorter than the output duration ({requested} s). Trim the clip or increase the output duration setting.",
     mediaSlotDurationOutOfRange:
       "❌ Video length of {actual} s is not accepted. Allowed duration is {min}–{max} s.",
     mediaSlotFileTooLarge: "❌ File is too large ({actualMb} MB). Maximum size is {maxMb} MB.",
@@ -460,6 +462,8 @@ export default {
       "❌ Failed to upload the file for generation. Please check the size (usually up to 50 MB) and file format.",
     replicateContentPolicy:
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
+    loraUrlInvalid:
+      "❌ The “Extra LoRA” field in model settings is filled incorrectly — it expects a LoRA file URL (HuggingFace / CivitAI / Replicate / .safetensors), not free-form text. Clear this field or replace it with a valid URL.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
     modelDoesNotSupportImages:
@@ -677,6 +681,7 @@ export default {
   },
   modelModes: {
     pickerTitle: "Choose mode:",
+    pickModeFirstForMedia: "Pick a mode first — without one you can't upload photo/file:",
     activated:
       "Mode «{mode}» activated.\n✉️ Send a text prompt to start generation.\n🖼 To attach images — use the slot buttons below.",
     activatedTextOnly: "Mode «{mode}» activated. Send a text prompt to start generation.",

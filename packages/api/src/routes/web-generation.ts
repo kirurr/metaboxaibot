@@ -17,9 +17,35 @@ import { videoGenerationService } from "../services/video-generation.service.js"
 import { audioGenerationService } from "../services/audio-generation.service.js";
 import { costPreviewService } from "../services/cost-preview.service.js";
 import { getFileUrl } from "../services/s3.service.js";
+import { db } from "../db.js";
 import { AI_MODELS, UserFacingError } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+
+/**
+ * Эвристика: похожа ли строка `GenerationJob.error` на локализованное
+ * user-facing сообщение, а не на сырой `String(err)`.
+ *
+ * Worker'ские локализованные тексты в `packages/shared/src/i18n/locales/*.ts`
+ * единообразно начинаются с эмодзи (❌ / ⚠️ / 🎨 / 🎬 / 🎧 / 🔔 …) — это
+ * визуальный маркер ошибки для юзера. `String(err)` из JS-исключений всегда
+ * начинается с ASCII-символов: «Error:», «Fetch failed:», провайдерским JSON
+ * и т.п. Различаем по codepoint первого non-whitespace символа.
+ *
+ * Если бы worker когда-нибудь стал писать локализацию без emoji-префикса —
+ * этот фильтр ложно отнесёт её к raw. Пока такого нет, поэтому проще, чем
+ * полноценный i18n-перевод по errorCode на нашей стороне.
+ */
+function isUserFacingErrorText(text: string | null): text is string {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  // codePointAt возвращает корректный codepoint для surrogate-pair эмодзи.
+  const cp = trimmed.codePointAt(0) ?? 0;
+  // Всё что выше Latin-1 (> 0xFF) — non-ASCII, включая эмодзи и кириллицу.
+  // Сырые JS-исключения этого диапазона не задевают.
+  return cp > 0xff;
+}
 
 /** Резолвит s3Key'и из payload'а в presigned URL'ы. Дропающиеся ключи молча
  * скипаются — лучше отдать неполный слот провайдеру, чем 500. */
@@ -42,6 +68,157 @@ async function resolveMediaInputs(
 export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", webTelegramLinkedPreHandler);
   fastify.addHook("onRoute", (params) => constructOpenAPIonRouteHook(params, ["web-generation"]));
+
+  // ── GET /web/generations?modelIds=a,b&limit=20 ─────────────────────────────
+  // История генераций юзера (done + failed) с пресайнднутыми URL'ами outputs'ов.
+  // Web-эквивалент `/gallery` без telegram-download-токенов: всё через прямые
+  // S3 presigned URL'ы. Фильтр `modelIds` — CSV из members семейства (на фронте
+  // ресолвим из `family.members` чтобы вкладки Standard/Pro/etc. шарили историю).
+  fastify.get<{
+    Querystring: { modelIds?: string; section?: string; limit?: string };
+  }>(
+    "/web/generations",
+    {
+      schema: {
+        description: "List user's recent generations (done + failed) with presigned outputs",
+        querystring: {
+          type: "object",
+          properties: {
+            modelIds: {
+              type: "string",
+              description: "Comma-separated modelId filter (e.g. 'flux,flux-pro')",
+            },
+            section: { type: "string", description: "design | video | audio | gpt" },
+            limit: { type: "string", description: "Page size, default 20, max 50" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              items: { type: "array", items: { type: "object", additionalProperties: true } },
+            },
+          },
+          500: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      const { modelIds, section, limit = "20" } = request.query;
+      const take = Math.min(parseInt(limit, 10) || 20, 50);
+      const modelIdsArr = modelIds ? modelIds.split(",").filter(Boolean) : null;
+
+      // Section mismatch fix: в каталоге моделей design-секция называется
+      // "design" (AI_MODELS[*].section = "design"), но в `generation_jobs.section`
+      // хардкодится "image" (см. generation.service.ts). Фронт берёт section из
+      // model'и → передаёт "design" → Prisma matchит 0 rows. Маппим на лету.
+      const normalizedSection = section === "design" ? "image" : section;
+
+      try {
+        const jobs = await db.generationJob.findMany({
+          where: {
+            userId: aibUserId!,
+            // Включаем и done и failed — failed нужно показать с error-карточкой.
+            // Pending/processing с web-стороны не тянем: они трекаются локально
+            // по dbJobId сразу после submit'а (`pendingJobs` в GenerateScene).
+            status: { in: ["done", "failed"] },
+            ...(normalizedSection ? { section: normalizedSection } : {}),
+            ...(modelIdsArr ? { modelId: { in: modelIdsArr } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take,
+          select: {
+            id: true,
+            section: true,
+            modelId: true,
+            prompt: true,
+            status: true,
+            error: true,
+            errorUserMessage: true,
+            errorCode: true,
+            tokensSpent: true,
+            createdAt: true,
+            completedAt: true,
+            outputs: {
+              orderBy: { index: "asc" },
+              select: { id: true, s3Key: true, outputUrl: true, thumbnailS3Key: true },
+            },
+          },
+        });
+
+        // Legacy fallback для старых job'ов (до выкатки колонки `errorUserMessage`):
+        // достаём свежее `WebNotification.message` по jobId. Новые job'ы пишут
+        // локализацию прямо в `errorUserMessage` — для них этот lookup no-op.
+        const legacyIds = jobs
+          .filter((j) => j.status === "failed" && !j.errorUserMessage)
+          .map((j) => j.id);
+        const notifMessages = new Map<string, string>();
+        if (legacyIds.length > 0) {
+          const notifs = await db.webNotification.findMany({
+            where: { userId: aibUserId!, jobId: { in: legacyIds } },
+            select: { jobId: true, message: true, createdAt: true },
+            orderBy: { createdAt: "desc" },
+          });
+          for (const n of notifs) {
+            if (n.jobId && !notifMessages.has(n.jobId)) {
+              notifMessages.set(n.jobId, n.message);
+            }
+          }
+        }
+
+        // URL priority: presigned S3 (наш storage) > outputUrl (провайдер).
+        // Линки провайдеров временные и недоступны для скачивания напрямую через
+        // приложение — для UX нужен стабильный URL из нашего S3.
+        const items = await Promise.all(
+          jobs.map(async (job) => {
+            const outputs = await Promise.all(
+              job.outputs.map(async (o) => {
+                const url =
+                  (o.s3Key ? await getFileUrl(o.s3Key).catch(() => null) : null) ?? o.outputUrl;
+                const thumbnailUrl = o.thumbnailS3Key
+                  ? await getFileUrl(o.thumbnailS3Key).catch(() => null)
+                  : null;
+                return { id: o.id, url, thumbnailUrl };
+              }),
+            );
+            // Приоритет источников локализованной ошибки:
+            //   1. `errorUserMessage` — новая колонка, worker пишет туда явно
+            //   2. WebNotification.message — legacy fallback для старых job'ов
+            //      (до выкатки колонки), берётся из notif'и того же jobId
+            //   3. job.error если выглядит локализованным (эвристика по эмодзи) —
+            //      покрывает совсем древние данные без notif'ей
+            //   4. null → фронт покажет generic `t("generate.historyError")`
+            const localized =
+              job.errorUserMessage ??
+              notifMessages.get(job.id) ??
+              (isUserFacingErrorText(job.error) ? job.error : null);
+            return {
+              id: job.id,
+              section: job.section,
+              modelId: job.modelId,
+              prompt: job.prompt,
+              status: job.status,
+              error: localized,
+              errorCode: job.errorCode,
+              tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
+              createdAt: job.createdAt.toISOString(),
+              completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+              outputs,
+            };
+          }),
+        );
+
+        return { items };
+      } catch (err) {
+        logger.error({ err, userId: aibUserId?.toString() }, "web-generations list failed");
+        return reply
+          .code(500)
+          .send({ code: "INTERNAL_ERROR", error: "Не удалось загрузить историю" });
+      }
+    },
+  );
 
   // ── POST /web/generation/image ─────────────────────────────────────────────
   fastify.post<{
@@ -282,7 +459,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
 
       try {
         const section = model.section;
-        if (section === "design" || section === "image") {
+        if (section === "design") {
           const preview = await costPreviewService.previewImage({
             userId: aibUserId!,
             modelId,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Search, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { fetchCartesiaPreviewBlobUrl, type VoiceItem, type VoiceProvider } from "@/api/voices";
 
 /**
@@ -28,6 +29,7 @@ export function VoicePicker({
   onSelect: (voice: VoiceItem) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
@@ -101,10 +103,10 @@ export function VoicePicker({
     <div className="voice-picker">
       <div className="voice-picker-head">
         <div>
-          <div className="voice-picker-title">Выбор голоса</div>
+          <div className="voice-picker-title">{t("voicePicker.title")}</div>
           <div className="voice-picker-sub">{providerName(provider)}</div>
         </div>
-        <button className="voice-picker-close" onClick={onClose} aria-label="Закрыть">
+        <button className="voice-picker-close" onClick={onClose} aria-label={t("common.close")}>
           <X size={16} />
         </button>
       </div>
@@ -114,14 +116,14 @@ export function VoicePicker({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поиск по имени / языку"
+          placeholder={t("voicePicker.searchPlaceholder")}
         />
       </div>
 
       <div className="voice-picker-list">
-        {isLoading && <div className="voice-picker-empty">Загрузка…</div>}
+        {isLoading && <div className="voice-picker-empty">{t("voicePicker.loading")}</div>}
         {!isLoading && filtered.length === 0 && (
-          <div className="voice-picker-empty">{q ? "Ничего не найдено" : "Голосов пока нет"}</div>
+          <div className="voice-picker-empty">{q ? t("common.empty") : t("voicePicker.empty")}</div>
         )}
         {filtered.map((v) => {
           const isSelected = v.id === currentVoiceId;
@@ -145,7 +147,7 @@ export function VoicePicker({
                     e.stopPropagation();
                     togglePlay(v);
                   }}
-                  aria-label={isPlaying ? "Пауза" : "Прослушать"}
+                  aria-label={isPlaying ? t("voicePicker.pause") : t("voicePicker.play")}
                   type="button"
                 >
                   {isPlaying ? <Pause size={14} /> : <Play size={14} />}

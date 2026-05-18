@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
@@ -33,6 +35,7 @@ import {
 import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
+import { GenerationHistory, type PendingJob } from "./GenerationHistory";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -410,6 +413,80 @@ function SettingChip({
 }
 
 /**
+ * Chip-выбор для оси семейства моделей (версия / вариант). Структурно — то же
+ * самое, что generic `SettingChip` для select, но значение не идёт в
+ * `settingValues`: клик меняет `modelId` сцены (свопаем сиблинга семейства).
+ *
+ * Если в семействе только одно значение на оси (например все Recraft-сиблинги
+ * имеют `versionLabel="v4"`), компонент возвращает `null` — лишний chip без
+ * выбора прятать чище, чем показывать noop-кнопку.
+ */
+function FamilyAxisChip({
+  label,
+  current,
+  options,
+  onSelect,
+}: {
+  label: string;
+  current: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chipRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  if (options.length <= 1) return null;
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className={clsx("gen-chip-pill", open && "is-open")}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="gen-chip-pill-label">{label}:</span>
+        <span className="gen-chip-pill-val">{current}</span>
+      </button>
+      {open && (
+        <ChipPopover anchorRef={chipRef} popRef={popRef}>
+          <div className="gen-pop-body">
+            <div className="gen-pop-chips-row">
+              {options.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  className={clsx("gen-chip", o === current && "on")}
+                  onClick={() => {
+                    onSelect(o);
+                    setOpen(false);
+                  }}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+          </div>
+        </ChipPopover>
+      )}
+    </>
+  );
+}
+
+/**
  * Popover в portal'е — рендерится поверх всего, не клипается scroll-контейнерами.
  * Позиционируется по `getBoundingClientRect` anchor'а с auto-flip вверх если
  * не помещается вниз. Реагирует на resize окна и scroll-события (capture, чтобы
@@ -647,8 +724,26 @@ function SettingPopBody({
 // ── Main scene ───────────────────────────────────────────────────────────────
 
 export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+  const { t } = useTranslation();
+
+  // ── Family grouping ───────────────────────────────────────────────────────
+  // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
+  // здесь делаем дедуп по familyId для дропдауна моделей в footer'е и считаем
+  // siblings + версии/варианты для chip'ов в блоке настроек.
+  const families = useMemo(() => {
+    const seen = new Set<string>();
+    const out: WebModelDto[] = [];
+    for (const m of models) {
+      const key = m.familyId ?? m.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }, [models]);
+
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(models[0]?.id ?? "");
+  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
@@ -703,15 +798,117 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  // Когда модели приехали — выставляем дефолт.
-  useEffect(() => {
-    if (!modelId && models.length > 0) setModelId(models[0].id);
-  }, [models, modelId]);
+  // Локально трекаемые job'ы между submit'ом и финальным WS-event'ом.
+  // GenerationHistory сама подписывается на notification:new и зовёт
+  // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
+  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
 
+  // Когда модели приехали — выставляем дефолт (первый из дедуплированных
+  // семейств, не из полного списка: иначе можно случайно стартовать с
+  // not-default-варианта).
+  useEffect(() => {
+    if (!modelId && families.length > 0) setModelId(families[0].id);
+  }, [families, modelId]);
+
+  // ── URL → modelId sync ────────────────────────────────────────────────────
+  // `?model=<id>` в URL — источник правды для навигации (mega-menu в navbar'е,
+  // shareable links). Когда юзер уже в текущем разделе и кликает другую модель
+  // в navbar'е, route не меняется → размонта нет → без этого effect'а modelId
+  // не переключился бы.
+  //
+  // Обратный синк (state → URL) делаем НЕ через effect, а атомарным `pickModel`
+  // helper'ом — иначе два effect'а отвечающие друг другу зациклились бы
+  // (state="A" эхает в URL "A", тем временем URL="B" эхает в state "B" → swap).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlModelId = searchParams.get("model");
+
+  useEffect(() => {
+    if (!urlModelId) return;
+    if (urlModelId === modelId) return;
+    // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
+    // (например юзер вручную набил кривой ?model=, не валим default-flow).
+    if (models.some((m) => m.id === urlModelId)) {
+      setModelId(urlModelId);
+    }
+  }, [urlModelId, models, modelId]);
+
+  // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
+  // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
+  // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  function pickModel(id: string) {
+    setModelId(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("model", id);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
+  // дропдаун показывает только families[0] на семейство, но юзер может
+  // переключиться на sibling через version/variant chip'ы.
   const selectedModel = useMemo(
-    () => models.find((m) => m.id === modelId) ?? models[0],
-    [models, modelId],
+    () => models.find((m) => m.id === modelId) ?? families[0],
+    [models, families, modelId],
   );
+
+  // ── Family axis (version / variant) ────────────────────────────────────────
+  // Считаем siblings выбранной модели и доступные version/variant под them.
+  // Возвращаем null если у модели нет familyId или в семействе всего 1 модель.
+  //
+  // Не у всех семейств есть version-ось: например kling имеет только variantLabel
+  // (Standard/Pro), без versionLabel. В этом случае variants берутся из ВСЕХ
+  // siblings, а не из подмножества с тем же versionLabel'ом — иначе chip не
+  // рендерился бы (variantSource был бы пуст).
+  const familyAxis = useMemo(() => {
+    if (!selectedModel?.familyId) return null;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    if (siblings.length <= 1) return null;
+    // Уникальные version'ы в порядке появления (Set сохраняет insertion order).
+    const versions = Array.from(
+      new Set(siblings.map((m) => m.versionLabel).filter((v): v is string => !!v)),
+    );
+    const currentVersion = selectedModel.versionLabel ?? null;
+    // Если у семейства есть version-ось — фильтруем variants по текущей версии,
+    // иначе берём из всех siblings.
+    const variantSource =
+      versions.length > 0 && currentVersion
+        ? siblings.filter((m) => m.versionLabel === currentVersion)
+        : siblings;
+    const variants = Array.from(
+      new Set(variantSource.map((m) => m.variantLabel).filter((v): v is string => !!v)),
+    );
+    return {
+      versions,
+      currentVersion,
+      variants,
+      currentVariant: selectedModel.variantLabel ?? null,
+    };
+  }, [models, selectedModel]);
+
+  // Свопаем modelId на sibling с указанной версией. Стараемся сохранить
+  // вариант (Pro→Pro), иначе берём первый sibling в новой версии.
+  function selectFamilyVersion(version: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target =
+      siblings.find(
+        (m) => m.versionLabel === version && m.variantLabel === selectedModel.variantLabel,
+      ) ?? siblings.find((m) => m.versionLabel === version);
+    if (target) pickModel(target.id);
+  }
+
+  function selectFamilyVariant(variant: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target = siblings.find(
+      (m) => m.versionLabel === selectedModel.versionLabel && m.variantLabel === variant,
+    );
+    if (target) pickModel(target.id);
+  }
 
   // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
   useEffect(() => {
@@ -1006,23 +1203,40 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }));
   }
 
-  // Готовность к отправке: prompt непустой ИЛИ модель позволяет пустой prompt при
-  // наличии обязательного слота. Все required-слоты должны быть заполнены.
-  const requiredSlotsOk = activeSlots
-    .filter((s) => s.required)
-    .every((s) => (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) > 0);
-  const promptOk =
-    prompt.trim().length > 0 ||
-    (selectedModel?.promptOptional &&
-      (!selectedModel.promptOptionalRequiresMedia ||
-        Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
   // Аплоад в процессе → дизейблим CTA. Без этого юзер может стартовать
   // генерацию с пустым/неполным набором ассетов (s3Key'и ещё не выданы).
   const uploadInProgress = useMemo(
     () => Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "uploading")),
     [slotFiles],
   );
-  const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy && !uploadInProgress;
+
+  // Если генерация недоступна — на кнопке отображается ПРИЧИНА (а не дизейбл-стилистика
+  // с opacity), чтобы юзер понял, что именно нужно доделать. `null` = всё готово.
+  const blockerReason = useMemo<string | null>(() => {
+    if (busy) return t("generate.btnGenerating");
+    if (uploadInProgress) return t("generate.btnUploading");
+    if (!selectedModel) return t("generate.btnSelectModel");
+
+    const missingSlot = activeSlots.find(
+      (s) =>
+        s.required && (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) === 0,
+    );
+    if (missingSlot) return t("generate.btnAddToSlot", { slot: missingSlot.label });
+
+    const hasReadyMedia = Object.values(slotFiles).some((arr) =>
+      arr.some((f) => f.status === "ready"),
+    );
+    const promptIsEmpty = prompt.trim().length === 0;
+    if (promptIsEmpty) {
+      if (!selectedModel.promptOptional) return t("generate.btnEnterPrompt");
+      if (selectedModel.promptOptionalRequiresMedia && !hasReadyMedia) {
+        return t("generate.btnPromptOrMedia");
+      }
+    }
+    return null;
+  }, [busy, uploadInProgress, selectedModel, activeSlots, slotFiles, prompt, t]);
+
+  const canGenerate = blockerReason === null;
 
   // ── Debounced cost preview ─────────────────────────────────────────────────
   // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
@@ -1130,8 +1344,23 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       } else {
         throw new Error(`Unsupported section: ${section}`);
       }
-      // TODO: следить за прогрессом через WS-событие на subscriber'е (job-notifications).
-      console.info("[generate] job submitted", section, result.dbJobId);
+      // Локально трекаем pending-job: GenerationHistory подхватит её и
+      // переключит в success/error когда придёт `notification:new`.
+      // section пишем нормализованный под DB-словарь ("image"/"video"/"audio"),
+      // т.к. модель имеет "design" в каталоге — у success-карточки рендер
+      // outputs зависит от типа медиа.
+      const trackedSection = section === "design" || section === "image" ? "image" : section;
+      setPendingJobs((prev) => [
+        {
+          id: result.dbJobId,
+          modelId: selectedModel.id,
+          section: trackedSection,
+          prompt,
+          startedAt: Date.now(),
+          status: "pending",
+        },
+        ...prev,
+      ]);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
       setSubmitError(msg);
@@ -1332,9 +1561,29 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             rows={3}
           />
 
-          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку. */}
-          {visibleSettings.length > 0 && (
+          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
+              Family axis chip'ы (version / variant) идут первыми — это про
+              «какую модель из семейства взять», логически выше per-model
+              tuning settings. FamilyAxisChip сам прячется если выбора нет
+              (1 версия/вариант). */}
+          {(familyAxis || visibleSettings.length > 0) && (
             <div className="gen-settings-chips">
+              {familyAxis && familyAxis.currentVersion && (
+                <FamilyAxisChip
+                  label={t("generate.familyVersion")}
+                  current={familyAxis.currentVersion}
+                  options={familyAxis.versions}
+                  onSelect={selectFamilyVersion}
+                />
+              )}
+              {familyAxis && familyAxis.currentVariant && (
+                <FamilyAxisChip
+                  label={t("generate.familyVariant")}
+                  current={familyAxis.currentVariant}
+                  options={familyAxis.variants}
+                  onSelect={selectFamilyVariant}
+                />
+              )}
               {visibleSettings.map((s) => (
                 <SettingChip
                   key={s.key}
@@ -1377,23 +1626,30 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                 className="gen-model-pop"
                 matchAnchorWidth
               >
-                {models.map((m) => (
-                  <button
-                    key={m.id}
-                    className={clsx("gen-model-row-item", m.id === modelId && "on")}
-                    onClick={() => {
-                      setModelId(m.id);
-                      setModelOpen(false);
-                    }}
-                  >
-                    <div className="gen-model-glyph">{modelLetter(m)}</div>
-                    <div className="gen-model-item-body">
-                      <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                      <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                    </div>
-                    {m.id === modelId && <Check size={14} />}
-                  </button>
-                ))}
+                {families.map((m) => {
+                  // Active = выбранная модель из этого семейства (даже если
+                  // юзер переключился на sibling-вариант через chip'ы).
+                  const isActive = selectedModel?.familyId
+                    ? m.familyId === selectedModel.familyId
+                    : m.id === modelId;
+                  return (
+                    <button
+                      key={m.id}
+                      className={clsx("gen-model-row-item", isActive && "on")}
+                      onClick={() => {
+                        pickModel(m.id);
+                        setModelOpen(false);
+                      }}
+                    >
+                      <div className="gen-model-glyph">{modelLetter(m)}</div>
+                      <div className="gen-model-item-body">
+                        <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                        <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                      </div>
+                      {isActive && <Check size={14} />}
+                    </button>
+                  );
+                })}
               </ChipPopover>
             )}
           </div>
@@ -1404,11 +1660,11 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             ) : (
               <Sparkles size={16} />
             )}
-            <span>{busy ? "Generating…" : uploadInProgress ? "Загрузка файлов…" : "Generate"}</span>
+            <span>{blockerReason ?? t("generate.btnGenerate")}</span>
             {selectedModel && (
               <span className="gen-cta-cost mono">
                 {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
-                {Math.round(previewCost ?? selectedModel.tokenCostApprox)} т
+                {(previewCost ?? selectedModel.tokenCostApprox).toFixed(2)}
                 {previewPricingMode === "per_second" ? " / сек" : ""}
               </span>
             )}
@@ -1420,6 +1676,28 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             </div>
           )}
         </div>
+      </div>
+
+      {/* История генераций — отдельная пэйн справа от `.gen-panel`. Занимает
+          всё оставшееся пустое место экрана. На мобильных скрывается через
+          CSS (там панель и так full-width). */}
+      <div className="gen-history-pane">
+        <GenerationHistory
+          selectedModel={selectedModel}
+          allModels={models}
+          pendingJobs={pendingJobs}
+          onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
+          onJobFailed={(jobId, errorMessage) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
+            )
+          }
+          onJobSucceeded={(jobId, outputs) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
+            )
+          }
+        />
       </div>
 
       {voicePickerSetting && activePickerProvider && (
@@ -1464,7 +1742,9 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             userItems={mediaUserItems}
             userItemsLoading={mediaUserItemsLoading}
             userItemsLabel={
-              mediaPickerSetting?.kind === "soul-character" ? "Мои персонажи" : "Мои аватары"
+              mediaPickerSetting?.kind === "soul-character"
+                ? t("mediaPicker.myCharacters")
+                : t("mediaPicker.myAvatars")
             }
             hideCatalog={mediaPickerHideCatalog}
             onCreate={mediaPickerOnCreate}

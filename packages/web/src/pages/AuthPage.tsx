@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Eye, EyeOff, Lock, Mail, User as UserIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/stores/authStore";
 import * as authApi from "@/api/auth";
@@ -15,6 +16,7 @@ type Props = { initialMode?: "login" | "signup" };
  * автоматический редирект на `/admin` (т.к. они приходят сюда из `AdminRoute` с `from`).
  */
 export default function AuthPage({ initialMode = "login" }: Props) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -52,11 +54,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
       if (e instanceof ApiError) {
         setError(e.message);
       } else {
-        setError(
-          mode === "login"
-            ? "Не удалось войти. Проверьте email и пароль."
-            : "Не удалось создать аккаунт. Попробуйте позже.",
-        );
+        setError(mode === "login" ? t("auth.loginError") : t("auth.signupError"));
       }
     } finally {
       setBusy(false);
@@ -87,12 +85,9 @@ export default function AuthPage({ initialMode = "login" }: Props) {
               color: "transparent",
             }}
           >
-            A calmer way to work with intelligence.
+            {t("auth.heroTitle")}
           </h1>
-          <p className="sub">
-            Pay for what you use. Eight frontier models. One quiet, focused workspace built for
-            people who do real work.
-          </p>
+          <p className="sub">{t("auth.heroSubtitle")}</p>
         </div>
         <div className="quote rise d2">
           <div className="q">
@@ -112,12 +107,10 @@ export default function AuthPage({ initialMode = "login" }: Props) {
             </span>
           </div>
 
-          <h2 className="h2">{mode === "login" ? "Welcome back." : "Create your account."}</h2>
-          <p className="sub">
-            {mode === "login"
-              ? "Sign in to continue your conversation."
-              : "Start with 50,000 free tokens. No card required."}
-          </p>
+          <h2 className="h2">
+            {mode === "login" ? t("auth.welcomeBack") : t("auth.createAccount")}
+          </h2>
+          <p className="sub">{mode === "login" ? t("auth.loginHint") : t("auth.signupHint")}</p>
 
           <div className="auth-tab">
             <button
@@ -127,7 +120,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
                 setError(null);
               }}
             >
-              Sign in
+              {t("auth.signIn")}
             </button>
             <button
               className={mode === "signup" ? "on" : ""}
@@ -136,20 +129,20 @@ export default function AuthPage({ initialMode = "login" }: Props) {
                 setError(null);
               }}
             >
-              Create account
+              {t("auth.createAccountBtn")}
             </button>
           </div>
 
           {mode === "signup" && (
             <div className="field-block">
-              <span className="lbl">Full name</span>
+              <span className="lbl">{t("auth.fullName")}</span>
               <div className="input-group">
                 <span className="leading-icon">
                   <UserIcon size={16} />
                 </span>
                 <input
                   className="input"
-                  placeholder="Ada Lovelace"
+                  placeholder={t("auth.fullNamePlaceholder")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -158,7 +151,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
             </div>
           )}
           <div className="field-block">
-            <span className="lbl">Email</span>
+            <span className="lbl">{t("auth.email")}</span>
             <div className="input-group">
               <span className="leading-icon">
                 <Mail size={16} />
@@ -167,7 +160,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
                 className="input"
                 type="email"
                 autoComplete="email"
-                placeholder="you@company.com"
+                placeholder={t("auth.emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -176,14 +169,14 @@ export default function AuthPage({ initialMode = "login" }: Props) {
           </div>
           <div className="field-block">
             <span className="lbl row between" style={{ display: "flex" }}>
-              <span>Password</span>
+              <span>{t("auth.password")}</span>
               {mode === "login" && (
                 <a
                   className="hint"
                   style={{ fontSize: 12, cursor: "pointer" }}
                   onClick={() => navigate("/forgot-password")}
                 >
-                  Forgot?
+                  {t("auth.forgot")}
                 </a>
               )}
             </span>
@@ -246,15 +239,15 @@ export default function AuthPage({ initialMode = "login" }: Props) {
           >
             {busy
               ? mode === "login"
-                ? "Signing in…"
-                : "Creating…"
+                ? t("auth.signingIn")
+                : t("auth.creating")
               : mode === "login"
-                ? "Sign in"
-                : "Create account"}{" "}
+                ? t("auth.signIn")
+                : t("auth.createAccountBtn")}{" "}
             {!busy && <ArrowRight size={16} />}
           </button>
 
-          <div className="oauth-sep">or continue with</div>
+          <div className="oauth-sep">{t("auth.orContinueWith")}</div>
           <div className="oauth-row">
             <button className="btn btn-secondary" style={{ flex: 1 }} disabled>
               Google
@@ -268,7 +261,7 @@ export default function AuthPage({ initialMode = "login" }: Props) {
           </div>
 
           <p className="hint" style={{ marginTop: 24, fontSize: 12, textAlign: "center" }}>
-            By continuing you agree to our Terms &amp; Privacy. Data never used for training.
+            {t("auth.termsHint")}
           </p>
         </div>
       </div>

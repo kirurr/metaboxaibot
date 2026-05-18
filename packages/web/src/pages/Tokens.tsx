@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowRight, Download, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
 import clsx from "clsx";
+import { Trans, useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/stores/authStore";
 import { useTransactions } from "@/hooks/useTransactions";
@@ -25,12 +26,13 @@ const packs: Pack[] = [
 
 type UiKind = "use" | "topup" | "bonus" | "refund";
 
-const FILTERS: { id: "all" | UiKind; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "use", label: "AI usage" },
-  { id: "topup", label: "Top-ups" },
-  { id: "bonus", label: "Bonuses" },
-  { id: "refund", label: "Refunds" },
+/** Список фильтров — `label` резолвится в рендере через `t(labelKey)`. */
+const FILTERS: { id: "all" | UiKind; labelKey: string }[] = [
+  { id: "all", labelKey: "tokens.filters.all" },
+  { id: "use", labelKey: "tokens.filters.use" },
+  { id: "topup", labelKey: "tokens.filters.topup" },
+  { id: "bonus", labelKey: "tokens.filters.bonus" },
+  { id: "refund", labelKey: "tokens.filters.refund" },
 ];
 
 type FilterId = (typeof FILTERS)[number]["id"];
@@ -57,27 +59,28 @@ function txIcon(kind: UiKind) {
 }
 
 /** Человекочитаемый текст транзакции: `description` или fallback по reason. */
-function txTitle(t: TransactionDto): string {
-  if (t.description?.trim()) return t.description;
-  switch (t.reason) {
+function txTitle(tx: TransactionDto, t: (k: string) => string): string {
+  if (tx.description?.trim()) return tx.description;
+  switch (tx.reason) {
     case "ai_usage":
-      return "AI генерация";
+      return t("tokens.tx.aiUsage");
     case "purchase":
     case "metabox_purchase":
-      return "Покупка токенов";
+      return t("tokens.tx.purchase");
     case "welcome_bonus":
-      return "Приветственный бонус";
+      return t("tokens.tx.welcomeBonus");
     case "referral_bonus":
-      return "Реферальный бонус";
+      return t("tokens.tx.referralBonus");
     case "admin":
-      return "Начисление администратором";
+      return t("tokens.tx.admin");
     default:
-      if (t.reason.endsWith("_undelivered")) return "Возврат за неуспешную генерацию";
-      return t.reason;
+      if (tx.reason.endsWith("_undelivered")) return t("tokens.tx.refundFailed");
+      return tx.reason;
   }
 }
 
 export default function Tokens() {
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const user = useAuthStore((s) => s.user);
   const { transactions, loading, error } = useTransactions();
@@ -117,11 +120,8 @@ export default function Tokens() {
     <div className="page">
       <div className="page-head rise">
         <div>
-          <h1 className="h1">Top up.</h1>
-          <p className="sub">
-            Buy tokens once, use them whenever. They never expire, and bigger packs cost less per
-            million.
-          </p>
+          <h1 className="h1">{t("tokens.title")}</h1>
+          <p className="sub">{t("tokens.subtitle")}</p>
         </div>
       </div>
 
@@ -131,7 +131,7 @@ export default function Tokens() {
             className="muted"
             style={{ fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" }}
           >
-            Current balance
+            {t("tokens.currentBalance")}
           </div>
           <div
             style={{
@@ -153,13 +153,16 @@ export default function Tokens() {
                 fontWeight: 600,
               }}
             >
-              tokens
+              {t("tokens.tokensUnit")}
             </span>
           </div>
           {user?.subscriptionTokenBalance && parseTokens(user.subscriptionTokenBalance) > 0 && (
             <div className="muted" style={{ marginTop: 6, fontSize: 14 }}>
-              включая <span className="mono">{formatTokens(user.subscriptionTokenBalance)}</span> по
-              подписке
+              <Trans
+                i18nKey="tokens.includingSubscription"
+                values={{ tokens: formatTokens(user.subscriptionTokenBalance) }}
+                components={{ mono: <span className="mono" /> }}
+              />
             </div>
           )}
           <div className="spark">
@@ -172,22 +175,24 @@ export default function Tokens() {
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            Last 28 days · daily usage
+            {t("tokens.last28Days")}
           </div>
         </div>
         <div className="token-orb" aria-hidden="true" />
       </div>
 
       <h2 className="section-title rise d2" style={{ marginTop: 8 }}>
-        Choose a pack
+        {t("tokens.choosePack")}
       </h2>
       <div className="packs rise d2">
         {packs.map((p, i) => (
           <div key={i} className={clsx("pack", sel === i && "selected")} onClick={() => setSel(i)}>
-            {p.bonus && <span className="pack-bonus">{p.bonus} bonus</span>}
+            {p.bonus && (
+              <span className="pack-bonus">{t("tokens.bonusOf", { percent: p.bonus })}</span>
+            )}
             <div>
               <span className="pack-amount">{p.amount}</span>
-              <span className="pack-unit">tokens</span>
+              <span className="pack-unit">{t("tokens.tokensUnit")}</span>
             </div>
             <div className="pack-rate">{p.rate}</div>
             <div className="pack-price mono">${p.price}</div>
@@ -196,7 +201,7 @@ export default function Tokens() {
       </div>
 
       <h2 className="section-title rise d3" style={{ marginTop: 8 }}>
-        Or a custom amount
+        {t("tokens.customAmount")}
       </h2>
       <div className="custom-amount-row rise d3">
         <div className="amount-input">
@@ -213,20 +218,20 @@ export default function Tokens() {
           style={{ minWidth: 200 }}
           disabled={!custom && sel === null}
         >
-          Continue to payment <ArrowRight size={16} />
+          {t("tokens.continueToPayment")} <ArrowRight size={16} />
         </button>
       </div>
       <p className="hint" style={{ marginTop: -6, fontSize: 12 }}>
-        Minimum $5 · Tokens added instantly · Receipt emailed automatically
+        {t("tokens.minPaymentHint")}
       </p>
 
       <div className="rise d4" style={{ marginTop: 16 }}>
         <div className="row between" style={{ marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
           <h2 className="section-title" style={{ margin: 0 }}>
-            Transaction history
+            {t("tokens.txHistory")}
           </h2>
           <button className="btn btn-ghost btn-sm">
-            <Download size={14} /> Export CSV
+            <Download size={14} /> {t("tokens.exportCsv")}
           </button>
         </div>
 
@@ -237,14 +242,14 @@ export default function Tokens() {
               className={clsx("tx-filter", filter === f.id && "on")}
               onClick={() => setFilter(f.id)}
             >
-              {f.label} <span className="count">{counts[f.id] ?? 0}</span>
+              {t(f.labelKey)} <span className="count">{counts[f.id] ?? 0}</span>
             </button>
           ))}
         </div>
 
         {loading && (
           <div className="empty-illu" style={{ marginTop: 12 }}>
-            Загрузка…
+            {t("common.loading")}
           </div>
         )}
         {error && !loading && (
@@ -259,7 +264,7 @@ export default function Tokens() {
                 <div key={tx.id} className="tx-row">
                   <div className={"tx-ico " + kind}>{txIcon(kind)}</div>
                   <div style={{ minWidth: 0 }}>
-                    <div className="tx-title">{txTitle(tx)}</div>
+                    <div className="tx-title">{txTitle(tx, t)}</div>
                     <div className="tx-sub">
                       {tx.modelId && <span className="model-tag">{tx.modelId}</span>}
                       <span>{formatTxnTime(tx.createdAt)}</span>
@@ -274,9 +279,7 @@ export default function Tokens() {
             </div>
             {filtered.length === 0 && (
               <div className="empty-illu" style={{ marginTop: 12 }}>
-                {transactions.length === 0
-                  ? "Транзакций пока нет."
-                  : "Нет транзакций в этом фильтре."}
+                {transactions.length === 0 ? t("tokens.empty") : t("tokens.emptyForFilter")}
               </div>
             )}
           </>

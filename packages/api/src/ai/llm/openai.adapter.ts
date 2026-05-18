@@ -237,6 +237,46 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         }
       }
     } catch (err) {
+      // Диагностика: SSE-стрим OpenAI бросает APIError из streaming.mjs:57
+      // без HTTP-статуса. Без контекста невозможно отличить server-side
+      // transient от нашей дырки в payload'е (stale previous_response_id /
+      // удалённый file_id / просроченная presigned-ссылка на картинку).
+      // Логируем срез payload-метаданных (без user content) на КАЖДОЙ ошибке
+      // этого catch'а — следующий хит даст root cause.
+      const errAny = err as {
+        message?: unknown;
+        status?: unknown;
+        code?: unknown;
+        param?: unknown;
+        type?: unknown;
+      };
+      const docs = input.documentAttachments ?? [];
+      logger.warn(
+        {
+          modelId: this.model,
+          errorName: err instanceof Error ? err.constructor.name : typeof err,
+          errorType: typeof errAny.type === "string" ? errAny.type : undefined,
+          errorCode: typeof errAny.code === "string" ? errAny.code : undefined,
+          errorParam: typeof errAny.param === "string" ? errAny.param : undefined,
+          errorStatus: typeof errAny.status === "number" ? errAny.status : undefined,
+          errorMessage: typeof errAny.message === "string" ? errAny.message : undefined,
+          visibleDeltas: deltaCount,
+          hasPreviousResponseId: !!input.previousResponseId,
+          historyLen: input.history?.length ?? 0,
+          docsCount: docs.length,
+          docsWithFileId: docs.filter((d) => !!d.openaiFileId).length,
+          docsUrlOnly: docs.filter((d) => !d.openaiFileId && !!d.url).length,
+          imagesCount: input.imageUrls?.length ?? (input.imageUrl ? 1 : 0),
+          promptLen: input.prompt?.length ?? 0,
+          systemPromptLen: input.systemPrompt?.length ?? 0,
+          reasoningEffort: input.reasoningEffort,
+          showReasoning: input.showReasoning,
+          maxTokensLimitEnabled: input.maxTokensLimitEnabled,
+          maxTokens: input.maxTokens,
+        },
+        "openai.chatStream: SDK threw from stream — payload context",
+      );
+
       // OpenAI Stream.iterator бросает Error/APIError без числового .status,
       // когда сервер падает прямо в SSE-стриме. Без status'а isFiveXxError →
       // false, retry/fallback в chat.service не срабатывает и юзер ловит

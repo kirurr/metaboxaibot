@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { X, Send } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { linkTelegramInit, linkTelegramStatus } from "@/api/auth";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -22,6 +23,7 @@ interface Props {
  * 3. Как только бэк вернул `linked: true` — закрывается + тост об успехе + рефреш сессии
  */
 export function TelegramLinkModal({ open, onClose, context }: Props) {
+  const { t } = useTranslation();
   const [deepLink, setDeepLink] = useState<string | null>(null);
   const [state, setState] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,8 +60,8 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
             pushToast({
               type: "success",
               message: status.telegramUsername
-                ? `Telegram @${status.telegramUsername} привязан`
-                : "Telegram привязан",
+                ? t("telegramLink.linkedToast", { username: status.telegramUsername })
+                : t("telegramLink.linkedToastNoUsername"),
             });
             onClose();
           }
@@ -88,7 +90,7 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
         setState(res.state);
         startPolling(res.state);
       })
-      .catch(() => setError("Не удалось получить ссылку"))
+      .catch(() => setError(t("telegramLink.linkError")))
       .finally(() => setLoading(false));
 
     return () => stopPolling();
@@ -107,8 +109,8 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
   if (!open) return null;
 
   const contextText = context
-    ? `Чтобы ${context}, привяжите Telegram к аккаунту.`
-    : "Для доступа к нейросетям привяжите Telegram к аккаунту.";
+    ? t("telegramLink.introWithContext", { context })
+    : t("telegramLink.intro");
 
   return (
     <div
@@ -131,7 +133,7 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
           type="button"
           onClick={onClose}
           className="absolute top-4 right-4 text-text-hint hover:text-text transition-colors"
-          aria-label="Закрыть"
+          aria-label={t("common.close")}
         >
           <X size={20} />
         </button>
@@ -144,12 +146,9 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
             <Send size={28} className="text-[#2AABEE]" />
           </div>
 
-          <h3 className="text-lg font-bold mb-2">Подключите Telegram-бот</h3>
+          <h3 className="text-lg font-bold mb-2">{t("telegramLink.title")}</h3>
           <p className="text-sm text-text-secondary leading-relaxed mb-4">{contextText}</p>
-          <p className="text-xs text-text-hint leading-relaxed">
-            Нажмите кнопку ниже, откройте бота и нажмите «Start». После подключения доступ откроется
-            автоматически.
-          </p>
+          <p className="text-xs text-text-hint leading-relaxed">{t("telegramLink.instructions")}</p>
         </div>
 
         {error && <p className="text-sm text-danger text-center mt-3">{error}</p>}
@@ -170,7 +169,7 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
             }}
           >
             <Send size={16} />
-            Открыть Telegram-бот
+            {t("telegramLink.openBot")}
           </a>
         ) : null}
 
@@ -178,12 +177,12 @@ export function TelegramLinkModal({ open, onClose, context }: Props) {
           onClick={onClose}
           className="mt-3 w-full py-2 text-text-hint text-sm hover:text-text transition-colors"
         >
-          Отмена
+          {t("telegramLink.cancel")}
         </button>
 
         {deepLink && state && (
           <p className="text-xs text-center text-text-hint mt-3 animate-pulse">
-            Ожидаем подключение…
+            {t("telegramLink.waiting")}
           </p>
         )}
       </div>

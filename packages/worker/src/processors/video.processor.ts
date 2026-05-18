@@ -917,7 +917,12 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        },
       });
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
@@ -1079,7 +1084,12 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       const msg = pickGenerationFailedMessage(t, modelName, "video");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: "PROVIDER_INSUFFICIENT_CREDIT" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "PROVIDER_INSUFFICIENT_CREDIT",
+        },
       });
       await notifyTechError(err, {
         jobId: dbJobId,
@@ -1106,7 +1116,12 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Video job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: userMsg,
+          errorCode: classifyError(err),
+        },
       });
       if (shouldNotifyOps(err)) {
         await notifyTechError(err, {
@@ -1319,10 +1334,16 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+      const failureMsg = pickGenerationFailedMessage(t, modelName, "video");
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: failureMsg,
+          errorCode: classifyError(err),
+        },
       });
 
       if (tokensSpent > 0) {
@@ -1340,8 +1361,6 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         userId: userIdStr,
         attempt: job.attemptsMade,
       });
-
-      const failureMsg = pickGenerationFailedMessage(t, modelName, "video");
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {

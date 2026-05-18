@@ -1,6 +1,7 @@
-import { Fragment, useState } from "react";
+import { Fragment, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Download, Plus, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 type Item = {
@@ -11,9 +12,12 @@ type Item = {
   tokens: string;
 };
 
-const historyData: { day: string; items: Item[] }[] = [
+// Mock-данные группированы по `dayKey` (i18n-ключ заголовка), сами тексты —
+// дизайн-плейсхолдеры (имитация истории чатов). Реальная история подтягивается
+// в чате через /web/dialogs, эта страница — каталог-агрегатор по дням.
+const historyData: { dayKey: string; items: Item[] }[] = [
   {
-    day: "Today",
+    dayKey: "history.days.today",
     items: [
       {
         title: "Restructure product launch announcement",
@@ -32,7 +36,7 @@ const historyData: { day: string; items: Item[] }[] = [
     ],
   },
   {
-    day: "Yesterday",
+    dayKey: "history.days.yesterday",
     items: [
       {
         title: "SQL for cohort retention by signup channel",
@@ -58,7 +62,7 @@ const historyData: { day: string; items: Item[] }[] = [
     ],
   },
   {
-    day: "This week",
+    dayKey: "history.days.thisWeek",
     items: [
       {
         title: "Brainstorm: pricing experiment for paid tier",
@@ -77,7 +81,7 @@ const historyData: { day: string; items: Item[] }[] = [
     ],
   },
   {
-    day: "Earlier",
+    dayKey: "history.days.earlier",
     items: [
       {
         title: "Convert React component to plain HTML",
@@ -91,34 +95,37 @@ const historyData: { day: string; items: Item[] }[] = [
 ];
 
 export default function History() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [q, setQ] = useState("");
 
-  const filtered = historyData
-    .map((g) => ({
-      ...g,
-      items: g.items.filter((i) =>
-        (i.title + " " + i.preview).toLowerCase().includes(q.toLowerCase()),
-      ),
-    }))
-    .filter((g) => g.items.length);
+  const filtered = useMemo(
+    () =>
+      historyData
+        .map((g) => ({
+          ...g,
+          items: g.items.filter((i) =>
+            (i.title + " " + i.preview).toLowerCase().includes(q.toLowerCase()),
+          ),
+        }))
+        .filter((g) => g.items.length),
+    [q],
+  );
 
   return (
     <div className="page">
       <div className="page-head rise">
         <div>
-          <h1 className="h1">History</h1>
-          <p className="sub">
-            Every conversation, organised by time. Search across all of them in one keystroke.
-          </p>
+          <h1 className="h1">{t("history.title")}</h1>
+          <p className="sub">{t("history.subtitle")}</p>
         </div>
         <div className="actions">
           <button className="btn btn-secondary">
-            <Download size={16} /> Export all
+            <Download size={16} /> {t("history.exportAll")}
           </button>
           <button className="btn btn-primary" onClick={() => navigate("/chat")}>
-            <Plus size={16} /> New chat
+            <Plus size={16} /> {t("history.newChat")}
           </button>
         </div>
       </div>
@@ -129,7 +136,7 @@ export default function History() {
         </span>
         <input
           className="input"
-          placeholder="Search 247 conversations…"
+          placeholder={t("history.searchPlaceholder")}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -137,11 +144,11 @@ export default function History() {
 
       <div className="history-list rise d2">
         {filtered.length === 0 && (
-          <div className="empty-illu">No conversations match &quot;{q}&quot;.</div>
+          <div className="empty-illu">{t("history.emptyMatch", { q })}</div>
         )}
         {filtered.map((g) => (
-          <Fragment key={g.day}>
-            <div className="history-day">{g.day}</div>
+          <Fragment key={g.dayKey}>
+            <div className="history-day">{t(g.dayKey)}</div>
             {g.items.map((it, i) => (
               <div key={i} className="history-row" onClick={() => navigate("/chat")}>
                 <div style={{ minWidth: 0 }}>

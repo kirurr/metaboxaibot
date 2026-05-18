@@ -1,0 +1,15 @@
+-- Adds errorUserMessage to generation_jobs.
+--
+-- Historically `error` carried mixed content: sometimes a raw exception
+-- (`String(err)`), sometimes a localized user-facing message (from
+-- `resolveUserFacingMessage(err, t)` or `pickGenerationFailedMessage`).
+-- The web UI showed whatever was there → users occasionally saw raw
+-- technical text in history (e.g. "Error: ElevenLabs … 401 payment_issue").
+--
+-- After this migration:
+--   - `error`            → strictly raw/technical (for ops dashboards)
+--   - `errorUserMessage` → strictly localized user-facing string
+-- Workers must populate both moving forward. Old rows have NULL in
+-- `errorUserMessage` — the API falls back to legacy heuristic + WebNotification
+-- lookup so they continue to display sensibly.
+ALTER TABLE "generation_jobs" ADD COLUMN "errorUserMessage" TEXT;

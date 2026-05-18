@@ -50,6 +50,21 @@ export function me() {
   return apiClient<{ user: WebUser; csrfToken: string }>("/auth/web-me");
 }
 
+/**
+ * Обновляет `user.language` в БД. Воркеры читают это поле для формирования
+ * user-facing сообщений (включая ошибки генераций), поэтому смену UI-языка в
+ * Settings нужно прокинуть на бэк — иначе ошибки придут в старом языке.
+ *
+ * Web-only юзеры без линкованного Telegram получают 204 (нет User-row, менять
+ * нечего). UI на ошибке не валим — language всё равно сохранён локально.
+ */
+export function updatePreferences(body: { language?: string }) {
+  return apiClient<{ ok: true; language?: string }, { language?: string }>("/auth/web-me", {
+    method: "PATCH",
+    body,
+  });
+}
+
 export interface TransactionDto {
   id: string;
   amount: string;

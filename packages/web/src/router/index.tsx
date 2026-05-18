@@ -20,6 +20,7 @@ const PlansPage = lazy(() => import("@/pages/Plans"));
 const TokensPage = lazy(() => import("@/pages/Tokens"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
 const BillingPage = lazy(() => import("@/pages/Billing"));
+const SettingsPage = lazy(() => import("@/pages/Settings"));
 
 const PaymentSuccessPage = lazy(() => import("@/pages/PaymentSuccess"));
 const PaymentPendingPage = lazy(() => import("@/pages/PaymentPending"));
@@ -86,6 +87,7 @@ export const router = createBrowserRouter([
       { path: "tokens", element: withSuspense(<TokensPage />) },
       { path: "profile", element: withSuspense(<ProfilePage />) },
       { path: "billing", element: withSuspense(<BillingPage />) },
+      { path: "settings", element: withSuspense(<SettingsPage />) },
       { path: "prompts", element: withSuspense(<PromptsPage />) },
       { path: "gallery", element: withSuspense(<GalleryPage />) },
       { path: "gallery/:jobId", element: withSuspense(<GalleryPage />) },

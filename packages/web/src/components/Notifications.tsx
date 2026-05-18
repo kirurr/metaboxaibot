@@ -2,13 +2,14 @@ import { useNotificationsStore } from "@/stores/notificationsStore";
 import type { WebNotificationDTO } from "@metabox/shared-browser/ws";
 import { ArrowRight, Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./common/Button";
 import clsx from "clsx";
 import { useNavigate } from "react-router-dom";
 
 export function Notifications() {
   const navigate = useNavigate();
-
+  const { t } = useTranslation();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -45,7 +46,12 @@ export function Notifications() {
   };
   return (
     <div className="relative">
-      <button ref={buttonRef} className="tn-icon-btn" title="Notifications" onClick={handleClick}>
+      <button
+        ref={buttonRef}
+        className="tn-icon-btn"
+        title={t("notifications.title")}
+        onClick={handleClick}
+      >
         <Bell size={18} />
         {hasNewNotif && <span className="pip" />}
       </button>
@@ -55,11 +61,11 @@ export function Notifications() {
         open={open}
       >
         <p className="text-[10px] font-medium tracking-widest uppercase text-white/30 px-2 pb-2 pt-1">
-          Уведомления
+          {t("notifications.title")}
         </p>
         <ul className="flex flex-col gap-4 ">
           {notifications.length === 0 && (
-            <li className="p-4 text-center text-text-hint">Нет новых уведомлений</li>
+            <li className="p-4 text-center text-text-hint">{t("notifications.empty")}</li>
           )}
           {notifications.map((n) => (
             <Notification

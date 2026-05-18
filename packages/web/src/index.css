@@ -626,6 +626,12 @@ select {
 .tn-balance .b-lbl {
   color: var(--text-secondary);
 }
+/* Иконка-замена для «tokens»: показываем `Sparkles` в цвете акцента,
+   чтобы было визуально консистентно с CTA на кнопке Generate. */
+.tn-balance .b-ico {
+  color: var(--accent-light);
+  flex-shrink: 0;
+}
 .tn-balance .b-plus {
   width: 22px;
   height: 22px;
@@ -1038,6 +1044,13 @@ select {
   justify-content: flex-end;
 }
 .msg .bubble {
+  /* fit-content нужен, иначе короткие сообщения (типа «Тест») сжимаются ниже
+     content-width: bubble — flex item в `.msg.user .msg-block` (column +
+     align-items:end + min-width:0), а `max-width: 78%` создаёт круговую
+     зависимость с auto-width → браузер резолвит в маленькую цифру и текст
+     вылезает за padding. `fit-content` заставляет считать ширину как
+     content+padding, при этом capается `max-width: 78%` для длинных строк. */
+  width: fit-content;
   max-width: 78%;
   padding: 14px 18px;
   border-radius: 18px;
@@ -1060,6 +1073,17 @@ select {
      («Тест», «ок») в `14px` смотрелись пухло. Горизонтальное padding'и
      одинаковые с AI, чтобы текст не упирался в рамку. */
   padding: 10px 18px;
+}
+.msg.user .msg-block {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+}
+.msg.ai .msg-block {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .msg .ai-mark {
   width: 32px;
@@ -2524,6 +2548,10 @@ select {
   transition: transform 220ms var(--ease), border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   overflow: hidden;
+  /* Flex column → нижняя CTA-кнопка с `margin-top: auto` прижимается к низу
+     карточки даже когда контента у соседей больше. */
+  display: flex;
+  flex-direction: column;
 }
 .plan:hover {
   transform: translateY(-3px);
@@ -2574,6 +2602,54 @@ select {
   font-size: 24px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/* Period selector — горизонтальный ряд chip'ов внутри `.plan` (1мес/3мес/...). */
+.plan-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.plan-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.plan-period:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period.on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period-off {
+  font-size: 11px;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+/* Зачёркнутая «была-цена» под актуальной — для подписок 3/6/12 мес. */
+.plan-old-price {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.plan-save {
+  color: var(--accent-light);
+  font-weight: 600;
+  margin-left: 8px;
 }
 .plan .feat-list {
   display: flex;
@@ -4768,6 +4844,209 @@ select {
   align-items: flex-start;
 }
 
+/* ── Generation history pane ───────────────────────────────────────────────
+   Правая пэйн в `.gen-scene` — занимает всё пространство справа от `.gen-panel`.
+   Сам контейнер прокручивается отдельно от панели (у панели свой скролл
+   внутри `.gen-panel-scroll`). На мобильных скрываем — там панель full-width. */
+.gen-history-pane {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 4px 4px 0;
+  /* Тонкий скроллбар, как у `.gen-panel-scroll` — единый стиль. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.gen-history-pane::-webkit-scrollbar {
+  width: 6px;
+}
+.gen-history-pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gen-history-pane::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.app.mobile .gen-history-pane {
+  display: none;
+}
+
+/* ── Generation history ────────────────────────────────────────────────────
+   Карточки последних генераций для текущего семейства моделей. Pending
+   карточки сверху (с лоадером/ошибкой), завершённые с outputs снизу. */
+.gen-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gen-history-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-hint);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.gen-history-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.gen-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gen-history-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.gen-history-card.is-pending {
+  border-style: dashed;
+  background: var(--bg-elevated);
+}
+.gen-history-card.is-error {
+  border-color: var(--danger, #d44);
+  background: rgba(220, 50, 50, 0.06);
+}
+.gen-history-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-hint);
+}
+.gen-history-card.is-error .gen-history-card-head {
+  color: var(--danger, #d44);
+  font-weight: 600;
+}
+.gen-history-card-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.gen-history-card-prompt {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  /* 2-line clamp — длинные промпты не должны раздувать карточку. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gen-history-card-error {
+  font-size: 12.5px;
+  color: var(--danger, #d44);
+  word-break: break-word;
+}
+.gen-history-card-dismiss {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-hint);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.gen-history-card-dismiss:hover {
+  color: var(--text);
+}
+.gen-history-card-outputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.gen-history-output {
+  width: 100%;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  display: block;
+  object-fit: cover;
+  aspect-ratio: 1 / 1;
+}
+.gen-history-output--audio {
+  aspect-ratio: auto;
+  height: 36px;
+  grid-column: 1 / -1;
+}
+.gen-history-output--placeholder {
+  aspect-ratio: 1 / 1;
+  border: 1px dashed var(--border);
+}
+.gen-history-output-btn {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  line-height: 0;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.gen-history-output-btn:hover .gen-history-output {
+  filter: brightness(1.05);
+}
+
+/* ── Media preview lightbox (in-app) ─────────────────────────────────────
+   Открывается кликом по output-thumb. Backdrop кликабельный (close), сам
+   контент — нет (stopPropagation на враппере). */
+.gen-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.gen-preview-content {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+}
+.gen-preview-media {
+  display: block;
+  max-width: 100%;
+  /* На всю высоту окна минус paddings backdrop'а. */
+  max-height: calc(100vh - 48px);
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  background: #000;
+}
+.gen-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 120ms var(--ease);
+}
+.gen-preview-close:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
 .gen-chip-pill {
   display: inline-flex;
   align-items: center;
@@ -5115,6 +5394,9 @@ select {
   gap: 8px;
   width: 100%;
   height: 52px;
+  /* Боковой padding: иконка + label не упирается в левый край, цена — в правый.
+     `.gen-cta-cost` имеет margin-left: auto и отжимается к правому отступу. */
+  padding: 0 18px;
   border-radius: var(--radius);
   background: var(--accent-gradient);
   color: var(--text-on-accent);
@@ -5134,7 +5416,11 @@ select {
   box-shadow: 0 8px 28px var(--accent-glow);
 }
 .gen-scene .gen-cta:disabled {
-  opacity: 0.5;
+  /* Не приглушаем визуально — лейбл кнопки сам сообщает что мешает старту
+     («Введите запрос», «Загрузите файл …»). Оставляем только not-allowed
+     курсор как hover-сигнал. Override'им глобальный `.gen-cta:disabled
+     { opacity: 0.55 }` (legacy-правило для других CTA, см. выше). */
+  opacity: 1;
   cursor: not-allowed;
 }
 .gen-cta-cost {

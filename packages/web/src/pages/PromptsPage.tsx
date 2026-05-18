@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useListPromptExamples } from "@/hooks/useListPromptExamples";
 import type { PromptExample } from "@/api/promptExamples";
 import { ArrowRight, Sparkles, X } from "lucide-react";
@@ -7,6 +8,7 @@ import { Button } from "@/components/common/Button";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 export default function PromptsPage() {
+  const { t } = useTranslation();
   const [selectedType, setSelectedType] = useState<string | undefined>(undefined);
   const { prompts, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } =
     useListPromptExamples(selectedType);
@@ -54,8 +56,8 @@ export default function PromptsPage() {
   return (
     <div className="p-4">
       <div className="text-center mt-8 mb-12">
-        <h1 className="h1 mb-4">Prompts for you to use</h1>
-        <p className="text-text-secondary text-lg">Click on image to see the prompt and settings</p>
+        <h1 className="h1 mb-4">{t("prompts.title")}</h1>
+        <p className="text-text-secondary text-lg">{t("prompts.subtitle")}</p>
       </div>
 
       <div className="auth-tab lg:w-1/2 mx-auto !mb-8">
@@ -63,19 +65,19 @@ export default function PromptsPage() {
           className={clsx(selectedType === undefined && "on")}
           onClick={() => handleTypeSelect(undefined)}
         >
-          All
+          {t("prompts.filters.all")}
         </button>
         <button
           className={clsx(selectedType === "design" && "on")}
           onClick={() => handleTypeSelect("design")}
         >
-          Images
+          {t("prompts.filters.images")}
         </button>
         <button
           className={clsx(selectedType === "video" && "on")}
           onClick={() => handleTypeSelect("video")}
         >
-          Videos
+          {t("prompts.filters.videos")}
         </button>
       </div>
 
@@ -99,7 +101,7 @@ export default function PromptsPage() {
         })}
       </ul>
       <div ref={sentinelRef} className="h-8" />
-      {isFetchingNextPage && <div className="text-center py-2">Loading...</div>}
+      {isFetchingNextPage && <div className="text-center py-2">{t("prompts.loading")}</div>}
 
       <dialog
         ref={dialogRef}
@@ -180,6 +182,7 @@ function PromptCard({
   tall?: boolean;
   wide?: boolean;
 }) {
+  const { t } = useTranslation();
   const [showThumbnail, setShowThumbnail] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -271,27 +274,26 @@ function PromptCard({
 				safe-top
 				"
       >
-        <Sparkles /> Try the same prompt
+        <Sparkles /> {t("prompts.tryPrompt")}
       </div>
     </button>
   );
 }
 
 function DialogCard({ prompt, isMobile }: { prompt: PromptExample; isMobile: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="shrink-0 md:shrink w-full md:w-1/2 lg:w-1/3 card flex flex-col gap-4 text-white p-4 md:p-8 min-h-0 overflow-hidden">
       <h2 className="h2 text-center shrink-0">{prompt.model?.name}</h2>
       <div className="flex flex-col gap-4 flex-1 min-h-0">
-        <h3 className="hidden md:block h3 text-center shrink-0">
-          Prompt that was used for this generation:
-        </h3>
+        <h3 className="hidden md:block h3 text-center shrink-0">{t("prompts.promptUsed")}</h3>
         <div className="text-text-secondary text-lg bg-bg-elevated p-4 rounded-[var(--radius)] overflow-y-auto">
           {prompt.prompt}
         </div>
       </div>
       <div className="mt-auto">
         <Button className="mt-4 w-full" size={isMobile ? "md" : "lg"} rightIcon={<ArrowRight />}>
-          Try the same prompt and settings
+          {t("prompts.tryPromptAndSettings")}
         </Button>
       </div>
     </div>

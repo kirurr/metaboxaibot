@@ -1,8 +1,9 @@
-import { ChevronDown, Download, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/authStore";
 import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
 
 export default function Profile() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
 
   const displayName = user ? fullName(user.firstName, user.lastName, user.email) : "—";
@@ -20,14 +21,14 @@ export default function Profile() {
     <div className="page">
       <div className="page-head rise">
         <div>
-          <h1 className="h1">Profile</h1>
-          <p className="sub">How you appear inside AI Box and how the product behaves for you.</p>
+          <h1 className="h1">{t("profile.title")}</h1>
+          <p className="sub">{t("profile.subtitle")}</p>
         </div>
       </div>
 
       <div className="two-col rise d1">
         <div className="card" style={{ padding: 26 }}>
-          <h3 className="section-title">Account</h3>
+          <h3 className="section-title">{t("profile.sectionAccount")}</h3>
           <div className="row" style={{ gap: 18, marginBottom: 12 }}>
             <div className="avatar lg">{displayInitials}</div>
             <div>
@@ -39,45 +40,45 @@ export default function Profile() {
           </div>
           <div className="divider" style={{ margin: "12px 0 4px" }} />
           <div className="field-row">
-            <span className="lbl">First name</span>
+            <span className="lbl">{t("profile.firstName")}</span>
             <span className="val">{user?.firstName?.trim() || "—"}</span>
             <span />
           </div>
           <div className="field-row">
-            <span className="lbl">Last name</span>
+            <span className="lbl">{t("profile.lastName")}</span>
             <span className="val">{user?.lastName?.trim() || "—"}</span>
             <span />
           </div>
           <div className="field-row">
-            <span className="lbl">Email</span>
+            <span className="lbl">{t("profile.email")}</span>
             <span className="val">{displayEmail}</span>
             <span />
           </div>
           <div className="field-row">
-            <span className="lbl">Telegram</span>
+            <span className="lbl">{t("profile.telegram")}</span>
             <span className="val">
               {user?.isTelegramLinked
                 ? user.telegramUsername
                   ? `@${user.telegramUsername}`
                   : `id ${user.telegramId}`
-                : "Не привязан"}
+                : t("profile.telegramNotLinked")}
             </span>
             {user?.isTelegramLinked ? (
-              <span className="chip success">Linked</span>
+              <span className="chip success">{t("profile.telegramLinked")}</span>
             ) : (
-              <span className="chip warning">Not linked</span>
+              <span className="chip warning">{t("profile.telegramNotLinkedChip")}</span>
             )}
           </div>
         </div>
 
         <div className="col" style={{ gap: 18 }}>
           <div className="card" style={{ padding: 22 }}>
-            <h3 className="section-title">Balance</h3>
+            <h3 className="section-title">{t("profile.sectionBalance")}</h3>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
-                <div style={{ fontSize: 14 }}>Всего токенов</div>
+                <div style={{ fontSize: 14 }}>{t("profile.balanceTotal")}</div>
                 <div className="muted" style={{ fontSize: 12.5 }}>
-                  Купленные + по подписке
+                  {t("profile.balanceTotalHint")}
                 </div>
               </div>
               <span className="mono" style={{ fontWeight: 600, fontSize: 18 }}>
@@ -86,52 +87,21 @@ export default function Profile() {
             </div>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
-                <div style={{ fontSize: 14 }}>Купленные</div>
+                <div style={{ fontSize: 14 }}>{t("profile.balancePurchased")}</div>
                 <div className="muted" style={{ fontSize: 12.5 }}>
-                  Не сгорают
+                  {t("profile.balancePurchasedHint")}
                 </div>
               </div>
               <span className="mono">{purchasedBalance}</span>
             </div>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
-                <div style={{ fontSize: 14 }}>По подписке</div>
+                <div style={{ fontSize: 14 }}>{t("profile.balanceSubscription")}</div>
                 <div className="muted" style={{ fontSize: 12.5 }}>
-                  Списываются при истечении периода
+                  {t("profile.balanceSubscriptionHint")}
                 </div>
               </div>
               <span className="mono">{subscriptionBalance}</span>
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 22 }}>
-            <h3 className="section-title">Preferences</h3>
-            <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>
-              <div>
-                <div style={{ fontSize: 14 }}>Response language</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>
-                  AI replies in this language by default
-                </div>
-              </div>
-              <div className="model-picker">
-                {user?.language === "en" ? "English" : "Русский"} <ChevronDown size={14} />
-              </div>
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 22 }}>
-            <h3 className="section-title">Data &amp; privacy</h3>
-            <p className="muted" style={{ fontSize: 13.5, margin: "0 0 14px" }}>
-              Your conversations are never used to train models. Export or delete everything any
-              time.
-            </p>
-            <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-secondary btn-sm">
-                <Download size={14} /> Export data
-              </button>
-              <button className="btn btn-ghost btn-sm" style={{ color: "var(--danger)" }}>
-                <Trash2 size={14} /> Delete account
-              </button>
             </div>
           </div>
         </div>
