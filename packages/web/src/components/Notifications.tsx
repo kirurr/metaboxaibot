@@ -4,8 +4,11 @@ import { ArrowRight, Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./common/Button";
 import clsx from "clsx";
+import { useNavigate } from "react-router-dom";
 
 export function Notifications() {
+  const navigate = useNavigate();
+
   const dialogRef = useRef<HTMLDialogElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -48,7 +51,7 @@ export function Notifications() {
       </button>
       <dialog
         ref={dialogRef}
-        className="max-h-[60vh] overflow-auto absolute z-10 top-10 -left-[20rem] card p-2 text-white rise min-w-[30rem]"
+        className="max-h-[60vh] max-w-[30rem] overflow-auto absolute z-10 top-10 -left-[20rem] card p-2 text-white rise min-w-[30rem]"
         open={open}
       >
         <p className="text-[10px] font-medium tracking-widest uppercase text-white/30 px-2 pb-2 pt-1">
@@ -59,7 +62,12 @@ export function Notifications() {
             <li className="p-4 text-center text-text-hint">Нет новых уведомлений</li>
           )}
           {notifications.map((n) => (
-            <Notification key={n.id} remove={() => remove(n.id)} data={n} />
+            <Notification
+              navigate={() => navigate(`/gallery/${n.jobId}`)}
+              key={n.id}
+              remove={() => remove(n.id)}
+              data={n}
+            />
           ))}
         </ul>
       </dialog>
@@ -67,7 +75,15 @@ export function Notifications() {
   );
 }
 
-function Notification({ data, remove }: { data: WebNotificationDTO; remove: () => void }) {
+function Notification({
+  data,
+  remove,
+  navigate,
+}: {
+  data: WebNotificationDTO;
+  remove: () => void;
+  navigate: () => void;
+}) {
   const isSuccess = data.type.includes("success");
   const category = getCategory(data.type);
 
@@ -123,6 +139,7 @@ function Notification({ data, remove }: { data: WebNotificationDTO; remove: () =
 							hover:bg-transparent
 							hover:scale-[1.1]
 						"
+            onClick={navigate}
           >
             <ArrowRight size={16} />
           </Button>

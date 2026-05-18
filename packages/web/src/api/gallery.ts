@@ -14,6 +14,7 @@
 import z from "zod";
 import { apiClient } from "./client";
 import {
+  galleryJobSchema,
   galleryListResponseSchema,
   galleryFolderSchema,
   galleryModelCountSchema,
@@ -70,11 +71,15 @@ export async function listGalleryJobs(
 
 export async function getGalleryModelCounts(
   section?: string,
+  folderId?: string,
   signal?: AbortSignal,
 ): Promise<GalleryModelCount[]> {
   const data = await apiClient("/web/gallery/model-counts", {
     signal,
-    query: section ? { section } : undefined,
+    query: {
+      ...(section ? { section } : {}),
+      ...(folderId ? { folderId } : {}),
+    },
   });
   return modelCountsArraySchema.parse(data);
 }
@@ -91,6 +96,11 @@ export async function getGalleryOriginalUrl(outputId: string): Promise<GalleryUr
     `/web/gallery/outputs/${encodeURIComponent(outputId)}/original-url`,
   );
   return galleryUrlResponseSchema.parse(data);
+}
+
+export async function getGalleryJob(jobId: string, signal?: AbortSignal): Promise<GalleryJob> {
+  const data = await apiClient(`/web/gallery/jobs/${encodeURIComponent(jobId)}`, { signal });
+  return galleryJobSchema.parse(data);
 }
 
 export function deleteGalleryJob(jobId: string) {
@@ -160,3 +170,22 @@ export function removeFromGalleryFavorites(jobId: string) {
     { method: "DELETE" },
   );
 }
+
+// ── Query keys ──────────────────────────────────────────────────────────────
+//
+// Иерархическая фабрика (TkDodo pattern) — позволяет инвалидировать как точечно
+// (`galleryKeys.folders()`), так и веером по всему домену (`galleryKeys.all`).
+// Все ключи начинаются с `["gallery", ...]`, чтобы `invalidateQueries({
+// queryKey: galleryKeys.all })` зацепил всё gallery-семейство одним вызовом.
+
+export const galleryKeys = {
+  all: ["gallery"] as const,
+  jobs: () => [...galleryKeys.all, "jobs"] as const,
+  jobsList: (params: ListGalleryJobsQuery) => [...galleryKeys.jobs(), params] as const,
+  detail: (id: string) => [...galleryKeys.all, "detail", id] as const,
+  modelCounts: (section: string | undefined, folderId: string | undefined) =>
+    [...galleryKeys.all, "model-counts", section ?? null, folderId ?? null] as const,
+  folders: () => [...galleryKeys.all, "folders"] as const,
+  previewUrl: (outputId: string) => [...galleryKeys.all, "preview-url", outputId] as const,
+  originalUrl: (outputId: string) => [...galleryKeys.all, "original-url", outputId] as const,
+};

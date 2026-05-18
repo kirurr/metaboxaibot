@@ -84,14 +84,18 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
         modelIds?: string;
         folderId?: string;
       };
-      return galleryService.listJobs(aibUserId, {
-        section,
-        page: parseInt(page, 10) || 1,
-        limit: parseInt(limit, 10) || 20,
-        modelId,
-        modelIds,
-        folderId,
-      });
+      return galleryService.listJobs(
+        aibUserId,
+        {
+          section,
+          page: parseInt(page, 10) || 1,
+          limit: parseInt(limit, 10) || 20,
+          modelId,
+          modelIds,
+          folderId,
+        },
+        { favoritesFirst: true },
+      );
     },
   );
 
@@ -99,21 +103,27 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /web/gallery/model-counts?section=image|audio|video
    * Per-model generation counts for the current user.
    */
-  fastify.get<{ Querystring: { section?: string } }>(
+  fastify.get<{ Querystring: { section?: string; folderId?: string } }>(
     "/web/gallery/model-counts",
     {
       schema: {
         description: "Per-model job counts for current user",
         querystring: {
           type: "object",
-          properties: { section: { type: "string" } },
+          properties: {
+            section: { type: "string" },
+            folderId: { type: "string" },
+          },
         },
       },
     },
     async (request: FastifyRequest) => {
       const aibUserId = request.webUser!.aibUserId!;
-      const { section } = request.query as { section?: string };
-      return galleryService.getModelCounts(aibUserId, section);
+      const { section, folderId } = request.query as {
+        section?: string;
+        folderId?: string;
+      };
+      return galleryService.getModelCounts(aibUserId, section, folderId);
     },
   );
 
@@ -186,6 +196,34 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
       } catch (err) {
         if (err instanceof GalleryBadRequestError)
           return reply.code(422).send({ error: err.message });
+        return mapGalleryError(err, reply);
+      }
+    },
+  );
+
+  /**
+   * GET /web/gallery/jobs/:id
+   * Single job + outputs. Used by web frontend for deep-link `/gallery/:jobId`.
+   * Returns 404 on unknown / not-owned job.
+   */
+  fastify.get<{ Params: { id: string } }>(
+    "/web/gallery/jobs/:id",
+    {
+      schema: {
+        description: "Fetch a single completed job by id",
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+      },
+    },
+    async (request, reply) => {
+      const aibUserId = request.webUser!.aibUserId!;
+      const { id } = request.params;
+      try {
+        return await galleryService.getJobById(aibUserId, id);
+      } catch (err) {
         return mapGalleryError(err, reply);
       }
     },

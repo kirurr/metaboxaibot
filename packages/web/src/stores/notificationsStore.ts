@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { ws } from "@/utils/ws";
 import type { WebNotificationDTO } from "@metabox/shared-browser/ws";
+import { useQueryClient } from "@tanstack/react-query";
+import { galleryKeys } from "@/api/gallery";
 
 interface NotificationsState {
   /** Дедупликация по id. Источник правды — server snapshot + push'и. */
@@ -45,6 +47,10 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   },
 
   upsert: (row) => {
+		// invalidate gallery queries
+    const qc = useQueryClient();
+    qc.invalidateQueries({ queryKey: galleryKeys.all });
+
     const next = new Map(get().byId);
     next.set(row.id, row);
     set({ byId: next, list: sortDesc(next) });
