@@ -7,7 +7,7 @@
  */
 
 /** Codes that indicate a user-correctable problem. */
-const USER_FACING_CODES = new Set(["E005", "E006", "E1001", "E9243", "E9825"]);
+const USER_FACING_CODES = new Set(["E005", "E006", "E1001", "E9243", "E9825", "E_LORA_URL"]);
 
 export class ReplicatePredictionError extends Error {
   constructor(
@@ -42,6 +42,13 @@ const USER_FACING_TEXT_PATTERNS: { pattern: RegExp; code: string }[] = [
   // root cause — silent refusal по content policy либо модель сочла промпт
   // непригодным. Мапим на E006 → юзеру говорим «измените промпт или фото».
   { pattern: /no image content found in response/i, code: "E006" },
+  // FLUX-based LoRA-моделей runtime-парсер `extra_lora` падает на не-URL
+  // значениях с этой формулировкой (юзер вписал свободный текст в advanced-
+  // поле «Дополнительная LoRA»). Дублирует safetensors-маркер чтобы
+  // случайно не сматчить какой-нибудь другой «Failed to parse URL» от другой
+  // модели. Адаптер ловит whitespace/длину up-front; этот pattern страхует
+  // случаи когда юзер впишет валидный URL, но не одного из 4 ожидаемых форматов.
+  { pattern: /Failed to parse URL[\s\S]*?\.safetensors/i, code: "E_LORA_URL" },
 ];
 
 /**
@@ -92,6 +99,8 @@ export function getReplicateUserMessage(
       return e.replicateInvalidParams;
     case "E9825":
       return e.replicateFileTooLarge;
+    case "E_LORA_URL":
+      return e.loraUrlInvalid;
     default:
       return e.generationFailed;
   }

@@ -1,6 +1,6 @@
 import Replicate from "replicate";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logger } from "../../logger.js";
 import { logCall } from "../../utils/fetch.js";
 import { parseReplicatePredictionFailure } from "../../utils/replicate-error.js";
@@ -85,13 +85,30 @@ export class ReplicateAdapter implements ImageAdapter {
     if (ms.guidance_scale !== undefined) msExtras.guidance_scale = ms.guidance_scale;
     if (ms.cfg !== undefined) msExtras.cfg = ms.cfg;
     if (ms.num_inference_steps !== undefined) msExtras.num_inference_steps = ms.num_inference_steps;
-    const stylePreset = ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
-    if (stylePreset) msExtras.style_preset = stylePreset;
     // Resolve image URL from structured media inputs, falling back to legacy imageUrl.
     // Ideogram models use "style_ref" slot; other models use "edit" slot.
+    // Считаем ДО style_preset — чтобы драгнуть style_preset при конфликте с
+    // загруженной картинкой (см. ниже).
     const imageUrl = IDEOGRAM_MODELS.has(this.modelId)
       ? (input.mediaInputs?.style_ref?.[0] ?? input.imageUrl)
       : (input.mediaInputs?.edit?.[0] ?? input.imageUrl);
+    // Ideogram взаимоисключает `style_preset` / `style_codes` / `style_reference_images` —
+    // Replicate отбивает payload с "Please provide just one of ...". UI знает про
+    // конфликт style_preset ↔ style_type (через unavailableIf), но НЕ про конфликт
+    // style_preset ↔ uploaded reference image. Если юзер загрузил картинку в slot
+    // `style_ref` — uploaded-картинка побеждает (это более явное действие чем
+    // saved-в-advanced preset), preset молча дропаем с warn'ом.
+    const stylePresetRaw =
+      ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
+    const ideogramHasUploadedRef = IDEOGRAM_MODELS.has(this.modelId) && !!imageUrl;
+    if (ideogramHasUploadedRef && stylePresetRaw) {
+      logger.warn(
+        { modelId: this.modelId, stylePreset: stylePresetRaw },
+        "Replicate adapter: dropped style_preset because style_ref image present (Ideogram mutex)",
+      );
+    }
+    const stylePreset = ideogramHasUploadedRef ? undefined : stylePresetRaw;
+    if (stylePreset) msExtras.style_preset = stylePreset;
     // Ideogram constraint: when style_preset, style_codes, or style_reference_images
     // is used, style_type must be Auto or General. A reference image sent by the
     // user becomes style_reference_images further down, so detect that here too.
@@ -139,7 +156,34 @@ export class ReplicateAdapter implements ImageAdapter {
       msExtras.num_inference_steps = 10;
     }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
-    if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
+    if (ms.extra_lora !== undefined && ms.extra_lora !== null) {
+      // Replicate runtime LoRA-loader принимает только: <owner>/<name>[:version],
+      // huggingface.co/..., civitai.com/models/..., либо URL на .safetensors.
+      // Все валидные форматы — без whitespace и в пределах ~256 chars. Юзеры
+      // регулярно путают поле с «доп. промптом» и вписывают свободный текст —
+      // тогда мы платим Replicate за заведомо обречённый predict и юзер ждёт
+      // 30s polling'а ради «Ошибка генерации». Up-front guard: rejectim
+      // очевидно-не-URL значения сразу. Остальные кривые URL (валидный формат,
+      // но неподдерживаемый хост) дойдут до Replicate-rejection — тогда
+      // USER_FACING_TEXT_PATTERN в replicate-error.ts смапит на тот же ключ.
+      const rawValue = typeof ms.extra_lora === "string" ? ms.extra_lora.trim() : "";
+      if (rawValue) {
+        if (/\s/.test(rawValue) || rawValue.length > 256) {
+          logger.warn(
+            {
+              modelId: this.modelId,
+              extraLoraSample: rawValue.slice(0, 80),
+              extraLoraLength: rawValue.length,
+            },
+            "Replicate adapter: rejected invalid extra_lora value (not a URL/identifier)",
+          );
+          throw new UserFacingError("Invalid extra_lora value (not a URL/identifier)", {
+            key: "loraUrlInvalid",
+          });
+        }
+        msExtras.extra_lora = rawValue;
+      }
+    }
     if (ms.extra_lora_scale !== undefined) msExtras.extra_lora_scale = ms.extra_lora_scale;
     if (ms.seed != null) msExtras.seed = ms.seed;
     if (ms.disable_safety_checker !== undefined)
