@@ -217,6 +217,15 @@ export class AlibabaVideoAdapter implements VideoAdapter {
           },
         );
       }
+      // Wan content policy: «Input data may contain inappropriate content.» —
+      // провайдер фильтрует input (фото/видео-референс или промпт). Без
+      // mapping'а юзер видит generic «generationFailed» + летит ops-alert на
+      // совершенно юзер-фолтовый кейс.
+      if (/Input data may contain inappropriate content/i.test(errMsg)) {
+        throw new UserFacingError(`Alibaba Wan: input flagged as inappropriate (${errMsg})`, {
+          key: "contentPolicyViolation",
+        });
+      }
       throw new Error(`Alibaba Wan generation failed: ${errMsg}`);
     }
     if (task_status !== "SUCCEEDED") return null;
