@@ -159,6 +159,16 @@ export const costPreviewService = {
       );
     }
 
+    // Wan first_clip mode: формула биллинга — `output + min(input_clip, 5)`
+    // (см. video.processor.ts:683-690). В previewVideo точная длительность
+    // клипа без HTTP-probe'а неизвестна, поэтому добавляем worst-case +5s.
+    // Превью чуть завышает на коротких клипах (<5s), зато никогда не занижает
+    // → юзер не получит surprise списание выше превью. Probe в hot-path
+    // нерентабелен (полная загрузка MP4 на каждый ререндер UI).
+    if (modelId === "wan" && params.mediaInputs?.first_clip?.[0]) {
+      effectiveDuration += 5;
+    }
+
     const estimatedVideoTokens = model.costUsdPerMVideoToken
       ? computeVideoTokens(
           model,

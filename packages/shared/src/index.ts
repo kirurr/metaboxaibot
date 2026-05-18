@@ -104,6 +104,7 @@ export {
   preloadLocales,
   buildDialogHint,
   buildResultCaption,
+  formatGenerationCostLine,
   pickGenerationFailedMessage,
   resolveUserFacingErrorVariant,
 } from "./i18n/index.js";
