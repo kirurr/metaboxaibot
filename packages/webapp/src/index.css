@@ -2939,7 +2939,8 @@ textarea::placeholder {
   padding: 12px 18px;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  z-index: 1000;
+  /* < .modal-overlay (1000), чтобы модалки не оказывались под этим тостом */
+  z-index: 998;
   text-align: center;
   animation: popup-fadein 0.2s ease;
 }
@@ -2952,6 +2953,77 @@ textarea::placeholder {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+.auto-activated-toast {
+  position: fixed;
+  /* env() даёт 0, если Telegram-клиент не инжектит safe-area inset
+     (на части Android-клиентов так и есть) — max() гарантирует визуальный отступ */
+  top: max(12px, calc(env(safe-area-inset-top, 0px) + 12px));
+  left: 12px;
+  right: 12px;
+  background: var(--accent, #6c63ff);
+  color: #fff;
+  padding: 12px 14px;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  /* < .modal-overlay (1000), но > .bottom-nav и обычного контента */
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: auto-activated-toast-in 0.25s ease forwards;
+}
+
+.auto-activated-toast.is-closing {
+  animation: auto-activated-toast-out 0.2s ease forwards;
+}
+
+.auto-activated-toast__message {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+  /* Контраст белого на --accent (#4a8df5) ниже WCAG AA — тень снимает blur с букв */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.auto-activated-toast__dismiss {
+  align-self: flex-start;
+  background: transparent;
+  color: #fff;
+  border: 0;
+  /* Hit-area 44px по высоте при сохранении визуальной высоты строки */
+  padding: 10px 4px;
+  margin: -8px -4px -4px -4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  opacity: 0.9;
+}
+
+@keyframes auto-activated-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auto-activated-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
   }
 }
 

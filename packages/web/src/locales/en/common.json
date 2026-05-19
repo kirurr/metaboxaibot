@@ -278,6 +278,10 @@
     "exportSoon": "Soon",
     "newShort": "New",
     "uploading": "Uploading…",
+    "settings": {
+      "title": "Model settings",
+      "advanced": "Advanced settings"
+    },
     "starterPrompts": {
       "0": "Write a product launch plan",
       "1": "Explain this code line by line",

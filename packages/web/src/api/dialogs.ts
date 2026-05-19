@@ -38,6 +38,10 @@ export type MessageDto = {
   createdAt: string;
   /** Прикреплённые файлы (картинки + документы), `null` если их нет. */
   attachments?: MessageAttachmentDto[] | null;
+  /** Raw input tokens (для assistant-сообщений; 0 для user). */
+  inputTokens?: number;
+  /** Raw output tokens (для assistant-сообщений; 0 для user). */
+  outputTokens?: number;
 };
 
 /** Payload для streamMessage — документы как в chatService.SendMessageParams. */
@@ -84,7 +88,12 @@ export type StreamBalance = {
 };
 export type StreamCallbacks = {
   onChunk: (text: string) => void;
-  onDone: (info: { tokensUsed: number; balance: StreamBalance }) => void;
+  onDone: (info: {
+    tokensUsed: number;
+    inputTokens: number;
+    outputTokens: number;
+    balance: StreamBalance;
+  }) => void;
   onError: (err: { code: string; message: string }) => void;
 };
 
@@ -194,9 +203,16 @@ function processEvent(block: string, callbacks: StreamCallbacks) {
     const text = (data as { text?: string }).text;
     if (typeof text === "string") callbacks.onChunk(text);
   } else if (eventName === "done") {
-    const d = data as { tokensUsed?: number; balance?: StreamBalance };
+    const d = data as {
+      tokensUsed?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      balance?: StreamBalance;
+    };
     callbacks.onDone({
       tokensUsed: d.tokensUsed ?? 0,
+      inputTokens: d.inputTokens ?? 0,
+      outputTokens: d.outputTokens ?? 0,
       balance: d.balance ?? { tokenBalance: "0", subscriptionTokenBalance: "0" },
     });
   } else if (eventName === "error") {

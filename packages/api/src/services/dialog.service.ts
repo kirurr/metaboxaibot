@@ -146,6 +146,8 @@ export const dialogService = {
     content: string,
     extras?: {
       tokensUsed?: number;
+      inputTokens?: number;
+      outputTokens?: number;
       providerMessageId?: string;
       mediaUrl?: string;
       mediaType?: string;
@@ -158,6 +160,8 @@ export const dialogService = {
         role,
         content,
         tokensUsed: extras?.tokensUsed ?? 0,
+        inputTokens: extras?.inputTokens ?? 0,
+        outputTokens: extras?.outputTokens ?? 0,
         providerMessageId: extras?.providerMessageId,
         mediaUrl: extras?.mediaUrl,
         mediaType: extras?.mediaType,
@@ -193,6 +197,8 @@ export const dialogService = {
         mediaUrl: true,
         mediaType: true,
         attachments: true,
+        inputTokens: true,
+        outputTokens: true,
         createdAt: true,
       },
     });
