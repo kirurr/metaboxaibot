@@ -219,6 +219,30 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       body: JSON.stringify(body),
     });
 
+    // Snapshot response headers сразу после fetch'а — нужны для
+    // диагностических warn'ов ниже. Прокси-поддержка (KIE/Evolink) не находит
+    // запросы по `message.id` из SSE payload (это, видимо, ID их upstream
+    // типа z.ai, не их собственный tracking-key). Их internal lookup-ключ
+    // обычно в HTTP-headers (x-request-id / cf-ray / x-kie-* / anthropic-*) —
+    // снепшот ниже даёт нам этот ID для последующего пробирования в support.
+    // На успешных запросах эти headers нигде не логируются, шума нет.
+    //
+    // Sensitive denylist: пропускаем `set-cookie`/`authorization`/`cookie`/
+    // `proxy-authorization` — теоретически прокси может эхать в response
+    // session-token или другую creds, не хотим тащить такое в ops-логи.
+    const SENSITIVE_HEADERS = new Set([
+      "set-cookie",
+      "cookie",
+      "authorization",
+      "proxy-authorization",
+    ]);
+    const responseHeaders: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      if (!SENSITIVE_HEADERS.has(k.toLowerCase())) {
+        responseHeaders[k] = v;
+      }
+    });
+
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
       // KIE/evolink Claude-гейты иногда транслируют upstream 5xx как 4xx
@@ -493,6 +517,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           pendingVisibleBufferLen: pendingVisibleBuffer.length,
           thinkingBufferLen: thinkingBuffer.length,
           eventTypeCounts,
+          responseHeaders,
         },
         "claude-anthropic-proxy: stop_reason=tool_use with no visible content (KIE injected built-in tool) — escalating as 503 for fallback",
       );
@@ -539,6 +564,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           inputTokens,
           eventTypeCounts,
           lastStopReason,
+          responseHeaders,
         },
         "claude-anthropic-proxy: gateway empty stream — escalating as 503 for retry",
       );
@@ -611,6 +637,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           visibleLooksEmpty,
           visibleLooksLikeThinkLiteral,
           rawEventSamples,
+          responseHeaders,
         },
         "claude-anthropic-proxy: stream-state diagnostic (raw events captured)",
       );
