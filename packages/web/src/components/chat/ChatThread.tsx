@@ -28,8 +28,7 @@ export const ChatThread = memo(function ChatThread({
     <div className="chat-scroll" ref={scrollRef}>
       <div className="chat-thread">
         {messages.map((m, i) => {
-          if (m.role === "ai")
-            return <AiChatMessage key={`${i}.${m.localId}.ai`} message={m} />;
+          if (m.role === "ai") return <AiChatMessage key={`${i}.${m.localId}.ai`} message={m} />;
           return <UserChatMessage key={`${i}.${m.localId}.user`} message={m} />;
         })}
 
@@ -156,4 +155,3 @@ function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
     <div className="att-chip">{inner}</div>
   );
 }
-

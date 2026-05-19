@@ -229,9 +229,7 @@ export function ChatComposer({
           />
           <button
             className="send"
-            disabled={
-              (!draft.trim() && readyCount === 0) || sending || uploadingCount > 0
-            }
+            disabled={(!draft.trim() && readyCount === 0) || sending || uploadingCount > 0}
             onClick={onSend}
             title={
               sending
@@ -248,8 +246,7 @@ export function ChatComposer({
           {selectedModel?.contextWindow ? (
             <div className="hint">
               <span className="mono">
-                {formatTokensK(currentContextTokens)} /{" "}
-                {formatTokensK(selectedModel.contextWindow)}
+                {formatTokensK(currentContextTokens)} / {formatTokensK(selectedModel.contextWindow)}
               </span>
             </div>
           ) : null}

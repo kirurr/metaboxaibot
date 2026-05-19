@@ -28,11 +28,7 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="chat-head">
       {expandVisible && (
-        <button
-          className="expand-side"
-          title={t("chat.dialogsExpand")}
-          onClick={onExpandSide}
-        >
+        <button className="expand-side" title={t("chat.dialogsExpand")} onClick={onExpandSide}>
           <Menu size={18} />
         </button>
       )}

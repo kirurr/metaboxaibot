@@ -1,15 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
-import {
-  ChevronLeft,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ChevronLeft, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import type { DialogDto } from "@/api/dialogs";
 import { dialogTitle } from "./chatHelpers";
 
@@ -81,8 +73,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   useEffect(() => {
     if (!isMobile || !sideOpen) return;
     const onDown = (e: MouseEvent | TouchEvent) => {
-      if (sideRef.current && !sideRef.current.contains(e.target as Node))
-        onCloseMobileDrawer();
+      if (sideRef.current && !sideRef.current.contains(e.target as Node)) onCloseMobileDrawer();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onDown);

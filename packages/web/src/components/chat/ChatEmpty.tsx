@@ -41,11 +41,7 @@ export const ChatEmpty = memo(function ChatEmpty({
       {/* <div className="ce-mark"> */}
       {/*   <Sparkles size={28} /> */}
       {/* </div> */}
-      <div
-        ref={modelPickRef}
-        className="model-pick"
-        onClick={() => setModelOpen(!modelOpen)}
-      >
+      <div ref={modelPickRef} className="model-pick" onClick={() => setModelOpen(!modelOpen)}>
         <span className="mp-dot" />
         <span className="mp-name">
           {selectedModel ? modelDisplayName(selectedModel) : t("common.loading")}

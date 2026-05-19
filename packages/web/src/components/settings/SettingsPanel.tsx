@@ -31,10 +31,7 @@ export function SettingsPanel({
 
   // Видимые настройки = поддерживаемые + удовлетворяющие dependsOn.
   const visible = useMemo(
-    () =>
-      settings.filter(
-        (s) => !UNSUPPORTED_TYPES.has(s.type) && isSettingVisible(s, values),
-      ),
+    () => settings.filter((s) => !UNSUPPORTED_TYPES.has(s.type) && isSettingVisible(s, values)),
     [settings, values],
   );
   const basic = visible.filter((s) => !s.advanced);
@@ -98,9 +95,7 @@ function SettingsRow({
           </button>
           <span className="settings-panel-label">{setting.label}</span>
         </div>
-        {setting.description && (
-          <div className="settings-panel-desc">{setting.description}</div>
-        )}
+        {setting.description && <div className="settings-panel-desc">{setting.description}</div>}
       </div>
     );
   }
@@ -113,9 +108,7 @@ function SettingsRow({
     return (
       <div className="settings-panel-row">
         <span className="settings-panel-label">{setting.label}</span>
-        {setting.description && (
-          <div className="settings-panel-desc">{setting.description}</div>
-        )}
+        {setting.description && <div className="settings-panel-desc">{setting.description}</div>}
         <textarea
           className="settings-panel-textarea"
           value={text}
@@ -129,11 +122,7 @@ function SettingsRow({
   return (
     <div className="settings-panel-row">
       <span className="settings-panel-label">{setting.label}</span>
-      <SettingControl
-        setting={setting}
-        value={value}
-        onChange={(v) => onChange(setting.key, v)}
-      />
+      <SettingControl setting={setting} value={value} onChange={(v) => onChange(setting.key, v)} />
     </div>
   );
 }

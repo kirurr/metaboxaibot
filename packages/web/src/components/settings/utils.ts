@@ -1,10 +1,7 @@
 import type { ModelSettingDto } from "@/api/models";
 
 /** Грубо: видна ли настройка с учётом `dependsOn` (другая настройка == value). */
-export function isSettingVisible(
-  s: ModelSettingDto,
-  values: Record<string, unknown>,
-): boolean {
+export function isSettingVisible(s: ModelSettingDto, values: Record<string, unknown>): boolean {
   if (!s.dependsOn) return true;
   return values[s.dependsOn.key] === s.dependsOn.value;
 }
