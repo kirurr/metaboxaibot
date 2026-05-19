@@ -37,6 +37,7 @@ model User {
   finishedOnboarding       Boolean @default(false)
   generationCount          Int     @default(0)
   confirmBeforeGenerate    Boolean @default(true)
+  autoActivateModel        Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

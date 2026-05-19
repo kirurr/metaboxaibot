@@ -33,6 +33,10 @@ export function setWebToken(token: string): void {
   _webToken = token;
 }
 
+export function clearWebToken(): void {
+  _webToken = null;
+}
+
 /**
  * Возвращает Authorization header для текущей сессии — Telegram initData
  * (mini-app) или web JWT. Расшарено между `request()` и `uploadRequest()`
@@ -63,6 +67,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     console.error(`[api] network error ${method} ${path}`, networkErr);
     throw networkErr;
   }
+
+  // Rolling-refresh wtoken: сервер кладёт свежий токен, когда наш приближается
+  // к hard-expiry. Подхватываем сразу, до проверки res.ok — даже на 4xx ответе
+  // токен мог обновиться (например, при ошибке домена, но валидной auth).
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as Record<
@@ -99,6 +109,9 @@ async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
     throw networkErr;
   }
 
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     console.error(`[api] POST ${path} → ${res.status}`, err);
@@ -124,11 +137,14 @@ export const api = {
 
   profile: {
     get: () => request<UserProfile>("/profile"),
-    updatePreferences: (body: { confirmBeforeGenerate?: boolean }) =>
-      request<{ ok: boolean; confirmBeforeGenerate: boolean }>("/profile/preferences", {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+    updatePreferences: (body: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean }) =>
+      request<{ ok: boolean; confirmBeforeGenerate: boolean; autoActivateModel: boolean }>(
+        "/profile/preferences",
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
     partnerBalance: () =>
       request<{
         balance: number;
@@ -237,6 +253,13 @@ export const api = {
       request<{ success: boolean }>("/state/selected-mode", {
         method: "POST",
         body: JSON.stringify({ modelId, modeId }),
+        // Симметрично с selectModel: юзер может тапнуть mode-чип и сразу X-close
+        // webview до того как запрос дойдёт до сервера. Без keepalive WebView
+        // убивает in-flight fetch → выбор mode'а теряется и bot работает по
+        // старому mode. Auto-activate через 3с (handleModeChange) при быстром
+        // X-close тоже отменится, поэтому keepalive здесь — единственная
+        // гарантия что mode change долетит.
+        keepalive: true,
       }),
   },
 

@@ -37,6 +37,12 @@ const SECTION_SUBTITLE_KEY: Record<MediaSection, Parameters<ReturnType<typeof us
   audio: "audioSettings.subtitle",
 };
 
+const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
+  design: "DESIGN_ACTIVE",
+  video: "VIDEO_ACTIVE",
+  audio: "AUDIO_ACTIVE",
+};
+
 export function MediaSettingsView({
   section,
   initialModelId,
@@ -75,10 +81,46 @@ export function MediaSettingsView({
   // отправлять ли финальное Telegram-уведомление, поэтому клиенту хранить
   // pending-таймер больше не нужно.
   const [hasPendingSelect, setHasPendingSelect] = useState(false);
+  // Auto-activate. Любая смена «текущей модели» — открытие view с
+  // initialModelId, переключение picker, тап варианта в карусели — немедленно
+  // запускает full activate (state → *_ACTIVE + Telegram-пинг). Это убирает
+  // обязательность тапа «Активировать»: standalone-модели и переключения
+  // семейств тоже фиксируются. Дедуп по lastActivatedRef: если target — то
+  // что уже активно в боте, повторный activate не запускается, чтобы не
+  // спамить чат одинаковыми «Модель X активирована».
+  const lastActivatedRef = useRef<string | null>(null);
+  // Mount-guard для async-задач auto-activate. autoActivate ждёт
+  // selectChainRef перед fetch'ем — за это время компонент может быть
+  // unmounted (tab-switch в ManagementPage делает conditional-render → unmount,
+  // X-close webview). Без guard'а activate улетел бы «вдогонку» и notify
+  // прилетел бы юзеру когда он уже на другой вкладке.
+  const mountedRef = useRef(true);
+  // Версионный токен «текущей activate-операции». Каждый запуск (schedule,
+  // ручной activate, smen варианта) инкрементирует counter; autoActivate
+  // запоминает свою версию на старте и после await проверяет, что версия не
+  // изменилась — иначе значит другой код перехватил инициативу и наш fetch
+  // дублировался бы. Сравнение по modelId не годится, потому что mode change
+  // на ту же модель должен инвалидировать предыдущий in-flight activate
+  // (старый mode) и запустить новый (с актуальным mode) — у обоих modelId
+  // одинаков, только version отличается.
+  const activateOpRef = useRef(0);
+  // Popup-таймер на «Активирована» — храним чтобы очистить на unmount,
+  // иначе setState отрабатывает на размонтированном компоненте.
+  const popupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // User-pref toggle (Account tab → «Активация моделей»). Default true чтобы
+  // до загрузки профиля поведение совпадало с дефолтом сервера. При false —
+  // scheduleAutoActivate становится no-op; юзер активирует модель кнопкой.
+  const [autoActivateEnabled, setAutoActivateEnabled] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.models.list(section), api.state.get(), api.modelSettings.get()])
-      .then(([ms, state, ms2]) => {
+    Promise.all([
+      api.models.list(section),
+      api.state.get(),
+      api.modelSettings.get(),
+      api.profile.get(),
+    ])
+      .then(([ms, state, ms2, profile]) => {
+        setAutoActivateEnabled(profile.autoActivateModel);
         setModels(ms);
         setAllModelSettings(ms2);
         setSelectedModes(state.selectedModes ?? {});
@@ -87,6 +129,14 @@ export function MediaSettingsView({
         const activeId = fromSection && ms.some((m) => m.id === fromSection) ? fromSection : "";
         setActiveModelId(activeId);
         setState(state.state);
+        // Сид для дедупа авто-активаций: если бот уже в *_ACTIVE на activeId,
+        // считаем «эта модель только что активирована» — повторный activate
+        // на ту же модель не отправит сообщение в чат. Если state другой
+        // (юзер ушёл в /menu и state в IDLE), ref остаётся null и сразу
+        // случится legitimate activate.
+        if (activeId && state.state === SECTION_ACTIVE_STATE[section]) {
+          lastActivatedRef.current = activeId;
+        }
         // initialModelId only controls which card is shown in the picker (navigation only)
         const navTarget =
           initialModelId && ms.some((m) => m.id === initialModelId) ? initialModelId : activeId;
@@ -109,13 +159,125 @@ export function MediaSettingsView({
     setHasPendingSelect(false);
   }, [selectedPickerId]);
 
-  const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
-    design: "DESIGN_ACTIVE",
-    video: "VIDEO_ACTIVE",
-    audio: "AUDIO_ACTIVE",
+  // Тихая авто-активация (без закрытия мини-аппы и без всплывающего popup'а):
+  // запускается сразу после любой смены target-модели. Дождаться silent-select
+  // очереди обязательно — иначе late selectModel мог бы переписать DB после
+  // activate (см. handleModelActivate). После успеха обновляем lastActivatedRef
+  // чтобы повторный target=та же модель не пинговал юзера снова.
+  const autoActivate = async (modelId: string, opVersion: number) => {
+    // Optimistic UI: запоминаем prev чтобы откатить при ошибке. Версия
+    // operation захвачена в момент scheduleAutoActivate (synchronous каждый
+    // вызов) — если за время await что-то перехватило (новый schedule,
+    // ручной activate, smen варианта), activateOpRef.current уже больше нашей
+    // opVersion и мы выходим, не запуская fetch.
+    const prevActive = activeModelId;
+    const prevState = stateStr;
+    setHasPendingSelect(false);
+    setActiveModelId(modelId);
+    setState(SECTION_ACTIVE_STATE[section]);
+    await selectChainRef.current.catch(() => void 0);
+    // Tab-switch / X-close между взводом таймера и моментом fetch'а: компонент
+    // unmounted, дальше слать activate бессмысленно — это привело бы к notify
+    // «модель X активирована» когда юзер уже на video-вкладке или закрыл webview.
+    if (!mountedRef.current) return;
+    // Перехвачено более свежей operation (другая модель, новый mode на той же
+    // модели, ручной activate) — наш fetch стал устаревшим, скипаем чтобы не
+    // отправить дубль activate + notify.
+    if (activateOpRef.current !== opVersion) return;
+    try {
+      await api.state.activate(section, modelId);
+      // Между fetch'ем и его resolve компонент мог unmount'ся (tab-switch,
+      // X-close webview). Любой setState отсюда уйдёт в «detached» React tree
+      // и выдаст «state update on unmounted component». lastActivatedRef сам
+      // по себе после unmount уже не важен — компонент-instance уходит.
+      if (!mountedRef.current) return;
+      // Версия могла подняться пока activate был в полёте — обновляем
+      // lastActivatedRef только если мы всё ещё актуальная operation.
+      if (activateOpRef.current === opVersion) {
+        lastActivatedRef.current = modelId;
+      }
+    } catch (e) {
+      console.error("[settings] auto-activate failed", modelId, e);
+      // Тот же mount-guard для rollback-ветки: setActiveModelId на unmount'е
+      // запрещён React'ом.
+      if (!mountedRef.current) return;
+      // Rollback только если мы всё ещё актуальная operation — иначе свежий
+      // optimistic state принадлежит чьей-то более новой работе, и его откат
+      // создал бы рассинхрон (model=новая / state=наш prev).
+      if (activateOpRef.current === opVersion) {
+        setActiveModelId((cur) => (cur === modelId ? prevActive : cur));
+        setState((cur) => (cur === SECTION_ACTIVE_STATE[section] ? prevState : cur));
+      }
+    }
   };
 
+  const scheduleAutoActivate = (modelId: string) => {
+    if (!modelId) return;
+    // Юзер отключил авто-активацию в профиле (Account tab) — переключения
+    // в picker'е/карусели только сохраняют выбор через silent-select, а full
+    // activate остаётся за кнопкой «Активировать». Инкремент op тоже пропускаем,
+    // чтобы случайно не дёрнуть rollback в неактивном пути.
+    if (!autoActivateEnabled) return;
+    // Инкремент op ДО dedup-check — это инвалидирует любой pending in-flight
+    // autoActivate даже если новый вызов сам ничего не запустит (dedup).
+    // Без этого: in-flight autoActivate(A,op=N) висит, прилетает scheduleAutoActivate(A)
+    // с dedup hit, op остаётся N → in-flight долетит и активирует уже-устаревший
+    // mode/state.
+    const opVersion = ++activateOpRef.current;
+    // Дедуп: модель уже activated в боте — повторный activate idempotent но
+    // sendModelActivatedNotification всё равно шлёт сообщение в чат, что для
+    // авто-режима выглядит как спам. Пропускаем.
+    if (modelId === lastActivatedRef.current) return;
+    void autoActivate(modelId, opVersion);
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (popupTimerRef.current) {
+        clearTimeout(popupTimerRef.current);
+        popupTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Реагируем на смену picker'а (юзер переключился на другое семейство или
+  // standalone-модель в выпадашке). Определяем target: для family — активная
+  // модель внутри если она здесь, иначе familyDefaultModelId / первый член;
+  // для standalone — сам id из picker'а. Срабатывает и на initial-mount после
+  // загрузки (loading→false), чем покрывает сценарий «открыли через "Выбрать
+  // модель" в боте — нужно автоактивировать сразу».
+  useEffect(() => {
+    if (loading) return;
+    const [pickerType, pickerId] = selectedPickerId.split("__");
+    if (!pickerType || !pickerId) return;
+    let target: string | undefined;
+    if (pickerType === "family") {
+      const members = models.filter((m) => m.familyId === pickerId);
+      const belongsHere = members.some((m) => m.id === activeModelId);
+      if (belongsHere) {
+        target = activeModelId;
+      } else {
+        const familyDefaultId = members[0]?.familyDefaultModelId ?? null;
+        const def =
+          (familyDefaultId ? members.find((m) => m.id === familyDefaultId) : null) ?? members[0];
+        target = def?.id;
+      }
+    } else if (pickerType === "standalone") {
+      target = pickerId;
+    }
+    if (target) scheduleAutoActivate(target);
+  }, [selectedPickerId, loading]);
+
   const handleModelActivate = async (modelId: string) => {
+    // Юзер сам нажал «Активировать» — поднимаем версию operation. Если
+    // autoActivate уже стартовал и сидит в await selectChainRef, ему нужен
+    // сигнал «ты устарел» — инкремент activateOpRef сделает его post-await
+    // check отрицательным, и он скипнет fetch + rollback.
+    const opVersion = ++activateOpRef.current;
+    const prevActive = activeModelId;
+    const prevState = stateStr;
     setHasPendingSelect(false);
     setActiveModelId(modelId);
     setState(SECTION_ACTIVE_STATE[section]);
@@ -127,12 +289,32 @@ export function MediaSettingsView({
     await selectChainRef.current.catch(() => void 0);
     try {
       await api.state.activate(section, modelId);
+      // Webview мог закрыться/таб переключиться пока activate был в полёте —
+      // setActivatedPopup/setTimeout сразу под этим try-блоком должен не
+      // сработать в этом случае (state update on unmounted). closeMiniApp
+      // тоже бесполезен (webview уже закрыт юзером).
+      if (!mountedRef.current) return;
+      if (activateOpRef.current === opVersion) {
+        lastActivatedRef.current = modelId;
+      }
     } catch (e) {
       console.error("[settings] activate failed", modelId, e);
+      if (!mountedRef.current) return;
+      // Откат оптимистичного UI только если мы всё ещё актуальная operation.
+      // Иначе свежий optimistic state — от перехватившей операции, его перезапись
+      // создала бы рассинхрон model=новая / state=наш prev.
+      if (activateOpRef.current === opVersion) {
+        setActiveModelId((cur) => (cur === modelId ? prevActive : cur));
+        setState((cur) => (cur === SECTION_ACTIVE_STATE[section] ? prevState : cur));
+      }
       return;
     }
     setActivatedPopup(true);
-    setTimeout(() => setActivatedPopup(false), 3000);
+    if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+    popupTimerRef.current = setTimeout(() => {
+      popupTimerRef.current = null;
+      setActivatedPopup(false);
+    }, 3000);
     closeMiniApp();
   };
 
@@ -155,6 +337,27 @@ export function MediaSettingsView({
   const handleModelSelect = (modelId: string) => {
     if (modelId === activeModelId) return;
 
+    // Manual-режим (тогл «Активация моделей» = Вручную): ни activeModelId,
+    // ни /state/select-model не трогаем. Иначе всплывает два эффекта:
+    //   (1) optimistic setActiveModelId двигает бейдж «Активно» на ещё
+    //       неактивированный вариант (Bug: «висит бейдж активно на модели»);
+    //   (2) /state/select-model планирует 3-секундный trailing-debounce
+    //       notify в чат (state.ts:scheduleModelChangedNotify). В Auto его
+    //       гасит cancelPendingNotify внутри /state/activate; в Manual
+    //       активации нет → пинг бы долетал (Bug: «всё равно автосохраняются»).
+    // hasPendingSelect=true ставим всё равно — он держит «Активировать»
+    // кликабельной даже при isGloballyActive=true (если потом юзер вернётся
+    // к исходной модели в карусели). FamilyCard сам обновит localId через
+    // selectVariant — это его внутренний state, не наш activeModelId.
+    if (!autoActivateEnabled) {
+      setHasPendingSelect(true);
+      return;
+    }
+
+    // Auto path: scheduleAutoActivate ниже инкрементнёт activateOpRef и
+    // перехватит любой pending in-flight autoActivate (на старую модель).
+    // Его rollback после catch не затрёт наш свежий optimistic UI, потому
+    // что захваченная opVersion уже не равна текущей.
     setActiveModelId(modelId);
     setHasPendingSelect(true);
     selectChainRef.current = selectChainRef.current.then(() =>
@@ -162,6 +365,14 @@ export function MediaSettingsView({
         console.error("[settings] select-model failed", modelId, e);
       }),
     );
+    // Поверх silent-select запускаем full activate синхронно — модель сразу
+    // становится реально активной в боте (state → *_ACTIVE) без тапа
+    // «Активировать». Сам autoActivate await'ит selectChainRef внутри, так
+    // что порядок silent-select → activate сохраняется. Silent-select с
+    // keepalive страхует ранний X-close: если юзер закроет webview до
+    // resolve'а activate, БД-поле уже сохранено, server-side trailing-debounce
+    // пришлёт обычный notify.
+    scheduleAutoActivate(modelId);
   };
 
   const handleSettingChange = (modelId: string, key: string, value: unknown) => {
@@ -210,12 +421,25 @@ export function MediaSettingsView({
     api.state
       .setSelectedMode(modelId, modeId)
       .catch((e) => console.error("[settings] setSelectedMode failed", modelId, modeId, e));
-    // Changing the mode invalidates the current "active" state — the bot needs
-    // to be re-activated so it asks for the new mode. Drop active state locally
-    // so the Activate button reappears for this model.
+    // Mode change инвалидирует текущую активацию — бот должен заново спросить
+    // слоты под новый mode.
+    //
+    // Auto-режим: ресетим lastActivatedRef (иначе scheduleAutoActivate
+    // задедупит на ту же модель) и реактивируем сразу. activeModelId НЕ
+    // сбрасываем — picker'у нельзя видеть "" иначе на следующем тике он
+    // подхватит familyDefault как target и активирует чужую модель.
+    //
+    // Manual-режим (тогл «Активация моделей» = Вручную): возвращаемся к
+    // pre-autosave поведению — локально сбрасываем активную модель, чтобы
+    // кнопка «Активировать» снова появилась и юзер сам подтвердил новый mode.
     if (modelId === activeModelId) {
-      setActiveModelId("");
-      setState(undefined);
+      if (autoActivateEnabled) {
+        lastActivatedRef.current = null;
+        scheduleAutoActivate(modelId);
+      } else {
+        setActiveModelId("");
+        setState(undefined);
+      }
     }
   };
 
@@ -291,6 +515,7 @@ export function MediaSettingsView({
             activeModelId === standaloneModel.id &&
             isActiveSection(standaloneModel.section, stateStr)
           }
+          isSelected={activeModelId === standaloneModel.id}
           activeState={stateStr}
           savedId={savedId}
           allModelSettings={allModelSettings}

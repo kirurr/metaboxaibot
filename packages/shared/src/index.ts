@@ -80,7 +80,8 @@ export { GENERATION_ERROR_CODES, classifyUserFacingError } from "./error-codes.j
 export type { GenerationErrorCode } from "./error-codes.js";
 
 // Web token (URL-based auth for KeyboardButtonWebApp where initData is unavailable)
-export { generateWebToken, verifyWebToken } from "./webtoken.js";
+export { generateWebToken, verifyWebToken, WebTokenError } from "./webtoken.js";
+export type { VerifyWebTokenResult, WebTokenErrorCode } from "./webtoken.js";
 
 // Config
 export { config } from "./config.js";
