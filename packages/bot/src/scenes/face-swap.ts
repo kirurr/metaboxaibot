@@ -29,14 +29,34 @@ const processedMediaGroups = new Set<string>();
 
 /**
  * Hardcoded prompt for face swap. First image = reference (pose / composition /
- * background), second = user's face. Kept in English to match other hardcoded
- * provider prompts in the codebase.
+ * background / lighting), second = user's face (identity only). Kept in English
+ * to match other hardcoded provider prompts in the codebase.
+ *
+ * Прошлый промпт был слишком общий → модель не следовала пропорциям, не
+ * подгоняла свет и цветокор, выдавала кринж-композит. Текущий — пошаговый,
+ * с явным контрактом «первое = всё кроме лица, второе = только identity».
  */
 const FACE_SWAP_PROMPT =
-  "Replace the face of the person in the first image with the face from the second image. " +
-  "Keep the first image's pose, body, clothing, lighting and background unchanged. " +
-  "Match skin tone and lighting naturally. " +
-  "Output the same aspect ratio and composition as the first image.";
+  "Generate a single photorealistic image where the person from the first image now has the " +
+  "facial identity (eyes, nose, mouth shape, face structure, ethnicity, age) of the person " +
+  "from the second image. The face must look like it was physically present in the first " +
+  "image's scene — naturally lit and naturally placed.\n\n" +
+  "ADAPT the face to fit the first image's environment — do not just stamp it on:\n" +
+  "- Scale face proportions naturally to fit the body and head shape from the first image\n" +
+  "- Re-light the face so its shadows, highlights and ambient occlusion match the first image's " +
+  "lighting direction and intensity exactly\n" +
+  "- Adjust skin tone, undertones and color temperature to match the first image's color " +
+  "grading and white balance\n" +
+  "- Match the face's contrast, saturation, sharpness, film grain and lens characteristics " +
+  "to the rest of the first image\n" +
+  "- Blend edges seamlessly along the jawline, hairline, ears and neck — no visible seams, " +
+  "no overlay, no Photoshop look\n\n" +
+  "Keep from the first image (do not regenerate these): pose, body, body proportions, hair, " +
+  "hairstyle, clothing, accessories, background, framing, composition, camera angle, " +
+  "perspective and depth of field. Keep the EXACT aspect ratio.\n\n" +
+  "Output one image that looks like a real unedited photograph taken with one camera in one " +
+  "scene — natural, organic, indistinguishable from a single shot. Avoid: airbrushed look, " +
+  "plastic skin, mismatched colors, composite seams, mannequin look, AI-collage feel.";
 
 /** Entry — user tapped «🔄 Замена лица» in the Scenarios submenu. */
 export async function handleFaceSwapEnter(ctx: BotContext): Promise<void> {
@@ -217,9 +237,14 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   // теряет последнюю загрузку до явного нового захода.
   if (submitOk) {
     await userStateService.clearMediaInputs(userId, FACE_SWAP_BUFFER_MODEL_ID);
+    // Авто-рестарт flow: после успешного submit оставляем юзера в состоянии
+    // ожидания нового референса. Если он пришлёт фото после результата — оно
+    // подхватится как старт следующей Замены лица. Без этого SCENARIOS_SECTION
+    // не имеет state-handler'а для фото — handleNoTool съел бы его с
+    // невнятным «Раздел не выбран».
+    await userStateService.setState(userId, "FACE_SWAP_AWAIT_REFERENCE", null);
+  } else {
+    // На ошибке возврат в Сценарии — оттуда юзер сам решит, что делать.
+    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
   }
-  // Возвращаемся в Сценарии без дубль-сообщения «Выберите сценарий 👇».
-  // Persistent reply-клавиатура уже показывает нужные кнопки — текст-меню
-  // после генерации только засоряет чат.
-  await userStateService.setState(userId, "SCENARIOS_SECTION", null);
 }
