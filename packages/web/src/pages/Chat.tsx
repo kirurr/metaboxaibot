@@ -45,6 +45,10 @@ type Msg = {
   localId?: string;
   /** Прикреплённые файлы — рендерятся над bubble. */
   attachments?: MessageAttachmentDto[];
+  /** Raw input tokens (для assistant; latest assistant сообщение — источник current-context для composer'а). */
+  inputTokens?: number;
+  /** Raw output tokens (для assistant). */
+  outputTokens?: number;
 };
 
 /** `accept` для file picker'а — синхронизирован с серверным `isAllowedUploadMime`. */
@@ -289,6 +293,40 @@ export default function Chat() {
   );
   const activeDialog = activeId ? dialogs.find((d) => d.id === activeId) : null;
 
+  // Текущий контекст диалога = high-water mark по `inputTokens+outputTokens`
+  // среди всех ассистент-сообщений + грубая оценка для сообщений ПОСЛЕ
+  // референсного ассистента (length/4 — тот же эвристик, что в composer'е).
+  //
+  // Почему high-water mark, а не просто последний ассистент: сервер режет
+  // историю при превышении ~75% окна модели (см.
+  // packages/api/src/ai/llm/truncate.ts:71 — `truncateInputDefault`). Поэтому
+  // `inputTokens` нового ассистента может ОКАЗАТЬСЯ МЕНЬШЕ предыдущего —
+  // и индикатор бы прыгал вниз. Берём максимум, чтобы значение росло
+  // монотонно и честно показывало пик использования контекста.
+  const currentContextTokens = useMemo(() => {
+    let bestIdx = -1;
+    let bestTokens = 0;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== "ai") continue;
+      const inT = m.inputTokens;
+      const outT = m.outputTokens;
+      if (typeof inT !== "number" || typeof outT !== "number") continue;
+      const sum = inT + outT;
+      if (sum > bestTokens) {
+        bestTokens = sum;
+        bestIdx = i;
+      }
+    }
+    let total = bestTokens;
+    // Сообщения после high-water mark (например, юзер только что отправил
+    // следующий вопрос, ответ ещё стримится) — оцениваем по тексту.
+    for (let i = bestIdx + 1; i < messages.length; i++) {
+      total += Math.max(1, Math.round(messages[i].text.length / 4));
+    }
+    return total;
+  }, [messages]);
+
   const autosize = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
@@ -467,9 +505,10 @@ export default function Chat() {
               return next;
             });
           },
-          onDone: ({ tokensUsed: used, balance }) => {
+          onDone: ({ tokensUsed: used, inputTokens, outputTokens, balance }) => {
             tokensUsed = used;
-            // Финализируем мету у последнего AI-сообщения.
+            // Финализируем мету у последнего AI-сообщения + сохраняем raw-токены
+            // для composer-индикатора контекста (см. рендер ниже).
             setMessages((m) => {
               const next = [...m];
               const last = next[next.length - 1];
@@ -478,6 +517,8 @@ export default function Chat() {
                 next[next.length - 1] = {
                   ...last,
                   meta: `${modelName} · ${used} tokens`,
+                  inputTokens,
+                  outputTokens,
                 };
               }
               return next;
@@ -814,10 +855,17 @@ export default function Chat() {
                   </div>
                 )}
               </div>
-							{/* TODO: add here tokens usage */}
               <span className="hint" style={{ marginLeft: "auto" }}>
                 ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span>{" "}
                 {t("chat.tokensEst")}
+                {selectedModel?.contextWindow ? (
+                  <>
+                    {" · "}
+                    <span className="mono">
+                      {formatTokensK(currentContextTokens)} / {formatTokensK(selectedModel.contextWindow)}
+                    </span>
+                  </>
+                ) : null}
               </span>
             </div>
           </div>
@@ -827,11 +875,28 @@ export default function Chat() {
   );
 }
 
+/**
+ * Форматирует число токенов как `1.2K` / `128K` / `850`. Для значений ≥10K
+ * округляем до целого (`128K`, не `128.0K`); для 1K..10K оставляем 1 знак
+ * после запятой (`1.2K`); ниже — как есть.
+ */
+function formatTokensK(n: number): string {
+  if (n < 1000) return String(n);
+  const v = n / 1000;
+  return v >= 10 ? `${Math.round(v)}K` : `${v.toFixed(1)}K`;
+}
+
 function messageDtoToMsg(m: MessageDto): Msg {
+  const isAi = m.role !== "user";
   return {
     role: m.role === "user" ? "user" : "ai",
     text: m.content,
     ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
+    // Сохраняем токены только для assistant — для user они в БД лежат как 0
+    // и не участвуют в подсчёте контекста (полная история уже в inputTokens
+    // следующего assistant-ответа).
+    ...(isAi && typeof m.inputTokens === "number" ? { inputTokens: m.inputTokens } : {}),
+    ...(isAi && typeof m.outputTokens === "number" ? { outputTokens: m.outputTokens } : {}),
   };
 }
 

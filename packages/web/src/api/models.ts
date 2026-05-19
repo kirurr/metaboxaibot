@@ -98,6 +98,8 @@ export type WebModelDto = {
   supportedAspectRatios: string[] | null;
   supportedDurations: number[] | null;
   durationRange: { min: number; max: number } | null;
+  /** Окно контекста модели (input+output tokens); `null` если у модели не задано. */
+  contextWindow: number | null;
   tokenCostApprox: number;
   /** msg / mpx / second / mvideotoken / kchar / request — единица для подписи стоимости. */
   tokenCostUnit: "msg" | "mpx" | "second" | "mvideotoken" | "kchar" | "request" | string;

@@ -70,6 +70,7 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const isPerMVideoToken = (m.costUsdPerMVideoToken ?? 0) > 0;
   const isPerSecond = (m.costUsdPerSecond ?? 0) > 0;
   const isPerKChar = m.costUsdPerKChar !== undefined;
+
   return {
     id: m.id,
     name: m.name,
@@ -92,6 +93,8 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     supportedAspectRatios: m.supportedAspectRatios ?? null,
     supportedDurations: m.supportedDurations ?? null,
     durationRange: m.durationRange ?? null,
+    /** Окно контекста модели (input+output tokens). Используется веб-композером для индикатора «X / Y» под полем ввода. */
+    contextWindow: m.contextWindow ?? null,
     // Modes (null = single-mode model, без выбора режима в UI).
     modes,
     // Слоты для медиа-инпутов (фильтруются на клиенте по active mode.slotKeys).
@@ -186,6 +189,7 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
                 supportedAspectRatios: { type: "array", nullable: true },
                 supportedDurations: { type: "array", nullable: true },
                 durationRange: { type: "object", nullable: true, additionalProperties: true },
+                contextWindow: { type: "integer", nullable: true },
                 tokenCostApprox: { type: "number" },
                 tokenCostUnit: { type: "string" },
                 modes: { type: "array", nullable: true },
