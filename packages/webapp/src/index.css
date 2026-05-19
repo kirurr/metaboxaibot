@@ -2965,8 +2965,7 @@ textarea::placeholder {
   right: 12px;
   background: var(--accent, #6c63ff);
   color: #fff;
-  /* padding-top увеличен, чтобы × сверху-справа не перекрывал первую строку. */
-  padding: 28px 14px 12px 14px;
+  padding: 12px 14px 12px 14px;
   border-radius: 12px;
   /* < .modal-overlay (1000), но > .bottom-nav и обычного контента */
   z-index: 999;
@@ -2986,11 +2985,19 @@ textarea::placeholder {
   line-height: 1.35;
   text-align: left;
   overflow-wrap: anywhere;
+  /* Без отступа между предложениями: \n из i18n превращается в строчный перенос
+     (а не схлопывается в пробел) и одновременно нет лишнего пустого блока, как
+     было бы с \n\n + pre-wrap. */
+  white-space: pre-line;
+  /* Освобождаем правый край для абсолютной кнопки × — иначе текст пройдёт под ней. */
+  padding-right: 28px;
 }
 
 .auto-activated-toast__close {
   position: absolute;
-  top: 4px;
+  /* Выровнено по центру первой строки сообщения: padding-top 12px + half line
+     (≈9px при 13px/1.35) − half button (12px) = ~9px. */
+  top: 9px;
   right: 6px;
   width: 24px;
   height: 24px;
