@@ -32,11 +32,26 @@ export default {
     audio: "🎧 AI Audio",
     video: "🎬 Video of the Future",
     storage: "📁 Media Storage",
+    scenarios: "🎯 Ready-made scenarios",
     help: "❓ Help",
     knowledgeBase: "📖 Knowledge Base",
     language: "🌐 Language",
     chooseLanguage: "Choose a language:",
     languageChanged: "✅ Language changed.",
+  },
+  scenarios: {
+    sectionTitle: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    faceSwap: "🔄 Face swap",
+    backToMain: "🏠 Back to main menu",
+    faceSwapStep1:
+      "🔄 <b>Face swap — step 1/2</b>\n\nSend a <b>reference photo</b> — the pose, look, and frame you want to appear in. The result will use the aspect ratio of this photo.",
+    faceSwapStep2:
+      "🔄 <b>Face swap — step 2/2</b>\n\nSend a <b>photo of your face</b> — close-up, sharp and clear.",
+    faceSwapNotPhoto: "📷 That's not a photo. Please send an image.",
+    faceSwapGenerating: "🎨 Starting face swap...",
+    faceSwapUploadFailed: "❌ Failed to save the photo. Please try again.",
+    faceSwapSubmitFailed: "❌ Failed to start generation. Please try again.",
+    faceSwapPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

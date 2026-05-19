@@ -54,6 +54,7 @@ export {
   MODEL_TO_FAMILY,
 } from "./constants/model-families.js";
 export { BOT_STATES, SECTION_BY_STATE, WELCOME_BONUS_TOKENS } from "./constants/states.js";
+export { FACE_SWAP_BUFFER_MODEL_ID } from "./constants/face-swap.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";

@@ -10,7 +10,15 @@ import {
   handleLanguageChangeSelect,
   handleOnboardingOk,
 } from "./commands/start.js";
-import { handleMenu, handleGpt, handleDesign, handleAudio, handleVideo } from "./commands/menu.js";
+import {
+  handleMenu,
+  handleGpt,
+  handleDesign,
+  handleAudio,
+  handleVideo,
+  handleScenarios,
+} from "./commands/menu.js";
+import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
 import { handleNoTool } from "./handlers/no-tool.handler.js";
 import {
   handleNewGptDialog,
@@ -362,6 +370,9 @@ export function createBot(token: string): Bot<BotContext> {
       [t.menu.design]: () => handleDesign(ctx),
       [t.menu.audio]: () => handleAudio(ctx),
       [t.menu.video]: () => handleVideo(ctx),
+      [t.menu.scenarios]: () => handleScenarios(ctx),
+      [t.scenarios.faceSwap]: () => handleFaceSwapEnter(ctx),
+      [t.scenarios.backToMain]: () => handleMenu(ctx),
       [t.common.backToMain]: () => handleMenu(ctx),
       [t.gpt.backToMain]: () => handleMenu(ctx),
       [t.design.backToMain]: () => handleMenu(ctx),
@@ -463,6 +474,12 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document?.mime_type?.startsWith("image/"))
         return handleSoulPhotoCapture(ctx);
       return; // ignore non-image messages while waiting for soul photos
+    }
+    if (state?.state === "FACE_SWAP_AWAIT_REFERENCE" || state?.state === "FACE_SWAP_AWAIT_FACE") {
+      if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
+      return;
     }
     if (state?.state === "AUDIO_ACTIVE") {
       if (state.audioModelId === "voice-clone") {

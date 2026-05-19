@@ -1,7 +1,13 @@
 import type { BotContext } from "../types/context.js";
 import { buildMainMenuKeyboard } from "../keyboards/main-menu.keyboard.js";
 import { userStateService, dialogService } from "@metabox/api/services";
-import { config, generateWebToken, AI_MODELS, buildDialogHint } from "@metabox/shared";
+import {
+  config,
+  generateWebToken,
+  AI_MODELS,
+  buildDialogHint,
+  FACE_SWAP_BUFFER_MODEL_ID,
+} from "@metabox/shared";
 import type { Section } from "@metabox/shared";
 import { buildDesignModelKeyboard } from "../scenes/design.js";
 import { buildVideoModelKeyboard } from "../scenes/video.js";
@@ -22,10 +28,28 @@ async function activeDialogInfo(
 export async function handleMenu(ctx: BotContext): Promise<void> {
   if (ctx.user) {
     await userStateService.setState(ctx.user.id, "MAIN_MENU", null);
+    // Гасим висящий face-swap буфер на случай, если юзер выпрыгнул из flow на
+    // середине шага: не оставляем S3-ключи мёртвыми в user-state.
+    await userStateService
+      .clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID)
+      .catch(() => void 0);
     clearActiveSlot(ctx.user.id);
   }
   await ctx.reply(ctx.t.start.mainMenuTitle, {
     reply_markup: buildMainMenuKeyboard(ctx.t, ctx.user?.telegramId),
+  });
+}
+
+export async function handleScenarios(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  clearActiveSlot(ctx.user.id);
+  await userStateService.setState(ctx.user.id, "SCENARIOS_SECTION", null);
+  await ctx.reply(ctx.t.scenarios.sectionTitle, {
+    reply_markup: {
+      keyboard: [[{ text: ctx.t.scenarios.faceSwap }], [{ text: ctx.t.scenarios.backToMain }]],
+      resize_keyboard: true,
+      is_persistent: true,
+    },
   });
 }
 
