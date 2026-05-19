@@ -6163,3 +6163,117 @@ select {
     }
   }
 }
+
+/* ── Chat: gear → settings popover ─────────────────────────────────────────── */
+
+.composer .tool.is-open {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.chat-settings-pop {
+  z-index: 60;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  padding: 14px;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-panel-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-panel-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.settings-panel-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-hint);
+}
+
+/* Settings panel reuses .gen-pop-body / .gen-pop-chips-row / .gen-chip from
+   the generate scene — they already match the visual language and live in
+   .composer-row context. No extra rules needed for slider/select/text/number. */
+
+.settings-panel-toggle {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.settings-panel-toggle-track {
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease);
+}
+.settings-panel-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 160ms var(--ease), background 160ms var(--ease);
+}
+.settings-panel-toggle.on .settings-panel-toggle-track {
+  background: var(--accent, #4a8df5);
+  border-color: var(--accent, #4a8df5);
+}
+.settings-panel-toggle.on .settings-panel-toggle-thumb {
+  background: #fff;
+  transform: translateX(16px);
+}
+
+.settings-panel-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.settings-panel-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  align-self: flex-start;
+}
+.settings-panel-advanced-toggle:hover {
+  color: var(--text);
+}
+.settings-panel-advanced-arrow {
+  transition: transform 160ms var(--ease);
+}
+.settings-panel-advanced-toggle.open .settings-panel-advanced-arrow {
+  transform: rotate(180deg);
+}

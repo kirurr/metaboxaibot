@@ -20,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings as SettingsIcon,
   Sparkles,
   Trash2,
   X,
@@ -35,7 +36,16 @@ import type { DialogDto, MessageAttachmentDto, MessageDto } from "@/api/dialogs"
 import type { WebModelDto } from "@/api/models";
 import type { ApiError } from "@/api/client";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
+import {
+  getAllModelSettings,
+  resolveEffectiveSettings,
+  setDialogModelSettings,
+  setUserModelSettings,
+  type ModelSettingsRoot,
+} from "@/api/modelSettings";
 import { markdownComponents } from "@/components/chat/MarkdownElements";
+import { ChipPopover } from "@/components/settings/ChipPopover";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
 
 type Msg = {
   role: "user" | "ai";
@@ -82,10 +92,12 @@ function modelRate(m: WebModelDto): string {
   // до десятков, которое работает для image/video/audio (там значения 10–500 ✦),
   // здесь схлопывало бы всё в 0. Поэтому формат с 2–3 знаками после запятой.
   if (m.tokenCostUnit === "1k_tok") {
-    const v = m.tokenCostApprox;
+		// Стоимость в токенах умножаем на значение символов = 1000 токенов / ~3500 символов
+    const v = m.tokenCostApprox * 0.3;
     const formatted = v < 0.1 ? v.toFixed(3) : v.toFixed(2);
-    return `≈ ${formatted} ✦ / 1k tok`;
+    return `≈ ${formatted} ✦ / 1k symbol`;
   }
+
   const n = Math.round(m.tokenCostApprox / 10) * 10;
   const unit =
     m.tokenCostUnit === "msg"
@@ -199,6 +211,13 @@ export default function Chat() {
   // Хранятся локально и сбрасываются после успешной отправки или newChat().
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
 
+  // Полный корень `/model-settings` — `{ [modelId]: {...}, "dialog:<id>": {...} }`.
+  // Подтягиваем один раз на mount, мерджим клиент-сайдом через
+  // resolveEffectiveSettings — те же приоритеты, что у бэкенда
+  // (см. userStateService.getEffectiveDialogSettings).
+  const [settingsRoot, setSettingsRoot] = useState<ModelSettingsRoot>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const sideVisible = isMobile ? sideOpen : !sideCollapsed;
   const sideRef = useRef<HTMLElement | null>(null);
   const modelPickRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +225,11 @@ export default function Chat() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const settingsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const settingsPopRef = useRef<HTMLDivElement | null>(null);
+  // Дебаунсер PATCH-ей настроек: ключ `${bucket}::${key}` → таймер.
+  // 800мс совпадает с веб-аппом (GptManagementView.tsx:82-88).
+  const settingsDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Маркируем id диалогов, для которых история уже загружена/прогрета. Нужен
   // потому что после `createDialog` мы знаем, что диалог пустой, и эффект ниже
   // не должен ходить за `getMessages` — иначе он перетрёт оптимистично-добавленные
@@ -221,6 +245,32 @@ export default function Chat() {
   useEffect(() => {
     loadDialogs(SECTION);
   }, [loadDialogs]);
+
+  // Подтягиваем все настройки моделей одним запросом — клиент-сайд резолвим
+  // эффективные значения из defaults + user-level + dialog override.
+  // Игнорим ошибку (TELEGRAM_NOT_LINKED уже обрабатывает apiClient) — оставляем
+  // settingsRoot={}, эффективные значения упадут на defaults.
+  useEffect(() => {
+    let cancelled = false;
+    getAllModelSettings()
+      .then((root) => {
+        if (!cancelled) setSettingsRoot(root);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // На unmount — флашим pending-таймеры дебаунсера, чтобы не висели после ухода.
+  useEffect(() => {
+    const timers = settingsDebounceRef.current;
+    return () => {
+      for (const id of Object.values(timers)) clearTimeout(id);
+    };
+  }, []);
 
   // Mobile drawer outside-click.
   useEffect(() => {
@@ -247,6 +297,20 @@ export default function Chat() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [modelOpen]);
+
+  // Settings popover outside-click. Popover в portal'е → проверяем оба ref'а
+  // (кнопку-anchor и сам popup), иначе клик внутри popover'а закроет его.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (settingsBtnRef.current?.contains(t)) return;
+      if (settingsPopRef.current?.contains(t)) return;
+      setSettingsOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [settingsOpen]);
 
   // Auto-scroll к низу при росте треда.
   useEffect(() => {
@@ -300,6 +364,44 @@ export default function Chat() {
     [chatModels, modelId],
   );
   const activeDialog = activeId ? dialogs.find((d) => d.id === activeId) : null;
+
+  // Эффективные значения настроек для выбранной модели/диалога. Резолвится
+  // клиент-сайд из defaults + user-level overrides + dialog overrides — те же
+  // приоритеты, что у бэкенда в getEffectiveDialogSettings.
+  const settingValues = useMemo(() => {
+    if (!selectedModel) return {};
+    return resolveEffectiveSettings(settingsRoot, selectedModel.id, activeId, selectedModel.settings);
+  }, [settingsRoot, selectedModel, activeId]);
+
+  // Изменение настройки: optimistic local + debounced PATCH.
+  //   - Активный диалог есть → пишем в `dialog:<id>` (override только для этого треда).
+  //   - Черновик (нет диалога) → пишем в user-level для текущей модели. Когда
+  //     первое сообщение создаст диалог, бэкенд смержит user-level как defaults,
+  //     так что мигрировать ничего не нужно.
+  const updateSetting = useCallback(
+    (key: string, value: unknown) => {
+      if (!selectedModel) return;
+      const bucket = activeId ? `dialog:${activeId}` : selectedModel.id;
+      setSettingsRoot((prev) => ({
+        ...prev,
+        [bucket]: { ...(prev[bucket] ?? {}), [key]: value },
+      }));
+      const timerKey = `${bucket}::${key}`;
+      const existing = settingsDebounceRef.current[timerKey];
+      if (existing) clearTimeout(existing);
+      settingsDebounceRef.current[timerKey] = setTimeout(() => {
+        delete settingsDebounceRef.current[timerKey];
+        const patch = { [key]: value };
+        const fn = activeId
+          ? setDialogModelSettings(activeId, patch)
+          : setUserModelSettings(selectedModel.id, patch);
+        fn.catch(() => {
+          /* swallow — следующий патч заменит ошибочное состояние */
+        });
+      }, 800);
+    },
+    [selectedModel, activeId],
+  );
 
   // Текущий контекст диалога = high-water mark по `inputTokens+outputTokens`
   // среди всех ассистент-сообщений + грубая оценка для сообщений ПОСЛЕ
@@ -831,6 +933,31 @@ export default function Chat() {
               >
                 <Paperclip size={18} />
               </button>
+              <button
+                ref={settingsBtnRef}
+                className={clsx("tool", settingsOpen && "is-open")}
+                title={t("chat.settings.title")}
+                onClick={() => setSettingsOpen((v) => !v)}
+                disabled={!selectedModel}
+                aria-haspopup="dialog"
+                aria-expanded={settingsOpen}
+              >
+                <SettingsIcon size={18} />
+              </button>
+              {settingsOpen && selectedModel && (
+                <ChipPopover
+                  anchorRef={settingsBtnRef}
+                  popRef={settingsPopRef}
+                  className="chat-settings-pop"
+                >
+                  <SettingsPanel
+                    settings={selectedModel.settings}
+                    values={settingValues}
+                    onChange={updateSetting}
+                    advancedLabel={t("chat.settings.advanced")}
+                  />
+                </ChipPopover>
+              )}
               <textarea
                 ref={taRef}
                 placeholder={t("chat.promptPlaceholder")}
