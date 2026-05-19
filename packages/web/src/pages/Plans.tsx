@@ -31,7 +31,6 @@ const PERIOD_MONTHS: Record<Period, number> = { M1: 1, M3: 3, M6: 6, M12: 12 };
 export default function Plans() {
   const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
-  const openTelegramLinkModal = useUIStore((s) => s.openTelegramLinkModal);
 
   const [catalog, setCatalog] = useState<CatalogDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,15 +67,8 @@ export default function Plans() {
     return "M1";
   }
 
-  /** Универсальный обработчик ошибок покупки: TG-link / общая ошибка → toast или модалка. */
   function handleBuyError(err: unknown) {
     if (err instanceof ApiError) {
-      // Бэк отдаёт 409 если у юзера нет привязки TG (web-only signup).
-      if (err.status === 409) {
-        openTelegramLinkModal();
-        pushToast({ type: "warning", message: t("plans.linkTelegram") });
-        return;
-      }
       pushToast({ type: "error", message: err.message });
       return;
     }

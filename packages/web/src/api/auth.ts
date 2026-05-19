@@ -104,20 +104,3 @@ export function changePassword(oldPassword: string, newPassword: string) {
     { method: "POST", body: { oldPassword, newPassword } },
   );
 }
-
-export function linkTelegramInit() {
-  return apiClient<{ deepLinkUrl: string; state: string }>("/auth/web-link-telegram/init", {
-    method: "POST",
-  });
-}
-
-export function linkTelegramStatus(state: string) {
-  return apiClient<{ linked: boolean; telegramUsername: string | null }>(
-    "/auth/web-link-telegram/status",
-    { method: "POST", body: { state } },
-  );
-}
-
-export function unlinkTelegram() {
-  return apiClient<{ ok: true }>("/auth/web-unlink-telegram", { method: "POST" });
-}

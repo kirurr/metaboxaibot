@@ -32,7 +32,7 @@ model User {
   isNew                    Boolean @default(true)
   isBlocked                Boolean @default(false)
   referredById             BigInt?
-  metaboxUserId            String? // UUID пользователя в Metabox (после привязки)
+  metaboxUserId            String? @unique // UUID пользователя в Metabox (после привязки)
   metaboxReferralCode      String? // Реферальный код Metabox (кешируется при привязке)
   finishedOnboarding       Boolean @default(false)
   generationCount          Int     @default(0)
@@ -609,7 +609,10 @@ model PricingOverride {
 // ─────────────────────────────────────────────
 model GrantedMetaboxOrder {
   orderId     String   @id
-  telegramId  BigInt
+  // Nullable: web-only юзеры (создан через ai.metabox.global без TG-привязки)
+  // тоже получают token-grants синком, и для них telegramId отсутствует.
+  // Дедуп всё равно работает по orderId как PK.
+  telegramId  BigInt?
   tokens      Decimal  @db.Decimal(12, 4)
   description String?
   grantedAt   DateTime @default(now())

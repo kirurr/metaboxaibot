@@ -152,7 +152,6 @@ export default function Chat() {
   const dialogs = useDialogsStore((s) => s.dialogs);
   const dialogsLoaded = useDialogsStore((s) => s.loaded);
   const dialogsLoading = useDialogsStore((s) => s.isLoading);
-  const dialogsErrorCode = useDialogsStore((s) => s.errorCode);
   const loadDialogs = useDialogsStore((s) => s.load);
   const prependDialog = useDialogsStore((s) => s.prepend);
   const renameInStore = useDialogsStore((s) => s.rename);
@@ -496,9 +495,7 @@ export default function Chat() {
       );
     } catch (err) {
       const e = err as ApiError;
-      if (e.code !== "TELEGRAM_NOT_LINKED") {
-        setSendError(e.message || t("chat.errorSend"));
-      }
+      setSendError(e.message || t("chat.errorSend"));
       setMessages((m) => m.filter((x) => x.localId !== localId + ".ai"));
     } finally {
       setSending(false);
@@ -580,12 +577,7 @@ export default function Chat() {
             {!dialogsLoaded && dialogsLoading && (
               <div className="cs-group">{t("chat.loadingDialogs")}</div>
             )}
-            {dialogsLoaded && dialogsErrorCode === "TELEGRAM_NOT_LINKED" && (
-              <div className="cs-group" style={{ color: "var(--text-secondary)" }}>
-                {t("chat.linkTgToSeeDialogs")}
-              </div>
-            )}
-            {dialogsLoaded && filteredDialogs.length === 0 && !dialogsErrorCode && (
+            {dialogsLoaded && filteredDialogs.length === 0 && (
               <div className="cs-group">{search ? t("common.empty") : t("chat.noDialogs")}</div>
             )}
             {filteredDialogs.length > 0 && <div className="cs-group">{t("chat.recent")}</div>}

@@ -360,6 +360,7 @@ const translations = {
     "linkMetabox.submit": "Continue",
     "linkMetabox.error": "Error. Please check your details and try again.",
     "linkMetabox.error.emailExists": "This email is already registered. Try logging in instead.",
+    "linkMetabox.error.emailExists.switchToLogin": "Sign in with this email",
     "linkMetabox.error.telegramLinked":
       "This Telegram account is already linked to a Metabox account.",
     "linkMetabox.error.userNotFound": "No account found with this email.",
@@ -894,6 +895,7 @@ const translations = {
     "linkMetabox.submit": "Продолжить",
     "linkMetabox.error": "Ошибка. Проверьте данные и попробуйте снова.",
     "linkMetabox.error.emailExists": "Этот email уже зарегистрирован. Попробуйте войти.",
+    "linkMetabox.error.emailExists.switchToLogin": "Войти с этой почтой",
     "linkMetabox.error.telegramLinked": "Этот аккаунт Telegram уже привязан к Metabox.",
     "linkMetabox.error.userNotFound": "Аккаунт с таким email не найден.",
     "linkMetabox.error.invalidPassword": "Неверный пароль.",

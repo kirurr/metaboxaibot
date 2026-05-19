@@ -64,20 +64,12 @@ async function parseError(res: Response): Promise<ApiError> {
   } catch {
     /* ignore */
   }
-  const err = new ApiError(
+  return new ApiError(
     res.status,
     body?.code,
     body?.error || body?.message || res.statusText || "Request failed",
     body,
   );
-  // Глобальный handler: 403 TELEGRAM_NOT_LINKED — открыть модалку
-  if (res.status === 403 && body?.code === "TELEGRAM_NOT_LINKED") {
-    // Импортируем lazy чтобы не было циклической зависимости модулей
-    import("@/stores/uiStore").then(({ useUIStore }) => {
-      useUIStore.getState().openTelegramLinkModal();
-    });
-  }
-  return err;
 }
 
 export async function apiClient<TResponse = unknown, TBody = unknown>(

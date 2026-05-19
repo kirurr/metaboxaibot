@@ -151,18 +151,6 @@
     "title": "Страница не найдена",
     "toHome": "На главную"
   },
-  "telegramLink": {
-    "title": "Подключите Telegram-бот",
-    "intro": "Для доступа к нейросетям привяжите Telegram к аккаунту.",
-    "introWithContext": "Чтобы {{context}}, привяжите Telegram к аккаунту.",
-    "instructions": "Нажмите кнопку ниже, откройте бота и нажмите «Start». После подключения доступ откроется автоматически.",
-    "openBot": "Открыть Telegram-бот",
-    "cancel": "Отмена",
-    "waiting": "Ожидаем подключение…",
-    "linkError": "Не удалось получить ссылку",
-    "linkedToast": "Telegram @{{username}} привязан",
-    "linkedToastNoUsername": "Telegram привязан"
-  },
   "notifications": {
     "title": "Уведомления",
     "empty": "Нет новых уведомлений"
@@ -215,7 +203,6 @@
     "buy": "Купить",
     "processing": "Обработка…",
     "loadError": "Не удалось загрузить каталог. Попробуйте позже.",
-    "linkTelegram": "Привяжите Telegram, чтобы совершать покупки.",
     "badgeTop": "Топ",
     "badgeProfitable": "Выгодно"
   },
@@ -249,7 +236,6 @@
     "searchDialogs": "Поиск по диалогам",
     "loadingHistory": "Загрузка истории…",
     "loadingDialogs": "Загрузка…",
-    "linkTgToSeeDialogs": "Привяжите Telegram, чтобы видеть историю диалогов.",
     "noDialogs": "Пока нет диалогов",
     "recent": "Недавние",
     "messagesCount_one": "{{count}} сообщение",

@@ -82,6 +82,8 @@ export {
   resendMetaboxVerification,
   changeMetaboxEmailPending,
   transferOnDeletion,
+  linkTelegramFromWeb,
+  followMetaboxMergeChain,
 } from "./metabox-bridge.service.js";
 export type {
   AiBotProduct,
@@ -90,6 +92,7 @@ export type {
   CatalogProduct,
   RecordSaleResult,
   MergedAccountInfo,
+  LinkTelegramFromWebResult,
 } from "./metabox-bridge.service.js";
 export { getRate, calcStars, updateRate } from "./exchange-rate.service.js";
 export { userUploadsService } from "./user-uploads.service.js";
@@ -109,6 +112,7 @@ export type {
 
 // ── Web (ai.metabox.global) ─────────────────────────────────────────────
 export { consumeLinkTelegramState, markLinkTelegramLinked } from "./web-session.service.js";
+export { ensureAibUserForMetabox, mergeWebUserIntoBotUser } from "./account-sync.service.js";
 
 // ── Account deletion ────────────────────────────────────────────────────
 export {

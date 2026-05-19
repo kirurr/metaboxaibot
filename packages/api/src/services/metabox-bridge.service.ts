@@ -390,6 +390,54 @@ export async function getPendingTokenGrants(
   return data.orders ?? [];
 }
 
+/** Same as getPendingTokenGrants, но ключуется по metaboxUserId для web-only юзеров. */
+export async function getPendingTokenGrantsByMetabox(
+  metaboxUserId: string,
+): Promise<Array<{ orderId: string; tokens: number; description: string }>> {
+  const data = await get<{
+    orders: Array<{ orderId: string; tokens: number; description: string }>;
+  }>(`/internal/pending-token-grants?metaboxUserId=${encodeURIComponent(metaboxUserId)}`);
+  return data.orders ?? [];
+}
+
+export interface LinkTelegramFromWebResult {
+  ok: boolean;
+  metaboxUserId: string;
+  mergedFrom?: MergedAccountInfo;
+  alreadyLinked?: boolean;
+}
+
+/**
+ * Линкует Telegram-юзера к metabox-аккаунту в web-initiated flow (linkweb_).
+ * Если на metabox-стороне был stub с этим telegramId — мержит его в R.
+ * Может бросать `MetaboxApiError` 409 с кодами:
+ *   - TELEGRAM_MISMATCH — на metaboxUserId уже другой telegramId
+ *   - TELEGRAM_ALREADY_LINKED — telegramId занят другим real-аккаунтом
+ */
+export async function linkTelegramFromWeb(params: {
+  metaboxUserId: string;
+  telegramId: bigint;
+  telegramUsername?: string | null;
+}): Promise<LinkTelegramFromWebResult> {
+  return post<LinkTelegramFromWebResult>("/link-telegram-from-web", {
+    metaboxUserId: params.metaboxUserId,
+    telegramId: params.telegramId.toString(),
+    telegramUsername: params.telegramUsername ?? undefined,
+  });
+}
+
+/**
+ * Резолвит metaboxUserId через merge-chain на metabox-стороне. Возвращает
+ * live id (если переданный id — frozen secondary, возвращается primary'й).
+ * Если merge-chain не активен, возвращается тот же id.
+ */
+export async function followMetaboxMergeChain(metaboxUserId: string): Promise<string> {
+  const res = await get<{ metaboxUserId: string }>(
+    `/internal/follow-merge?metaboxUserId=${encodeURIComponent(metaboxUserId)}`,
+  );
+  return res.metaboxUserId;
+}
+
 /** Mark a token-pack order as granted in the bot (sets tokensGrantedToBot = true on Metabox). */
 export async function markOrderGrantedOnMetabox(orderId: string): Promise<void> {
   try {
@@ -412,8 +460,7 @@ export async function markTokensGrantedOnMetabox(subscriptionId: string): Promis
   }
 }
 
-/** Fetch subscription status for a user from Metabox. */
-export async function getSubscriptionStatus(telegramId: bigint): Promise<{
+export interface SubscriptionStatus {
   subscription: {
     subscriptionId: string;
     planName: string;
@@ -424,8 +471,18 @@ export async function getSubscriptionStatus(telegramId: bigint): Promise<{
     tokensGranted: number;
     tokensGrantedToBot: boolean;
   } | null;
-}> {
+}
+
+/** Fetch subscription status for a user from Metabox by telegramId. */
+export async function getSubscriptionStatus(telegramId: bigint): Promise<SubscriptionStatus> {
   return get(`/internal/subscription-status?telegramId=${telegramId.toString()}`);
+}
+
+/** Same as getSubscriptionStatus, но для web-only юзеров — ключуется по metaboxUserId. */
+export async function getSubscriptionStatusByMetabox(
+  metaboxUserId: string,
+): Promise<SubscriptionStatus> {
+  return get(`/internal/subscription-status?metaboxUserId=${encodeURIComponent(metaboxUserId)}`);
 }
 
 // ── Web (ai.metabox.global) методы ──────────────────────────────────────────
@@ -461,7 +518,12 @@ export interface WebRegisterResult {
   referralCode: string;
 }
 
-/** Регистрация нового юзера с ai.metabox.global. Создаёт MetaBox User. */
+/** Регистрация нового юзера с ai.metabox.global. Создаёт MetaBox User.
+ *
+ * При коллизии по email возвращается `MetaboxApiError` со `status === 409` и
+ * `data.metaboxUserId` — id существующего metabox-юзера. caller использует
+ * его, чтобы посмотреть, есть ли уже привязанный AI Box User, и сформировать
+ * правильное сообщение для фронта. */
 export async function webRegister(params: {
   email: string;
   password: string;

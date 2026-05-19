@@ -151,18 +151,6 @@
     "title": "Page not found",
     "toHome": "Go home"
   },
-  "telegramLink": {
-    "title": "Connect the Telegram bot",
-    "intro": "Link Telegram to your account to access AI models.",
-    "introWithContext": "Link Telegram to your account to {{context}}.",
-    "instructions": "Click the button below, open the bot and press «Start». Access will unlock automatically once linked.",
-    "openBot": "Open Telegram bot",
-    "cancel": "Cancel",
-    "waiting": "Waiting for connection…",
-    "linkError": "Couldn't get the link",
-    "linkedToast": "Telegram @{{username}} linked",
-    "linkedToastNoUsername": "Telegram linked"
-  },
   "notifications": {
     "title": "Notifications",
     "empty": "No new notifications"
@@ -215,7 +203,6 @@
     "buy": "Buy",
     "processing": "Processing…",
     "loadError": "Couldn't load the catalog. Try again later.",
-    "linkTelegram": "Link Telegram to make purchases.",
     "badgeTop": "Top",
     "badgeProfitable": "Best value"
   },
@@ -249,7 +236,6 @@
     "searchDialogs": "Search dialogs",
     "loadingHistory": "Loading history…",
     "loadingDialogs": "Loading…",
-    "linkTgToSeeDialogs": "Link Telegram to see your dialog history.",
     "noDialogs": "No dialogs yet",
     "recent": "Recent",
     "messagesCount_one": "{{count}} message",

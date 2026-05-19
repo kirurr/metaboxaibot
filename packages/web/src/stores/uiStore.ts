@@ -11,23 +11,16 @@ interface UIState {
   sidebarOpen: boolean;
   toasts: Toast[];
 
-  /** Модалка «Привяжите Telegram». Если context задан, он подставляется в текст. */
-  telegramLinkModal: { open: boolean; context?: string };
-
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
 
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
-
-  openTelegramLinkModal: (context?: string) => void;
-  closeTelegramLinkModal: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
   sidebarOpen: true,
   toasts: [],
-  telegramLinkModal: { open: false },
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -42,7 +35,4 @@ export const useUIStore = create<UIState>((set, get) => ({
     return id;
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) })),
-
-  openTelegramLinkModal: (context) => set({ telegramLinkModal: { open: true, context } }),
-  closeTelegramLinkModal: () => set({ telegramLinkModal: { open: false } }),
 }));

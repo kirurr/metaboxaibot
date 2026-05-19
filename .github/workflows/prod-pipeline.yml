@@ -348,18 +348,21 @@ jobs:
             #   • nginx.web-prod.conf     — Web SPA на ai.metabox.global
             #   • nginx.myaibox-tma.conf  — Mini App + API на tma.myaibox.ai (зеркало)
             #   • nginx.myaibox-web.conf  — Web SPA на myaibox.ai (зеркало)
+            #   • nginx.nbsp.conf         — vanity-редирект nbsp.myaibox.ai → myaibox.ai/admin
             #   • nginx.metrics.conf      — Observability на metrics.aibox.metabox.global
             #
             # Для новых доменов перед первым reload'ом nginx нужно вручную
             # получить SSL-серты (Certbot не запускается из CI):
             #   sudo certbot --nginx -d myaibox.ai -d www.myaibox.ai
             #   sudo certbot --nginx -d tma.myaibox.ai
+            #   sudo certbot --nginx -d nbsp.myaibox.ai
             # До этого `nginx -t` будет падать на отсутствующих сертах —
             # симлинки можно оставить, но физически серверы 443 не поднимутся.
             sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.server.conf       /etc/nginx/sites-enabled/metabox             2>/dev/null || true
             sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.web-prod.conf     /etc/nginx/sites-enabled/metabox-web         2>/dev/null || true
             sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.myaibox-tma.conf  /etc/nginx/sites-enabled/myaibox-tma         2>/dev/null || true
             sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.myaibox-web.conf  /etc/nginx/sites-enabled/myaibox-web         2>/dev/null || true
+            sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.nbsp.conf         /etc/nginx/sites-enabled/nbsp                2>/dev/null || true
             sudo ln -sf /opt/metaboxaibot/infra/nginx/nginx.metrics.conf     /etc/nginx/sites-enabled/metabox-metrics     2>/dev/null || true
 
             sudo nginx -t && sudo systemctl reload nginx

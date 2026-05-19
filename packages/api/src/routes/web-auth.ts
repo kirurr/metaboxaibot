@@ -36,6 +36,7 @@ import {
   checkLinkTelegramLinked,
 } from "../services/web-session.service.js";
 import { extractWebUserFromRequest, webAuthPreHandler } from "../middlewares/web-auth.js";
+import { ensureAibUserForMetabox } from "../services/account-sync.service.js";
 import { config, SUPPORTED_LANGUAGES } from "@metabox/shared";
 
 // Set для O(1) валидации `language` в `/web/me` PATCH. Без проверки фронт мог бы
@@ -285,17 +286,50 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           });
         } catch (err) {
           if (err instanceof MetaboxApiError) {
-            if (err.status === 409)
-              return reply.code(409).send({ error: "Email уже зарегистрирован" });
+            if (err.status === 409) {
+              // Email уже зарегистрирован на Metabox. Если этот юзер уже
+              // привязан к AI Box (есть User с этим metaboxUserId) — даём
+              // спец-сообщение, чтобы UX подсказывал «логиньтесь Metabox-
+              // кредами», а не «регистрируйтесь заново». Если не привязан —
+              // тоже отправляем на login (там auto-create через
+              // ensureAibUserForMetabox), но с более общим текстом.
+              const existingMetaboxId =
+                typeof err.data?.metaboxUserId === "string" ? err.data.metaboxUserId : undefined;
+              if (existingMetaboxId) {
+                const aibLinked = await findAibUser(existingMetaboxId);
+                if (aibLinked) {
+                  return reply.code(409).send({
+                    code: "EMAIL_LINKED_TO_AIBOX",
+                    error:
+                      "Аккаунт с такой почтой уже существует. Используйте для входа email и пароль Metabox-аккаунта.",
+                  });
+                }
+              }
+              return reply.code(409).send({
+                code: "EMAIL_EXISTS",
+                error:
+                  "Аккаунт с такой почтой уже существует. Войдите, используя ваш Metabox-пароль.",
+              });
+            }
             if (err.status === 400) return reply.code(400).send({ error: err.message });
           }
           logger.error({ err }, "web-signup: metabox register failed");
           return reply.code(502).send({ error: "Не удалось создать аккаунт" });
         }
 
+        // Создаём AI Box User сразу при регистрации — иначе все защищённые
+        // /web/* endpoint'ы вернут 403 на первый запрос. Sync token-grants
+        // и subscription для нового metabox-юзера: ожидаемо пусто, но
+        // ensureAibUser идемпотентен.
+        const ensured = await ensureAibUserForMetabox({
+          metaboxUserId: registered.metaboxUserId,
+          firstName: registered.firstName,
+          lastName: registered.lastName,
+        });
+
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
           metaboxUserId: registered.metaboxUserId,
-          aibUserId: null, // регистрация на вебе не создаёт AI Box User
+          aibUserId: ensured.id.toString(),
           email: registered.email,
           firstName: registered.firstName,
           rememberMe: true,
@@ -396,11 +430,18 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
         }
 
-        const aib = await findAibUser(validated.metaboxUserId);
+        // Auto-create AI Box User если ещё нет. Также sync token-grants и
+        // подписку с metabox-стороны (полезно для юзеров, которые могли
+        // что-то купить через metabox до того, как зашли в AI Box).
+        const ensured = await ensureAibUserForMetabox({
+          metaboxUserId: validated.metaboxUserId,
+          firstName: validated.firstName,
+          lastName: validated.lastName,
+        });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
           metaboxUserId: validated.metaboxUserId,
-          aibUserId: aib?.id.toString() ?? null,
+          aibUserId: ensured.id.toString(),
           email: validated.email,
           firstName: validated.firstName,
           rememberMe,
@@ -457,9 +498,14 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
       const session = await getRefreshSession(refreshToken);
       if (!session) return reply.code(401).send({ error: "Session expired" });
 
-      // Рестартуем: может быть, юзер привязал TG между рефрешами — проверяем
-      const aib = await findAibUser(session.metaboxUserId);
-      session.aibUserId = aib?.id.toString() ?? null;
+      // Auto-create AI Box User для существующих сессий, которые были выданы
+      // ДО изменения signup/login flow (когда aibUserId оставался null до
+      // привязки TG). После апдейта они продолжают работать без логаута.
+      const ensured = await ensureAibUserForMetabox({
+        metaboxUserId: session.metaboxUserId,
+        firstName: session.firstName,
+      });
+      session.aibUserId = ensured.id.toString();
 
       const { csrfToken } = await touchRefreshSession(refreshToken, session);
 

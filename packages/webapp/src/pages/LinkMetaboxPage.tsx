@@ -616,6 +616,29 @@ export function LinkMetaboxPage({
 
           {error && <div className="form-error">{resolveMsg(error, t)}</div>}
 
+          {/* EMAIL_EXISTS в режиме регистрации = почти всегда юзер просто
+              перепутал «Login» и «Register». Кнопка-shortcut: переключает
+              на login mode с сохранённым email, чтобы юзер сразу ввёл пароль
+              существующего metabox-аккаунта. Это правильный путь для нашего
+              сценария: после успешного login-and-link metabox сольёт stub
+              (с tgId из бота) в real-аккаунт. */}
+          {mode === "register" &&
+            error?.kind === "key" &&
+            error.key === "linkMetabox.error.emailExists" && (
+              <button
+                className="secondary-btn"
+                onClick={() => {
+                  setMode("login");
+                  setError(null);
+                  setConfirmPassword("");
+                  setPassword("");
+                }}
+                disabled={loading}
+              >
+                {t("linkMetabox.error.emailExists.switchToLogin")}
+              </button>
+            )}
+
           <button className="primary-btn" onClick={() => void submit()} disabled={loading}>
             {loading ? t("common.loading") : t("linkMetabox.submit")}
           </button>
