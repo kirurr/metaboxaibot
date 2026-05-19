@@ -494,6 +494,10 @@ const translations = {
 
     // Auth errors
     "auth.tokenExpired": "Link expired. Press the «Profile» button in the bot menu again.",
+    "auth.tokenExpiredTitle": "Link expired",
+    "auth.tokenExpiredText":
+      "Tap «Refresh menu» — the bot will send a new main menu with a working «Profile» button.",
+    "auth.refreshMenu": "Refresh menu",
     "auth.openFromTelegram": "Please open this app from Telegram",
     "auth.notRegisteredTitle": "Open the bot first",
     "auth.notRegisteredText":
@@ -1032,6 +1036,10 @@ const translations = {
     // Auth errors
     "auth.tokenExpired":
       "Ссылка устарела. Заново откройте главное меню и нажмите кнопку «Профиль».",
+    "auth.tokenExpiredTitle": "Ссылка устарела",
+    "auth.tokenExpiredText":
+      "Нажмите «Обновить меню» — бот пришлёт свежее главное меню с рабочей кнопкой «Профиль».",
+    "auth.refreshMenu": "Обновить меню",
     "auth.openFromTelegram": "Пожалуйста, откройте приложение через Telegram",
     "auth.notRegisteredTitle": "Сначала откройте бота",
     "auth.notRegisteredText":

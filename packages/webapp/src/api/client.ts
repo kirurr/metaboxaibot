@@ -33,6 +33,10 @@ export function setWebToken(token: string): void {
   _webToken = token;
 }
 
+export function clearWebToken(): void {
+  _webToken = null;
+}
+
 /**
  * Возвращает Authorization header для текущей сессии — Telegram initData
  * (mini-app) или web JWT. Расшарено между `request()` и `uploadRequest()`
@@ -63,6 +67,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     console.error(`[api] network error ${method} ${path}`, networkErr);
     throw networkErr;
   }
+
+  // Rolling-refresh wtoken: сервер кладёт свежий токен, когда наш приближается
+  // к hard-expiry. Подхватываем сразу, до проверки res.ok — даже на 4xx ответе
+  // токен мог обновиться (например, при ошибке домена, но валидной auth).
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as Record<
@@ -98,6 +108,9 @@ async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
     console.error(`[api] network error POST ${path}`, networkErr);
     throw networkErr;
   }
+
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
