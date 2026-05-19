@@ -74,6 +74,9 @@ await server.register(cookie, {
 await server.register(cors, {
   origin: true, // restrict in prod via env
   credentials: true, // нужно для httpOnly cookie refresh-токена
+  // X-Refresh-Wtoken — rolling refresh для KeyboardButtonWebApp auth-токена.
+  // Без exposedHeaders браузер скрывает его от webapp-кода.
+  exposedHeaders: ["X-Refresh-Wtoken"],
 });
 await server.register(helmet);
 

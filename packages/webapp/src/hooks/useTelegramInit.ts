@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { setInitDataRaw, setWebToken, api } from "../api/client.js";
+import { setInitDataRaw, setWebToken, clearWebToken, api } from "../api/client.js";
 import { useI18n } from "../i18n.js";
 
 type TelegramWebApp = {
@@ -66,10 +66,12 @@ export function useTelegramInit(): TelegramInitState {
     // never injects initData by Telegram design — token in URL is the fallback).
     const wtoken = getUrlWebToken();
     if (wtoken) {
+      // Set _webToken до verifyToken: иначе rolling-refresh из ответа (X-Refresh-Wtoken,
+      // ставится в client.ts) был бы перезатёрт устаревшим wtoken из URL в .then.
+      setWebToken(wtoken);
       api.auth
         .verifyToken(wtoken)
         .then((user) => {
-          setWebToken(wtoken);
           setState({
             ready: true,
             error: null,
@@ -80,6 +82,10 @@ export function useTelegramInit(): TelegramInitState {
           });
         })
         .catch((err: Error & { code?: string }) => {
+          // wtoken оказался битым/протухшим — не оставляем его в памяти,
+          // иначе любой последующий fetch уйдёт со сломанным Authorization
+          // и получит шумные 401 поверх уже показанного error-экрана.
+          if (err.code !== "USER_NOT_FOUND") clearWebToken();
           setState({
             ready: false,
             error: err.code === "USER_NOT_FOUND" ? err.message : t("auth.tokenExpired"),
