@@ -54,6 +54,7 @@ export {
   MODEL_TO_FAMILY,
 } from "./constants/model-families.js";
 export { BOT_STATES, SECTION_BY_STATE, WELCOME_BONUS_TOKENS } from "./constants/states.js";
+export { FACE_SWAP_BUFFER_MODEL_ID } from "./constants/face-swap.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";
@@ -80,7 +81,8 @@ export { GENERATION_ERROR_CODES, classifyUserFacingError } from "./error-codes.j
 export type { GenerationErrorCode } from "./error-codes.js";
 
 // Web token (URL-based auth for KeyboardButtonWebApp where initData is unavailable)
-export { generateWebToken, verifyWebToken } from "./webtoken.js";
+export { generateWebToken, verifyWebToken, WebTokenError } from "./webtoken.js";
+export type { VerifyWebTokenResult, WebTokenErrorCode } from "./webtoken.js";
 
 // Config
 export { config } from "./config.js";
@@ -104,6 +106,7 @@ export {
   preloadLocales,
   buildDialogHint,
   buildResultCaption,
+  formatGenerationCostLine,
   pickGenerationFailedMessage,
   resolveUserFacingErrorVariant,
 } from "./i18n/index.js";

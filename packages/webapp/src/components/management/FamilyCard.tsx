@@ -224,7 +224,7 @@ export function FamilyCard({
         )}
       </div>
 
-      {isGloballyActive && isInSectionPicker(selected.section, activeState) && (
+      {activeModelId === localId && isInSectionPicker(selected.section, activeState) && (
         <button
           className="family-card__start-btn"
           onClick={() => void handleActivate()}

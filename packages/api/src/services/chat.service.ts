@@ -105,6 +105,14 @@ export interface SendMessageParams {
 export interface SendMessageResult {
   text: string;
   tokensUsed: number;
+  /** Raw provider input tokens (всё, что ушло в промпт для этого ответа — включая историю). */
+  inputTokens: number;
+  /** Raw provider output tokens (длина сгенерированного ответа). */
+  outputTokens: number;
+  /** Post-deduct subscription token balance. */
+  subscriptionTokenBalance: number;
+  /** Post-deduct regular (paid) token balance. */
+  tokenBalance: number;
 }
 
 export const chatService = {
@@ -985,7 +993,11 @@ export const chatService = {
           : estimateTokens(content, responseText);
 
     // Save assistant message
-    await dialogService.saveMessage(dialogId, "assistant", responseText, { tokensUsed });
+    await dialogService.saveMessage(dialogId, "assistant", responseText, {
+      tokensUsed,
+      inputTokens: inputTokensCount,
+      outputTokens: outputTokensCount,
+    });
 
     // Audit-метаданные: фактический provider (отличается от primary при
     // fallback'е) и сырая цена в USD по нему. Считаем по `activeAdapterModel`
@@ -1009,13 +1021,29 @@ export const chatService = {
           )
         : undefined;
 
-    // Deduct tokens
-    await deductTokens(userId, tokensUsed, dialog.modelId, dialogId, undefined, {
-      actualProvider,
-      actualCostUsd,
-    });
+    // Deduct tokens. Капчуем post-deduct balance чтобы клиент мог показать
+    // юзеру «списано X, осталось Y» без дополнительного DB-round-trip'а
+    // (зеркалит результат-caption на image/video с `generationCostLine`).
+    const deductResult = await deductTokens(
+      userId,
+      tokensUsed,
+      dialog.modelId,
+      dialogId,
+      undefined,
+      {
+        actualProvider,
+        actualCostUsd,
+      },
+    );
 
-    return { text: responseText, tokensUsed };
+    return {
+      text: responseText,
+      tokensUsed,
+      inputTokens: inputTokensCount,
+      outputTokens: outputTokensCount,
+      subscriptionTokenBalance: deductResult.subscriptionTokenBalance,
+      tokenBalance: deductResult.tokenBalance,
+    };
   },
 };
 

@@ -19,6 +19,7 @@ import { authRoutes } from "./routes/auth.js";
 import { webAuthRoutes } from "./routes/web-auth.js";
 import { webChatRoutes } from "./routes/web-chat.js";
 import { webModelsRoutes } from "./routes/web-models.js";
+import { webGalleryRoutes } from "./routes/web-gallery.js";
 import { webVoicesRoutes } from "./routes/web-voices.js";
 import { webPickersRoutes } from "./routes/web-pickers.js";
 import { webBillingRoutes } from "./routes/web-billing.js";
@@ -74,6 +75,9 @@ await server.register(cookie, {
 await server.register(cors, {
   origin: true, // restrict in prod via env
   credentials: true, // нужно для httpOnly cookie refresh-токена
+  // X-Refresh-Wtoken — rolling refresh для KeyboardButtonWebApp auth-токена.
+  // Без exposedHeaders браузер скрывает его от webapp-кода.
+  exposedHeaders: ["X-Refresh-Wtoken"],
 });
 await server.register(helmet);
 
@@ -205,6 +209,7 @@ await server.register(authRoutes);
 await server.register(webAuthRoutes);
 await server.register(webChatRoutes);
 await server.register(webModelsRoutes);
+await server.register(webGalleryRoutes);
 await server.register(webVoicesRoutes);
 await server.register(webPickersRoutes);
 await server.register(webBillingRoutes);

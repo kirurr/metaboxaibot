@@ -129,11 +129,15 @@ const MI_DRIVING_AUDIO: MediaInputSlot = {
   mode: "driving_audio",
   labelKey: "drivingAudio",
 };
-/** Wan 2.7 first-clip slot — video that model continues. */
+/** Wan 2.7 first-clip slot — video that model continues. Wan жёстко режет
+ *  входной клип >10s (выяснено по prod-логам: `duration should be at most 10s,
+ *  got 14.2s`). Ставим upload-time guard, чтобы юзер не сабмитил заведомо
+ *  обречённый payload и не тратил Wan-кредиты. */
 const MI_FIRST_CLIP: MediaInputSlot = {
   slotKey: "first_clip",
   mode: "first_clip",
   labelKey: "firstClip",
+  constraints: { maxDurationSec: 10 },
 };
 
 /** Seedance 2 first/last frame slots — exclusive with reference slots. */

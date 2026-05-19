@@ -23,3 +23,27 @@ export {
   modelSettingTypeSchema,
 } from "./model-setting.js";
 export type { ModelSettingDef, ModelSettingOption, ModelSettingType } from "./model-setting.js";
+export {
+  galleryOutputSchema,
+  galleryJobSchema,
+  galleryListResponseSchema,
+  galleryFolderSchema,
+  galleryModelCountSchema,
+  galleryUrlResponseSchema,
+  galleryFavoritesResponseSchema,
+  listGalleryJobsQuerySchema,
+  createGalleryFolderBodySchema,
+  updateGalleryFolderBodySchema,
+} from "./gallery.js";
+export type {
+  GalleryOutput,
+  GalleryJob,
+  GalleryListResponse,
+  GalleryFolder,
+  GalleryModelCount,
+  GalleryUrlResponse,
+  GalleryFavoritesResponse,
+  ListGalleryJobsQuery,
+  CreateGalleryFolderBody,
+  UpdateGalleryFolderBody,
+} from "./gallery.js";

@@ -193,6 +193,25 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     });
   }
 
+  // ── Refresh main menu (rolling-refresh deep link) ──────────────────────────
+  // Webapp ловит TOKEN_EXPIRED/TOKEN_INVALID → редиректит юзера сюда. Мы
+  // переотправляем персистентную reply-kb со свежим wtoken и выходим — никакого
+  // welcome'а, никаких сайд-эффектов (язык, FSM-state, Metabox-sync). Юзер
+  // тапнет «Профиль» в обновлённой клавиатуре и попадёт в webapp с рабочим
+  // токеном.
+  //
+  // `!ctx.user.isNew` — гард на случай, когда кто-то расшарил deeplink и юзер
+  // открыл его ДО регистрации: upsertByTelegramId выше создал свежую запись,
+  // и без этого условия мы бы short-circuit'нули welcome-flow (бонусные токены,
+  // Metabox-register, FSM=IDLE) и оставили бы юзера в полуоформленном состоянии.
+  if (param === "refresh_menu" && ctx.user && !ctx.user.isNew) {
+    const t = getT(ctx.user.language as Language);
+    await ctx.reply(t.start.mainMenuTitle, {
+      reply_markup: buildMainMenuKeyboard(t, ctx.user.telegramId),
+    });
+    return;
+  }
+
   // ── Metabox→Bot account linking ────────────────────────────────────────────
   if (param?.startsWith("link_") && ctx.user) {
     const token = param.slice("link_".length);

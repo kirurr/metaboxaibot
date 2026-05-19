@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute, GuestOnlyRoute, AdminRoute } from "./guards";
+import GalleryPage from "@/pages/Gallery";
 
 // Lazy-loaded pages — каждый роут отдельным чанком
 const LoginPage = lazy(() => import("@/pages/Login"));
@@ -88,6 +89,8 @@ export const router = createBrowserRouter([
       { path: "billing", element: withSuspense(<BillingPage />) },
       { path: "settings", element: withSuspense(<SettingsPage />) },
       { path: "prompts", element: withSuspense(<PromptsPage />) },
+      { path: "gallery", element: withSuspense(<GalleryPage />) },
+      { path: "gallery/:jobId", element: withSuspense(<GalleryPage />) },
     ],
   },
 

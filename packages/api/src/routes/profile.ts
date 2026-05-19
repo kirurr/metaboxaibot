@@ -140,6 +140,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
               metaboxReferralCode: { type: "string", nullable: true },
               finishedOnboarding: { type: "boolean" },
               confirmBeforeGenerate: { type: "boolean" },
+              autoActivateModel: { type: "boolean" },
               tokenBalance: { type: "string" },
               purchasedTokenBalance: { type: "string" },
               subscriptionTokenBalance: { type: "string" },
@@ -246,6 +247,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         metaboxReferralCode: user.metaboxReferralCode ?? null,
         finishedOnboarding: user.finishedOnboarding,
         confirmBeforeGenerate: user.confirmBeforeGenerate,
+        autoActivateModel: user.autoActivateModel,
         tokenBalance: (
           Number(user.tokenBalance) + Number(user.subscriptionTokenBalance)
         ).toString(),
@@ -268,17 +270,27 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** PATCH /profile/preferences — update per-user UX flags (low-iq mode toggle, …) */
-  fastify.patch<{ Body: { confirmBeforeGenerate?: boolean } }>(
+  fastify.patch<{ Body: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean } }>(
     "/profile/preferences",
     {
       schema: {
         description: "Update user preferences",
-        body: { type: "object", properties: { confirmBeforeGenerate: { type: "boolean" } } },
+        body: {
+          type: "object",
+          properties: {
+            confirmBeforeGenerate: { type: "boolean" },
+            autoActivateModel: { type: "boolean" },
+          },
+        },
         response: {
           200: {
             type: "object",
             additionalProperties: true,
-            properties: { ok: { type: "boolean" }, confirmBeforeGenerate: { type: "boolean" } },
+            properties: {
+              ok: { type: "boolean" },
+              confirmBeforeGenerate: { type: "boolean" },
+              autoActivateModel: { type: "boolean" },
+            },
           },
           400: badRequestResponse,
         },
@@ -287,9 +299,12 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const body = request.body ?? {};
-      const data: { confirmBeforeGenerate?: boolean } = {};
+      const data: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean } = {};
       if (typeof body.confirmBeforeGenerate === "boolean") {
         data.confirmBeforeGenerate = body.confirmBeforeGenerate;
+      }
+      if (typeof body.autoActivateModel === "boolean") {
+        data.autoActivateModel = body.autoActivateModel;
       }
       if (Object.keys(data).length === 0) {
         return reply.code(400).send({ error: "No supported fields in body" });
@@ -297,9 +312,13 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       const user = await db.user.update({
         where: { id: userId },
         data,
-        select: { confirmBeforeGenerate: true },
+        select: { confirmBeforeGenerate: true, autoActivateModel: true },
       });
-      return { ok: true, confirmBeforeGenerate: user.confirmBeforeGenerate };
+      return {
+        ok: true,
+        confirmBeforeGenerate: user.confirmBeforeGenerate,
+        autoActivateModel: user.autoActivateModel,
+      };
     },
   );
 

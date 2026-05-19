@@ -34,8 +34,12 @@ import { calculateCost } from "../services/token.service.js";
 import { db } from "../db.js";
 import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-const TYPICAL_INPUT_TOKENS = 500;
-const TYPICAL_OUTPUT_TOKENS = 500;
+// Approx стоимость LLM считаем за 1000 токенов сообщения, разбитых 50/50
+// input/output. Это даёт нейтральную оценку, не перекошенную ни в сторону
+// моделей с дорогим output, ни в сторону cached-input скидок. UI рисует
+// результат как «≈ X.XX ✦ / 1k tok» (см. Chat.tsx → modelRate()).
+const APPROX_INPUT_TOKENS_PER_1K = 500;
+const APPROX_OUTPUT_TOKENS_PER_1K = 500;
 
 function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const t = getT(lang);
@@ -70,6 +74,7 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const isPerMVideoToken = (m.costUsdPerMVideoToken ?? 0) > 0;
   const isPerSecond = (m.costUsdPerSecond ?? 0) > 0;
   const isPerKChar = m.costUsdPerKChar !== undefined;
+
   return {
     id: m.id,
     name: m.name,
@@ -92,6 +97,8 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     supportedAspectRatios: m.supportedAspectRatios ?? null,
     supportedDurations: m.supportedDurations ?? null,
     durationRange: m.durationRange ?? null,
+    /** Окно контекста модели (input+output tokens). Используется веб-композером для индикатора «X / Y» под полем ввода. */
+    contextWindow: m.contextWindow ?? null,
     // Modes (null = single-mode model, без выбора режима в UI).
     modes,
     // Слоты для медиа-инпутов (фильтруются на клиенте по active mode.slotKeys).
@@ -102,9 +109,10 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     settings: m.settings ?? [],
     promptOptional: m.promptOptional ?? false,
     promptOptionalRequiresMedia: m.promptOptionalRequiresMedia ?? false,
-    /** Базовая стоимость 1 запроса/среднего сообщения в токенах. UI показывает рядом с моделью. */
+    /** Базовая стоимость в токенах. Для LLM — за 1000 токенов сообщения (500 in + 500 out);
+     * для прочих — за 1 единицу соответствующего unit'а. UI показывает рядом с моделью. */
     tokenCostApprox: isLLM
-      ? calculateCost(m, TYPICAL_INPUT_TOKENS, TYPICAL_OUTPUT_TOKENS)
+      ? calculateCost(m, APPROX_INPUT_TOKENS_PER_1K, APPROX_OUTPUT_TOKENS_PER_1K)
       : isPerMPixel
         ? calculateCost(m, 0, 0, 1)
         : isPerSecond
@@ -114,9 +122,9 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
             : isPerKChar
               ? calculateCost(m, 0, 0, undefined, undefined, undefined, undefined, 1000)
               : calculateCost(m),
-    /** Единица измерения стоимости. UI рендерит «≈ 1.2k / msg», «≈ 900 / image» и т.п. */
+    /** Единица измерения стоимости. UI рендерит «≈ 0.13 ✦ / 1k tok» для LLM, «≈ 900 / image» и т.п. для остального. */
     tokenCostUnit: isLLM
-      ? ("msg" as const)
+      ? ("1k_tok" as const)
       : isPerMPixel
         ? ("mpx" as const)
         : isPerSecond
@@ -186,6 +194,7 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
                 supportedAspectRatios: { type: "array", nullable: true },
                 supportedDurations: { type: "array", nullable: true },
                 durationRange: { type: "object", nullable: true, additionalProperties: true },
+                contextWindow: { type: "integer", nullable: true },
                 tokenCostApprox: { type: "number" },
                 tokenCostUnit: { type: "string" },
                 modes: { type: "array", nullable: true },

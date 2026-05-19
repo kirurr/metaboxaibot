@@ -27,6 +27,9 @@ export type BotState =
   | "VIDEO_ACTIVE"
   | "HEYGEN_AVATAR_PHOTO"
   | "HIGGSFIELD_SOUL_PHOTO"
+  | "SCENARIOS_SECTION"
+  | "FACE_SWAP_AWAIT_FACE"
+  | "FACE_SWAP_AWAIT_REFERENCE"
   | "AWAITING_DELETE_CONFIRMATION";
 
 export type Section = "gpt" | "design" | "audio" | "video";

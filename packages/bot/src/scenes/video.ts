@@ -29,6 +29,7 @@ import {
   getResolvedModes,
   getModelDefaultDuration,
 } from "@metabox/shared";
+import type { Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
 import {
@@ -1069,6 +1070,54 @@ export async function handleVideoLipSync(ctx: BotContext): Promise<void> {
 type VideoMediaGroupEntry = { timer: ReturnType<typeof setTimeout>; processed: boolean };
 const videoMediaGroupBuffer = new Map<string, VideoMediaGroupEntry>();
 
+/** Доля площади, начиная с которой считаем кроп «сильным» и предупреждаем юзера. */
+const KLING_HEAVY_CROP_THRESHOLD = 0.25;
+
+function parseAspectRatio(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = /^(\d+):(\d+)$/.exec(s);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!w || !h) return null;
+  return w / h;
+}
+
+/**
+ * Для Kling-семейства при включённом тогле «Автокроп фото под формат»
+ * (`crop_to_aspect: true`) — если соотношение сторон загруженного фото
+ * сильно отличается от выбранного `aspect_ratio`, возвращает локализованное
+ * предупреждение со сжатой ~процентной долей обрезаемой площади. Иначе null.
+ *
+ * Метрика: `1 - min(actual,target)/max(actual,target)` — доля «лишнего» из
+ * меньшей стороны после center-crop'а. Порог 25% покрывает явные mismatch'и
+ * (1:1 → 16:9 ≈ 44%, 9:16 → 16:9 ≈ 68%) и не дёргает на близких пропорциях
+ * (16:10 → 16:9 ≈ 10%).
+ */
+async function buildKlingHeavyCropWarning(
+  userId: bigint,
+  modelId: string,
+  widthPx: number | undefined,
+  heightPx: number | undefined,
+  t: Translations,
+): Promise<string | null> {
+  if (!widthPx || !heightPx) return null;
+  const model = AI_MODELS[modelId];
+  if (model?.familyId !== "kling") return null;
+  const allSettings = await userStateService.getModelSettings(userId);
+  const ms = allSettings[modelId] ?? {};
+  if (ms.crop_to_aspect !== true) return null;
+  const aspectStr = (ms.aspect_ratio as string | undefined) ?? "16:9";
+  const targetAspect = parseAspectRatio(aspectStr);
+  if (!targetAspect) return null;
+  const actualAspect = widthPx / heightPx;
+  const cropped = 1 - Math.min(actualAspect, targetAspect) / Math.max(actualAspect, targetAspect);
+  if (cropped < KLING_HEAVY_CROP_THRESHOLD) return null;
+  return t.mediaInput.klingHeavyCropWarning
+    .replace("{percent}", String(Math.round(cropped * 100)))
+    .replace("{aspect}", aspectStr);
+}
+
 export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
   const isPhoto = !!ctx.message?.photo;
   const isImageDoc =
@@ -1163,16 +1212,18 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       return;
     }
 
+    // Hoist'нуты outside `if (slot?.constraints)` чтобы потом передать в
+    // buildKlingHeavyCropWarning после успешного addMediaInput.
+    let imageWidthPx: number | undefined = photoSize?.width;
+    let imageHeightPx: number | undefined = photoSize?.height;
     if (slot?.constraints) {
-      let widthPx = photoSize?.width;
-      let heightPx = photoSize?.height;
       let fileSizeBytes: number | undefined = fileSize || undefined;
       if (isImageDoc) {
         try {
           const probeUrl = await getLiveTgUrl();
           const meta = await probeImageMetadata(probeUrl);
-          widthPx = meta.width;
-          heightPx = meta.height;
+          imageWidthPx = meta.width;
+          imageHeightPx = meta.height;
           fileSizeBytes = meta.fileSizeBytes;
         } catch (err) {
           logger.warn({ err }, "probeImageMetadata failed for document");
@@ -1180,7 +1231,11 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
           return;
         }
       }
-      const violation = validateMediaAgainstSlot(slot, { widthPx, heightPx, fileSizeBytes }, ctx.t);
+      const violation = validateMediaAgainstSlot(
+        slot,
+        { widthPx: imageWidthPx, heightPx: imageHeightPx, fileSizeBytes },
+        ctx.t,
+      );
       if (violation) {
         await ctx.reply(violation);
         return;
@@ -1206,6 +1261,18 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       ? (ctx.t.mediaInput[slot.labelKey as keyof typeof ctx.t.mediaInput] ?? slot.labelKey)
       : activeSlot.slotKey;
 
+    // Kling «Автокроп фото под формат» + сильный mismatch соотношения —
+    // предупреждаем юзера в шапке стандартного «готово» сообщения, что фото
+    // будет существенно обрезано. Если condition'ы не сходятся → null,
+    // ничего не дописываем.
+    const klingCropWarning = await buildKlingHeavyCropWarning(
+      userId,
+      slotModelId,
+      imageWidthPx,
+      imageHeightPx,
+      ctx.t,
+    );
+
     debounceSlotReply(userId, mediaGroupId, async () => {
       await consumeMediaHint(ctx, "video");
       const freshInputs = await userStateService.getMediaInputs(userId, slotModelId);
@@ -1213,12 +1280,16 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
 
       if (activeSlot.maxImages === 1 || freshCount >= activeSlot.maxImages) {
         clearActiveSlot(userId);
-        await sendVideoMediaInputStatus(ctx);
+        await sendVideoMediaInputStatus(
+          ctx,
+          klingCropWarning ? { prependText: klingCropWarning } : {},
+        );
       } else {
-        const msg = ctx.t.mediaInput.imageSaved
+        const baseMsg = ctx.t.mediaInput.imageSaved
           .replace("{slot}", String(label))
           .replace("{n}", String(freshCount))
           .replace("{max}", String(activeSlot.maxImages));
+        const msg = klingCropWarning ? `${klingCropWarning}\n\n${baseMsg}` : baseMsg;
         const kb = new InlineKeyboard().text(
           ctx.t.mediaInput.doneUploading,
           `mi_done:${activeSlot.slotKey}`,
@@ -1250,16 +1321,17 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       // Constraint validation на upload'е (зеркалит active-slot путь выше).
       // Без этого юзер получает provider-error мид-генерации (типа
       // KIE 422 "Image dimensions must be at least 300 pixels").
+      // Hoist'нуты outside constraints-check чтобы передать в Kling crop-warn.
+      let imageWidthPx: number | undefined = photoSize?.width;
+      let imageHeightPx: number | undefined = photoSize?.height;
       if (targetSlot.constraints) {
-        let widthPx = photoSize?.width;
-        let heightPx = photoSize?.height;
         let fileSizeBytes: number | undefined = fileSize || undefined;
         if (isImageDoc) {
           try {
             const probeUrl = await getLiveTgUrl();
             const meta = await probeImageMetadata(probeUrl);
-            widthPx = meta.width;
-            heightPx = meta.height;
+            imageWidthPx = meta.width;
+            imageHeightPx = meta.height;
             fileSizeBytes = meta.fileSizeBytes;
           } catch (err) {
             logger.warn({ err }, "probeImageMetadata failed in auto-slot");
@@ -1269,7 +1341,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
         const violation = validateMediaAgainstSlot(
           targetSlot,
-          { widthPx, heightPx, fileSizeBytes },
+          { widthPx: imageWidthPx, heightPx: imageHeightPx, fileSizeBytes },
           ctx.t,
         );
         if (violation) {
@@ -1278,6 +1350,13 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
       }
       await userStateService.addMediaInput(userId, modelId, targetSlot.slotKey, tgSlotValue);
+      const klingCropWarning = await buildKlingHeavyCropWarning(
+        userId,
+        modelId,
+        imageWidthPx,
+        imageHeightPx,
+        ctx.t,
+      );
       debounceSlotReply(
         userId,
         mediaGroupId,
@@ -1285,7 +1364,8 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
           const fresh = await userStateService.getMediaInputs(userId, modelId);
           const count = fresh[targetSlot.slotKey]?.length ?? 0;
           if (count === 0) return;
-          await ctx.reply(buildSlotUploadedMessage(targetSlot, count, ctx.t));
+          const baseMsg = buildSlotUploadedMessage(targetSlot, count, ctx.t);
+          await ctx.reply(klingCropWarning ? `${klingCropWarning}\n\n${baseMsg}` : baseMsg);
         },
         targetSlot.slotKey,
       );

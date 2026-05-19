@@ -11,25 +11,25 @@ export function buildMainMenuKeyboard(t: Translations, telegramId?: bigint | nul
   const webappUrl = config.bot.webappUrl;
   const kb = new Keyboard();
 
-  if (webappUrl && telegramId) {
-    const token = generateWebToken(telegramId, config.bot.token);
-    kb.webApp(t.menu.profile, `${webappUrl}?page=profile&wtoken=${token}`);
-  } else if (webappUrl) {
-    kb.webApp(t.menu.profile, `${webappUrl}?page=profile`);
-  } else {
-    kb.text(t.menu.profile);
-  }
+  kb.text(t.menu.scenarios).row();
 
-  kb.row().text(t.menu.gpt).text(t.menu.design).row().text(t.menu.audio).text(t.menu.video).row();
+  kb.text(t.menu.gpt).text(t.menu.design).row().text(t.menu.audio).text(t.menu.video).row();
 
   if (webappUrl && telegramId) {
     const token = generateWebToken(telegramId, config.bot.token);
-    kb.webApp(t.menu.storage, `${webappUrl}?page=profile&section=gallery&wtoken=${token}`).row();
+    kb.webApp(t.menu.profile, `${webappUrl}?page=profile&wtoken=${token}`).webApp(
+      t.menu.storage,
+      `${webappUrl}?page=profile&section=gallery&wtoken=${token}`,
+    );
   } else if (webappUrl) {
-    kb.webApp(t.menu.storage, `${webappUrl}?page=gallery`).row();
+    kb.webApp(t.menu.profile, `${webappUrl}?page=profile`).webApp(
+      t.menu.storage,
+      `${webappUrl}?page=gallery`,
+    );
   } else {
-    kb.text(t.menu.storage).row();
+    kb.text(t.menu.profile).text(t.menu.storage);
   }
+  kb.row();
 
   return kb.text(t.menu.help).text(t.menu.language).resized().persistent();
 }

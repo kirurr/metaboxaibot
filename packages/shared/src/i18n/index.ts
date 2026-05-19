@@ -28,11 +28,23 @@ export interface Translations {
     audio: string;
     video: string;
     storage: string;
+    scenarios: string;
     help: string;
     knowledgeBase: string;
     language: string;
     chooseLanguage: string;
     languageChanged: string;
+  };
+  scenarios: {
+    sectionTitle: string;
+    faceSwap: string;
+    backToMain: string;
+    faceSwapStep1: string;
+    faceSwapStep2: string;
+    faceSwapNotPhoto: string;
+    faceSwapGenerating: string;
+    faceSwapPhotoTooLarge: string;
+    faceSwapAlbumNotice: string;
   };
   gpt: {
     sectionTitle: string;
@@ -429,6 +441,7 @@ export interface Translations {
     uploadPromptVideoRefAudios: string;
     imageSaved: string;
     imageSavedSingle: string;
+    klingHeavyCropWarning: string;
     tooManyMediaSingleSlot: string;
     tooManyMediaMultiSlot: string;
     slotRequired: string;
@@ -579,6 +592,24 @@ export function getT(lang: Language): Translations {
  */
 function formatTokens(n: number): string {
   return String(parseFloat(n.toFixed(2)));
+}
+
+/**
+ * Возвращает standalone строку «💸 Списано: X ✦\n💳 Баланс: Y ✦» по тому же
+ * шаблону `t.common.generationCostLine`, что и cost-блок в caption'ах
+ * image/video результатов. Используется когда нужно показать списание
+ * отдельным сообщением (например, после ответа LLM в чате — там caption'а нет).
+ */
+export function formatGenerationCostLine(
+  t: Translations,
+  cost: number,
+  subscriptionBalance: number,
+  tokenBalance: number,
+): string {
+  const total = subscriptionBalance + tokenBalance;
+  return t.common.generationCostLine
+    .replace("{cost}", formatTokens(cost))
+    .replace("{total}", formatTokens(total));
 }
 
 /**

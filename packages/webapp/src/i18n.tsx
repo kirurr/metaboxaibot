@@ -53,6 +53,12 @@ const translations = {
     "account.generationModeInfoAria": "Generation mode info",
     "account.generationModeInfo":
       "Control how generation starts:\n\n🎯 With confirmation — see the final request and confirm the start manually. Protects from accidental runs and extra spend.\n\n⚡ No confirmation — generation starts automatically after you send a prompt. Handy when you're already an experienced user.",
+    "account.autoActivateModel": "MODEL AUTO-ACTIVATION",
+    "account.autoActivateModelOn": "Auto",
+    "account.autoActivateModelOff": "Manual",
+    "account.autoActivateModelInfoAria": "Model auto-activation info",
+    "account.autoActivateModelInfo":
+      "Control how model switching works in the mini-app:\n\n⚡ Auto — picking a model in settings instantly activates it in the bot. Faster, fewer taps.\n\n🎯 Manual — switching just selects the model; you have to tap «Activate» to apply. Lets you tweak settings before committing.",
     "account.notLinked": "Metabox account not linked",
     "account.status": "STATUS",
     "account.statusPartner": "Partner",
@@ -423,6 +429,9 @@ const translations = {
     "imageSettings.resetTitle": "Reset settings to defaults",
     "imageSettings.selectModel": "Select model",
     "imageSettings.activatedPopup": "Model activated. Return to the bot to start using it.",
+    "imageSettings.autoActivatedToast":
+      "✅ {name} activated. Adjust settings, minimize the mini-app and start chatting in the bot.",
+    "imageSettings.autoActivatedToastDismiss": "Don’t show again",
     "manage.dialogActivatedPopup": "Dialog activated. Return to the chat to work with it.",
     "manage.startChat": "Start chatting",
     "manage.settings": "Settings",
@@ -489,6 +498,10 @@ const translations = {
 
     // Auth errors
     "auth.tokenExpired": "Link expired. Press the «Profile» button in the bot menu again.",
+    "auth.tokenExpiredTitle": "Link expired",
+    "auth.tokenExpiredText":
+      "Tap «Refresh menu» — the bot will send a new main menu with a working «Profile» button.",
+    "auth.refreshMenu": "Refresh menu",
     "auth.openFromTelegram": "Please open this app from Telegram",
     "auth.notRegisteredTitle": "Open the bot first",
     "auth.notRegisteredText":
@@ -591,6 +604,12 @@ const translations = {
     "account.generationModeInfoAria": "Информация о режиме генерации",
     "account.generationModeInfo":
       "Управляйте тем, как запускается генерация:\n\n🎯 С подтверждением — увидите финальный запрос и подтвердите старт вручную. Защищает от случайных запусков и лишних трат.\n\n⚡ Без подтверждения — генерация начнётся автоматически после отправки промпта. Удобно, когда вы уже опытный пользователь.",
+    "account.autoActivateModel": "АКТИВАЦИЯ МОДЕЛЕЙ",
+    "account.autoActivateModelOn": "Авто",
+    "account.autoActivateModelOff": "Вручную",
+    "account.autoActivateModelInfoAria": "Информация об активации моделей",
+    "account.autoActivateModelInfo":
+      "Управляйте тем, как переключаются модели в мини-аппе:\n\n⚡ Авто — выбор модели в настройках сразу активирует её в боте. Быстрее, меньше тапов.\n\n🎯 Вручную — переключение лишь выбирает модель; чтобы применить, нажмите «Активировать». Удобно, если хочется сначала настроить параметры.",
     "account.notLinked": "Аккаунт Metabox не привязан",
     "account.status": "СТАТУС",
     "account.statusPartner": "Партнёр",
@@ -955,6 +974,9 @@ const translations = {
     "imageSettings.resetTitle": "Сбрасывает настройки до значений по умолчанию.",
     "imageSettings.selectModel": "Выберите модель",
     "imageSettings.activatedPopup": "Модель активирована. Вернитесь в бот для работы с ней.",
+    "imageSettings.autoActivatedToast":
+      "✅ {name} активирована. Выставите настройки, сверните мини-апп и начинайте работу в чате.",
+    "imageSettings.autoActivatedToastDismiss": "Больше не показывать",
     "manage.dialogActivatedPopup": "Диалог активирован. Вернитесь в чат для работы с ним.",
     "manage.startChat": "Начать общение",
     "manage.settings": "Настройки",
@@ -1022,6 +1044,10 @@ const translations = {
     // Auth errors
     "auth.tokenExpired":
       "Ссылка устарела. Заново откройте главное меню и нажмите кнопку «Профиль».",
+    "auth.tokenExpiredTitle": "Ссылка устарела",
+    "auth.tokenExpiredText":
+      "Нажмите «Обновить меню» — бот пришлёт свежее главное меню с рабочей кнопкой «Профиль».",
+    "auth.refreshMenu": "Обновить меню",
     "auth.openFromTelegram": "Пожалуйста, откройте приложение через Telegram",
     "auth.notRegisteredTitle": "Сначала откройте бота",
     "auth.notRegisteredText":

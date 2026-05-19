@@ -32,11 +32,26 @@ export default {
     audio: "🎧 AI Audio",
     video: "🎬 Video of the Future",
     storage: "📁 Media Storage",
+    scenarios: "🎯 Ready-made scenarios",
     help: "❓ Help",
     knowledgeBase: "📖 Knowledge Base",
     language: "🌐 Language",
     chooseLanguage: "Choose a language:",
     languageChanged: "✅ Language changed.",
+  },
+  scenarios: {
+    sectionTitle: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    faceSwap: "🔄 Face swap",
+    backToMain: "🏠 Back to main menu",
+    faceSwapStep1:
+      "🔄 <b>Face swap — step 1/2</b>\n\nSend a <b>reference photo</b> — the pose, look, and frame you want to appear in. The result will use the aspect ratio of this photo.",
+    faceSwapStep2:
+      "🔄 <b>Face swap — step 2/2</b>\n\nSend a <b>photo of your face</b> — close-up, sharp and clear.",
+    faceSwapNotPhoto: "📷 That's not a photo. Please send an image.",
+    faceSwapGenerating: "🎨 Starting face swap...",
+    faceSwapPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
+    faceSwapAlbumNotice:
+      "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
@@ -621,6 +636,8 @@ export default {
     tooManyMediaMultiSlot:
       "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} {fileNoun}:\n{breakdown}\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
+    klingHeavyCropWarning:
+      "⚠️ Your photo's aspect ratio differs significantly from the selected format {aspect} — with “Autocrop photo to format” enabled, about {percent}% of the image will be cropped. Disable autocrop or pick a format closer to the photo's proportions.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",
     remove: "Remove",
