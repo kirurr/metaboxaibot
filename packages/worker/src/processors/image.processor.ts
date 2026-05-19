@@ -439,6 +439,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
   const t = getT(userLang);
   const modelMeta = AI_MODELS[modelId];
   const modelName = modelMeta?.name ?? modelId;
+  // displayName — то, что юзер ДОЛЖЕН видеть в любом user-facing сообщении
+  // (caption успеха, «модель отдыхает», batch-failure footer и пр.). Готовые
+  // сценарии (Face Swap и пр.) маскируют реальную модель через
+  // `displayNameOverride`. `modelName` остаётся для логов/ops, чтобы там было
+  // видно реальную модель, на которой произошла ошибка.
+  const displayName = job.data.displayNameOverride ?? modelName;
 
   // Fallback-кандидаты: уже отфильтрованные по media-режиму задачи (если у
   // задачи есть, например, edit slots — fallback должен их поддерживать).
@@ -829,7 +835,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
           if (subCandidates.length === 0) {
             const synth = new Error(`Locked provider ${lockedProvider} not found`);
-            const resolved = resolveSubJobError(synth, t, modelName);
+            const resolved = resolveSubJobError(synth, t, displayName);
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
@@ -982,7 +988,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             // long cooldown) — synthetic Error → generic шаблон.
             const errToResolve =
               lastSubErr ?? new Error(lastSubError || "Pool exhausted: no provider keys available");
-            const resolved = resolveSubJobError(errToResolve, t, modelName);
+            const resolved = resolveSubJobError(errToResolve, t, displayName);
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
@@ -1258,7 +1264,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 const resolved = resolveSubJobError(
                   new Error(`Adapter ${modelId} has no poll()`),
                   t,
-                  modelName,
+                  displayName,
                 );
                 state.subJobs[i] = {
                   ...sub,
@@ -1277,7 +1283,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
               if (sub.providerKeyId) void recordError(sub.providerKeyId, message.slice(0, 500));
-              const resolved = resolveSubJobError(err, t, modelName);
+              const resolved = resolveSubJobError(err, t, displayName);
               state.subJobs[i] = {
                 ...sub,
                 status: "failed",
@@ -1302,7 +1308,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", displayName);
             if (telegramChatId !== null) {
               await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
             } else {
@@ -1413,7 +1419,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", displayName);
             if (telegramChatId !== null) {
               await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
             } else {
@@ -1434,7 +1440,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               await telegram
                 .sendMessage(
                   telegramChatId,
-                  t.errors.generationStillRunning.replace("{modelName}", modelName),
+                  t.errors.generationStillRunning.replace("{modelName}", displayName),
                 )
                 .catch(() => void 0);
             }
@@ -1465,10 +1471,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     // ── Stage 3: send to user ────────────────────────────────────────────
-    const modelForCaption = AI_MODELS[modelId];
-    const displayName = modelForCaption?.name ?? modelId;
+    // `displayName` уже посчитан в начале функции с учётом overrides — здесь
+    // не пересчитываем. Прячем «цитату промпта» если сценарий замаскирован.
+    const captionPrompt = job.data.hidePromptInCaption ? "" : prompt;
     const buildCaption = (): string =>
-      buildResultCaption(t, displayName, prompt, {
+      buildResultCaption(t, displayName, captionPrompt, {
         cost: deductResult?.deducted,
         subscriptionBalance: deductResult?.subscriptionTokenBalance,
         tokenBalance: deductResult?.tokenBalance,
@@ -1488,7 +1495,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const text =
         userFacingBatchErrors.length > 0
           ? userFacingBatchErrors[0]!
-          : pickGenerationFailedMessage(t, modelName, "design");
+          : pickGenerationFailedMessage(t, displayName, "design");
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
       } else {
@@ -1543,12 +1550,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
         // Send a single message with refine + (orig|download) buttons for all outputs.
         // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
+        // Refine is skipped when the job opts out (готовые сценарии без выбора модели).
         {
+          const hideRefine = job.data.hideRefineButton === true;
           const buttons: InlineKeyboardButton[] = [];
           for (let i = 0; i < outputRecords.length; i++) {
             const rec = outputRecords[i];
             const n = i + 1;
-            buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
+            if (!hideRefine) {
+              buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
+            }
             if (byteSizes[i] <= TELEGRAM_DOC_MAX_BYTES) {
               buttons.push({ text: `${n}. 📎`, callback_data: `orig_${rec.id}` });
             } else if (rec.s3Key) {
@@ -1581,7 +1592,10 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
         // равно один root-cause в 99% случаев — детали есть в ops alert).
         if (batchErrors.length > 0) {
-          const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
+          const errorMessage = t.design.batchSubJobFailedMessage.replace(
+            "{modelName}",
+            displayName,
+          );
           const text = t.design.batchPartialFooter
             .replace("{success}", String(outputRecords.length))
             .replace("{total}", String(requestedN))
@@ -1671,9 +1685,9 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         filename,
       );
 
-      const refineRow: InlineKeyboardButton[] = [
-        { text: t.design.refine, callback_data: `design_ref_${outputId}` },
-      ];
+      const refineRow: InlineKeyboardButton[] | null = job.data.hideRefineButton
+        ? null
+        : [{ text: t.design.refine, callback_data: `design_ref_${outputId}` }];
       const actionRow: InlineKeyboardButton[] | null =
         info.byteSize <= TELEGRAM_DOC_MAX_BYTES
           ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
@@ -1710,7 +1724,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       // К одиночному фото добавляем footer-сообщение с одним общим текстом
       // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
       if (batchErrors.length > 0) {
-        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
+        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", displayName);
         const text = t.design.batchPartialFooter
           .replace("{success}", String(outputRecords.length))
           .replace("{total}", String(requestedN))
@@ -1741,7 +1755,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
   } catch (err) {
     if (err instanceof DelayedError) throw err;
     if (isRateLimitLongWindowError(err)) {
-      const msg = pickGenerationFailedMessage(t, modelName, "design");
+      const msg = pickGenerationFailedMessage(t, displayName, "design");
       await db.generationJob.update({
         where: { id: dbJobId },
         data: {
@@ -2092,7 +2106,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
-      const failureMsg = pickGenerationFailedMessage(t, modelName, "design");
+      const failureMsg = pickGenerationFailedMessage(t, displayName, "design");
 
       await db.generationJob.update({
         where: { id: dbJobId },

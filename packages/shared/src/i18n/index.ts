@@ -45,6 +45,7 @@ export interface Translations {
     faceSwapGenerating: string;
     faceSwapPhotoTooLarge: string;
     faceSwapAlbumNotice: string;
+    faceSwapWelcome: string;
   };
   gpt: {
     sectionTitle: string;
