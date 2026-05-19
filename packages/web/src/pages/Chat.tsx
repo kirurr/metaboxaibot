@@ -1,3 +1,7 @@
+import Markdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -31,6 +35,7 @@ import type { DialogDto, MessageAttachmentDto, MessageDto } from "@/api/dialogs"
 import type { WebModelDto } from "@/api/models";
 import type { ApiError } from "@/api/client";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
+import { markdownComponents } from "@/components/chat/MarkdownElements";
 
 type Msg = {
   role: "user" | "ai";
@@ -69,7 +74,7 @@ function modelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
 }
 function modelRate(m: WebModelDto): string {
-  const n = Math.round(m.tokenCostApprox / 10) * 10;
+  const n = (Math.round(m.tokenCostApprox / 10) * 10);
   const unit =
     m.tokenCostUnit === "msg"
       ? "/ msg"
@@ -686,53 +691,12 @@ export default function Chat() {
             </div>
           ) : (
             <div className="chat-thread">
-              {messages.map((m, i) => (
-                <div key={i} className={"msg " + m.role + " rise"}>
-                  {m.role === "ai" && (
-                    <div className="ai-mark">
-                      <Sparkles size={16} />
-                    </div>
-                  )}
-                  <div className="msg-block">
-                    {m.attachments && m.attachments.length > 0 && (
-                      <div className="msg-attachments">
-                        {m.attachments.map((a, ai) => (
-                          <AttachmentChip key={a.s3Key + ai} attachment={a} />
-                        ))}
-                      </div>
-                    )}
-                    {(m.text.length > 0 || m.role === "ai") && (
-                      <div className="bubble">
-                        {m.text.length === 0 && m.role === "ai" ? (
-                          <span className="msg-typing">…</span>
-                        ) : (
-                          m.text.split("\n\n").map((p, k) => (
-                            <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
-                              {p}
-                            </p>
-                          ))
-                        )}
-                      </div>
-                    )}
-                    {m.role === "ai" && m.meta && (
-                      <div className="msg-meta">
-                        <span>{m.meta}</span>
-                        <div className="msg-actions">
-                          <button
-                            title="Copy"
-                            onClick={() => navigator.clipboard?.writeText(m.text)}
-                          >
-                            <Copy size={14} />
-                          </button>
-                          <button title="More">
-                            <MoreHorizontal size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+              {messages.map((m, i) => {
+                if (m.role === "ai")
+                  return <AiChatMessage key={`${i}.${m.localId}.ai`} message={m} />;
+                return <UserChatMessage key={`${i}.${m.localId}.user`} message={m} />;
+              })}
+
               {messagesLoading && (
                 <div className="msg ai">
                   <div className="ai-mark">
@@ -850,6 +814,7 @@ export default function Chat() {
                   </div>
                 )}
               </div>
+							{/* TODO: add here tokens usage */}
               <span className="hint" style={{ marginLeft: "auto" }}>
                 ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span>{" "}
                 {t("chat.tokensEst")}
@@ -984,4 +949,67 @@ function useObjectUrl(file: File, enabled: boolean): string | null {
     return () => URL.revokeObjectURL(u);
   }, [file, enabled]);
   return url;
+}
+
+function AiChatMessage({ message }: { message: Msg }) {
+  return (
+    <div className="msg ai rise">
+      <div className="msg-block">
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="msg-attachments">
+            {message.attachments.map((a, ai) => (
+              <AttachmentChip key={a.s3Key + ai} attachment={a} />
+            ))}
+          </div>
+        )}
+
+        {message.text.length === 0 && <div className="msg-typing">...</div>}
+
+        <Markdown
+          components={markdownComponents}
+          rehypePlugins={[rehypeSanitize]}
+          remarkPlugins={[remarkGfm]}
+        >
+          {message.text}
+        </Markdown>
+
+        {message.meta && (
+          <div className="msg-meta">
+            <span>{message.meta}</span>
+            <div className="msg-actions">
+              <button title="Copy" onClick={() => navigator.clipboard?.writeText(message.text)}>
+                <Copy size={14} />
+              </button>
+              <button title="More">
+                <MoreHorizontal size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UserChatMessage({ message }: { message: Msg }) {
+  return (
+    <div className="msg user rise">
+      <div className="msg-block">
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="msg-attachments">
+            {message.attachments.map((a, ai) => (
+              <AttachmentChip key={a.s3Key + ai} attachment={a} />
+            ))}
+          </div>
+        )}
+        <div className="bubble">
+          {message.text.split("\n\n").map((p, k) => (
+            <p key={k} style={{ margin: k === 0 ? 0 : "10px 0 0" }}>
+              {p}
+            </p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
