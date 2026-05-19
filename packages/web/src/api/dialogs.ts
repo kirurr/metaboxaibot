@@ -17,6 +17,16 @@ export type DialogDto = {
   title: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Возвращается только при `listDialogs({ withStats: true })`. */
+  totalTokens?: number;
+  /** Возвращается только при `listDialogs({ q })` — сниппет первого матч-сообщения. */
+  snippet?: string | null;
+  /**
+   * id последнего done-job в этом диалоге (для image/video/audio секций).
+   * Используется страницей /history для навигации в `/gallery/:jobId`.
+   * Для gpt-диалогов и для не-media диалогов без завершённых джобов = `null`.
+   */
+  latestJobId?: string | null;
 };
 
 export type MessageAttachmentDto = {
@@ -52,8 +62,27 @@ export type SendDocumentAttachment = {
   size?: number;
 };
 
-export function listDialogs(section?: string) {
-  return apiClient<DialogDto[]>("/web/dialogs", section ? { query: { section } } : undefined);
+export type ListDialogsOptions = {
+  section?: string;
+  /** Поиск по title + содержимому сообщений (server-side). */
+  q?: string;
+  /** Включить агрегированные `totalTokens` per dialog (легче `withStats=false`). */
+  withStats?: boolean;
+  /** AbortSignal — TanStack Query прокидывает свой при смене queryKey. */
+  signal?: AbortSignal;
+};
+
+export function listDialogs(opts: ListDialogsOptions | string = {}): Promise<DialogDto[]> {
+  // Backward-compat: некоторые места передают section строкой.
+  const o = typeof opts === "string" ? { section: opts } : opts;
+  const query: Record<string, string> = {};
+  if (o.section) query.section = o.section;
+  if (o.q) query.q = o.q;
+  if (o.withStats) query.withStats = "1";
+  return apiClient<DialogDto[]>("/web/dialogs", {
+    query: Object.keys(query).length ? query : undefined,
+    signal: o.signal,
+  });
 }
 
 export function createDialog(input: { section: string; modelId: string; title?: string }) {
