@@ -23,6 +23,7 @@ import { getFileUrl, uploadBuffer } from "../services/s3.service.js";
 import { logger } from "../logger.js";
 import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+import type { OutgoingHttpHeaders } from "node:http";
 
 // ── Загрузка вложений для чата ───────────────────────────────────────────────
 // Принимаемые типы соответствуют пайплайну `chat.service`:
@@ -448,6 +449,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 content: { type: "string" },
                 mediaUrl: { type: "string", nullable: true },
                 mediaType: { type: "string", nullable: true },
+                inputTokens: { type: "integer" },
+                outputTokens: { type: "integer" },
                 createdAt: { type: "string" },
                 attachments: {
                   type: "array",
@@ -499,6 +502,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             mediaUrl: string | null;
             mediaType: string | null;
             attachments: unknown;
+            inputTokens: number;
+            outputTokens: number;
             createdAt: Date;
           }>
         ).map(async (m) => {
@@ -538,6 +543,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             content: m.content,
             mediaUrl,
             mediaType: m.mediaType ?? null,
+            inputTokens: m.inputTokens,
+            outputTokens: m.outputTokens,
             createdAt: m.createdAt.toISOString(),
             attachments: attachments.length > 0 ? attachments : null,
           };
@@ -588,12 +595,28 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
     if (dialog.userId !== aibUserId) return reply.code(403).send({ error: "Forbidden" });
 
-    reply.raw.writeHead(200, {
+    // @ts-expect-error some weird fastify magic
+    const headers: OutgoingHttpHeaders = {
+      ...reply.getHeaders(),
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
-    });
+    };
+
+    // @fastify/cors ставит Access-Control-Allow-Origin через reply.header(),
+    // которые попадают в raw только при reply.send(). Здесь мы пишем напрямую
+    // в reply.raw — поэтому сливаем ранее установленные fastify-заголовки
+    // (CORS, прочие хуки) в writeHead, иначе браузер режет ответ по CORS.
+    // reply.raw.writeHead(200, {
+    //   ...reply.getHeaders(),
+    //   "Content-Type": "text/event-stream",
+    //   "Cache-Control": "no-cache, no-transform",
+    //   Connection: "keep-alive",
+    //   "X-Accel-Buffering": "no",
+    // });
+    reply.raw.writeHead(200, headers);
+    reply.hijack();
 
     const send = (event: string, data: unknown) => {
       reply.raw.write(`event: ${event}\n`);
@@ -641,6 +664,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
       // которую только что сделал `deductTokens`. Берём прямо из стрима.
       send("done", {
         tokensUsed: result.value?.tokensUsed ?? 0,
+        inputTokens: result.value?.inputTokens ?? 0,
+        outputTokens: result.value?.outputTokens ?? 0,
         balance: {
           tokenBalance: result.value?.tokenBalance?.toString() ?? "0",
           subscriptionTokenBalance: result.value?.subscriptionTokenBalance?.toString() ?? "0",

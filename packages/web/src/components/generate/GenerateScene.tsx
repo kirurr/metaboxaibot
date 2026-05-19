@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
@@ -7,6 +6,9 @@ import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
+import { ChipPopover } from "@/components/settings/ChipPopover";
+import { SettingControl } from "@/components/settings/SettingControl";
+import { isSettingVisible, UNSUPPORTED_TYPES } from "@/components/settings/utils";
 import {
   submitImageGeneration,
   submitVideoGeneration,
@@ -94,20 +96,6 @@ function getActiveSlots(
     .filter((s) => allowed.has(s.slotKey))
     .map((s) => (requiredOverride ? { ...s, required: requiredOverride.has(s.slotKey) } : s));
 }
-
-/** Грубо: видна ли настройка с учётом `dependsOn` (другая настройка == value). */
-function isSettingVisible(s: ModelSettingDto, values: Record<string, unknown>): boolean {
-  if (!s.dependsOn) return true;
-  return values[s.dependsOn.key] === s.dependsOn.value;
-}
-
-/** Типы пикеров, которые web пока не реализует — прячем их. */
-const UNSUPPORTED_TYPES = new Set<string>([
-  // Generic voice-picker (без конкретного провайдера) и d-id-voice-picker —
-  // пока не подключены.
-  "voice-picker",
-  "did-voice-picker",
-]);
 
 /** Map setting.type → провайдер каталога голосов. */
 const VOICE_PROVIDER_BY_TYPE: Record<string, VoiceProvider> = {
@@ -405,7 +393,7 @@ function SettingChip({
       </button>
       {open && (
         <ChipPopover anchorRef={chipRef} popRef={popRef}>
-          <SettingPopBody setting={setting} value={value} onChange={onChange} />
+          <SettingControl setting={setting} value={value} onChange={onChange} />
         </ChipPopover>
       )}
     </>
@@ -484,241 +472,6 @@ function FamilyAxisChip({
       )}
     </>
   );
-}
-
-/**
- * Popover в portal'е — рендерится поверх всего, не клипается scroll-контейнерами.
- * Позиционируется по `getBoundingClientRect` anchor'а с auto-flip вверх если
- * не помещается вниз. Реагирует на resize окна и scroll-события (capture, чтобы
- * ловить scroll внутри `.gen-panel-scroll`).
- */
-function ChipPopover({
-  anchorRef,
-  popRef,
-  children,
-  className = "gen-chip-pop",
-  matchAnchorWidth = false,
-}: {
-  anchorRef: React.RefObject<HTMLElement | null>;
-  popRef: React.RefObject<HTMLDivElement | null>;
-  children: React.ReactNode;
-  className?: string;
-  /** Подгонять ширину popover'а под anchor (для model-picker и аналогов). */
-  matchAnchorWidth?: boolean;
-}) {
-  const [pos, setPos] = useState<{
-    top: number;
-    left: number;
-    maxHeight: number;
-    width?: number;
-  } | null>(null);
-
-  useLayoutEffect(() => {
-    function update() {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const ar = anchor.getBoundingClientRect();
-      const pop = popRef.current;
-      const pw = matchAnchorWidth ? ar.width : (pop?.offsetWidth ?? 240);
-      // scrollHeight — фактическая высота контента, не клампнутая max-height'ом
-      // самого popover'а. Нужно чтобы корректно решить "помещается ли".
-      const ph = pop?.scrollHeight ?? pop?.offsetHeight ?? 100;
-      const vh = window.innerHeight;
-      const vw = window.innerWidth;
-      const GAP = 6;
-      const MARGIN = 8;
-      const MIN_HEIGHT = 120;
-
-      // Выбираем направление: сначала пробуем вниз, если не помещается —
-      // вверх. Если ни там, ни там не влезает целиком — пускаем в сторону с
-      // бо́льшим запасом и клампим max-height.
-      const spaceBelow = vh - ar.bottom - GAP - MARGIN;
-      const spaceAbove = ar.top - GAP - MARGIN;
-      let top: number;
-      let maxHeight: number;
-      if (ph <= spaceBelow) {
-        top = ar.bottom + GAP;
-        maxHeight = spaceBelow;
-      } else if (ph <= spaceAbove) {
-        top = ar.top - GAP - ph;
-        maxHeight = spaceAbove;
-      } else if (spaceBelow >= spaceAbove) {
-        top = ar.bottom + GAP;
-        maxHeight = Math.max(MIN_HEIGHT, spaceBelow);
-      } else {
-        maxHeight = Math.max(MIN_HEIGHT, spaceAbove);
-        top = Math.max(MARGIN, ar.top - GAP - maxHeight);
-      }
-
-      // Horizontal: prefer align-left; clamp в viewport.
-      let left = ar.left;
-      if (left + pw + MARGIN > vw) left = Math.max(MARGIN, vw - pw - MARGIN);
-      if (left < MARGIN) left = MARGIN;
-
-      setPos({ top, left, maxHeight, width: matchAnchorWidth ? ar.width : undefined });
-    }
-    update();
-    // Scroll любого внутреннего контейнера → reposition. capture обязателен —
-    // scroll-event не bubble'ится. Resize окна тоже двигает anchor.
-    const onScrollOrResize = () => update();
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    // Второй tick — после того как popover реально отрендерился с правильным размером.
-    const raf = requestAnimationFrame(update);
-    return () => {
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-      cancelAnimationFrame(raf);
-    };
-  }, [anchorRef, popRef, matchAnchorWidth]);
-
-  return createPortal(
-    <div
-      ref={popRef}
-      className={className}
-      style={{
-        position: "fixed",
-        top: pos?.top ?? -9999,
-        left: pos?.left ?? -9999,
-        width: pos?.width,
-        maxHeight: pos?.maxHeight,
-        overflowY: "auto",
-        // До первого позиционирования прячем (иначе мелькает в (0,0)).
-        visibility: pos ? "visible" : "hidden",
-      }}
-    >
-      {children}
-    </div>,
-    document.body,
-  );
-}
-
-/** Содержимое popover'а — фактический контрол для каждого типа настройки. */
-function SettingPopBody({
-  setting,
-  value,
-  onChange,
-}: {
-  setting: ModelSettingDto;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  if (setting.type === "color") {
-    const hex = typeof value === "string" && value ? value : String(setting.default ?? "#000000");
-    return (
-      <div className="gen-pop-body">
-        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
-        <div className="gen-color-row">
-          <input
-            type="color"
-            className="gen-color-input"
-            value={hex}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <input
-            type="text"
-            className="gen-text gen-color-text"
-            value={hex}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="#RRGGBB"
-          />
-        </div>
-      </div>
-    );
-  }
-  if (setting.type === "slider") {
-    const min = setting.min ?? 0;
-    const max = setting.max ?? 100;
-    const step = setting.step ?? 1;
-    const num = typeof value === "number" ? value : Number(setting.default ?? min);
-    // Кол-во знаков после запятой берём из step'а — формат chip'а согласован
-    // с тем, как UX выглядит для дробных шагов (0.05 → "0.10", "0.15").
-    const stepStr = String(step);
-    const dotIdx = stepStr.indexOf(".");
-    const decimals = dotIdx >= 0 ? stepStr.length - dotIdx - 1 : 0;
-    const values: number[] = [];
-    // Накопление через i*step вместо v+=step: избегаем float-drift на длинных диапазонах.
-    const count = Math.round((max - min) / step) + 1;
-    for (let i = 0; i < count; i++) {
-      const v = Number((min + i * step).toFixed(decimals));
-      values.push(v);
-    }
-    return (
-      <div className="gen-pop-body">
-        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
-        <div className="gen-pop-chips-row">
-          {values.map((v) => {
-            const active = Number(num.toFixed(decimals)) === v;
-            return (
-              <button
-                key={v}
-                type="button"
-                className={clsx("gen-chip", active && "on")}
-                onClick={() => onChange(v)}
-              >
-                {v}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-  if (setting.type === "number") {
-    const num = typeof value === "number" ? value : Number(setting.default ?? 0);
-    return (
-      <div className="gen-pop-body">
-        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
-        <input
-          type="number"
-          min={setting.min}
-          max={setting.max}
-          step={setting.step}
-          value={num}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="gen-num"
-        />
-      </div>
-    );
-  }
-  if (setting.type === "text") {
-    return (
-      <div className="gen-pop-body">
-        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
-        <input
-          type="text"
-          value={typeof value === "string" ? value : String(setting.default ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          className="gen-text"
-        />
-      </div>
-    );
-  }
-  if (setting.type === "select" || setting.type === "dropdown") {
-    const opts = setting.options ?? [];
-    if (opts.length === 0) return null;
-    return (
-      <div className="gen-pop-body">
-        {setting.description && <div className="gen-pop-desc">{setting.description}</div>}
-        <div className="gen-pop-chips-row">
-          {opts.map((o) => {
-            const active = String(value ?? setting.default) === String(o.value);
-            return (
-              <button
-                key={String(o.value)}
-                type="button"
-                className={clsx("gen-chip", active && "on")}
-                onClick={() => onChange(o.value)}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-  return null;
 }
 
 // ── Main scene ───────────────────────────────────────────────────────────────

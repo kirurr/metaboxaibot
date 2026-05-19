@@ -105,6 +105,10 @@ export interface SendMessageParams {
 export interface SendMessageResult {
   text: string;
   tokensUsed: number;
+  /** Raw provider input tokens (всё, что ушло в промпт для этого ответа — включая историю). */
+  inputTokens: number;
+  /** Raw provider output tokens (длина сгенерированного ответа). */
+  outputTokens: number;
   /** Post-deduct subscription token balance. */
   subscriptionTokenBalance: number;
   /** Post-deduct regular (paid) token balance. */
@@ -989,7 +993,11 @@ export const chatService = {
           : estimateTokens(content, responseText);
 
     // Save assistant message
-    await dialogService.saveMessage(dialogId, "assistant", responseText, { tokensUsed });
+    await dialogService.saveMessage(dialogId, "assistant", responseText, {
+      tokensUsed,
+      inputTokens: inputTokensCount,
+      outputTokens: outputTokensCount,
+    });
 
     // Audit-метаданные: фактический provider (отличается от primary при
     // fallback'е) и сырая цена в USD по нему. Считаем по `activeAdapterModel`
@@ -1031,6 +1039,8 @@ export const chatService = {
     return {
       text: responseText,
       tokensUsed,
+      inputTokens: inputTokensCount,
+      outputTokens: outputTokensCount,
       subscriptionTokenBalance: deductResult.subscriptionTokenBalance,
       tokenBalance: deductResult.tokenBalance,
     };
