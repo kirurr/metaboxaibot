@@ -92,8 +92,9 @@ function modelRate(m: WebModelDto): string {
   // до десятков, которое работает для image/video/audio (там значения 10–500 ✦),
   // здесь схлопывало бы всё в 0. Поэтому формат с 2–3 знаками после запятой.
   if (m.tokenCostUnit === "1k_tok") {
-		// Стоимость в токенах умножаем на значение символов = 1000 токенов / ~3500 символов
-    const v = m.tokenCostApprox * 0.3;
+    // Пересчитываем стоимость в токенах на символы
+    // Стоимость в токенах * множитель символов = 1000 токенов / 3500 символов
+    const v = m.tokenCostApprox * Number((1000 / 3500).toFixed(2));
     const formatted = v < 0.1 ? v.toFixed(3) : v.toFixed(2);
     return `≈ ${formatted} ✦ / 1k symbol`;
   }
@@ -227,9 +228,14 @@ export default function Chat() {
   const abortRef = useRef<AbortController | null>(null);
   const settingsBtnRef = useRef<HTMLButtonElement | null>(null);
   const settingsPopRef = useRef<HTMLDivElement | null>(null);
-  // Дебаунсер PATCH-ей настроек: ключ `${bucket}::${key}` → таймер.
-  // 800мс совпадает с веб-аппом (GptManagementView.tsx:82-88).
-  const settingsDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Дебаунсер PATCH-ей настроек: накапливаем diff per-bucket и шлём одним
+  // запросом. 800мс совпадает с веб-аппом (GptManagementView.tsx:82-88).
+  // Map хранит pending-изменения, которые ещё не ушли на сервер — флашатся
+  // или по таймеру, или принудительно перед send() (иначе race: юзер набрал
+  // system_prompt и сразу нажал Send до того, как timer успел стрельнуть).
+  const settingsPendingRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  const settingsTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const settingsInflightRef = useRef<Set<Promise<unknown>>>(new Set());
   // Маркируем id диалогов, для которых история уже загружена/прогрета. Нужен
   // потому что после `createDialog` мы знаем, что диалог пустой, и эффект ниже
   // не должен ходить за `getMessages` — иначе он перетрёт оптимистично-добавленные
@@ -264,9 +270,9 @@ export default function Chat() {
     };
   }, []);
 
-  // На unmount — флашим pending-таймеры дебаунсера, чтобы не висели после ухода.
+  // На unmount — гасим pending-таймеры дебаунсера, чтобы не висели после ухода.
   useEffect(() => {
-    const timers = settingsDebounceRef.current;
+    const timers = settingsTimersRef.current;
     return () => {
       for (const id of Object.values(timers)) clearTimeout(id);
     };
@@ -370,14 +376,52 @@ export default function Chat() {
   // приоритеты, что у бэкенда в getEffectiveDialogSettings.
   const settingValues = useMemo(() => {
     if (!selectedModel) return {};
-    return resolveEffectiveSettings(settingsRoot, selectedModel.id, activeId, selectedModel.settings);
+    return resolveEffectiveSettings(
+      settingsRoot,
+      selectedModel.id,
+      activeId,
+      selectedModel.settings,
+    );
   }, [settingsRoot, selectedModel, activeId]);
+
+  // Шлёт накопленный diff одной PATCH-ой и пишет промис в inflight-сет, чтобы
+  // его можно было дождаться из flushSettings перед send().
+  const flushBucket = useCallback((bucket: string) => {
+    const changes = settingsPendingRef.current.get(bucket);
+    if (!changes || Object.keys(changes).length === 0) return;
+    settingsPendingRef.current.delete(bucket);
+    const promise = bucket.startsWith("dialog:")
+      ? setDialogModelSettings(bucket.slice("dialog:".length), changes)
+      : setUserModelSettings(bucket, changes);
+    const wrapped = promise.catch(() => {
+      /* swallow — следующий патч заменит ошибочное состояние */
+    });
+    settingsInflightRef.current.add(wrapped);
+    void wrapped.finally(() => settingsInflightRef.current.delete(wrapped));
+  }, []);
+
+  // Принудительный флаш: гасим все debounce-таймеры, шлём накопленные diff'ы и
+  // ждём inflight-PATCH'ей. Вызывается в начале send() — иначе race: юзер
+  // набрал system_prompt и сразу нажал Send до того, как 800мс таймер успел
+  // стрельнуть → бэкенд читает старое состояние из БД.
+  const flushSettings = useCallback(async () => {
+    for (const [bucket, timer] of Object.entries(settingsTimersRef.current)) {
+      clearTimeout(timer);
+      delete settingsTimersRef.current[bucket];
+      flushBucket(bucket);
+    }
+    if (settingsInflightRef.current.size > 0) {
+      await Promise.all(settingsInflightRef.current);
+    }
+  }, [flushBucket]);
 
   // Изменение настройки: optimistic local + debounced PATCH.
   //   - Активный диалог есть → пишем в `dialog:<id>` (override только для этого треда).
   //   - Черновик (нет диалога) → пишем в user-level для текущей модели. Когда
   //     первое сообщение создаст диалог, бэкенд смержит user-level как defaults,
   //     так что мигрировать ничего не нужно.
+  // Diff накапливается в `settingsPendingRef[bucket]` и уходит одним запросом
+  // на debounce-таймер; flushSettings() умеет дернуть его принудительно.
   const updateSetting = useCallback(
     (key: string, value: unknown) => {
       if (!selectedModel) return;
@@ -386,21 +430,16 @@ export default function Chat() {
         ...prev,
         [bucket]: { ...(prev[bucket] ?? {}), [key]: value },
       }));
-      const timerKey = `${bucket}::${key}`;
-      const existing = settingsDebounceRef.current[timerKey];
-      if (existing) clearTimeout(existing);
-      settingsDebounceRef.current[timerKey] = setTimeout(() => {
-        delete settingsDebounceRef.current[timerKey];
-        const patch = { [key]: value };
-        const fn = activeId
-          ? setDialogModelSettings(activeId, patch)
-          : setUserModelSettings(selectedModel.id, patch);
-        fn.catch(() => {
-          /* swallow — следующий патч заменит ошибочное состояние */
-        });
+      const existing = settingsPendingRef.current.get(bucket) ?? {};
+      settingsPendingRef.current.set(bucket, { ...existing, [key]: value });
+      const existingTimer = settingsTimersRef.current[bucket];
+      if (existingTimer) clearTimeout(existingTimer);
+      settingsTimersRef.current[bucket] = setTimeout(() => {
+        delete settingsTimersRef.current[bucket];
+        flushBucket(bucket);
       }, 800);
     },
-    [selectedModel, activeId],
+    [selectedModel, activeId, flushBucket],
   );
 
   // Текущий контекст диалога = high-water mark по `inputTokens+outputTokens`
@@ -529,6 +568,11 @@ export default function Chat() {
 
     setSendError(null);
     setSending(true);
+
+    // 0) Флашим pending-PATCH настроек до createDialog/streamMessage. Иначе
+    //    race: backend читает getEffectiveDialogSettings из БД, а debounce
+    //    ещё не успел отослать system_prompt/temperature/etc.
+    await flushSettings();
 
     // 1) Гарантируем существующий диалог на бэке.
     let dialogId = activeId;
@@ -990,14 +1034,14 @@ export default function Chat() {
               </button>
             </div>
             <div className="composer-foot">
-							{selectedModel?.contextWindow ? (
-								<div className="hint">
-									<span className="mono">
-										{formatTokensK(currentContextTokens)} /{" "}
-										{formatTokensK(selectedModel.contextWindow)}
-									</span>
-								</div>
-							) : null}
+              {selectedModel?.contextWindow ? (
+                <div className="hint">
+                  <span className="mono">
+                    {formatTokensK(currentContextTokens)} /{" "}
+                    {formatTokensK(selectedModel.contextWindow)}
+                  </span>
+                </div>
+              ) : null}
               <span className="hint" style={{ marginLeft: "auto" }}>
                 ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span>{" "}
                 {t("chat.tokensEst")}

@@ -6182,6 +6182,17 @@ select {
   padding: 14px;
 }
 
+/* Cap the panel height so ChipPopover's measured scrollHeight stays bounded —
+   otherwise expanding "Advanced" makes the popup taller and ChipPopover re-anchors
+   the popover further up the viewport. Inner scroll keeps the gear popup
+   anchored predictably near the composer. */
+.chat-settings-pop .settings-panel {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  /* Reserve scrollbar gutter so chip rows don't shift when scrollbar toggles. */
+  scrollbar-gutter: stable;
+}
+
 .settings-panel {
   display: flex;
   flex-direction: column;
@@ -6211,6 +6222,26 @@ select {
 /* Settings panel reuses .gen-pop-body / .gen-pop-chips-row / .gen-chip from
    the generate scene — they already match the visual language and live in
    .composer-row context. No extra rules needed for slider/select/text/number. */
+
+.settings-panel-textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 240px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  outline: none;
+  transition: border-color 150ms var(--ease);
+}
+.settings-panel-textarea:focus {
+  border-color: var(--accent, #4a8df5);
+}
 
 .settings-panel-toggle {
   flex-shrink: 0;

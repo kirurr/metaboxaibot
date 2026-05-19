@@ -105,6 +105,27 @@ function SettingsRow({
     );
   }
 
+  // Text — рендерим textarea, потому что в этой панели чаще всего лежит
+  // system_prompt (многострочный). У SettingControl text-тип это single-line
+  // input — там он живёт внутри popover'а чипа и компактнее.
+  if (setting.type === "text") {
+    const text = typeof value === "string" ? value : String(setting.default ?? "");
+    return (
+      <div className="settings-panel-row">
+        <span className="settings-panel-label">{setting.label}</span>
+        {setting.description && (
+          <div className="settings-panel-desc">{setting.description}</div>
+        )}
+        <textarea
+          className="settings-panel-textarea"
+          value={text}
+          onChange={(e) => onChange(setting.key, e.target.value)}
+          rows={4}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="settings-panel-row">
       <span className="settings-panel-label">{setting.label}</span>
