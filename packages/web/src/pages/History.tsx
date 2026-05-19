@@ -93,7 +93,10 @@ export default function History() {
         signal,
       }),
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    // staleTime: 0 — каждый mount страницы /history и фокус вкладки рефетчат.
+    // Иначе после генерации (image/video/audio) или delete/rename на другой
+    // странице список будет показан устаревшим до 30с.
+    staleTime: 0,
   });
 
   const items = query.data ?? [];
@@ -222,16 +225,34 @@ function HistoryRow({
   onOpen: () => void;
   fallbackTitle: string;
 }) {
-  // failed-джобы помечаем приглушением, чтобы UX отделял их от done.
-  const dim = item.kind === "job" && item.status === "failed";
+  const { t } = useTranslation();
+  const isFailed = item.kind === "job" && item.status === "failed";
   return (
-    <div
-      className="history-row"
-      onClick={onOpen}
-      style={dim ? { opacity: 0.65 } : undefined}
-    >
+    <div className="history-row" onClick={onOpen}>
       <div style={{ minWidth: 0 }}>
-        <div className="h-title">{item.title ?? fallbackTitle}</div>
+        <div className="h-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {item.title ?? fallbackTitle}
+          </span>
+          {isFailed && (
+            <span
+              style={{
+                flexShrink: 0,
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: "rgba(220, 38, 38, 0.15)",
+                color: "#dc2626",
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                lineHeight: 1.4,
+              }}
+            >
+              {t("history.statusFailed")}
+            </span>
+          )}
+        </div>
         {item.snippet ? (
           <div className="h-preview">{item.snippet}</div>
         ) : (
@@ -242,9 +263,7 @@ function HistoryRow({
       </div>
       <div className="meta">
         <span className="h-model">{item.modelId}</span>
-        {!isMobile && (
-          <span className="mono">{formatTokensK(item.totalTokens)}</span>
-        )}
+        {!isMobile && <span className="mono">{formatTokensK(item.totalTokens)}</span>}
         <span>{formatTimeForDay(item.updatedAt, day, locale)}</span>
         <ChevronRight size={16} />
       </div>

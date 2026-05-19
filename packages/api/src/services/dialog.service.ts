@@ -233,9 +233,7 @@ export const dialogService = {
     const snippetsByDialog = new Map<string, string>(
       snippets.map((s) => [s.dialogId, buildSnippet(s.content, q)]),
     );
-    const latestJobByDialog = new Map<string, string>(
-      latestJobs.map((j) => [j.dialogId, j.id]),
-    );
+    const latestJobByDialog = new Map<string, string>(latestJobs.map((j) => [j.dialogId, j.id]));
 
     return dialogs.map((d) => ({
       ...d,

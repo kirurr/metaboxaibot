@@ -105,11 +105,13 @@ export const ChatSidebar = memo(function ChatSidebar({
   const isSearching = debouncedSearch.length >= MIN_SEARCH_LEN;
   const searchQuery = useQuery({
     queryKey: ["chat-sidebar-search", debouncedSearch],
-    queryFn: ({ signal }) =>
-      listDialogs({ section: "gpt", q: debouncedSearch, signal }),
+    queryFn: ({ signal }) => listDialogs({ section: "gpt", q: debouncedSearch, signal }),
     placeholderData: keepPreviousData,
     enabled: isSearching,
-    staleTime: 30_000,
+    // staleTime: 0 — каждый mount страницы /chat рефетчит результаты поиска.
+    // Иначе после rename/delete/create на другой вкладке сидбар покажет
+    // устаревшие данные (Zustand-store обновляется, react-query кэш — нет).
+    staleTime: 0,
   });
 
   const clientFilteredDialogs = useMemo(() => {
@@ -142,11 +144,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         </button>
       </div>
       <div className="cs-search">
-        {isSearchFetching ? (
-          <RefreshCw size={14} className="anim-spin" />
-        ) : (
-          <Search size={14} />
-        )}
+        {isSearchFetching ? <RefreshCw size={14} className="anim-spin" /> : <Search size={14} />}
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}

@@ -70,7 +70,9 @@ export const historyService = {
 
     const [dialogs, jobs] = await Promise.all([
       wantsGpt ? loadGptDialogs(userId, q) : Promise.resolve([] as HistoryItem[]),
-      wantsMedia ? loadMediaJobs(userId, q, section === "gpt" ? undefined : section) : Promise.resolve([] as HistoryItem[]),
+      wantsMedia
+        ? loadMediaJobs(userId, q, section === "gpt" ? undefined : section)
+        : Promise.resolve([] as HistoryItem[]),
     ]);
 
     return [...dialogs, ...jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -150,7 +152,7 @@ async function loadGptDialogs(userId: bigint, q: string): Promise<HistoryItem[]>
     createdAt: d.createdAt.toISOString(),
     updatedAt: d.updatedAt.toISOString(),
     totalTokens: totalsByDialog.get(d.id) ?? 0,
-    snippet: q ? snippetsByDialog.get(d.id) ?? null : null,
+    snippet: q ? (snippetsByDialog.get(d.id) ?? null) : null,
   }));
 }
 
@@ -159,9 +161,7 @@ async function loadMediaJobs(
   q: string,
   section: string | undefined,
 ): Promise<HistoryItem[]> {
-  const sectionFilter = section
-    ? { section }
-    : { section: { in: [...MEDIA_SECTIONS] } };
+  const sectionFilter = section ? { section } : { section: { in: [...MEDIA_SECTIONS] } };
 
   const jobs = await db.generationJob.findMany({
     where: {

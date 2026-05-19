@@ -373,7 +373,8 @@
       "design": "Image",
       "video": "Video",
       "audio": "Audio"
-    }
+    },
+    "statusFailed": "Failed"
   },
   "tokens": {
     "title": "Top up.",
