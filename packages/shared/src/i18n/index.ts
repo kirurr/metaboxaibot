@@ -28,11 +28,23 @@ export interface Translations {
     audio: string;
     video: string;
     storage: string;
+    scenarios: string;
     help: string;
     knowledgeBase: string;
     language: string;
     chooseLanguage: string;
     languageChanged: string;
+  };
+  scenarios: {
+    sectionTitle: string;
+    faceSwap: string;
+    backToMain: string;
+    faceSwapStep1: string;
+    faceSwapStep2: string;
+    faceSwapNotPhoto: string;
+    faceSwapGenerating: string;
+    faceSwapPhotoTooLarge: string;
+    faceSwapAlbumNotice: string;
   };
   gpt: {
     sectionTitle: string;
