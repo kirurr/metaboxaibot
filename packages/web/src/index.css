@@ -1573,8 +1573,13 @@ select {
 }
 .mp-pop {
   position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
+
+	/* Move the openned menu to the bottom insted of the top */
+	left: -50%;
+	top: calc(100% + 8px);
+  /* bottom: calc(100% + 8px); */
+  /* left: 0; */
+
   width: 320px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);

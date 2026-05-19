@@ -78,7 +78,15 @@ function modelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
 }
 function modelRate(m: WebModelDto): string {
-  const n = (Math.round(m.tokenCostApprox / 10) * 10);
+  // LLM: бэк отдаёт стоимость за 1000 токенов сообщения (доли ✦) — округление
+  // до десятков, которое работает для image/video/audio (там значения 10–500 ✦),
+  // здесь схлопывало бы всё в 0. Поэтому формат с 2–3 знаками после запятой.
+  if (m.tokenCostUnit === "1k_tok") {
+    const v = m.tokenCostApprox;
+    const formatted = v < 0.1 ? v.toFixed(3) : v.toFixed(2);
+    return `≈ ${formatted} ✦ / 1k tok`;
+  }
+  const n = Math.round(m.tokenCostApprox / 10) * 10;
   const unit =
     m.tokenCostUnit === "msg"
       ? "/ msg"
@@ -717,8 +725,40 @@ export default function Chat() {
         <div className="chat-scroll" ref={scrollRef}>
           {messages.length === 0 && !messagesLoading ? (
             <div className="chat-empty">
-              <div className="ce-mark">
-                <Sparkles size={28} />
+              {/* <div className="ce-mark"> */}
+              {/*   <Sparkles size={28} /> */}
+              {/* </div> */}
+              <div
+                ref={modelPickRef}
+                className="model-pick"
+                onClick={() => setModelOpen(!modelOpen)}
+              >
+                <span className="mp-dot" />
+                <span className="mp-name">
+                  {selectedModel ? modelDisplayName(selectedModel) : t("common.loading")}
+                </span>
+                <ChevronDown size={13} />
+                {modelOpen && (
+                  <div className="mp-pop" onClick={(e) => e.stopPropagation()}>
+                    {chatModels.map((m) => (
+                      <button
+                        key={m.id}
+                        className={clsx("mp-row", m.id === modelId && "on")}
+                        onClick={() => {
+                          setModelId(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <span className="mp-row-name">
+                          {modelDisplayName(m)}
+                          {m.id === modelId && <Check size={12} />}
+                        </span>
+                        <span className="mp-row-rate mono">{modelRate(m)}</span>
+                        <span className="mp-row-desc">{modelDesc(m)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <h2>{t("chat.startNew")}</h2>
               <p>{t("chat.startNewHint")}</p>
@@ -823,49 +863,17 @@ export default function Chat() {
               </button>
             </div>
             <div className="composer-foot">
-              <div
-                ref={modelPickRef}
-                className="model-pick"
-                onClick={() => setModelOpen(!modelOpen)}
-              >
-                <span className="mp-dot" />
-                <span className="mp-name">
-                  {selectedModel ? modelDisplayName(selectedModel) : t("common.loading")}
-                </span>
-                <ChevronDown size={13} />
-                {modelOpen && (
-                  <div className="mp-pop" onClick={(e) => e.stopPropagation()}>
-                    {chatModels.map((m) => (
-                      <button
-                        key={m.id}
-                        className={clsx("mp-row", m.id === modelId && "on")}
-                        onClick={() => {
-                          setModelId(m.id);
-                          setModelOpen(false);
-                        }}
-                      >
-                        <span className="mp-row-name">
-                          {modelDisplayName(m)}
-                          {m.id === modelId && <Check size={12} />}
-                        </span>
-                        <span className="mp-row-rate mono">{modelRate(m)}</span>
-                        <span className="mp-row-desc">{modelDesc(m)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+							{selectedModel?.contextWindow ? (
+								<div className="hint">
+									<span className="mono">
+										{formatTokensK(currentContextTokens)} /{" "}
+										{formatTokensK(selectedModel.contextWindow)}
+									</span>
+								</div>
+							) : null}
               <span className="hint" style={{ marginLeft: "auto" }}>
                 ~ <span className="mono">{Math.max(1, Math.round(draft.length / 4))}</span>{" "}
                 {t("chat.tokensEst")}
-                {selectedModel?.contextWindow ? (
-                  <>
-                    {" · "}
-                    <span className="mono">
-                      {formatTokensK(currentContextTokens)} / {formatTokensK(selectedModel.contextWindow)}
-                    </span>
-                  </>
-                ) : null}
               </span>
             </div>
           </div>
