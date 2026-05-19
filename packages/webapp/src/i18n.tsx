@@ -428,6 +428,9 @@ const translations = {
     "imageSettings.resetTitle": "Reset settings to defaults",
     "imageSettings.selectModel": "Select model",
     "imageSettings.activatedPopup": "Model activated. Return to the bot to start using it.",
+    "imageSettings.autoActivatedToast":
+      "✅ {name} activated. Adjust settings, minimize the mini-app and start chatting in the bot.",
+    "imageSettings.autoActivatedToastDismiss": "Don’t show again",
     "manage.dialogActivatedPopup": "Dialog activated. Return to the chat to work with it.",
     "manage.startChat": "Start chatting",
     "manage.settings": "Settings",
@@ -969,6 +972,9 @@ const translations = {
     "imageSettings.resetTitle": "Сбрасывает настройки до значений по умолчанию.",
     "imageSettings.selectModel": "Выберите модель",
     "imageSettings.activatedPopup": "Модель активирована. Вернитесь в бот для работы с ней.",
+    "imageSettings.autoActivatedToast":
+      "✅ {name} активирована. Выставите настройки, сверните мини-апп и начинайте работу в чате.",
+    "imageSettings.autoActivatedToastDismiss": "Больше не показывать",
     "manage.dialogActivatedPopup": "Диалог активирован. Вернитесь в чат для работы с ним.",
     "manage.startChat": "Начать общение",
     "manage.settings": "Настройки",

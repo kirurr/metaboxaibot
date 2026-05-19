@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type AnimationEvent } from "react";
 import { api } from "../../api/client.js";
 import { useI18n } from "../../i18n.js";
 import { MODEL_TRANSLATIONS } from "@metabox/shared-browser";
@@ -42,6 +42,17 @@ const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
   video: "VIDEO_ACTIVE",
   audio: "AUDIO_ACTIVE",
 };
+
+const AUTO_ACTIVATED_TOAST_SUPPRESS_KEY = "metabox.autoActivateToast.suppressed";
+const AUTO_ACTIVATED_TOAST_MS = 3500;
+
+function isAutoActivatedToastSuppressed(): boolean {
+  try {
+    return localStorage.getItem(AUTO_ACTIVATED_TOAST_SUPPRESS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function MediaSettingsView({
   section,
@@ -111,6 +122,54 @@ export function MediaSettingsView({
   // до загрузки профиля поведение совпадало с дефолтом сервера. При false —
   // scheduleAutoActivate становится no-op; юзер активирует модель кнопкой.
   const [autoActivateEnabled, setAutoActivateEnabled] = useState(true);
+  // Slide-from-top toast «модель X активирована». Показывается на mount (если
+  // секция уже в *_ACTIVE) и после каждого успешного autoActivate. Юзер может
+  // погасить навсегда — флаг в localStorage, проверяется в showAutoActivatedToast.
+  // closing=true запускает CSS-анимацию выхода; компонент unmount'ится по
+  // onAnimationEnd, чтобы не было резкого «мигания» при auto-dismiss.
+  const [autoActivatedToastName, setAutoActivatedToastName] = useState<string | null>(null);
+  const [autoActivatedToastClosing, setAutoActivatedToastClosing] = useState(false);
+  const autoActivatedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showAutoActivatedToast = (name: string) => {
+    if (isAutoActivatedToastSuppressed()) return;
+    if (autoActivatedToastTimerRef.current) {
+      clearTimeout(autoActivatedToastTimerRef.current);
+    }
+    setAutoActivatedToastName(name);
+    setAutoActivatedToastClosing(false);
+    autoActivatedToastTimerRef.current = setTimeout(() => {
+      autoActivatedToastTimerRef.current = null;
+      setAutoActivatedToastClosing(true);
+    }, AUTO_ACTIVATED_TOAST_MS);
+  };
+
+  const closeAutoActivatedToast = () => {
+    if (autoActivatedToastTimerRef.current) {
+      clearTimeout(autoActivatedToastTimerRef.current);
+      autoActivatedToastTimerRef.current = null;
+    }
+    setAutoActivatedToastClosing(true);
+  };
+
+  const suppressAutoActivatedToast = () => {
+    try {
+      localStorage.setItem(AUTO_ACTIVATED_TOAST_SUPPRESS_KEY, "1");
+    } catch {
+      // localStorage недоступен в части Telegram-клиентов — toast просто не
+      // запомнит выбор, но текущий экземпляр всё равно закроется ниже.
+    }
+    closeAutoActivatedToast();
+  };
+
+  const handleAutoActivatedToastAnimationEnd = (e: AnimationEvent<HTMLDivElement>) => {
+    // Размонтируем toast только когда отыграла именно out-анимация — иначе
+    // re-trigger (showAutoActivatedToast поверх старого) сразу же сожрёт сам себя.
+    if (autoActivatedToastClosing && e.animationName === "auto-activated-toast-out") {
+      setAutoActivatedToastName(null);
+      setAutoActivatedToastClosing(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -136,6 +195,16 @@ export function MediaSettingsView({
         // случится legitimate activate.
         if (activeId && state.state === SECTION_ACTIVE_STATE[section]) {
           lastActivatedRef.current = activeId;
+          // MET-184: переход на экран активной (auto-activated) секции —
+          // показываем toast «модель X активирована» даже если фактического
+          // /state/activate в этом mount'е не было. Имя резолвим из тех же
+          // ms, что только что положили в state.
+          if (profile.autoActivateModel) {
+            const localeMap = MODEL_TRANSLATIONS[locale] ?? MODEL_TRANSLATIONS["en"] ?? {};
+            const m = ms.find((mm) => mm.id === activeId);
+            const displayName = localeMap[activeId]?.name ?? m?.name ?? "";
+            if (displayName) showAutoActivatedToast(displayName);
+          }
         }
         // initialModelId only controls which card is shown in the picker (navigation only)
         const navTarget =
@@ -195,6 +264,11 @@ export function MediaSettingsView({
       // lastActivatedRef только если мы всё ещё актуальная operation.
       if (activateOpRef.current === opVersion) {
         lastActivatedRef.current = modelId;
+        // MET-184: показываем toast только для актуальной operation — иначе
+        // более свежая активация уже в полёте и её собственный toast перекроет наш.
+        const m = models.find((mm) => mm.id === modelId);
+        const displayName = modelLocaleMap[modelId]?.name ?? m?.name ?? "";
+        if (displayName) showAutoActivatedToast(displayName);
       }
     } catch (e) {
       console.error("[settings] auto-activate failed", modelId, e);
@@ -238,6 +312,10 @@ export function MediaSettingsView({
       if (popupTimerRef.current) {
         clearTimeout(popupTimerRef.current);
         popupTimerRef.current = null;
+      }
+      if (autoActivatedToastTimerRef.current) {
+        clearTimeout(autoActivatedToastTimerRef.current);
+        autoActivatedToastTimerRef.current = null;
       }
     };
   }, []);
@@ -476,6 +554,26 @@ export function MediaSettingsView({
 
   return (
     <div className="page">
+      {autoActivatedToastName && (
+        <div
+          className={`auto-activated-toast${autoActivatedToastClosing ? " is-closing" : ""}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          onAnimationEnd={handleAutoActivatedToastAnimationEnd}
+        >
+          <span className="auto-activated-toast__message">
+            {t("imageSettings.autoActivatedToast").replace("{name}", autoActivatedToastName)}
+          </span>
+          <button
+            type="button"
+            className="auto-activated-toast__dismiss"
+            onClick={suppressAutoActivatedToast}
+          >
+            {t("imageSettings.autoActivatedToastDismiss")}
+          </button>
+        </div>
+      )}
       {activatedPopup && <div className="activated-popup">{t("imageSettings.activatedPopup")}</div>}
       <div className="page-header">
         <h2>{t(SECTION_TITLE_KEY[section])}</h2>
