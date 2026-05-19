@@ -68,6 +68,7 @@ export default function Chat() {
   const dialogs = useDialogsStore((s) => s.dialogs);
   const dialogsLoaded = useDialogsStore((s) => s.loaded);
   const dialogsLoading = useDialogsStore((s) => s.isLoading);
+  const dialogsErrorCode = useDialogsStore((s) => s.errorCode);
   const loadDialogs = useDialogsStore((s) => s.load);
   const prependDialog = useDialogsStore((s) => s.prepend);
   const renameInStore = useDialogsStore((s) => s.rename);
