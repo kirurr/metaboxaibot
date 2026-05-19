@@ -337,10 +337,27 @@ export function MediaSettingsView({
   const handleModelSelect = (modelId: string) => {
     if (modelId === activeModelId) return;
 
-    // scheduleAutoActivate ниже инкрементнёт activateOpRef и тем самым
-    // перехватит любой pending in-flight autoActivate (на старую модель). Его
-    // rollback после catch не затрёт наш свежий optimistic UI, потому что
-    // его захваченная opVersion уже не равна текущей.
+    // Manual-режим (тогл «Активация моделей» = Вручную): ни activeModelId,
+    // ни /state/select-model не трогаем. Иначе всплывает два эффекта:
+    //   (1) optimistic setActiveModelId двигает бейдж «Активно» на ещё
+    //       неактивированный вариант (Bug: «висит бейдж активно на модели»);
+    //   (2) /state/select-model планирует 3-секундный trailing-debounce
+    //       notify в чат (state.ts:scheduleModelChangedNotify). В Auto его
+    //       гасит cancelPendingNotify внутри /state/activate; в Manual
+    //       активации нет → пинг бы долетал (Bug: «всё равно автосохраняются»).
+    // hasPendingSelect=true ставим всё равно — он держит «Активировать»
+    // кликабельной даже при isGloballyActive=true (если потом юзер вернётся
+    // к исходной модели в карусели). FamilyCard сам обновит localId через
+    // selectVariant — это его внутренний state, не наш activeModelId.
+    if (!autoActivateEnabled) {
+      setHasPendingSelect(true);
+      return;
+    }
+
+    // Auto path: scheduleAutoActivate ниже инкрементнёт activateOpRef и
+    // перехватит любой pending in-flight autoActivate (на старую модель).
+    // Его rollback после catch не затрёт наш свежий optimistic UI, потому
+    // что захваченная opVersion уже не равна текущей.
     setActiveModelId(modelId);
     setHasPendingSelect(true);
     selectChainRef.current = selectChainRef.current.then(() =>
@@ -498,6 +515,7 @@ export function MediaSettingsView({
             activeModelId === standaloneModel.id &&
             isActiveSection(standaloneModel.section, stateStr)
           }
+          isSelected={activeModelId === standaloneModel.id}
           activeState={stateStr}
           savedId={savedId}
           allModelSettings={allModelSettings}

@@ -9,7 +9,15 @@ import { SettingsPanel } from "./SettingsPanel";
 
 interface StandaloneCardProps {
   model: Model;
+  /** Бот реально active в чате с этой моделью (state === `*_ACTIVE`). */
   isActive: boolean;
+  /**
+   * Модель — текущий пик юзера для секции (`activeModelId === model.id`),
+   * независимо от того, *_ACTIVE сейчас бот или *_SECTION (этап выбора).
+   * Нужно отдельно от isActive чтобы кнопка «Начать работу» появлялась
+   * в *_SECTION без побочного эффекта подсветки бейджа «Активна».
+   */
+  isSelected: boolean;
   activeState?: string;
   savedId: string | null;
   allModelSettings: Record<string, Record<string, unknown>>;
@@ -23,6 +31,7 @@ interface StandaloneCardProps {
 export function StandaloneCard({
   model,
   isActive,
+  isSelected,
   activeState,
   savedId,
   allModelSettings,
@@ -114,7 +123,7 @@ export function StandaloneCard({
           </button>
         )}
       </div>
-      {isActive && isInSectionPicker(model.section, activeState) && (
+      {isSelected && isInSectionPicker(model.section, activeState) && (
         <button
           className="family-card__start-btn"
           onClick={() => void handleActivate()}

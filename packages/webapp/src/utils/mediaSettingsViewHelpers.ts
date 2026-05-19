@@ -212,18 +212,28 @@ export function modelCostLabel(
   return null;
 }
 
+/**
+ * Строго «модель действительно активна в чате» — бот в `*_ACTIVE` для своей
+ * секции и отвечает на сообщения с её моделью. НЕ включает `*_SECTION` (этап
+ * выбора): в селекшн-стадии бот не отвечает на сообщения, поэтому показывать
+ * бейдж «Активна» на сохранённой из прошлой сессии модели было бы враньём.
+ * Старая версия объединяла оба состояния — это привело к багу: юзер тапал
+ * «Видео будущего», открывал миниаппу и видел бейдж на модели из прошлой
+ * сессии, хотя в чат бот не отвечал.
+ *
+ * `HEYGEN_AVATAR_PHOTO` оставляем — это под-состояние внутри активного видео
+ * (загрузка фото для аватара), модель уже active.
+ */
 export function isActiveSection(section: string, state?: string) {
   switch (section) {
     case "gpt":
-      return state === "GPT_ACTIVE" || state === "GPT_SECTION";
+      return state === "GPT_ACTIVE";
     case "design":
-      return state === "DESIGN_ACTIVE" || state === "DESIGN_SECTION";
+      return state === "DESIGN_ACTIVE";
     case "video":
-      return (
-        state === "VIDEO_ACTIVE" || state === "VIDEO_SECTION" || state === "HEYGEN_AVATAR_PHOTO"
-      );
+      return state === "VIDEO_ACTIVE" || state === "HEYGEN_AVATAR_PHOTO";
     case "audio":
-      return state === "AUDIO_ACTIVE" || state === "AUDIO_SECTION";
+      return state === "AUDIO_ACTIVE";
   }
   return false;
 }
