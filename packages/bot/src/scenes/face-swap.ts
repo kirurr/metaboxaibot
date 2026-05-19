@@ -1,8 +1,8 @@
 import type { BotContext } from "../types/context.js";
 import { generationService, userStateService, s3Service } from "@metabox/api/services";
-import { config } from "@metabox/shared";
+import { AI_MODELS, config } from "@metabox/shared";
 import { logger } from "../logger.js";
-import { handleScenarios } from "../commands/menu.js";
+import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
 import {
@@ -43,6 +43,15 @@ export async function handleFaceSwapEnter(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
   await userStateService.clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID);
   await userStateService.setState(ctx.user.id, "FACE_SWAP_AWAIT_REFERENCE", null);
+
+  // Welcome — описание сценария + стоимость, как у моделей в Дизайне.
+  // Под капотом nano-banana-pro @ 2K, цена считается через стандартный buildCostLine.
+  const model = AI_MODELS[FACE_SWAP_MODEL_ID];
+  const costLine = model ? buildCostLine(model, { resolution: "2K" }, ctx.t) : "";
+  const welcome = [`<b>${ctx.t.scenarios.faceSwap}</b>`, ctx.t.scenarios.faceSwapWelcome, costLine]
+    .filter(Boolean)
+    .join("\n\n");
+  await ctx.reply(welcome, { parse_mode: "HTML" });
   await ctx.reply(ctx.t.scenarios.faceSwapStep1, { parse_mode: "HTML" });
 }
 
@@ -159,7 +168,7 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
     }
     // S3 keys are gone — нет смысла держать буфер.
     await userStateService.clearMediaInputs(userId, FACE_SWAP_BUFFER_MODEL_ID);
-    await handleScenarios(ctx);
+    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
     return;
   }
 
@@ -182,6 +191,12 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
         output_format: "jpeg",
         num_images: 1,
       },
+      // Сценарий маскирует реальную модель: в подписи показываем «Замена лица»,
+      // прячем захардкоженный английский промпт и кнопку «Доработать» (юзер
+      // не выбирал модель — её и не должно быть для редактирования).
+      displayNameOverride: ctx.t.scenarios.faceSwap,
+      hidePromptInCaption: true,
+      hideRefineButton: true,
     });
     submitOk = true;
   } catch (err: unknown) {
@@ -203,5 +218,8 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   if (submitOk) {
     await userStateService.clearMediaInputs(userId, FACE_SWAP_BUFFER_MODEL_ID);
   }
-  await handleScenarios(ctx);
+  // Возвращаемся в Сценарии без дубль-сообщения «Выберите сценарий 👇».
+  // Persistent reply-клавиатура уже показывает нужные кнопки — текст-меню
+  // после генерации только засоряет чат.
+  await userStateService.setState(userId, "SCENARIOS_SECTION", null);
 }
