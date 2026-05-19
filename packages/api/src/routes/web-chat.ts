@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { randomUUID } from "node:crypto";
 import { webTelegramLinkedPreHandler } from "../middlewares/web-auth.js";
 import { dialogService, type StoredAttachment } from "../services/dialog.service.js";
+import { historyService } from "../services/history.service.js";
 import {
   chatService,
   ContextOverflowError,
@@ -285,6 +286,56 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         ...(q ? { snippet: d.snippet ?? null } : {}),
         latestJobId: d.latestJobId ?? null,
       }));
+    },
+  );
+
+  // ── GET /web/history ────────────────────────────────────────────────────
+  // Unified list для страницы /history:
+  //  - kind="dialog": для gpt — Dialog с агрегированными tokensUsed по сообщениям.
+  //  - kind="job": для image/video/audio — GenerationJob (по userId, dialogId
+  //    игнорируется), потому что media-джобы часто создаются с пустым dialogId.
+  //
+  // Без q возвращает всю историю; с q фильтрует по title/контенту (gpt) и по
+  // prompt (media). Без пагинации, sort: updatedAt desc.
+  fastify.get<{ Querystring: { section?: string; q?: string } }>(
+    "/web/history",
+    {
+      schema: {
+        description: "Unified history (gpt dialogs + media generation jobs)",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "gpt | image | design | video | audio" },
+            q: { type: "string", description: "Search in title/content (gpt) and prompt (media)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+                section: { type: "string" },
+                modelId: { type: "string" },
+                title: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+                totalTokens: { type: "number" },
+                snippet: { type: "string", nullable: true },
+                status: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { aibUserId } = request.webUser!;
+      const { section, q } = request.query;
+      return historyService.list(aibUserId!, { section, q });
     },
   );
 

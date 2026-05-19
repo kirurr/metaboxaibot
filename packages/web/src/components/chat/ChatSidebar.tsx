@@ -1,9 +1,23 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
-import { ChevronLeft, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import type { DialogDto } from "@/api/dialogs";
+import {
+  ChevronLeft,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { listDialogs, type DialogDto } from "@/api/dialogs";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { dialogTitle } from "./chatHelpers";
+
+const SEARCH_DEBOUNCE_MS = 300;
+const MIN_SEARCH_LEN = 2;
 
 /**
  * "сейчас" / "5м" / "2ч" / "Вчера" / "Пн" / "Apr 28" — компактная подпись справа.
@@ -83,11 +97,32 @@ export const ChatSidebar = memo(function ChatSidebar({
     };
   }, [isMobile, sideOpen, onCloseMobileDrawer]);
 
-  const filteredDialogs = useMemo(() => {
+  // Серверный поиск: title + содержимое сообщений. Активен только при q ≥ 2
+  // символов — чтобы не дёргать БД на каждое нажатие. Пока сервер думает,
+  // показываем мгновенный client-side фильтр по title (через
+  // `clientFilteredDialogs`) — UI не мигает на пустой список.
+  const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
+  const isSearching = debouncedSearch.length >= MIN_SEARCH_LEN;
+  const searchQuery = useQuery({
+    queryKey: ["chat-sidebar-search", debouncedSearch],
+    queryFn: ({ signal }) =>
+      listDialogs({ section: "gpt", q: debouncedSearch, signal }),
+    placeholderData: keepPreviousData,
+    enabled: isSearching,
+    staleTime: 30_000,
+  });
+
+  const clientFilteredDialogs = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return dialogs;
     return dialogs.filter((d) => dialogTitle(d, t("chat.newDialog")).toLowerCase().includes(q));
   }, [dialogs, search, t]);
+
+  // Если серверный ответ ещё не пришёл (или поиск отключён) — используем
+  // client-side фильтр (он же — fallback для непустого q < MIN_SEARCH_LEN).
+  const filteredDialogs =
+    isSearching && searchQuery.data ? searchQuery.data : clientFilteredDialogs;
+  const isSearchFetching = isSearching && searchQuery.isFetching;
 
   return (
     <aside ref={sideRef} className={clsx("chat-side", sideOpen && "open open-backdrop")}>
@@ -107,11 +142,16 @@ export const ChatSidebar = memo(function ChatSidebar({
         </button>
       </div>
       <div className="cs-search">
-        <Search size={14} />
+        {isSearchFetching ? (
+          <RefreshCw size={14} className="anim-spin" />
+        ) : (
+          <Search size={14} />
+        )}
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("chat.searchDialogs")}
+          aria-busy={isSearchFetching}
         />
       </div>
       <div className="cs-list">

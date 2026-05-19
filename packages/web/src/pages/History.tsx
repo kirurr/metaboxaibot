@@ -1,4 +1,4 @@
-import { Fragment, useDeferredValue, useMemo, useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Download, Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -6,7 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { listDialogs, type DialogDto } from "@/api/dialogs";
+import { listHistory, type HistoryItemDto } from "@/api/history";
 import { formatTokensK } from "@/components/chat/chatHelpers";
 
 type DayKey = "today" | "yesterday" | "thisWeek" | "earlier";
@@ -18,11 +18,10 @@ const MIN_SEARCH_LEN = 2;
 const SEARCH_DEBOUNCE_MS = 300;
 
 /**
- * Группирует диалоги по дням относительно текущего времени. Сортировка
- * сохраняется (бэк отдаёт по `updatedAt desc`), внутри группы порядок не
- * меняем.
+ * Группирует элементы истории по дням (отсчёт от текущего момента).
+ * Внутри группы порядок сохраняется (бэк отдаёт по `updatedAt desc`).
  */
-function groupByDay(dialogs: DialogDto[]): Record<DayKey, DialogDto[]> {
+function groupByDay(items: HistoryItemDto[]): Record<DayKey, HistoryItemDto[]> {
   const now = new Date();
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
@@ -31,18 +30,18 @@ function groupByDay(dialogs: DialogDto[]): Record<DayKey, DialogDto[]> {
   const weekStart = new Date(todayStart);
   weekStart.setDate(todayStart.getDate() - 6);
 
-  const out: Record<DayKey, DialogDto[]> = {
+  const out: Record<DayKey, HistoryItemDto[]> = {
     today: [],
     yesterday: [],
     thisWeek: [],
     earlier: [],
   };
-  for (const d of dialogs) {
-    const dt = new Date(d.updatedAt);
-    if (dt >= todayStart) out.today.push(d);
-    else if (dt >= yesterdayStart) out.yesterday.push(d);
-    else if (dt >= weekStart) out.thisWeek.push(d);
-    else out.earlier.push(d);
+  for (const it of items) {
+    const dt = new Date(it.updatedAt);
+    if (dt >= todayStart) out.today.push(it);
+    else if (dt >= yesterdayStart) out.yesterday.push(it);
+    else if (dt >= weekStart) out.thisWeek.push(it);
+    else out.earlier.push(it);
   }
   return out;
 }
@@ -50,17 +49,12 @@ function groupByDay(dialogs: DialogDto[]): Record<DayKey, DialogDto[]> {
 const DAY_ORDER: DayKey[] = ["today", "yesterday", "thisWeek", "earlier"];
 
 /**
- * Куда вести при клике на строку истории.
- * - gpt → текстовый чат с поддержкой /chat/:id.
- * - image/video/audio → последняя завершённая генерация в /gallery/:jobId.
- * - Если у media-диалога нет done-job'а (`latestJobId === null`), переходить
- *   некуда — возвращаем `null`, строка визуально приглушается и клик
- *   игнорируется.
+ * Куда вести при клике:
+ *  - dialog (gpt) → `/chat/${id}` (поддержка id-параметра в роуте).
+ *  - job (media)  → `/gallery/${jobId}` (GalleryPage умеет открывать конкретную job).
  */
-function openHref(d: DialogDto): string | null {
-  if (d.section === "gpt") return `/chat/${d.id}`;
-  if (d.latestJobId) return `/gallery/${d.latestJobId}`;
-  return null;
+function openHref(item: HistoryItemDto): string {
+  return item.kind === "job" ? `/gallery/${item.id}` : `/chat/${item.id}`;
 }
 
 /** Компактная подпись времени: HH:mm / weekday / DD MMM — выбор по дню. */
@@ -88,34 +82,25 @@ export default function History() {
   // q короче порога считаем «нет поиска» — UI отзывчив, сервер не дёргается.
   const effectiveQ = debouncedQ.length >= MIN_SEARCH_LEN ? debouncedQ : "";
 
+  const serverSection = section === "all" ? undefined : section;
+
   const query = useQuery({
-    queryKey: ["history-dialogs", effectiveQ],
+    queryKey: ["history", serverSection ?? "all", effectiveQ],
     queryFn: ({ signal }) =>
-      listDialogs({
-        // Секцию фильтруем client-side: данных мало, переключение секций
-        // не должно слать новые запросы.
+      listHistory({
+        section: serverSection,
         q: effectiveQ || undefined,
-        withStats: true,
         signal,
       }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 
-  // Section-фильтр клиент-сайд. useDeferredValue даёт планировщику снизить
-  // приоритет фильтрации/группировки, чтобы клики по чипсам ощущались мгновенно.
-  const deferredSection = useDeferredValue(section);
-  const filteredBySection = useMemo(() => {
-    const list = query.data ?? [];
-    if (deferredSection === "all") return list;
-    return list.filter((d) => d.section === deferredSection);
-  }, [query.data, deferredSection]);
-
-  const grouped = useMemo(() => groupByDay(filteredBySection), [filteredBySection]);
-  const isEmpty = filteredBySection.length === 0;
+  const items = query.data ?? [];
+  const grouped = groupByDay(items);
+  const isEmpty = items.length === 0;
   const isInitialLoading = query.isLoading && !query.data;
-  // Фоновое обновление поверх previousData: показываем мягкий индикатор без
-  // подмены контента (контейнер не меняет высоту, список не прыгает).
+  // Фоновое обновление поверх previousData: мягкий индикатор, без подмены.
   const isBackgroundFetching = query.isFetching && !!query.data;
 
   return (
@@ -198,25 +183,22 @@ export default function History() {
         {!isInitialLoading &&
           !query.isError &&
           DAY_ORDER.map((day) => {
-            const items = grouped[day];
-            if (items.length === 0) return null;
+            const dayItems = grouped[day];
+            if (dayItems.length === 0) return null;
             return (
               <Fragment key={day}>
                 <div className="history-day">{t(`history.days.${day}`)}</div>
-                {items.map((d) => {
-                  const href = openHref(d);
-                  return (
-                    <HistoryRow
-                      key={d.id}
-                      dialog={d}
-                      day={day}
-                      locale={i18n.language}
-                      isMobile={isMobile}
-                      onOpen={href ? () => navigate(href) : null}
-                      fallbackTitle={t("chat.newDialog")}
-                    />
-                  );
-                })}
+                {dayItems.map((it) => (
+                  <HistoryRow
+                    key={`${it.kind}:${it.id}`}
+                    item={it}
+                    day={day}
+                    locale={i18n.language}
+                    isMobile={isMobile}
+                    onOpen={() => navigate(openHref(it))}
+                    fallbackTitle={t("chat.newDialog")}
+                  />
+                ))}
               </Fragment>
             );
           })}
@@ -226,45 +208,45 @@ export default function History() {
 }
 
 function HistoryRow({
-  dialog,
+  item,
   day,
   locale,
   isMobile,
   onOpen,
   fallbackTitle,
 }: {
-  dialog: DialogDto;
+  item: HistoryItemDto;
   day: DayKey;
   locale: string;
   isMobile: boolean;
-  /** `null` — у строки нет цели перехода (media без done-job'а). */
-  onOpen: (() => void) | null;
+  onOpen: () => void;
   fallbackTitle: string;
 }) {
-  const isOpenable = onOpen !== null;
+  // failed-джобы помечаем приглушением, чтобы UX отделял их от done.
+  const dim = item.kind === "job" && item.status === "failed";
   return (
     <div
       className="history-row"
-      onClick={onOpen ?? undefined}
-      style={isOpenable ? undefined : { cursor: "default", opacity: 0.7 }}
+      onClick={onOpen}
+      style={dim ? { opacity: 0.65 } : undefined}
     >
       <div style={{ minWidth: 0 }}>
-        <div className="h-title">{dialog.title ?? fallbackTitle}</div>
-        {dialog.snippet ? (
-          <div className="h-preview">{dialog.snippet}</div>
+        <div className="h-title">{item.title ?? fallbackTitle}</div>
+        {item.snippet ? (
+          <div className="h-preview">{item.snippet}</div>
         ) : (
           <div className="h-preview" style={{ color: "var(--text-tertiary, #999)" }}>
-            {dialog.section}
+            {item.section}
           </div>
         )}
       </div>
       <div className="meta">
-        <span className="h-model">{dialog.modelId}</span>
-        {!isMobile && typeof dialog.totalTokens === "number" && (
-          <span className="mono">{formatTokensK(dialog.totalTokens)}</span>
+        <span className="h-model">{item.modelId}</span>
+        {!isMobile && (
+          <span className="mono">{formatTokensK(item.totalTokens)}</span>
         )}
-        <span>{formatTimeForDay(dialog.updatedAt, day, locale)}</span>
-        {isOpenable && <ChevronRight size={16} />}
+        <span>{formatTimeForDay(item.updatedAt, day, locale)}</span>
+        <ChevronRight size={16} />
       </div>
     </div>
   );
