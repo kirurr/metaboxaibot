@@ -43,9 +43,8 @@ export interface Translations {
     faceSwapStep2: string;
     faceSwapNotPhoto: string;
     faceSwapGenerating: string;
-    faceSwapUploadFailed: string;
-    faceSwapSubmitFailed: string;
     faceSwapPhotoTooLarge: string;
+    faceSwapAlbumNotice: string;
   };
   gpt: {
     sectionTitle: string;

@@ -8,6 +8,7 @@ import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-err
 import {
   UserFacingError,
   resolveUserFacingErrorVariant,
+  pickGenerationFailedMessage,
   FACE_SWAP_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 
@@ -53,20 +54,13 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
 
   // Drop album siblings — only the first photo of any media group is consumed.
+  // The first photo also triggers a one-time notice so the user knows the
+  // siblings were skipped (otherwise the album upload feels broken). Note:
+  // dedup is committed only AFTER a successful S3 upload (see below) so a
+  // failed first photo doesn't blackhole the rest of the album.
   const mediaGroupId = ctx.message?.media_group_id;
-  if (mediaGroupId) {
-    const key = `${ctx.user.id}:${mediaGroupId}`;
-    if (processedMediaGroups.has(key)) return;
-    processedMediaGroups.add(key);
-    // Cap the set so it can't grow unbounded across the bot's lifetime.
-    if (processedMediaGroups.size > 1000) {
-      const iter = processedMediaGroups.values();
-      for (let i = 0; i < 100; i++) {
-        const v = iter.next().value;
-        if (v) processedMediaGroups.delete(v);
-      }
-    }
-  }
+  const mediaGroupKey = mediaGroupId ? `${ctx.user.id}:${mediaGroupId}` : null;
+  if (mediaGroupKey && processedMediaGroups.has(mediaGroupKey)) return;
 
   let fileId: string | undefined;
   let fileSize: number | undefined;
@@ -104,7 +98,7 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   const s3Key = `face_swap/${userId.toString()}/${Date.now()}_${slot}.${ext}`;
   const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
   if (!uploadedKey) {
-    await ctx.reply(ctx.t.scenarios.faceSwapUploadFailed);
+    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.faceSwap, "design"));
     return;
   }
 
@@ -112,6 +106,22 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   // read it back. Use addMediaInput with overflow=true so retries on the same
   // slot replace the previous value rather than appending.
   await userStateService.addMediaInput(userId, FACE_SWAP_BUFFER_MODEL_ID, slot, uploadedKey, true);
+
+  // Commit album dedup AFTER successful upload + notify the user once per
+  // album. If upload had failed we'd have early-returned above without
+  // marking the group — the next sibling can retry.
+  if (mediaGroupKey) {
+    processedMediaGroups.add(mediaGroupKey);
+    // Cap the set so it can't grow unbounded across the bot's lifetime.
+    if (processedMediaGroups.size > 1000) {
+      const iter = processedMediaGroups.values();
+      for (let i = 0; i < 100; i++) {
+        const v = iter.next().value;
+        if (v) processedMediaGroups.delete(v);
+      }
+    }
+    await ctx.reply(ctx.t.scenarios.faceSwapAlbumNotice);
+  }
 
   if (isReference) {
     await userStateService.setState(userId, "FACE_SWAP_AWAIT_FACE", null);
@@ -145,7 +155,7 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
     } else {
       logger.error(err, "Face swap: failed to resolve media URLs");
-      await ctx.reply(ctx.t.scenarios.faceSwapUploadFailed);
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.faceSwap, "design"));
     }
     // S3 keys are gone — нет смысла держать буфер.
     await userStateService.clearMediaInputs(userId, FACE_SWAP_BUFFER_MODEL_ID);
@@ -183,7 +193,7 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
     } else {
       logger.error(err, "Face swap submit failed");
-      await ctx.reply(ctx.t.scenarios.faceSwapSubmitFailed);
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.faceSwap, "design"));
     }
   }
 

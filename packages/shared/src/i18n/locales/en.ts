@@ -49,9 +49,9 @@ export default {
       "🔄 <b>Face swap — step 2/2</b>\n\nSend a <b>photo of your face</b> — close-up, sharp and clear.",
     faceSwapNotPhoto: "📷 That's not a photo. Please send an image.",
     faceSwapGenerating: "🎨 Starting face swap...",
-    faceSwapUploadFailed: "❌ Failed to save the photo. Please try again.",
-    faceSwapSubmitFailed: "❌ Failed to start generation. Please try again.",
     faceSwapPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
+    faceSwapAlbumNotice:
+      "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
