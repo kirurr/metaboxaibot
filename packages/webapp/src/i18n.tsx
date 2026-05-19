@@ -431,6 +431,7 @@ const translations = {
     "imageSettings.autoActivatedToast":
       "✅ {name} activated. Adjust settings, minimize the mini-app and start chatting in the bot.",
     "imageSettings.autoActivatedToastDismiss": "Don’t show again",
+    "imageSettings.autoActivatedToastClose": "Close",
     "manage.dialogActivatedPopup": "Dialog activated. Return to the chat to work with it.",
     "manage.startChat": "Start chatting",
     "manage.settings": "Settings",
@@ -975,6 +976,7 @@ const translations = {
     "imageSettings.autoActivatedToast":
       "✅ {name} активирована. Выставите настройки, сверните мини-апп и начинайте работу в чате.",
     "imageSettings.autoActivatedToastDismiss": "Больше не показывать",
+    "imageSettings.autoActivatedToastClose": "Закрыть",
     "manage.dialogActivatedPopup": "Диалог активирован. Вернитесь в чат для работы с ним.",
     "manage.startChat": "Начать общение",
     "manage.settings": "Настройки",

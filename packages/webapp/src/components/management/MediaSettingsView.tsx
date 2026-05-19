@@ -44,7 +44,7 @@ const SECTION_ACTIVE_STATE: Record<MediaSection, string> = {
 };
 
 const AUTO_ACTIVATED_TOAST_SUPPRESS_KEY = "metabox.autoActivateToast.suppressed";
-const AUTO_ACTIVATED_TOAST_MS = 3500;
+const AUTO_ACTIVATED_TOAST_MS = 5000;
 
 function isAutoActivatedToastSuppressed(): boolean {
   try {
@@ -562,6 +562,14 @@ export function MediaSettingsView({
           aria-atomic="true"
           onAnimationEnd={handleAutoActivatedToastAnimationEnd}
         >
+          <button
+            type="button"
+            className="auto-activated-toast__close"
+            onClick={closeAutoActivatedToast}
+            aria-label={t("imageSettings.autoActivatedToastClose")}
+          >
+            ×
+          </button>
           <span className="auto-activated-toast__message">
             {t("imageSettings.autoActivatedToast").replace("{name}", autoActivatedToastName)}
           </span>
