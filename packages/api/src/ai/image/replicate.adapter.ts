@@ -34,10 +34,12 @@ const MODEL_IDS: Record<string, string> = {
   "imagen-4-fast": "google/imagen-4-fast",
   "imagen-4": "google/imagen-4",
   "imagen-4-ultra": "google/imagen-4-ultra",
-  // Специализированный face-swap (InsightFace). Deployment-endpoint без пина
-  // версии — всегда последняя опубликованная. Параметры: input_image (сцена) +
+  // Специализированный face-swap (InsightFace). Community-модель — у неё нет
+  // deployment-endpoint'а (POST /models/.../predictions → 404), поэтому пиним
+  // версию явно (POST /predictions с version). Параметры: input_image (сцена) +
   // swap_image (лицо). Без prompt.
-  "face-swap-classic": "cdingram/face-swap",
+  "face-swap-classic":
+    "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
 };
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
