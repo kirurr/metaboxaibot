@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
@@ -47,6 +47,9 @@ import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { FloatingMediaBg } from "./FloatingMediaBg";
+import type { AmbientSection } from "@/api/ambientMedia";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/stores/uiStore";
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 
@@ -85,6 +88,11 @@ export type GenerateSceneProps = {
    * автоматически применяются настройки соответствующей модели.
    */
   presetSettingsByModel?: Record<string, Record<string, unknown>>;
+  /**
+   * Секция для ambient-фона на пустом экране (картинки/видео «выпадают» и
+   * плавают, пока нет генераций). `undefined` — фон выключен (например, /audio).
+   */
+  ambientSection?: AmbientSection;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -513,8 +521,13 @@ export function GenerateScene({
   hideModelPicker = false,
   onReset,
   presetSettingsByModel,
+  ambientSection,
 }: GenerateSceneProps) {
   const { t } = useTranslation();
+  // Ambient-фон только на «десктопной» ширине (≥900px). На телефонах и iPad в
+  // портрете (<900) его нет — там панель и так full-width, медиа некуда класть.
+  // iPad в ландшафте (1024px) уже считается десктопом → фон показываем.
+  const isMobile = useIsMobile();
 
   // ── Family grouping ───────────────────────────────────────────────────────
   // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
@@ -592,6 +605,11 @@ export function GenerateScene({
   // GenerationHistory сама подписывается на notification:new и зовёт
   // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
   const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
+
+  // Есть ли уже генерации в правой пэйне. Пока пусто и задан ambientSection —
+  // в фоне показываем «выпадающие» плавающие медиа; как только появилась первая
+  // генерация — фон скрывается (его место занимает галерея).
+  const [historyHasContent, setHistoryHasContent] = useState(false);
 
   // Когда модели приехали — выставляем дефолт (первый из дедуплированных
   // семейств, не из полного списка: иначе можно случайно стартовать с
@@ -1447,7 +1465,11 @@ export function GenerateScene({
 
   return (
     <div className={clsx("gen-scene", (voicePickerSetting || mediaPickerSetting) && "has-picker")}>
-      <div className="gen-bg" aria-hidden />
+      <div className="gen-bg" aria-hidden>
+        {ambientSection && !historyHasContent && !isMobile && (
+          <FloatingMediaBg section={ambientSection} />
+        )}
+      </div>
       <div className="gen-panel">
         <div className="gen-head">
           <div>
@@ -1632,6 +1654,23 @@ export function GenerateScene({
           всё оставшееся пустое место экрана. На мобильных скрывается через
           CSS (там панель и так full-width). */}
       <div className="gen-history-pane">
+        {ambientSection && !historyHasContent && !isMobile && (
+          <div className="gen-ambient-headline" aria-hidden>
+            <h2>
+              <Trans
+                i18nKey="generate.ambientTitle"
+                components={{ hl: <span className="gen-hl" /> }}
+              />
+            </h2>
+            <p>
+              {t(
+                ambientSection === "video"
+                  ? "generate.ambientSubtitleVideo"
+                  : "generate.ambientSubtitleImage",
+              )}
+            </p>
+          </div>
+        )}
         <GenerationHistory
           selectedModel={selectedModel}
           allModels={models}
@@ -1647,6 +1686,7 @@ export function GenerateScene({
               prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
             )
           }
+          onHasContentChange={setHistoryHasContent}
         />
       </div>
 

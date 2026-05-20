@@ -1,28 +1,15 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Download, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Download, Loader2, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
 import clsx from "clsx";
 import { Trans, useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/stores/authStore";
+import { useUIStore } from "@/stores/uiStore";
 import { useTransactions } from "@/hooks/useTransactions";
 import { formatTokenDelta, formatTokens, formatTxnTime, parseTokens } from "@/utils/format";
+import { getCatalog, createTokensOrder, type TokenPackDto } from "@/api/billing";
+import { ApiError } from "@/api/client";
 import type { TransactionDto } from "@/api/auth";
-
-type Pack = {
-  amount: string;
-  price: number;
-  rate: string;
-  bonus: string | null;
-};
-
-const packs: Pack[] = [
-  { amount: "500K", price: 5, rate: "$0.01 / 1k", bonus: null },
-  { amount: "2M", price: 18, rate: "$0.009 / 1k", bonus: "+10%" },
-  { amount: "10M", price: 79, rate: "$0.008 / 1k", bonus: "+20%" },
-  { amount: "25M", price: 179, rate: "$0.0072 / 1k", bonus: "+25%" },
-  { amount: "50M", price: 339, rate: "$0.0068 / 1k", bonus: "+30%" },
-  { amount: "100M", price: 629, rate: "$0.0063 / 1k", bonus: "+35%" },
-];
 
 type UiKind = "use" | "topup" | "bonus" | "refund";
 
@@ -83,11 +70,44 @@ export default function Tokens() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const user = useAuthStore((s) => s.user);
+  const pushToast = useUIStore((s) => s.pushToast);
   const { transactions, loading, error } = useTransactions();
 
-  const [sel, setSel] = useState(2);
-  const [custom, setCustom] = useState("");
   const [filter, setFilter] = useState<FilterId>("all");
+
+  // Реальные пакеты токенов из БД (через /web/billing/catalog).
+  const [packs, setPacks] = useState<TokenPackDto[] | null>(null);
+  const [packsError, setPacksError] = useState<string | null>(null);
+  const [buyingId, setBuyingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCatalog()
+      .then((c) => {
+        if (!cancelled) setPacks(c.tokenPackages);
+      })
+      .catch((err: ApiError) => {
+        if (!cancelled) setPacksError(err.message || t("tokens.packsError"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  async function buyTokens(pkg: TokenPackDto) {
+    if (buyingId) return;
+    setBuyingId(pkg.id);
+    try {
+      const { paymentUrl } = await createTokensOrder(pkg.id);
+      window.location.href = paymentUrl;
+    } catch (err) {
+      setBuyingId(null);
+      pushToast({
+        type: "error",
+        message: err instanceof ApiError ? err.message : t("common.error"),
+      });
+    }
+  }
 
   const totalBalanceRaw = user
     ? String(parseTokens(user.tokenBalance) + parseTokens(user.subscriptionTokenBalance))
@@ -121,7 +141,6 @@ export default function Tokens() {
       <div className="page-head rise">
         <div>
           <h1 className="h1">{t("tokens.title")}</h1>
-          <p className="sub">{t("tokens.subtitle")}</p>
         </div>
       </div>
 
@@ -182,48 +201,62 @@ export default function Tokens() {
       </div>
 
       <h2 className="section-title rise d2" style={{ marginTop: 8 }}>
-        {t("tokens.choosePack")}
+        {t("tokens.readyPacks")}
       </h2>
-      <div className="packs rise d2">
-        {packs.map((p, i) => (
-          <div key={i} className={clsx("pack", sel === i && "selected")} onClick={() => setSel(i)}>
-            {p.bonus && (
-              <span className="pack-bonus">{t("tokens.bonusOf", { percent: p.bonus })}</span>
-            )}
-            <div>
-              <span className="pack-amount">{p.amount}</span>
-              <span className="pack-unit">{t("tokens.tokensUnit")}</span>
-            </div>
-            <div className="pack-rate">{p.rate}</div>
-            <div className="pack-price mono">${p.price}</div>
-          </div>
-        ))}
-      </div>
 
-      <h2 className="section-title rise d3" style={{ marginTop: 8 }}>
-        {t("tokens.customAmount")}
-      </h2>
-      <div className="custom-amount-row rise d3">
-        <div className="amount-input">
-          <input
-            type="text"
-            placeholder="0"
-            value={custom}
-            onChange={(e) => setCustom(e.target.value.replace(/[^0-9]/g, ""))}
-          />
-          <span className="suffix">USD</span>
+      {packs === null && !packsError && (
+        <div className="muted rise d2" style={{ padding: "12px 0", display: "flex", gap: 8 }}>
+          <Loader2 size={16} className="spin" /> <span>{t("app.loading")}</span>
         </div>
-        <button
-          className="btn btn-primary"
-          style={{ minWidth: 200 }}
-          disabled={!custom && sel === null}
-        >
-          {t("tokens.continueToPayment")} <ArrowRight size={16} />
-        </button>
-      </div>
-      <p className="hint" style={{ marginTop: -6, fontSize: 12 }}>
-        {t("tokens.minPaymentHint")}
-      </p>
+      )}
+      {packsError && (
+        <div className="empty-illu rise d2" style={{ color: "var(--danger)" }}>
+          {packsError}
+        </div>
+      )}
+      {packs !== null && !packsError && packs.length === 0 && (
+        <div className="empty-illu rise d2">{t("tokens.packsEmpty")}</div>
+      )}
+
+      {packs !== null && packs.length > 0 && (
+        <div className="packs rise d2">
+          {packs.map((p) => {
+            const badgeLabel =
+              p.badge === "top"
+                ? t("plans.badgeTop")
+                : p.badge === "profitable" || p.badge === "best_value"
+                  ? t("plans.badgeProfitable")
+                  : p.badge;
+            const busy = buyingId === p.id;
+            const isProfitable = p.badge === "profitable" || p.badge === "best_value";
+            return (
+              <div key={p.id} className="pack" style={{ cursor: "default" }}>
+                {p.badge && <span className="pack-bonus">{badgeLabel}</span>}
+                <div>
+                  <span className="pack-amount">{p.tokens.toLocaleString("ru-RU")}</span>
+                  <span className="pack-unit">{t("tokens.tokensUnit")}</span>
+                </div>
+                <div className="pack-rate">{p.name}</div>
+                <div className="pack-price mono">{Number(p.priceRub).toLocaleString("ru-RU")} ₽</div>
+                <button
+                  className={clsx("btn btn-primary", isProfitable && "btn-heartbeat")}
+                  style={{ width: "100%", marginTop: 16 }}
+                  onClick={() => buyTokens(p)}
+                  disabled={buyingId !== null}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 size={14} className="spin" /> {t("tokens.processing")}
+                    </>
+                  ) : (
+                    t("tokens.buy")
+                  )}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="rise d4" style={{ marginTop: 16 }}>
         <div className="row between" style={{ marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
