@@ -1115,17 +1115,20 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /internal/get-local-subscription?telegramId=<id>
+   * GET /internal/get-local-subscription?aiboxUserId=<id>
    * Returns local subscription data if exists and active.
    */
-  fastify.get<{ Querystring: { telegramId?: string } }>(
+  fastify.get<{ Querystring: { telegramId?: string; aiboxUserId?: string } }>(
     "/get-local-subscription",
     {
       schema: {
         description: "Get user's local subscription data",
         querystring: {
           type: "object",
-          properties: { telegramId: { type: "string" } },
-          required: ["telegramId"],
+          properties: {
+            telegramId: { type: "string" },
+            aiboxUserId: { type: "string" },
+          },
         },
         response: {
           200: {
@@ -1138,15 +1141,18 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { telegramId } = request.query;
-      if (!telegramId) {
-        return reply.code(400).send({ error: "telegramId is required" });
+      const { telegramId, aiboxUserId } = request.query;
+      if (!telegramId && !aiboxUserId) {
+        return reply.code(400).send({ error: "telegramId or aiboxUserId is required" });
       }
 
-      const user = await db.user.findUnique({
-        where: { telegramId: BigInt(telegramId) },
-        select: { id: true },
-      });
+      // Резолвим юзера по любому из двух идентификаторов (приоритет — aiboxUserId).
+      const user = aiboxUserId
+        ? await db.user.findUnique({ where: { id: BigInt(aiboxUserId) }, select: { id: true } })
+        : await db.user.findUnique({
+            where: { telegramId: BigInt(telegramId!) },
+            select: { id: true },
+          });
       const sub = user
         ? await db.localSubscription.findUnique({ where: { userId: user.id } })
         : null;

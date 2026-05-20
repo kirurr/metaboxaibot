@@ -464,6 +464,28 @@ export async function setAiboxId(params: {
   }
 }
 
+/**
+ * Триггерит `reconcileSubscription` на metabox-стороне для web-only юзера.
+ * Метабокс flush'ит pendingBot* (накопленные при админ-грантах ДО фикса A1)
+ * в бот через syncBotSubscription по `aiboxUserId`. Best-effort: на ошибке
+ * возвращает null. Не критично для login flow — это catch-up для legacy
+ * pendingBot* данных, новые гранты идут напрямую через grantAiBoxTokens.
+ */
+export async function reconcileByAibox(params: {
+  metaboxUserId: string;
+  aiboxUserId: bigint | string;
+}): Promise<{ ok: boolean; case?: number | string } | null> {
+  try {
+    return await post<{ ok: boolean; case?: number | string }>("/reconcile-by-aibox", {
+      metaboxUserId: params.metaboxUserId,
+      aiboxUserId:
+        typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Mark a token-pack order as granted in the bot (sets tokensGrantedToBot = true on Metabox). */
 export async function markOrderGrantedOnMetabox(orderId: string): Promise<void> {
   try {

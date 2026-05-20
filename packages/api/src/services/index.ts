@@ -85,6 +85,7 @@ export {
   linkTelegramFromWeb,
   followMetaboxMergeChain,
   setAiboxId,
+  reconcileByAibox,
 } from "./metabox-bridge.service.js";
 export type {
   AiBotProduct,

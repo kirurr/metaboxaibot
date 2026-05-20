@@ -25,6 +25,7 @@ import {
   getSubscriptionStatusByMetabox,
   markOrderGrantedOnMetabox,
   markTokensGrantedOnMetabox,
+  reconcileByAibox,
   setAiboxId,
 } from "./metabox-bridge.service.js";
 
@@ -102,6 +103,15 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   }
 
   if (existing) {
+    // Existing User: всё равно дёргаем setAiboxId + reconcileByAibox.
+    // Это catch-up для legacy юзеров, которые создавались ДО фикса A1 и
+    // потому на metabox-стороне у них может ещё не быть aiboxUserId или в
+    // pendingBot* лежать админ-гранты, недоставленные из-за прежнего гейта
+    // на telegramId. Обе bridge-функции best-effort + идемпотентны
+    // (`setAiboxId` → `alreadySet:true`, `reconcileByAibox` → `case:'none'`),
+    // так что повторные вызовы не делают вреда.
+    await setAiboxId({ metaboxUserId: liveMetaboxUserId, aiboxUserId: existing.id });
+    await reconcileByAibox({ metaboxUserId: liveMetaboxUserId, aiboxUserId: existing.id });
     return { ...existing, created: false };
   }
 
@@ -138,6 +148,16 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
       "[ensureAibUser] setAiboxId failed (will retry on next refresh)",
     );
   }
+
+  // Catch-up: если у этого metabox-юзера есть pendingBot* (накопились до
+  // фикса A1, когда admin grants не доставлялись web-only юзерам), просим
+  // metabox flush'нуть их в бот через reconcileSubscription по нашему
+  // aiboxUserId. Для свежих signup-юзеров pendingBot* пустые — endpoint
+  // отрабатывает мгновенно без эффектов. Bridge сам swallow'ит ошибки.
+  await reconcileByAibox({
+    metaboxUserId: liveMetaboxUserId,
+    aiboxUserId: created.id,
+  });
 
   // Sync — best effort. Любая ошибка тут не блокирует логин, юзер залогинится
   // и ребёнок UI; следующий рефреш/логин ретрайнет.
