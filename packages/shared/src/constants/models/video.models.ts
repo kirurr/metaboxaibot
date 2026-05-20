@@ -646,7 +646,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
       settingKey: "upscale_factor",
       map: {
         "2": { costUsdPerSecond: 0.04 },
-        "4": { costUsdPerSecond: 0.07 },
+        "4": { costUsdPerSecond: 0.08 },
       },
     },
     inputCostUsdPerMToken: 0,
@@ -2533,5 +2533,51 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     supportedAspectRatios: ["16:9", "9:16"],
     supportedDurations: [8],
     settings: VEO_KIE_SETTINGS,
+  },
+  // ── Video upscale via Replicate Topaz (fallback к KIE primary) ───────────────
+  // KIE primary `video-upscale` (topaz/video-upscale) роутится на Replicate
+  // topazlabs/video-upscale. Replicate принимает абсолютное `target_resolution`,
+  // а не множитель — адаптер маппит upscale_factor → разрешение. Биллинг —
+  // всегда по KIE-цене primary.
+  {
+    id: "video-upscale",
+    name: "Video upscale (Replicate fallback)",
+    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    section: "video",
+    provider: "replicate",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.04,
+    costVariants: {
+      settingKey: "upscale_factor",
+      map: {
+        "2": { costUsdPerSecond: 0.04 },
+        "4": { costUsdPerSecond: 0.08 },
+      },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: [{ slotKey: "motion_video", mode: "motion_video", labelKey: "motionVideo" }],
+    // Prebuilt для plug-and-play promotion в primary (как у kling-motion fallback'ов).
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту видео. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+        ],
+        default: "2",
+      },
+    ],
   },
 ];

@@ -11,6 +11,8 @@ import { resolveImageMimeType } from "../../utils/mime-detect.js";
  */
 const REPLICATE_MODELS: Record<string, `${string}/${string}:${string}` | `${string}/${string}`> = {
   sora: "openai/sora-2",
+  // Topaz video upscaler — fallback для KIE primary `video-upscale`.
+  "video-upscale": "topazlabs/video-upscale",
 };
 
 export class ReplicateVideoAdapter implements VideoAdapter {
@@ -33,6 +35,44 @@ export class ReplicateVideoAdapter implements VideoAdapter {
 
   async submit(input: VideoInput): Promise<string> {
     const ms = input.modelSettings ?? {};
+
+    // ── Topaz video upscale — fallback для KIE primary `video-upscale` ────────
+    // Replicate-версия принимает абсолютное `target_resolution`, а не множитель.
+    // Маппим KIE `upscale_factor` (2/4) в разрешение: 2 → 1080p, 4 → 4k.
+    if (this.modelId === "video-upscale") {
+      const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
+      if (!videoUrl) throw new Error("Replicate video-upscale: source video is required");
+      // Replicate не умеет фетчить S3/Telegram presigned URL напрямую — качаем
+      // видео сами и отдаём Blob (SDK v1.x грузит его в Replicate files API).
+      let videoParam: Blob | string = videoUrl;
+      const vidRes = await fetch(videoUrl);
+      if (vidRes.ok) {
+        const vidBuf = await vidRes.arrayBuffer();
+        videoParam = new Blob([vidBuf], {
+          type: vidRes.headers.get("content-type") ?? "video/mp4",
+        });
+      }
+      const targetResolution = String(ms.upscale_factor ?? "2") === "4" ? "4k" : "1080p";
+      // Жёстко фиксируем 30fps: цена Replicate Topaz растёт вдвое на 60fps
+      // (4K/60 ≈ $0.149/s против 4K/30 ≈ $0.075/s), а биллим мы по KIE-ставке
+      // primary ($0.08/s) — без пина 60fps-исходник на fallback ушёл бы в минус.
+      const predInput = {
+        video: videoParam,
+        target_resolution: targetResolution,
+        target_fps: 30,
+      };
+      logCall(String(this.model), "submit", {
+        video: "<blob>",
+        target_resolution: targetResolution,
+        target_fps: 30,
+      });
+      const prediction = await this.client.predictions.create({
+        model: this.model as `${string}/${string}`,
+        input: predInput,
+      });
+      return prediction.id;
+    }
+
     const referenceUrl = input.mediaInputs?.reference?.[0] ?? input.imageUrl;
 
     // Sora uses "seconds" (not "duration"), "input_reference" (not "image"),

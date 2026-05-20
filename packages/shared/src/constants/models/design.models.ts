@@ -364,7 +364,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     costUsdPerRequest: 0.05, // base = upscale_factor "2"
     costVariants: {
       settingKey: "upscale_factor",
-      map: { "2": 0.05, "4": 0.1, "8": 0.2 },
+      map: { "2": 0.05, "4": 0.15, "8": 0.35 },
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
@@ -2464,6 +2464,47 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
           { value: "auto", label: "Auto" },
         ],
         default: "medium",
+      },
+    ],
+  },
+  // ── Image upscale via Replicate Topaz (fallback к KIE primary) ───────────────
+  // KIE primary `image-upscale` (topaz/image-upscale) роутится на одноимённую
+  // Replicate-модель topazlabs/image-upscale. Биллинг — всегда по KIE-цене primary.
+  {
+    id: "image-upscale",
+    name: "Image upscale (Replicate fallback)",
+    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    section: "design",
+    provider: "replicate",
+    costUsdPerRequest: 0.05,
+    costVariants: {
+      settingKey: "upscale_factor",
+      map: { "2": 0.05, "4": 0.15, "8": 0.35 },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+    // Prebuilt для plug-and-play promotion в primary (как у nano-banana fallback'ов).
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+          { value: "8", label: "×8" },
+        ],
+        default: "2",
       },
     ],
   },
