@@ -6,6 +6,8 @@ import {
   issueSsoTokenRemote,
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
+import { mergeWebUserIntoBotUser } from "../services/account-sync.service.js";
+import { logger } from "../logger.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
@@ -833,6 +835,36 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           botHasPurchase: !!botPurchase,
           botCreatedAt: user.createdAt,
         });
+
+        // Merge: если юзер ранее регистрировался на ai.metabox.global, у
+        // него уже есть web-only AI Box User с metaboxUserId=result.metaboxUserId
+        // (создан через ensureAibUserForMetabox на web-login). Без merge
+        // db.user.update упадёт с P2002 на @unique metaboxUserId.
+        // Сливаем web-only User → текущий bot User (ctx.user/userId).
+        const existingWebUser = await db.user.findFirst({
+          where: { metaboxUserId: result.metaboxUserId, id: { not: userId } },
+          select: { id: true },
+        });
+        if (existingWebUser) {
+          try {
+            await mergeWebUserIntoBotUser(existingWebUser.id, userId);
+          } catch (mergeErr) {
+            logger.error(
+              {
+                err: mergeErr,
+                userId: userId.toString(),
+                sourceId: existingWebUser.id.toString(),
+                metaboxUserId: result.metaboxUserId,
+              },
+              "[profile/metabox-login] merge with web-only user failed",
+            );
+            // @ts-expect-error status number — schema declares 200/400 only
+            return reply.code(500).send({
+              error: "Не удалось объединить аккаунты. Напишите в поддержку.",
+            });
+          }
+        }
+
         await db.user.update({
           where: { id: userId },
           data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },
