@@ -30,6 +30,8 @@ export type BotState =
   | "SCENARIOS_SECTION"
   | "FACE_SWAP_AWAIT_FACE"
   | "FACE_SWAP_AWAIT_REFERENCE"
+  | "PHOTO_UPSCALE_AWAIT_PHOTO"
+  | "VIDEO_UPSCALE_AWAIT_VIDEO"
   | "AWAITING_DELETE_CONFIRMATION";
 
 export type Section = "gpt" | "design" | "audio" | "video";
