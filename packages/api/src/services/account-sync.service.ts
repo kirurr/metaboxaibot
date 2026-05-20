@@ -34,6 +34,10 @@ interface EnsureUserParams {
   firstName?: string | null;
   lastName?: string | null;
   language?: string;
+  /** Metabox referralCode — пишется в `User.metaboxReferralCode` при первом
+   *  create. Если у existing User уже выставлен другой — не перетираем
+   *  (referralCode не меняется на metabox-стороне, drift'а ожидать не стоит). */
+  metaboxReferralCode?: string | null;
 }
 
 interface EnsuredUser {
@@ -75,7 +79,7 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   // Ищем по live id (после-merge primary).
   let existing = await db.user.findFirst({
     where: { metaboxUserId: liveMetaboxUserId },
-    select: { id: true, telegramId: true, metaboxUserId: true },
+    select: { id: true, telegramId: true, metaboxUserId: true, metaboxReferralCode: true },
   });
 
   // Stale-cache case: AI Box User существует, но привязан к старому (frozen
@@ -83,7 +87,7 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   if (!existing && liveMetaboxUserId !== params.metaboxUserId) {
     const stale = await db.user.findFirst({
       where: { metaboxUserId: params.metaboxUserId },
-      select: { id: true, telegramId: true, metaboxUserId: true },
+      select: { id: true, telegramId: true, metaboxUserId: true, metaboxReferralCode: true },
     });
     if (stale) {
       await db.user.update({
@@ -103,6 +107,17 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   }
 
   if (existing) {
+    // Backfill metaboxReferralCode для legacy юзеров: до текущего фикса
+    // ensureAibUser не писал поле, и юзеры созданные ранее имеют null.
+    // Обновляем только если у нас сейчас есть свежее значение от
+    // webValidateCredentials и у юзера в БД пусто.
+    if (params.metaboxReferralCode && !existing.metaboxReferralCode) {
+      await db.user.update({
+        where: { id: existing.id },
+        data: { metaboxReferralCode: params.metaboxReferralCode },
+      });
+    }
+
     // Existing User: всё равно дёргаем setAiboxId + reconcileByAibox.
     // Это catch-up для legacy юзеров, которые создавались ДО фикса A1 и
     // потому на metabox-стороне у них может ещё не быть aiboxUserId или в
@@ -125,6 +140,9 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
       lastName: params.lastName ?? null,
       language: params.language ?? "ru",
       metaboxUserId: liveMetaboxUserId,
+      // referralCode пишем сразу — иначе web-фронт после web-login видит
+      // null в `Profile.referralCode` и не может показать партнёрский код.
+      metaboxReferralCode: params.metaboxReferralCode ?? null,
       // isNew=true оставляем дефолтом — welcome-flow в боте триггерится через
       // первый /start (не наш случай); на вебе никаких welcome-сообщений нет.
     },

@@ -125,7 +125,11 @@ async function buildWebUserResponse(args: {
     language: (aib?.language as "ru" | "en" | undefined) ?? "ru",
     telegramId,
     telegramUsername,
-    isTelegramLinked: !!aib,
+    // Привязка TG = именно наличие telegramId на AI Box User (или fallback на
+    // metabox-side telegramId если AI Box User ещё не создан). Раньше было
+    // `!!aib` — web-only юзеры (создаются `ensureAibUser` без TG) видели в
+    // профиле «Linked» + «id null» и не могли кликнуть «Привязать Telegram».
+    isTelegramLinked: !!telegramId,
     tokenBalance: aib?.tokenBalance.toString() ?? "0",
     subscriptionTokenBalance: aib?.subscriptionTokenBalance.toString() ?? "0",
     role: aib?.role ?? "USER",
@@ -338,6 +342,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           metaboxUserId: registered.metaboxUserId,
           firstName: registered.firstName,
           lastName: registered.lastName,
+          metaboxReferralCode: registered.referralCode,
         });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
@@ -436,8 +441,20 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           if (err instanceof MetaboxApiError) {
             if (err.status === 401)
               return reply.code(401).send({ error: "Неверный email или пароль" });
-            if (err.status === 403)
-              return reply.code(403).send({ error: err.message || "Вход запрещён" });
+            if (err.status === 403) {
+              // EMAIL_NOT_VERIFIED — клин-месседж + code, фронт покажет CTA
+              // «отправить письмо повторно». Без code (banned / другая 403) —
+              // возвращаем дефолт «Вход запрещён», БЕЗ технического
+              // `err.message` (он содержит `Metabox internal API … → 403: …`).
+              if (err.code === "EMAIL_NOT_VERIFIED") {
+                return reply.code(403).send({
+                  code: "EMAIL_NOT_VERIFIED",
+                  error: "Email не подтверждён. Перейдите по ссылке из письма или запросите новое.",
+                  email: emailNorm,
+                });
+              }
+              return reply.code(403).send({ error: "Вход запрещён" });
+            }
           }
           logger.error({ err }, "web-login: metabox validate failed");
           return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
@@ -450,6 +467,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           metaboxUserId: validated.metaboxUserId,
           firstName: validated.firstName,
           lastName: validated.lastName,
+          metaboxReferralCode: validated.referralCode,
         });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {

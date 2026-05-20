@@ -546,6 +546,10 @@ export interface WebValidateResult {
   firstName: string | null;
   lastName: string | null;
   name: string | null;
+  /** Metabox referralCode — кешируется в `User.metaboxReferralCode` при
+   *  ensureAibUserForMetabox, чтобы web-фронт мог показать его в Profile/Plans
+   *  без отдельного запроса к metabox-стороне. */
+  referralCode: string | null;
   /** true если на стороне meta-box у юзера есть telegramId (может быть привязан через сайт ранее). */
   hasTelegramOnSite: boolean;
 }

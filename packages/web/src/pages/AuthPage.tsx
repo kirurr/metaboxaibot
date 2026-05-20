@@ -69,7 +69,15 @@ export default function AuthPage({ initialMode = "login" }: Props) {
       }
     } catch (e) {
       if (e instanceof ApiError) {
-        setError(e.message);
+        // EMAIL_NOT_VERIFIED при login — фронт не должен показывать сухую
+        // ошибку; перекидываем на тот же «проверьте почту» экран что и
+        // signup, чтобы юзер мог кликнуть resend.
+        if (e.code === "EMAIL_NOT_VERIFIED") {
+          const details = e.details as { email?: string } | undefined;
+          setPendingVerification(details?.email ?? email.trim().toLowerCase());
+        } else {
+          setError(e.message);
+        }
       } else {
         setError(mode === "login" ? t("auth.loginError") : t("auth.signupError"));
       }
