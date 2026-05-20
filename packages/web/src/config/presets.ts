@@ -44,12 +44,12 @@ export const imagePresets: PresetMap = {
     // настройки задаются отдельно для каждой модели из allowedModelIds
     settings: {
       "nano-banana-2": {
-				aspect_ratio: "1:1",
-			},
+        aspect_ratio: "1:1",
+      },
       "grok-imagine-image": {
-				enable_pro: true,
-				aspect_ratio: "16:9",
-			},
+        enable_pro: true,
+        aspect_ratio: "16:9",
+      },
     },
     // i18n-ключи, но просто текст тоже сработает
     title: "presets.image.swap.title",
