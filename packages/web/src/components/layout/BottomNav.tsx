@@ -1,23 +1,26 @@
 import { NavLink } from "react-router-dom";
 import { GraduationCap, Home, Image as ImageIcon, Sparkles, User } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 
 type NavItem = {
   to: string;
-  label: string;
+  /** i18n-ключ для подписи (резолвится в рендере). */
+  labelKey: string;
   icon: typeof Home;
   center?: boolean;
 };
 
 const items: NavItem[] = [
-  { to: "/", label: "Главная", icon: Home },
-  { to: "/history", label: "Галерея", icon: ImageIcon },
-  { to: "/tokens", label: "Генерировать", icon: Sparkles, center: true },
-  { to: "/plans", label: "Обучение", icon: GraduationCap },
-  { to: "/profile", label: "Профиль", icon: User },
+  { to: "/", labelKey: "nav.bottom.home", icon: Home },
+  { to: "/history", labelKey: "nav.bottom.gallery", icon: ImageIcon },
+  { to: "/tokens", labelKey: "nav.bottom.generate", icon: Sparkles, center: true },
+  { to: "/plans", labelKey: "nav.bottom.learn", icon: GraduationCap },
+  { to: "/profile", labelKey: "nav.bottom.profile", icon: User },
 ];
 
 export function BottomNav() {
+  const { t } = useTranslation();
   return (
     <nav className="bottom-nav">
       {items.map((n) => (
@@ -36,12 +39,12 @@ export function BottomNav() {
               <span className="bn-fab">
                 <n.icon size={22} />
               </span>
-              <span>{n.label}</span>
+              <span>{t(n.labelKey)}</span>
             </>
           ) : (
             <>
               <n.icon size={20} />
-              <span>{n.label}</span>
+              <span>{t(n.labelKey)}</span>
               <span className="dot" />
             </>
           )}

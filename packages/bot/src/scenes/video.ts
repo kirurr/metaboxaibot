@@ -9,6 +9,7 @@ import {
   checkBalance,
   usdToTokens,
   probeImageMetadata,
+  probeHeygenAudioDuration,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import { buildCostLine } from "../utils/cost-line.js";
@@ -28,6 +29,7 @@ import {
   getResolvedModes,
   getModelDefaultDuration,
 } from "@metabox/shared";
+import type { Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
 import {
@@ -91,6 +93,9 @@ interface AvatarVoiceEntry {
   tgUrl: string;
   /** message_id of the voice/audio message — so the result reply targets it. */
   voiceMessageId?: number;
+  /** Длительность аудио в секундах — ffprobe на байтах (не metadata) при
+   *  загрузке. Прокидывается как `audioDurationSecHint` в cost-preview. */
+  durationSec?: number;
   expiresAt: number;
 }
 
@@ -112,6 +117,75 @@ function getAvatarVoice(userId: bigint, id: string): AvatarVoiceEntry | null {
     return null;
   }
   return entry;
+}
+
+/**
+ * Верхняя граница плаусибельного аудио-битрейта для sanity-check. 64 KB/s ≈
+ * 512 kbps — покрывает high-quality stereo mp3/opus/m4a с запасом. Реальные
+ * аудио-файлы в Telegram редко идут выше 192 kbps = 24 KB/s.
+ */
+const MAX_PLAUSIBLE_AUDIO_BYTES_PER_SEC = 64 * 1024;
+
+/**
+ * Достоверная длительность TG-аудио для cost-preview hint.
+ *
+ * Переиспользует существующий `probeHeygenAudioDuration` (он же используется
+ * для сайта). Добавляет safety-логику:
+ *  - Когда ffprobe вернул значение: `max(ceil(ffprobe), metaDuration)`.
+ *    ffprobe служит floor'ом против exploit'а с занижением metaDuration;
+ *    meta перевешивает когда больше — компенсирует под-репорт ffprobe
+ *    (опус voice часто занижается на 0.5-1s vs реальная длительность).
+ *  - Когда ffprobe сорвался + voice: trust `metaDuration` (Telegram-server
+ *    ставит при записи, юзер подделать не может).
+ *  - Когда ffprobe сорвался + audio: sanity-check `metaDuration` против
+ *    `fileSize` (defense-in-depth: если файл 5MB но meta=1сек — это явно
+ *    подделанные метаданные, реальный 5MB at min audio bitrate >> 1 sec).
+ *    Если правдоподобно → trust meta. Иначе → null → per_second mode.
+ */
+async function probeTelegramAudioDurationSec(
+  tgUrl: string,
+  isVoiceType: boolean,
+  metaDuration: number | undefined,
+  fileSize: number | undefined,
+): Promise<number | null> {
+  const probed = await probeHeygenAudioDuration({}, { voice_audio: [tgUrl] });
+  const probedSec = probed && probed > 0 ? Math.ceil(probed) : 0;
+  const meta =
+    typeof metaDuration === "number" && isFinite(metaDuration) && metaDuration > 0
+      ? metaDuration
+      : 0;
+
+  if (probedSec > 0) {
+    if (meta > 0 && probedSec < meta * 0.5) {
+      logger.warn(
+        { probedSec, meta },
+        "probeTelegramAudioDurationSec: ffprobe disagrees with metaDuration",
+      );
+    }
+    return Math.max(probedSec, meta);
+  }
+
+  if (meta <= 0) return null;
+
+  // Probe сорвался. Voice — TG-server ставит meta, доверяем безусловно.
+  if (isVoiceType) return meta;
+
+  // Audio — meta под контролем юзера, проверяем через file_size:
+  // занижение meta для exploit'а арифметически невозможно если файл реально
+  // содержит больше данных. Используем верхнюю границу битрейта чтобы
+  // вычислить минимально-возможную длительность для этого размера.
+  if (typeof fileSize === "number" && fileSize > 0) {
+    const minPlausibleSec = fileSize / MAX_PLAUSIBLE_AUDIO_BYTES_PER_SEC;
+    // 50% margin — на накладные расходы контейнера (header'ы и т.п.).
+    if (meta < minPlausibleSec * 0.5) {
+      logger.warn(
+        { meta, fileSize, minPlausibleSec },
+        "probeTelegramAudioDurationSec: metaDuration implausibly small vs file_size — rejecting",
+      );
+      return null;
+    }
+  }
+  return meta;
 }
 
 // ── Model selection keyboard ──────────────────────────────────────────────────
@@ -218,7 +292,10 @@ export async function activateVideoModel(
     // или mode-activated). Раз reply_markup-слот свободен — всегда привязываем
     // нижнюю persistent-клавиатуру со СВЕЖИМ wtoken для кнопки «Управление»
     // (web_app). Без обновления токены протухают через ~24ч.
-    const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+    const token =
+      webappUrl && ctx.user.telegramId
+        ? generateWebToken(ctx.user.telegramId, config.bot.token)
+        : "";
     const managementBtn = webappUrl
       ? {
           text: ctx.t.video.management,
@@ -613,15 +690,31 @@ export async function executeVideoPrompt(
   prompt: string,
   sourceMessageId?: string,
   promptMessageId?: number,
+  options: { skipModeGate?: boolean } = {},
 ): Promise<void> {
   if (!ctx.user) return;
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
+  // Dedup сначала: если у юзера уже летит активная генерация с этого же
+  // sourceMessageId — выходим тихо, без побочных эффектов (включая picker
+  // ниже). Без этого дубль-тап мог бы отправить picker сверху "уже
+  // генерируется" уведомления.
   if (sourceMessageId) {
     const active = await generationService.hasActiveJobForSource(ctx.user.id, sourceMessageId);
     if (active) return;
   }
+
+  // Mode gate здесь, а не в `handleVideoMessage` — этот же entry point
+  // используют voice-prompt callback (`handlers/voice-prompt.handler.ts`) и
+  // album/caption flows из `handleVideoPhoto`/`handleVideoVideo`. Без gate в
+  // executeVideoPrompt voice-prompt у multi-mode модели без textOnly режима
+  // молча падал бы на required-slot validation.
+  //
+  // `skipModeGate` передают caption-flow'ы из handleVideoPhoto/handleVideoVideo
+  // — там media gate уже отработал и гарантирует что mode выбран; повторный
+  // gate здесь дал бы 2 лишних DB-read'а на каждое captioned-фото в альбоме.
+  if (!options.skipModeGate && !(await ensureVideoModeSelected(ctx, "text"))) return;
 
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId ?? "kling";
@@ -700,7 +793,12 @@ export async function executeVideoPrompt(
   // resolve once — `resolveSlotValue` handles `tg:`-fileIds and bare S3 keys
   // uniformly, returning fresh URLs.
   const pendingMediaInputs: Record<string, string[]> = hasMediaInputs ? { ...mediaInputs } : {};
-  if (rawVoiceS3Key) pendingMediaInputs.voice_audio = [rawVoiceS3Key];
+  if (rawVoiceS3Key) {
+    pendingMediaInputs.voice_audio = [rawVoiceS3Key];
+    // Scratchpad override — другое аудио чем то, для которого мы стэшили
+    // длительность в slot-upload. Чистим, чтобы не подсунуть hint от чужого файла.
+    await userStateService.clearVideoVoiceDurationSec(ctx.user.id);
+  }
   const hasAnyPending = Object.keys(pendingMediaInputs).length > 0;
   const resolvedMediaInputs = hasAnyPending
     ? await resolveMediaInputUrls(pendingMediaInputs)
@@ -710,6 +808,14 @@ export async function executeVideoPrompt(
   // avatar_photo slot.
   const routed = routeAvatarPhoto(modelId, scratchpadImageUrl, resolvedMediaInputs);
   const imageUrl = routed.imageUrl;
+
+  // Hint: достоверная длительность загруженного юзером voice'а. Использую
+  // ТОЛЬКО если в submit'е реально есть voice_audio — иначе stale значение
+  // в БД (от прошлой загрузки) применилось бы к submit'у без аудио.
+  const hasVoiceAudioForSubmit = !!routed.mediaInputs?.voice_audio?.[0];
+  const audioDurationSecHint = hasVoiceAudioForSubmit
+    ? ((await userStateService.getVideoVoiceDurationSec(ctx.user.id)) ?? undefined)
+    : undefined;
 
   // Build submitParams without EL TTS — preGen is deferred until after the gate
   // so that cancelling the confirmation costs the user $0 in EL spend.
@@ -726,6 +832,7 @@ export async function executeVideoPrompt(
     extraModelSettings: driverUrl ? { driver_url: driverUrl } : undefined,
     sourceMessageId,
     promptMessageId,
+    ...(audioDurationSecHint !== undefined ? { audioDurationSecHint } : {}),
   };
 
   if (
@@ -774,6 +881,10 @@ export async function executeVideoPrompt(
       }
     }
 
+    // HeyGen native voice (Jenny и т.п.): EL TTS не отрабатывает, voice_audio
+    // пуст. Дальнейший `videoGenerationService.submitVideo` сам синтезирует
+    // через HeyGen Starfish (см. heygen-tts.service.ts), чтобы probe увидел
+    // реальную длительность и checkBalance не пропустил юзера в минус.
     const submitParams = elTtsS3Key
       ? {
           ...submitParamsBase,
@@ -803,7 +914,77 @@ export async function executeVideoPrompt(
 
 export async function handleVideoMessage(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.message?.text) return;
+  // Mode gate выполняется внутри executeVideoPrompt — единая точка для всех
+  // text entry'ев (текстовое сообщение, voice-prompt callback, generate-no-prompt).
   await executeVideoPrompt(ctx, ctx.message.text, undefined, ctx.message.message_id);
+}
+
+/**
+ * Гарантирует, что у юзера выбран mode для активной multi-mode video-модели.
+ * Возвращает `true` — продолжаем хендлер; `false` — мы уже отправили алерт
+ * и picker, дальше идти не надо.
+ *
+ * No-op (возврат `true`) когда: модель не активирована, модель single-mode,
+ * либо мод уже выбран явно.
+ *
+ * Multi-mode + не выбран мод:
+ * - `inputKind = "text"`: если в модели есть `textOnly`-режим — тихо
+ *   выставляем его (юзер допишет промпт и пойдёт в `executeVideoPrompt`).
+ *   Если textOnly режима нет — алерт+picker (модели без text-only генерации
+ *   физически не могут принять одинокий текстовый промпт без media-слотов).
+ * - `inputKind = "media"`: всегда алерт+picker, файл не сохраняем. Слоты
+ *   живут внутри мода — без выбранного мода непонятно куда класть.
+ *
+ * Race с `handleModeSet` (юзер тапнул picker в те же миллисекунды что
+ * отправил текст): re-read прямо перед write сжимает окно до микросекунд.
+ * Полностью устранить без DB CAS нельзя, но в этом окне DB-write от
+ * handleModeSet почти всегда успевает закоммититься первым; если нет —
+ * следующий тап перепишет.
+ */
+async function ensureVideoModeSelected(
+  ctx: BotContext,
+  inputKind: "text" | "media",
+): Promise<boolean> {
+  // `false` означает «алерт+picker отправлены, дальше не идти». Когда нет
+  // ctx.user — ничего не отправили, поэтому возвращаем `true` (no-op, иди
+  // как обычно). Все текущие вызывающие сами проверяют ctx.user перед
+  // обращением, так что эта ветка по факту недостижима — но семантика
+  // должна быть корректной для будущих вызовов без guard'а.
+  if (!ctx.user) return true;
+  const state = await userStateService.get(ctx.user.id);
+  const modelId = state?.videoModelId;
+  if (!modelId) return true;
+  const model = AI_MODELS[modelId];
+  const modes = model ? getResolvedModes(model) : null;
+  if (!modes) return true;
+  const saved = await userStateService.getSelectedMode(ctx.user.id, modelId);
+  if (saved) return true;
+
+  if (inputKind === "text") {
+    const textOnly = modes.find((m) => m.textOnly);
+    if (textOnly) {
+      const fresh = await userStateService.getSelectedMode(ctx.user.id, modelId);
+      if (fresh) return true;
+      await userStateService.setSelectedMode(ctx.user.id, modelId, textOnly.id);
+      return true;
+    }
+  }
+
+  // Dedup picker'а: при загрузке альбома (10-30 фоток подряд) старый код слал
+  // picker на каждую. Acquire Redis-lock на 15с — только первый вызов в окне
+  // фактически рендерит picker, остальные тихо возвращают false (upload
+  // блокируется, но без спама). 15с покрывает типичную загрузку большого
+  // альбома (~10-15с). Если юзер за это время выбрал mod — gate выйдет рано
+  // по `saved !== null`, lock не трогаем; так что увеличение TTL не вредит
+  // legitimate flow. Fail-open: если Redis недоступен, рендерим picker (лучше
+  // спам чем потерянный алерт).
+  const pickerLockKey = `mode-picker-shown:${ctx.user.id}:video`;
+  const acquired = await acquireLock(pickerLockKey, 15).catch(() => true);
+  if (acquired) {
+    await ctx.reply(ctx.t.modelModes.pickModeFirstForMedia);
+    await sendVideoModePicker(ctx, modelId, modes);
+  }
+  return false;
 }
 
 // ── New video dialog ──────────────────────────────────────────────────────────
@@ -889,11 +1070,61 @@ export async function handleVideoLipSync(ctx: BotContext): Promise<void> {
 type VideoMediaGroupEntry = { timer: ReturnType<typeof setTimeout>; processed: boolean };
 const videoMediaGroupBuffer = new Map<string, VideoMediaGroupEntry>();
 
+/** Доля площади, начиная с которой считаем кроп «сильным» и предупреждаем юзера. */
+const KLING_HEAVY_CROP_THRESHOLD = 0.25;
+
+function parseAspectRatio(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = /^(\d+):(\d+)$/.exec(s);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!w || !h) return null;
+  return w / h;
+}
+
+/**
+ * Для Kling-семейства при включённом тогле «Автокроп фото под формат»
+ * (`crop_to_aspect: true`) — если соотношение сторон загруженного фото
+ * сильно отличается от выбранного `aspect_ratio`, возвращает локализованное
+ * предупреждение со сжатой ~процентной долей обрезаемой площади. Иначе null.
+ *
+ * Метрика: `1 - min(actual,target)/max(actual,target)` — доля «лишнего» из
+ * меньшей стороны после center-crop'а. Порог 25% покрывает явные mismatch'и
+ * (1:1 → 16:9 ≈ 44%, 9:16 → 16:9 ≈ 68%) и не дёргает на близких пропорциях
+ * (16:10 → 16:9 ≈ 10%).
+ */
+async function buildKlingHeavyCropWarning(
+  userId: bigint,
+  modelId: string,
+  widthPx: number | undefined,
+  heightPx: number | undefined,
+  t: Translations,
+): Promise<string | null> {
+  if (!widthPx || !heightPx) return null;
+  const model = AI_MODELS[modelId];
+  if (model?.familyId !== "kling") return null;
+  const allSettings = await userStateService.getModelSettings(userId);
+  const ms = allSettings[modelId] ?? {};
+  if (ms.crop_to_aspect !== true) return null;
+  const aspectStr = (ms.aspect_ratio as string | undefined) ?? "16:9";
+  const targetAspect = parseAspectRatio(aspectStr);
+  if (!targetAspect) return null;
+  const actualAspect = widthPx / heightPx;
+  const cropped = 1 - Math.min(actualAspect, targetAspect) / Math.max(actualAspect, targetAspect);
+  if (cropped < KLING_HEAVY_CROP_THRESHOLD) return null;
+  return t.mediaInput.klingHeavyCropWarning
+    .replace("{percent}", String(Math.round(cropped * 100)))
+    .replace("{aspect}", aspectStr);
+}
+
 export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
   const isPhoto = !!ctx.message?.photo;
   const isImageDoc =
     !!ctx.message?.document && ctx.message.document.mime_type?.startsWith("image/");
   if (!ctx.user || (!isPhoto && !isImageDoc)) return;
+
+  if (!(await ensureVideoModeSelected(ctx, "media"))) return;
 
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId ?? "kling";
@@ -981,16 +1212,18 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       return;
     }
 
+    // Hoist'нуты outside `if (slot?.constraints)` чтобы потом передать в
+    // buildKlingHeavyCropWarning после успешного addMediaInput.
+    let imageWidthPx: number | undefined = photoSize?.width;
+    let imageHeightPx: number | undefined = photoSize?.height;
     if (slot?.constraints) {
-      let widthPx = photoSize?.width;
-      let heightPx = photoSize?.height;
       let fileSizeBytes: number | undefined = fileSize || undefined;
       if (isImageDoc) {
         try {
           const probeUrl = await getLiveTgUrl();
           const meta = await probeImageMetadata(probeUrl);
-          widthPx = meta.width;
-          heightPx = meta.height;
+          imageWidthPx = meta.width;
+          imageHeightPx = meta.height;
           fileSizeBytes = meta.fileSizeBytes;
         } catch (err) {
           logger.warn({ err }, "probeImageMetadata failed for document");
@@ -998,7 +1231,11 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
           return;
         }
       }
-      const violation = validateMediaAgainstSlot(slot, { widthPx, heightPx, fileSizeBytes }, ctx.t);
+      const violation = validateMediaAgainstSlot(
+        slot,
+        { widthPx: imageWidthPx, heightPx: imageHeightPx, fileSizeBytes },
+        ctx.t,
+      );
       if (violation) {
         await ctx.reply(violation);
         return;
@@ -1024,6 +1261,18 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       ? (ctx.t.mediaInput[slot.labelKey as keyof typeof ctx.t.mediaInput] ?? slot.labelKey)
       : activeSlot.slotKey;
 
+    // Kling «Автокроп фото под формат» + сильный mismatch соотношения —
+    // предупреждаем юзера в шапке стандартного «готово» сообщения, что фото
+    // будет существенно обрезано. Если condition'ы не сходятся → null,
+    // ничего не дописываем.
+    const klingCropWarning = await buildKlingHeavyCropWarning(
+      userId,
+      slotModelId,
+      imageWidthPx,
+      imageHeightPx,
+      ctx.t,
+    );
+
     debounceSlotReply(userId, mediaGroupId, async () => {
       await consumeMediaHint(ctx, "video");
       const freshInputs = await userStateService.getMediaInputs(userId, slotModelId);
@@ -1031,12 +1280,16 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
 
       if (activeSlot.maxImages === 1 || freshCount >= activeSlot.maxImages) {
         clearActiveSlot(userId);
-        await sendVideoMediaInputStatus(ctx);
+        await sendVideoMediaInputStatus(
+          ctx,
+          klingCropWarning ? { prependText: klingCropWarning } : {},
+        );
       } else {
-        const msg = ctx.t.mediaInput.imageSaved
+        const baseMsg = ctx.t.mediaInput.imageSaved
           .replace("{slot}", String(label))
           .replace("{n}", String(freshCount))
           .replace("{max}", String(activeSlot.maxImages));
+        const msg = klingCropWarning ? `${klingCropWarning}\n\n${baseMsg}` : baseMsg;
         const kb = new InlineKeyboard().text(
           ctx.t.mediaInput.doneUploading,
           `mi_done:${activeSlot.slotKey}`,
@@ -1045,7 +1298,10 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       }
 
       if (caption) {
-        await executeVideoPrompt(ctx, caption, undefined, promptMessageId);
+        // skipModeGate: media gate выше уже отработал, повтор — лишние DB-read'ы.
+        await executeVideoPrompt(ctx, caption, undefined, promptMessageId, {
+          skipModeGate: true,
+        });
       }
     });
     return;
@@ -1065,16 +1321,17 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       // Constraint validation на upload'е (зеркалит active-slot путь выше).
       // Без этого юзер получает provider-error мид-генерации (типа
       // KIE 422 "Image dimensions must be at least 300 pixels").
+      // Hoist'нуты outside constraints-check чтобы передать в Kling crop-warn.
+      let imageWidthPx: number | undefined = photoSize?.width;
+      let imageHeightPx: number | undefined = photoSize?.height;
       if (targetSlot.constraints) {
-        let widthPx = photoSize?.width;
-        let heightPx = photoSize?.height;
         let fileSizeBytes: number | undefined = fileSize || undefined;
         if (isImageDoc) {
           try {
             const probeUrl = await getLiveTgUrl();
             const meta = await probeImageMetadata(probeUrl);
-            widthPx = meta.width;
-            heightPx = meta.height;
+            imageWidthPx = meta.width;
+            imageHeightPx = meta.height;
             fileSizeBytes = meta.fileSizeBytes;
           } catch (err) {
             logger.warn({ err }, "probeImageMetadata failed in auto-slot");
@@ -1084,7 +1341,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
         const violation = validateMediaAgainstSlot(
           targetSlot,
-          { widthPx, heightPx, fileSizeBytes },
+          { widthPx: imageWidthPx, heightPx: imageHeightPx, fileSizeBytes },
           ctx.t,
         );
         if (violation) {
@@ -1093,6 +1350,13 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
       }
       await userStateService.addMediaInput(userId, modelId, targetSlot.slotKey, tgSlotValue);
+      const klingCropWarning = await buildKlingHeavyCropWarning(
+        userId,
+        modelId,
+        imageWidthPx,
+        imageHeightPx,
+        ctx.t,
+      );
       debounceSlotReply(
         userId,
         mediaGroupId,
@@ -1100,7 +1364,8 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
           const fresh = await userStateService.getMediaInputs(userId, modelId);
           const count = fresh[targetSlot.slotKey]?.length ?? 0;
           if (count === 0) return;
-          await ctx.reply(buildSlotUploadedMessage(targetSlot, count, ctx.t));
+          const baseMsg = buildSlotUploadedMessage(targetSlot, count, ctx.t);
+          await ctx.reply(klingCropWarning ? `${klingCropWarning}\n\n${baseMsg}` : baseMsg);
         },
         targetSlot.slotKey,
       );
@@ -1133,7 +1398,10 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
+          // skipModeGate: media gate в handleVideoPhoto уже отработал.
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId, {
+            skipModeGate: true,
+          });
         }
       }
     });
@@ -1211,6 +1479,11 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
 
     // Build submitParams without EL TTS — preGen is deferred until after the gate.
     const routed = routeAvatarPhoto(modelId, supportsImages ? tgUrl : undefined, mediaInputs);
+    // См. executeVideoPrompt — DB hint для cost-preview, только если slot-voice реально в submit'е.
+    const hasVoiceAudioForSubmit = !!routed.mediaInputs?.voice_audio?.[0];
+    const audioDurationSecHint = hasVoiceAudioForSubmit
+      ? ((await userStateService.getVideoVoiceDurationSec(ctx.user.id)) ?? undefined)
+      : undefined;
     const submitParamsBase = {
       userId: ctx.user.id,
       modelId,
@@ -1222,6 +1495,7 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
       aspectRatio: modelSettings?.aspectRatio,
       duration: modelSettings?.duration,
       promptMessageId,
+      ...(audioDurationSecHint !== undefined ? { audioDurationSecHint } : {}),
     };
 
     if (
@@ -1259,6 +1533,8 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
         }
       }
 
+      // HeyGen native voice добивается уже внутри submitVideo (см.
+      // executeVideoPrompt выше / heygen-tts.service.ts).
       const submitParams = elTtsS3Key
         ? {
             ...submitParamsBase,
@@ -1297,6 +1573,7 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
   const isVideoMsg = !!ctx.message?.video;
   const isVideoDoc = !!ctx.message?.document?.mime_type?.startsWith("video/");
   if (!isVideoMsg && !isVideoDoc) return;
+  if (!(await ensureVideoModeSelected(ctx, "media"))) return;
   const state = await userStateService.get(ctx.user.id);
   const modelId = state?.videoModelId;
   if (!modelId) return;
@@ -1506,7 +1783,10 @@ export async function handleVideoVideo(ctx: BotContext): Promise<void> {
         const finalInputs = await userStateService.getMediaInputs(userId, modelId);
         const missingRequired = findMissingRequiredSlot(modelId, freshSlots, finalInputs);
         if (!missingRequired) {
-          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId);
+          // skipModeGate: media gate в handleVideoVideo уже отработал.
+          await executeVideoPrompt(ctx, tracked.caption, undefined, promptMessageId, {
+            skipModeGate: true,
+          });
         }
       }
     });
@@ -1540,7 +1820,11 @@ export async function handleAvatarPhotoCapture(ctx: BotContext): Promise<void> {
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
 
   const userId = ctx.user.id;
-  const chatId = ctx.chat?.id ?? Number(userId);
+  const telegramId = ctx.user.telegramId;
+  // chat_id для Telegram API. Если по какой-то причине ctx.chat пуст —
+  // fallback на telegramId юзера. Никогда не подставляем internal id.
+  const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
+  if (chatId === undefined) return;
 
   // Fetch original image to (a) detect content-type and (b) build a thumbnail.
   const imgRes = await fetch(tgUrl);
@@ -1600,7 +1884,7 @@ export async function handleAvatarPhotoCapture(ctx: BotContext): Promise<void> {
 
   // Show the section reply keyboard immediately; ready message arrives async from worker.
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(userId, config.bot.token) : "";
+  const token = webappUrl && telegramId ? generateWebToken(telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.video.management,
@@ -1668,6 +1952,29 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
       if (slot.mode === "driving_audio") {
         await userStateService.clearMediaInputSlot(userId, slotModelId, activeSlot.slotKey);
         await userStateService.addMediaInput(userId, slotModelId, activeSlot.slotKey, tgSlotValue);
+        // Замеряем длительность для cost-preview hint (см. probeTelegramAudioDurationSec).
+        // Только для моделей с per-second биллингом по входному аудио (HeyGen).
+        //
+        // ВАЖНО: чистим DB ПЕРЕД probe — иначе если getFile / probe сорвётся
+        // (транзиентный TG fail), старая duration осталась бы в DB и применилась
+        // бы к НОВОМУ файлу на сабмите → exploit vector (можно подменить voice
+        // на длинный, заранее залив короткий с известной duration).
+        if (slotModelId === "heygen") {
+          await userStateService.clearVideoVoiceDurationSec(userId);
+          const tgFile = await ctx.api.getFile(audioMsg.file_id).catch(() => null);
+          if (tgFile?.file_path) {
+            const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${tgFile.file_path}`;
+            const durSec = await probeTelegramAudioDurationSec(
+              tgUrl,
+              !!ctx.message?.voice,
+              audioMsg.duration,
+              audioMsg.file_size,
+            );
+            if (durSec) {
+              await userStateService.setVideoVoiceDurationSec(userId, durSec);
+            }
+          }
+        }
         clearActiveSlot(userId);
         await consumeMediaHint(ctx, "video");
         await sendVideoMediaInputStatus(ctx);
@@ -1724,12 +2031,21 @@ export async function handleVideoVoice(ctx: BotContext): Promise<void> {
   const s3Key = `voice/${userId.toString()}/${file.file_id}.${ext}`;
   const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
 
+  // Достоверная длительность для cost-preview hint (см. probeTelegramAudioDurationSec).
+  const durationSec = await probeTelegramAudioDurationSec(
+    tgUrl,
+    isVoice,
+    audioMsg.duration,
+    audioMsg.file_size,
+  );
+
   // Generate an ID and store voice data for both callback paths
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   storeAvatarVoice(userId, id, {
     uploadedKey,
     tgUrl,
     voiceMessageId: ctx.message?.message_id,
+    ...(durationSec ? { durationSec } : {}),
   });
 
   const kb = new InlineKeyboard()
@@ -1815,6 +2131,8 @@ export async function handleVideoAvatarVoiceCallback(ctx: BotContext): Promise<v
     aspectRatio: modelSettings?.aspectRatio,
     duration: modelSettings?.duration,
     promptMessageId: entry.voiceMessageId,
+    // Достоверная длительность от ffprobe-at-upload (или TG-server для voice'ов).
+    ...(entry.durationSec !== undefined ? { audioDurationSecHint: entry.durationSec } : {}),
   };
 
   if (
@@ -1913,6 +2231,7 @@ export async function handleSoulCreateSubmit(ctx: BotContext): Promise<void> {
   await ctx.answerCallbackQuery();
 
   const userId = ctx.user.id;
+  const telegramId = ctx.user.telegramId;
   try {
     if (!(await acquireLock(`dedup:soul:${userId}`, 120))) return;
   } catch {
@@ -1998,7 +2317,7 @@ export async function handleSoulCreateSubmit(ctx: BotContext): Promise<void> {
         userId: userId.toString(),
         provider: "higgsfield_soul",
         action: "create",
-        telegramChatId: ctx.chat?.id ?? Number(userId),
+        telegramChatId: ctx.chat?.id ?? (telegramId ? Number(telegramId) : 0),
         s3Keys,
         characterName: ctx.t.video.myAvatarDefaultName,
       },

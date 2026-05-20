@@ -2,6 +2,8 @@ export {
   promptExampleSchema,
   promptExamplesPageSchema,
   promptExampleModelSchema,
+  promptModelDtoSchema,
+  adminPromptsModelsResponseSchema,
   listPromptExamplesQuerySchema,
   createPromptExampleBodySchema,
   updatePromptExampleBodySchema,
@@ -12,6 +14,8 @@ export type {
   ListPromptExamplesQuery,
   CreatePromptExampleBody,
   UpdatePromptExampleBody,
+  PromptModelDto,
+  AdminPromptsModelsResponse,
 } from "./prompt-example.js";
 export {
   modelSettingDefSchema,
@@ -19,3 +23,27 @@ export {
   modelSettingTypeSchema,
 } from "./model-setting.js";
 export type { ModelSettingDef, ModelSettingOption, ModelSettingType } from "./model-setting.js";
+export {
+  galleryOutputSchema,
+  galleryJobSchema,
+  galleryListResponseSchema,
+  galleryFolderSchema,
+  galleryModelCountSchema,
+  galleryUrlResponseSchema,
+  galleryFavoritesResponseSchema,
+  listGalleryJobsQuerySchema,
+  createGalleryFolderBodySchema,
+  updateGalleryFolderBodySchema,
+} from "./gallery.js";
+export type {
+  GalleryOutput,
+  GalleryJob,
+  GalleryListResponse,
+  GalleryFolder,
+  GalleryModelCount,
+  GalleryUrlResponse,
+  GalleryFavoritesResponse,
+  ListGalleryJobsQuery,
+  CreateGalleryFolderBody,
+  UpdateGalleryFolderBody,
+} from "./gallery.js";

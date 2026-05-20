@@ -42,8 +42,17 @@ export interface ImageCostPreview {
   effectiveModelSettings: Record<string, unknown>;
 }
 
+export type VideoPricingMode = "total" | "per_second";
+
 export interface VideoCostPreview {
   cost: number;
+  /**
+   * "total" — `cost` это полная предварительная цена ролика.
+   * "per_second" — длительность заранее неизвестна (HeyGen без входного аудио):
+   *   `cost` это цена ОДНОЙ секунды видео, бот должен показать её отдельным
+   *   текстом и не выдавать за итоговую сумму.
+   */
+  pricingMode: VideoPricingMode;
   effectiveDuration: number;
   effectiveAspectRatio: string | undefined;
   effectiveModelSettings: Record<string, unknown>;
@@ -57,12 +66,12 @@ export interface AudioCostPreview {
 
 export const costPreviewService = {
   async previewImage(params: SubmitImageParams): Promise<ImageCostPreview> {
-    const { userId, modelId, aspectRatio } = params;
+    const { userId, modelId, aspectRatio, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    const modelSettings = allModelSettings[modelId] ?? {};
+    const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const effectiveAspectRatio = (modelSettings.aspect_ratio as string | undefined) ?? aspectRatio;
 
     const estimatedMegapixels = model.costUsdPerMPixel ? 1.0 : undefined;
@@ -101,21 +110,36 @@ export const costPreviewService = {
       duration ??
       getModelDefaultDuration(model) ??
       5;
+    let pricingMode: VideoPricingMode = "total";
 
     if (modelId === "heygen") {
-      const audioSec = await probeHeygenAudioDuration(modelSettings, params.mediaInputs);
+      // HeyGen биллится посекундно, длина видео = длине аудио. Если аудио есть —
+      // probe'аем и показываем точную предварительную цену. Если аудио нет
+      // (текстовый TTS-путь) либо probe сорвался — длительность заранее
+      // неизвестна (раньше угадывали по prompt.length/14 и получали ложные
+      // 11.25 ✦ при реальном списании 389.25 ✦). Переключаемся на per-second
+      // режим: показываем юзеру цену 1 секунды, итог считается по факту.
+      //
+      // Если `audioDurationSecHint` уже задан (HeyGen TTS endpoint вернул
+      // точную длительность из ответа) — используем его и пропускаем
+      // повторный fetch+ffprobe того же mp3.
+      const hint = params.audioDurationSecHint;
+      const audioSec =
+        typeof hint === "number" && isFinite(hint) && hint > 0
+          ? hint
+          : await probeHeygenAudioDuration(modelSettings, params.mediaInputs);
       if (audioSec !== null) {
         effectiveDuration = Math.ceil(audioSec);
         logger.info(
           { modelId, audioSec, effectiveDuration },
           "HeyGen pre-flight: using probed audio duration for cost estimate",
         );
-      } else if (prompt) {
-        const TTS_CHARS_PER_SEC = 14;
-        effectiveDuration = Math.max(5, Math.ceil(prompt.length / TTS_CHARS_PER_SEC));
+      } else {
+        pricingMode = "per_second";
+        effectiveDuration = 1;
         logger.info(
-          { modelId, promptChars: prompt.length, effectiveDuration },
-          "HeyGen pre-flight: using TTS-from-prompt duration estimate",
+          { modelId, hasPrompt: !!prompt },
+          "HeyGen pre-flight: per-second pricing (no input audio to probe)",
         );
       }
     }
@@ -133,6 +157,16 @@ export const costPreviewService = {
           Math.abs(d - effectiveDuration) < Math.abs(best - effectiveDuration) ? d : best,
         allowed[0]!,
       );
+    }
+
+    // Wan first_clip mode: формула биллинга — `output + min(input_clip, 5)`
+    // (см. video.processor.ts:683-690). В previewVideo точная длительность
+    // клипа без HTTP-probe'а неизвестна, поэтому добавляем worst-case +5s.
+    // Превью чуть завышает на коротких клипах (<5s), зато никогда не занижает
+    // → юзер не получит surprise списание выше превью. Probe в hot-path
+    // нерентабелен (полная загрузка MP4 на каждый ререндер UI).
+    if (modelId === "wan" && params.mediaInputs?.first_clip?.[0]) {
+      effectiveDuration += 5;
     }
 
     const estimatedVideoTokens = model.costUsdPerMVideoToken
@@ -159,6 +193,7 @@ export const costPreviewService = {
 
     return {
       cost,
+      pricingMode,
       effectiveDuration,
       effectiveAspectRatio,
       effectiveModelSettings: modelSettings,
@@ -167,12 +202,12 @@ export const costPreviewService = {
   },
 
   async previewAudio(params: SubmitAudioParams): Promise<AudioCostPreview> {
-    const { userId, modelId, prompt } = params;
+    const { userId, modelId, prompt, extraModelSettings } = params;
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
     const allModelSettings = await userStateService.getModelSettings(userId);
-    let modelSettings = allModelSettings[modelId] ?? {};
+    let modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
 
     // Посекундный биллинг аудио (sounds-el / music-el): нормализуем
     // duration_seconds перед расчётом стоимости. Без этого:

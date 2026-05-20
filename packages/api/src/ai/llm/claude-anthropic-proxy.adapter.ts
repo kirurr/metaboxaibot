@@ -219,6 +219,30 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       body: JSON.stringify(body),
     });
 
+    // Snapshot response headers сразу после fetch'а — нужны для
+    // диагностических warn'ов ниже. Прокси-поддержка (KIE/Evolink) не находит
+    // запросы по `message.id` из SSE payload (это, видимо, ID их upstream
+    // типа z.ai, не их собственный tracking-key). Их internal lookup-ключ
+    // обычно в HTTP-headers (x-request-id / cf-ray / x-kie-* / anthropic-*) —
+    // снепшот ниже даёт нам этот ID для последующего пробирования в support.
+    // На успешных запросах эти headers нигде не логируются, шума нет.
+    //
+    // Sensitive denylist: пропускаем `set-cookie`/`authorization`/`cookie`/
+    // `proxy-authorization` — теоретически прокси может эхать в response
+    // session-token или другую creds, не хотим тащить такое в ops-логи.
+    const SENSITIVE_HEADERS = new Set([
+      "set-cookie",
+      "cookie",
+      "authorization",
+      "proxy-authorization",
+    ]);
+    const responseHeaders: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      if (!SENSITIVE_HEADERS.has(k.toLowerCase())) {
+        responseHeaders[k] = v;
+      }
+    });
+
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
       // KIE/evolink Claude-гейты иногда транслируют upstream 5xx как 4xx
@@ -287,6 +311,20 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
     //      ни одного → yield буфер `<think>...</think>` ВСЕГДА (даже при
     //      `showReasoning=false`). Юзер увидит, что модель только подумала.
     let thinkingBuffer = "";
+    // KIE injects built-in tool `view` (skill-reader) into /claude/v1/messages
+    // requests without opt-in, and silently strips our `tool_choice: none`
+    // защитное поле — оно не описано в их OpenAPI spec. Observed pattern:
+    //   1. content_block index=0, type=text, delta=" "          ← один пробел
+    //   2. content_block index=1, type=thinking                 ← план чтения skill
+    //   3. content_block index=2, type=tool_use, name=view      ← KIE-инжект
+    //   4. message_delta stop_reason=tool_use
+    // Если yield'нуть пробел сразу — `chunks.length=1` в chat.service блокирует
+    // fallback на evolink-claude через `chunks.length===0` guard. Поэтому
+    // буферизуем первый whitespace-only visible content до момента когда
+    // станет ясно: появилось ли meaningful содержимое (→ flush + streaming-режим)
+    // или это был skill-tool dead-end (→ дропаем буфер + throw 503 для fallback).
+    let pendingVisibleBuffer = "";
+    let visibleStreamingStarted = false;
     // Диагностика пустых стримов (KIE-прокси иногда висит и закрывает
     // соединение без терминального message_delta — юзер видит generic
     // "модель отдыхает", в логах нет ни stop_reason, ни тайминга. Считаем
@@ -358,23 +396,57 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           //   выше). Гейт на showReasoning стоит только на yield'е.
           const visibleText = handleVisibleDelta(evt.data);
           if (visibleText) {
-            if (thinkingBuffer.length > 0) {
-              if (input.showReasoning) {
-                yield "<think>";
-                yield thinkingBuffer;
-                yield "</think>";
+            if (!visibleStreamingStarted) {
+              // Pre-streaming: накапливаем visible content в буфере. Yield'им
+              // только когда появится non-whitespace — иначе chat-сервис посчитает
+              // " " как полноценный chunk и заблокирует fallback на evolink
+              // при KIE-инжекте skill-tool'а (см. комментарий у объявления
+              // pendingVisibleBuffer).
+              pendingVisibleBuffer += visibleText;
+              if (pendingVisibleBuffer.trim().length > 0) {
+                const flushText = pendingVisibleBuffer;
+                pendingVisibleBuffer = "";
+                visibleStreamingStarted = true;
+                if (thinkingBuffer.length > 0) {
+                  if (input.showReasoning) {
+                    yield "<think>";
+                    yield thinkingBuffer;
+                    yield "</think>";
+                  }
+                  thinkingBuffer = "";
+                }
+                visibleChunks++;
+                visibleTextTotalLen += flushText.length;
+                if (visibleTextSample.length < MAX_VISIBLE_SAMPLE) {
+                  visibleTextSample += flushText.slice(
+                    0,
+                    MAX_VISIBLE_SAMPLE - visibleTextSample.length,
+                  );
+                }
+                yield flushText;
               }
-              thinkingBuffer = "";
+              // else: только whitespace в буфере — продолжаем без yield,
+              // но event-processing ниже (eventTypeCounts, message_delta usage)
+              // не пропускаем.
+            } else {
+              if (thinkingBuffer.length > 0) {
+                if (input.showReasoning) {
+                  yield "<think>";
+                  yield thinkingBuffer;
+                  yield "</think>";
+                }
+                thinkingBuffer = "";
+              }
+              visibleChunks++;
+              visibleTextTotalLen += visibleText.length;
+              if (visibleTextSample.length < MAX_VISIBLE_SAMPLE) {
+                visibleTextSample += visibleText.slice(
+                  0,
+                  MAX_VISIBLE_SAMPLE - visibleTextSample.length,
+                );
+              }
+              yield visibleText;
             }
-            visibleChunks++;
-            visibleTextTotalLen += visibleText.length;
-            if (visibleTextSample.length < MAX_VISIBLE_SAMPLE) {
-              visibleTextSample += visibleText.slice(
-                0,
-                MAX_VISIBLE_SAMPLE - visibleTextSample.length,
-              );
-            }
-            yield visibleText;
           } else {
             const reasoningText = handleThinkingDelta(evt.data);
             if (reasoningText) thinkingBuffer += reasoningText;
@@ -412,6 +484,58 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
       reader.releaseLock();
     }
 
+    // KIE инжектит built-in инструмент `view` (skill-reader) в наши запросы
+    // в обход client-side `tool_choice: { type: "none" }`. Stop_reason=tool_use
+    // без meaningful visible content = модель потратила токены на «прочитать
+    // skill» из инжектированного prompt'а и не ответила юзеру. См. описание
+    // паттерна в pendingVisibleBuffer комментарии выше + kie-support-claim.md
+    // в корне репо.
+    //
+    // Условие: stop_reason=tool_use И streaming так и не начался (буфер либо
+    // пустой, либо только whitespace). Если streaming уже шёл — у юзера есть
+    // полезный content, retry/fallback ломал бы continuity, оставляем как есть.
+    //
+    // Throw 503 → isFiveXxError в chat.service → trySwitchToFallbackProvider
+    // → evolink-claude (другой прокси, не инжектит skills).
+    //
+    // Thinking-буфер НЕ флашим: юзеру бесполезен план «сейчас прочитаю
+    // frontend-design skill» (см. лог-сэмплы) — это про KIE-инжект, не про
+    // его запрос. Дропаем тихо.
+    if (
+      lastStopReason === "tool_use" &&
+      !visibleStreamingStarted &&
+      pendingVisibleBuffer.trim().length === 0
+    ) {
+      logger.warn(
+        {
+          modelId: this.modelId,
+          apiModel: this.apiModel,
+          provider: this.proxyConfig.providerLabel,
+          streamDurationMs: Date.now() - streamStartedAt,
+          inputTokens,
+          outputTokens,
+          pendingVisibleBufferLen: pendingVisibleBuffer.length,
+          thinkingBufferLen: thinkingBuffer.length,
+          eventTypeCounts,
+          responseHeaders,
+        },
+        "claude-anthropic-proxy: stop_reason=tool_use with no visible content (KIE injected built-in tool) — escalating as 503 for fallback",
+      );
+      const err = new Error(
+        `${this.proxyConfig.providerLabel} Claude proxy injected built-in tool (stop_reason=tool_use, no visible content)`,
+      ) as Error & { status?: number };
+      err.status = 503;
+      throw err;
+    }
+
+    // Whitespace-only буфер на легитимном stop_reason (end_turn / max_tokens
+    // и т.п.): дропаем чтобы visibleChunks остался 0 и isOnlyThinkingFinal
+    // ниже сработал штатно (юзер увидит «модель только подумала» вместо
+    // generic «временно недоступна» когда thinking есть).
+    if (pendingVisibleBuffer.length > 0) {
+      pendingVisibleBuffer = "";
+    }
+
     // Gateway-пустота KIE/Evolink: HTTP 200 открыл стрим, но прокси закрыл
     // соединение БЕЗ терминального события (нет ни stop_reason, ни usage).
     // Это инфра-сбой прокси, а не легитимный «модель ответила пустотой» —
@@ -440,6 +564,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           inputTokens,
           eventTypeCounts,
           lastStopReason,
+          responseHeaders,
         },
         "claude-anthropic-proxy: gateway empty stream — escalating as 503 for retry",
       );
@@ -512,6 +637,7 @@ export class ClaudeAnthropicProxyAdapter extends BaseLLMAdapter {
           visibleLooksEmpty,
           visibleLooksLikeThinkLiteral,
           rawEventSamples,
+          responseHeaders,
         },
         "claude-anthropic-proxy: stream-state diagnostic (raw events captured)",
       );

@@ -29,7 +29,8 @@ export interface SubmitImageParams {
   sourceImageUrl?: string;
   /** Named media input slots: { [slotKey]: string[] } */
   mediaInputs?: Record<string, string[]>;
-  telegramChatId: number;
+  /** Telegram chat id; `null` для генераций, запущенных с веба. */
+  telegramChatId: number | null;
   /** If set, user/assistant messages are saved to this dialog for img2img context. */
   dialogId?: string;
   /** Pre-translated label for the "Send as file" inline button. */
@@ -40,6 +41,22 @@ export interface SubmitImageParams {
   sourceMessageId?: string;
   /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
   promptMessageId?: number;
+  /**
+   * Per-request override настроек модели (web-flow, где нет userStateService).
+   * Мержится поверх user-state'овых defaults в `previewImage` тем же приёмом,
+   * что и у video (см. `cost-preview.service.ts:previewVideo`).
+   */
+  extraModelSettings?: Record<string, unknown>;
+  /**
+   * Готовые сценарии (Face Swap и пр.) показывают юзеру имя сценария вместо
+   * имени реальной модели под капотом. Если задано — воркер использует это
+   * значение в подписи к результату вместо `model.name`.
+   */
+  displayNameOverride?: string;
+  /** Прячем «цитату промпта» в подписи результата. */
+  hidePromptInCaption?: boolean;
+  /** Скрываем кнопку «Доработать» в результате. */
+  hideRefineButton?: boolean;
 }
 
 export interface SubmitImageResult {
@@ -149,6 +166,15 @@ export const generationService = {
           // Persist `n` для virtual-batch воркера: чтобы после restart'а воркер
           // знал сколько sub-job'ов запускать без перечитывания userState.
           ...(numImages > 1 ? { batch: { n: numImages } } : {}),
+          // Persist scenario-masking overrides (Face Swap и пр.) — без этого
+          // reconcile после Redis-wipe пересоберёт job из БД, а воркер пришлёт
+          // результат с реальным именем модели, оригинальным промптом и кнопкой
+          // «Доработать», которой у сценария быть не должно.
+          ...(params.displayNameOverride
+            ? { displayNameOverride: params.displayNameOverride }
+            : {}),
+          ...(params.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
+          ...(params.hideRefineButton ? { hideRefineButton: true } : {}),
         },
         status: "pending",
         ...(params.sourceMessageId ? { sourceMessageId: params.sourceMessageId } : {}),
@@ -173,6 +199,9 @@ export const generationService = {
         modelSettings,
         ...(numImages > 1 ? { numImages } : {}),
         ...(params.promptMessageId ? { promptMessageId: params.promptMessageId } : {}),
+        ...(params.displayNameOverride ? { displayNameOverride: params.displayNameOverride } : {}),
+        ...(params.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
+        ...(params.hideRefineButton ? { hideRefineButton: true } : {}),
       },
       {
         jobId: job.id,

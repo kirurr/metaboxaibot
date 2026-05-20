@@ -9,12 +9,13 @@ import {
   DocumentExtractFailedError,
   ContextOverflowError,
 } from "@metabox/api/services";
-import type { StoredAttachment } from "@metabox/api/services";
+import type { StoredAttachment, SendMessageResult } from "@metabox/api/services";
 import { logger } from "../logger.js";
 import {
   config,
   AI_MODELS,
   buildDialogHint,
+  formatGenerationCostLine,
   generateWebToken,
   UserFacingError,
   resolveUserFacingErrorVariant,
@@ -431,7 +432,16 @@ async function streamGptResponse(
       ...(documentAttachments?.length ? { documentAttachments } : {}),
     });
 
-    for await (const chunk of stream) {
+    // Захватываем return-value стрима (`SendMessageResult`) через manual
+    // итерацию — for-await его теряет. Нужен для пост-show «списано X / баланс Y».
+    let streamResult: SendMessageResult | undefined;
+    while (true) {
+      const next = await stream.next();
+      if (next.done) {
+        streamResult = next.value;
+        break;
+      }
+      const chunk = next.value;
       accumulated += chunk;
 
       // Split into a new message when approaching Telegram's 4096-char limit.
@@ -501,6 +511,22 @@ async function streamGptResponse(
     // выключил тогл show_reasoning — адаптеры не yield'ят `<think>` маркеров,
     // extractThinkingBlocks вернёт [] и эта функция тихо ничего не пошлёт.
     await sendReasoningMessages(ctx, chatId, accumulated);
+
+    // Cost-line отдельным сообщением, как просили — зеркалит cost-блок в
+    // caption'ах image/video результатов (`generationCostLine`). Шлём только
+    // если реально что-то списано (tokensUsed > 0) — на edge-cases вроде
+    // admin'a/пустого ответа лишнее сообщение про «0 ✦» бесполезно.
+    if (streamResult && streamResult.tokensUsed > 0) {
+      const costLine = formatGenerationCostLine(
+        ctx.t,
+        streamResult.tokensUsed,
+        streamResult.subscriptionTokenBalance,
+        streamResult.tokenBalance,
+      );
+      await ctx.reply(costLine).catch((err) => {
+        logger.warn(err, "GPT stream: failed to send cost-line, ignoring");
+      });
+    }
   } catch (err: unknown) {
     logger.error(err, "GPT message error");
     await ctx.api.deleteMessage(chatId, placeholder.message_id).catch(() => void 0);
@@ -588,11 +614,11 @@ export async function handleNewGptDialog(ctx: BotContext): Promise<void> {
 
 async function replyNoActiveDialog(ctx: BotContext): Promise<void> {
   const webappUrl = config.bot.webappUrl;
-  if (!webappUrl || !ctx.user) {
+  if (!webappUrl || !ctx.user || !ctx.user.telegramId) {
     await ctx.reply(ctx.t.gpt.noActiveDialog);
     return;
   }
-  const token = generateWebToken(ctx.user.id, config.bot.token);
+  const token = generateWebToken(ctx.user.telegramId, config.bot.token);
   const kb = new InlineKeyboard().webApp(
     ctx.t.gpt.createDialog,
     `${webappUrl}?page=management&section=gpt&action=new&wtoken=${token}`,

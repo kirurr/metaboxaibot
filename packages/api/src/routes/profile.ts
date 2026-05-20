@@ -6,14 +6,18 @@ import {
   issueSsoTokenRemote,
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
+import { mergeWebUserIntoBotUser } from "../services/account-sync.service.js";
+import { logger } from "../logger.js";
 import { config } from "@metabox/shared";
 import { validateEmail } from "../utils/email-validation.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
 type AuthRequest = FastifyRequest & {
   userId: bigint;
+  telegramId: bigint;
   user: {
     id: bigint;
+    telegramId: bigint | null;
     username: string | null;
     firstName: string | null;
     lastName: string | null;
@@ -138,6 +142,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
               metaboxReferralCode: { type: "string", nullable: true },
               finishedOnboarding: { type: "boolean" },
               confirmBeforeGenerate: { type: "boolean" },
+              autoActivateModel: { type: "boolean" },
               tokenBalance: { type: "string" },
               purchasedTokenBalance: { type: "string" },
               subscriptionTokenBalance: { type: "string" },
@@ -175,7 +180,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
 
       const [user, transactions] = await Promise.all([
         db.user.findUnique({ where: { id: userId } }),
@@ -186,12 +191,18 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         }),
       ]);
 
-      // Referral count from Metabox (includes site referrals, not just bot)
+      // Referral count from Metabox (includes site referrals, not just bot).
+      // Metabox API ключуется по tgid; для web-only юзеров без tg-привязки
+      // сразу идём в local fallback.
       let referralCount = 0;
       try {
-        const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
-        const partnerData = await getPartnerBalance(userId);
-        referralCount = partnerData?.referralCount ?? 0;
+        if (telegramId) {
+          const { getPartnerBalance } = await import("../services/metabox-bridge.service.js");
+          const partnerData = await getPartnerBalance(telegramId);
+          referralCount = partnerData?.referralCount ?? 0;
+        } else {
+          referralCount = await db.user.count({ where: { referredById: userId } });
+        }
       } catch {
         // Fallback to local count
         referralCount = await db.user.count({ where: { referredById: userId } });
@@ -238,6 +249,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         metaboxReferralCode: user.metaboxReferralCode ?? null,
         finishedOnboarding: user.finishedOnboarding,
         confirmBeforeGenerate: user.confirmBeforeGenerate,
+        autoActivateModel: user.autoActivateModel,
         tokenBalance: (
           Number(user.tokenBalance) + Number(user.subscriptionTokenBalance)
         ).toString(),
@@ -260,17 +272,27 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /** PATCH /profile/preferences — update per-user UX flags (low-iq mode toggle, …) */
-  fastify.patch<{ Body: { confirmBeforeGenerate?: boolean } }>(
+  fastify.patch<{ Body: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean } }>(
     "/profile/preferences",
     {
       schema: {
         description: "Update user preferences",
-        body: { type: "object", properties: { confirmBeforeGenerate: { type: "boolean" } } },
+        body: {
+          type: "object",
+          properties: {
+            confirmBeforeGenerate: { type: "boolean" },
+            autoActivateModel: { type: "boolean" },
+          },
+        },
         response: {
           200: {
             type: "object",
             additionalProperties: true,
-            properties: { ok: { type: "boolean" }, confirmBeforeGenerate: { type: "boolean" } },
+            properties: {
+              ok: { type: "boolean" },
+              confirmBeforeGenerate: { type: "boolean" },
+              autoActivateModel: { type: "boolean" },
+            },
           },
           400: badRequestResponse,
         },
@@ -279,9 +301,12 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { userId } = request as AuthRequest;
       const body = request.body ?? {};
-      const data: { confirmBeforeGenerate?: boolean } = {};
+      const data: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean } = {};
       if (typeof body.confirmBeforeGenerate === "boolean") {
         data.confirmBeforeGenerate = body.confirmBeforeGenerate;
+      }
+      if (typeof body.autoActivateModel === "boolean") {
+        data.autoActivateModel = body.autoActivateModel;
       }
       if (Object.keys(data).length === 0) {
         return reply.code(400).send({ error: "No supported fields in body" });
@@ -289,9 +314,13 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       const user = await db.user.update({
         where: { id: userId },
         data,
-        select: { confirmBeforeGenerate: true },
+        select: { confirmBeforeGenerate: true, autoActivateModel: true },
       });
-      return { ok: true, confirmBeforeGenerate: user.confirmBeforeGenerate };
+      return {
+        ok: true,
+        confirmBeforeGenerate: user.confirmBeforeGenerate,
+        autoActivateModel: user.autoActivateModel,
+      };
     },
   );
 
@@ -674,7 +703,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const { email, password, firstName, lastName, username } = request.body as {
         email: string;
         password: string;
@@ -695,7 +724,11 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       }
       const user = await db.user.findUnique({
         where: { id: userId },
-        select: { metaboxUserId: true, referredById: true },
+        select: {
+          metaboxUserId: true,
+          referredById: true,
+          referredBy: { select: { telegramId: true } },
+        },
       });
       if (user?.metaboxUserId) {
         // @ts-expect-error status number
@@ -706,11 +739,11 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
         const result = await registerFromBot({
           email,
           password,
-          telegramId: userId,
+          telegramId,
           firstName,
           lastName,
           username,
-          referrerTelegramId: user?.referredById ?? undefined,
+          referrerTelegramId: user?.referredBy?.telegramId ?? undefined,
         });
         await db.user.update({
           where: { id: userId },
@@ -771,7 +804,7 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId, user } = request as AuthRequest;
+      const { userId, telegramId, user } = request as AuthRequest;
       const { email, password } = request.body as { email: string; password: string };
       if (!email || !password) {
         return reply.code(400).send({ error: "email and password are required" });
@@ -782,17 +815,56 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
           where: { userId, type: "credit", reason: "purchase" },
           select: { id: true },
         });
+        // referredById — внутренний FK; для Metabox API нужен tgid реферрера.
+        let referrerTelegramId: bigint | null = null;
+        if (user.referredById) {
+          const referrer = await db.user.findUnique({
+            where: { id: user.referredById },
+            select: { telegramId: true },
+          });
+          referrerTelegramId = referrer?.telegramId ?? null;
+        }
         const result = await loginAndLink({
           email,
           password,
-          telegramId: userId,
+          telegramId,
           telegramUsername: user.username,
           firstName: user.firstName ?? undefined,
           lastName: user.lastName ?? undefined,
-          referrerTelegramId: user.referredById,
+          referrerTelegramId,
           botHasPurchase: !!botPurchase,
           botCreatedAt: user.createdAt,
         });
+
+        // Merge: если юзер ранее регистрировался на ai.metabox.global, у
+        // него уже есть web-only AI Box User с metaboxUserId=result.metaboxUserId
+        // (создан через ensureAibUserForMetabox на web-login). Без merge
+        // db.user.update упадёт с P2002 на @unique metaboxUserId.
+        // Сливаем web-only User → текущий bot User (ctx.user/userId).
+        const existingWebUser = await db.user.findFirst({
+          where: { metaboxUserId: result.metaboxUserId, id: { not: userId } },
+          select: { id: true },
+        });
+        if (existingWebUser) {
+          try {
+            await mergeWebUserIntoBotUser(existingWebUser.id, userId);
+          } catch (mergeErr) {
+            logger.error(
+              {
+                err: mergeErr,
+                userId: userId.toString(),
+                sourceId: existingWebUser.id.toString(),
+                metaboxUserId: result.metaboxUserId,
+              },
+              "[profile/metabox-login] merge with web-only user failed",
+            );
+            // @ts-expect-error status number — schema declares 200/400 only
+            return reply.code(500).send({
+              error: "Не удалось объединить аккаунты. Напишите в поддержку.",
+            });
+          }
+        }
+
         await db.user.update({
           where: { id: userId },
           data: { metaboxUserId: result.metaboxUserId, metaboxReferralCode: result.referralCode },

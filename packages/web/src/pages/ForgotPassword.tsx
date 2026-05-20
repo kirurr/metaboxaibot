@@ -1,21 +1,31 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useTranslation, Trans } from "react-i18next";
 import { Input } from "@/components/common/Input";
 import { Button } from "@/components/common/Button";
 import { forgotPassword } from "@/api/auth";
 import { ApiError } from "@/api/client";
 
-const schema = z.object({
-  email: z.string().min(1, "Укажите email").email("Некорректный email"),
-});
-type FormValues = z.infer<typeof schema>;
-
 export default function ForgotPassword() {
+  const { t } = useTranslation();
   const [sent, setSent] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  // Schema создаём через useMemo чтобы сообщения брались актуальной локалью.
+  const schema = useMemo(
+    () =>
+      z.object({
+        email: z
+          .string()
+          .min(1, t("forgotPassword.errorEmailRequired"))
+          .email(t("forgotPassword.errorEmailInvalid")),
+      }),
+    [t],
+  );
+  type FormValues = z.infer<typeof schema>;
 
   const {
     register,
@@ -31,7 +41,7 @@ export default function ForgotPassword() {
       setSent(true);
     } catch (err) {
       if (err instanceof ApiError) setServerError(err.message);
-      else setServerError("Не удалось отправить письмо. Проверьте введенную почту.");
+      else setServerError(t("forgotPassword.errorSendFailed"));
     }
   };
 
@@ -40,14 +50,16 @@ export default function ForgotPassword() {
       <div className="min-h-screen flex items-center justify-center p-4 bg-bg">
         <div className="card w-full max-w-[400px] p-8 text-center anim-page-in">
           <div className="brand-text text-3xl mb-2">AI Box</div>
-          <h1 className="text-xl font-bold mt-4 mb-2">Проверьте почту</h1>
+          <h1 className="text-xl font-bold mt-4 mb-2">{t("forgotPassword.checkInbox")}</h1>
           <p className="text-text-secondary text-sm mb-6">
-            Если аккаунт с адресом{" "}
-            <span className="text-text font-semibold">{getValues("email")}</span> существует, мы
-            отправили ссылку для сброса пароля. Ссылка действительна 1 час.
+            <Trans
+              i18nKey="forgotPassword.ifAccountExists"
+              values={{ email: getValues("email") }}
+              components={{ bold: <span className="text-text font-semibold" /> }}
+            />
           </p>
           <Link to="/login" className="text-accent hover:underline text-sm">
-            ← Вернуться ко входу
+            {t("forgotPassword.backToLogin")}
           </Link>
         </div>
       </div>
@@ -58,17 +70,17 @@ export default function ForgotPassword() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-bg">
       <div className="card w-full max-w-[400px] p-8 anim-page-in">
         <div className="brand-text text-3xl mb-2">AI Box</div>
-        <p className="text-text-secondary text-sm mb-7">Восстановление пароля</p>
+        <p className="text-text-secondary text-sm mb-7">{t("forgotPassword.title")}</p>
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
           <Input
             id="email"
-            label="Email"
+            label={t("auth.email")}
             type="email"
             autoComplete="email"
             autoFocus
-            placeholder="you@example.com"
-            hint="Мы отправим ссылку для сброса пароля на этот адрес."
+            placeholder={t("auth.emailPlaceholder")}
+            hint={t("forgotPassword.emailHint")}
             error={errors.email?.message}
             {...register("email")}
           />
@@ -87,13 +99,13 @@ export default function ForgotPassword() {
           )}
 
           <Button type="submit" loading={isSubmitting} fullWidth>
-            Отправить ссылку
+            {t("forgotPassword.submit")}
           </Button>
         </form>
 
         <div className="mt-6 pt-6 border-t border-border text-center text-sm text-text-secondary">
           <Link to="/login" className="text-accent hover:underline">
-            ← Вернуться ко входу
+            {t("forgotPassword.backToLogin")}
           </Link>
         </div>
       </div>

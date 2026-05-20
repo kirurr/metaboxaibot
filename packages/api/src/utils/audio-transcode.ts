@@ -10,6 +10,11 @@ import { logger } from "../logger.js";
 const _require = createRequire(import.meta.url);
 const ffmpegPath: string | null = _require("ffmpeg-static") as string | null;
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+// `ffprobe-static` экспортит `{ path }`, а не строку как `ffmpeg-static`.
+// Без явной регистрации `fluent-ffmpeg.ffprobe()` искал бы бинарник в PATH —
+// в alpine-контейнере его там нет, отсюда "Cannot find ffprobe" в проде.
+const ffprobeStatic = _require("ffprobe-static") as { path?: string } | null;
+if (ffprobeStatic?.path) ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 /**
  * Transcodes an arbitrary audio buffer to MP3.

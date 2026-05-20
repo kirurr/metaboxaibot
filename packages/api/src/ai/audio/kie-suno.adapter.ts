@@ -1,6 +1,7 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -168,7 +169,7 @@ export class KieSunoAdapter implements AudioAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`Kie Suno API error ${resp.status}: ${txt}`);
+      throw providerHttpError(`Kie Suno API error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as SunoGenerateResponse;
@@ -193,7 +194,10 @@ export class KieSunoAdapter implements AudioAdapter {
       });
     }
 
-    throw new Error(`Kie Suno API: ${msg}`);
+    // `code` (напр. 500) включаем в текст и проставляем `status` для 5xx —
+    // иначе submitWithFallback не распознаёт серверный сбой kie и не уходит
+    // на apipass-fallback.
+    throw providerHttpError(`Kie Suno API error ${data.code}: ${msg}`, data.code);
   }
 
   async poll(taskId: string): Promise<AudioResult | null> {
@@ -205,7 +209,7 @@ export class KieSunoAdapter implements AudioAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`Kie Suno API poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`Kie Suno API poll error ${resp.status}`, resp.status);
 
     const body = (await resp.json()) as SunoPollResponse;
     const taskData = body.data;
@@ -217,7 +221,15 @@ export class KieSunoAdapter implements AudioAdapter {
       status === "CREATE_TASK_FAILED" ||
       status === "SENSITIVE_WORD_ERROR"
     ) {
-      throw new Error(`Kie Suno generation failed: ${status} ${taskData?.errorMessage ?? ""}`);
+      // errorCode kie несёт серверные сбои таски (напр. 500 "Internal Error,
+      // Please try again later."). Кладём его и в текст, и в `status` через
+      // providerHttpError — без 5xx-классификации poll-стадия не уходит на
+      // apipass-fallback, а ошибка маппится как вина юзера ("измените запрос").
+      const failCode = taskData?.errorCode;
+      const detail = [status, failCode, taskData?.errorMessage]
+        .filter((p) => p !== null && p !== undefined && p !== "")
+        .join(" ");
+      throw providerHttpError(`Kie Suno generation failed: ${detail}`, failCode);
     }
 
     // Все прочие статусы (PENDING, TEXT_SUCCESS, CALLBACK_EXCEPTION и т.п.) —
@@ -227,9 +239,7 @@ export class KieSunoAdapter implements AudioAdapter {
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
     // Берём только финальные audioUrl'ы — streamAudioUrl это HLS/chunked
-    // endpoint, его нельзя отдавать как mp3 в Telegram sendAudio. На
-    // FIRST_SUCCESS audioUrl первого трека уже готов; если ещё нет —
-    // продолжаем поллить до SUCCESS.
+    // endpoint, его нельзя отдавать как mp3 в Telegram sendAudio.
     //
     // Suno возвращает 2 трека за запрос. Все валидные кладём: первый в
     // основной result, остальные в `extras` (worker сохранит каждый как
@@ -238,6 +248,12 @@ export class KieSunoAdapter implements AudioAdapter {
       .map((tr) => tr.audioUrl)
       .filter((u): u is string => !!u);
     if (audioUrls.length === 0) return null;
+
+    // На FIRST_SUCCESS обычно готов только первый трек (audioUrl второго ещё
+    // null). Не отдаём результат, пока готовы не оба, — иначе юзер получает
+    // 1 трек за полную (2-трековую) цену запроса. На SUCCESS отдаём что есть:
+    // изредка Suno реально возвращает 1 трек, ждать второй бессмысленно.
+    if (status === "FIRST_SUCCESS" && audioUrls.length < 2) return null;
 
     const [primaryUrl, ...restUrls] = audioUrls;
     return {

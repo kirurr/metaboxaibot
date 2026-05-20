@@ -4,7 +4,9 @@ import { delayJob } from "../utils/delay-job.js";
 import {
   resolveUserFacingMessage,
   shouldNotifyOps,
+  getOpsAlertDedupKey,
   resolveSubJobError,
+  getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { Api } from "grammy";
@@ -47,7 +49,12 @@ import {
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
-import { notifyTechError, notifyRateLimit, notifyFallback } from "../utils/notify-error.js";
+import {
+  notifyTechError,
+  notifyTechErrorThrottled,
+  notifyRateLimit,
+  notifyFallback,
+} from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -58,6 +65,7 @@ import {
   pickBatchErrorCode,
 } from "../utils/fallback-state.js";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { acquireForPoll } from "../utils/acquire-for-processor.js";
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { deferIfTransientNetworkError } from "../utils/defer-transient.js";
@@ -183,6 +191,25 @@ function formatSubJobErrorReport(
     lines.push(`[${i}] provider=${provider}${fbMark}:\n${indented}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Роутинг batch-алерта: если хотя бы один sub-job упал на balance/credits-
+ * exhausted паттерн (KIE 402 «Credits insufficient», EL `quota_exceeded`) —
+ * алерт идёт в тему BALANCE. Иначе — общий ALERTS поток.
+ *
+ * В batch-пути мы не имеем доступа к оригинальному `UserFacingError` каждого
+ * sub-job'а (`notifyTechError` получает synthetic `new Error(report)`),
+ * поэтому детектим по подстроке в `errorRaw` — единый источник правды для
+ * batch-алерта.
+ */
+function detectBatchAlertChannel(techRawErrors: string[]): "alerts" | "balance" {
+  const hit = techRawErrors.some((e) =>
+    /credits? insufficient|quota_exceeded|out of credits|insufficient credits|balance.*enough/i.test(
+      e,
+    ),
+  );
+  return hit ? "balance" : "alerts";
 }
 
 /**
@@ -418,6 +445,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
   const t = getT(userLang);
   const modelMeta = AI_MODELS[modelId];
   const modelName = modelMeta?.name ?? modelId;
+  // displayName — то, что юзер ДОЛЖЕН видеть в любом user-facing сообщении
+  // (caption успеха, «модель отдыхает», batch-failure footer и пр.). Готовые
+  // сценарии (Face Swap и пр.) маскируют реальную модель через
+  // `displayNameOverride`. `modelName` остаётся для логов/ops, чтобы там было
+  // видно реальную модель, на которой произошла ошибка.
+  const displayName = job.data.displayNameOverride ?? modelName;
 
   // Fallback-кандидаты: уже отфильтрованные по media-режиму задачи (если у
   // задачи есть, например, edit slots — fallback должен их поддерживать).
@@ -808,11 +841,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
           if (subCandidates.length === 0) {
             const synth = new Error(`Locked provider ${lockedProvider} not found`);
-            const resolved = resolveSubJobError(synth, t, modelName);
+            const resolved = resolveSubJobError(synth, t, displayName);
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
-              errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorRaw:
+                resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
               errorCode: resolved.errorCode,
             };
             await writeBatchState(state);
@@ -960,11 +994,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             // long cooldown) — synthetic Error → generic шаблон.
             const errToResolve =
               lastSubErr ?? new Error(lastSubError || "Pool exhausted: no provider keys available");
-            const resolved = resolveSubJobError(errToResolve, t, modelName);
+            const resolved = resolveSubJobError(errToResolve, t, displayName);
             state.subJobs[i] = {
               status: "failed",
               error: resolved.userText,
-              errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+              errorRaw:
+                resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
               errorCode: resolved.errorCode,
             };
           }
@@ -995,14 +1030,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               "submit",
               modelMeta?.provider ?? "unknown",
             );
-            await notifyTechError(new Error(report), {
-              jobId: dbJobId,
-              modelId,
-              section: "image",
-              userId: userIdStr,
-              attempt: job.attemptsMade,
-              partialSuccess: successResults.length > 0,
-            });
+            await notifyTechError(
+              new Error(report),
+              {
+                jobId: dbJobId,
+                modelId,
+                section: "image",
+                userId: userIdStr,
+                attempt: job.attemptsMade,
+                partialSuccess: successResults.length > 0,
+              },
+              detectBatchAlertChannel(techRawErrors),
+            );
           }
           if (successResults.length === 0) {
             // K=0 — все провалились. Перед mark-failed пробуем fallback re-submit:
@@ -1231,7 +1270,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 const resolved = resolveSubJobError(
                   new Error(`Adapter ${modelId} has no poll()`),
                   t,
-                  modelName,
+                  displayName,
                 );
                 state.subJobs[i] = {
                   ...sub,
@@ -1250,12 +1289,13 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
               if (sub.providerKeyId) void recordError(sub.providerKeyId, message.slice(0, 500));
-              const resolved = resolveSubJobError(err, t, modelName);
+              const resolved = resolveSubJobError(err, t, displayName);
               state.subJobs[i] = {
                 ...sub,
                 status: "failed",
                 error: resolved.userText,
-                errorRaw: resolved.isUserFacing ? undefined : resolved.rawText,
+                errorRaw:
+                  resolved.isUserFacing && !resolved.shouldNotifyOps ? undefined : resolved.rawText,
                 errorCode: resolved.errorCode,
               };
             }
@@ -1274,12 +1314,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", displayName);
+            if (telegramChatId !== null) {
+              await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+            } else {
+              await apiNotifyError({
+                section: "image",
+                userId: userIdStr,
+                dbJobId,
+                userMessage: timeoutMsg,
+                errorCode: POLL_TIMEOUT_CODE,
+              }).catch(() => void 0);
+            }
             throw new UnrecoverableError("poll timeout 24h");
           }
           await delayJob(
@@ -1308,14 +1354,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             "poll",
             modelMeta?.provider ?? "unknown",
           );
-          await notifyTechError(new Error(report), {
-            jobId: dbJobId,
-            modelId,
-            section: "image",
-            userId: userIdStr,
-            attempt: job.attemptsMade,
-            partialSuccess: successResults.length > 0,
-          });
+          await notifyTechError(
+            new Error(report),
+            {
+              jobId: dbJobId,
+              modelId,
+              section: "image",
+              userId: userIdStr,
+              attempt: job.attemptsMade,
+              partialSuccess: successResults.length > 0,
+            },
+            detectBatchAlertChannel(techRawErrors),
+          );
         }
         if (successResults.length === 0) {
           // K=0 — все провалились. См. tryVirtualBatchFallbackResubmit:
@@ -1375,22 +1425,31 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               where: { id: dbJobId },
               data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
             });
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", displayName);
+            if (telegramChatId !== null) {
+              await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+            } else {
+              await apiNotifyError({
+                section: "image",
+                userId: userIdStr,
+                dbJobId,
+                userMessage: timeoutMsg,
+                errorCode: POLL_TIMEOUT_CODE,
+              }).catch(() => void 0);
+            }
             throw new UnrecoverableError("poll timeout 24h");
           }
 
           if (job.data.lastIntervalMs !== undefined && interval !== job.data.lastIntervalMs) {
-            await telegram
-              .sendMessage(
-                telegramChatId,
-                t.errors.generationStillRunning.replace("{modelName}", modelName),
-              )
-              .catch(() => void 0);
+            // "still running" hint имеет смысл только в TG-чате; web-клиент видит статус processing напрямую.
+            if (telegramChatId !== null) {
+              await telegram
+                .sendMessage(
+                  telegramChatId,
+                  t.errors.generationStillRunning.replace("{modelName}", displayName),
+                )
+                .catch(() => void 0);
+            }
           }
 
           await delayJob(
@@ -1418,10 +1477,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     }
 
     // ── Stage 3: send to user ────────────────────────────────────────────
-    const modelForCaption = AI_MODELS[modelId];
-    const displayName = modelForCaption?.name ?? modelId;
+    // `displayName` уже посчитан в начале функции с учётом overrides — здесь
+    // не пересчитываем. Прячем «цитату промпта» если сценарий замаскирован.
+    const captionPrompt = job.data.hidePromptInCaption ? "" : prompt;
     const buildCaption = (): string =>
-      buildResultCaption(t, displayName, prompt, {
+      buildResultCaption(t, displayName, captionPrompt, {
         cost: deductResult?.deducted,
         subscriptionBalance: deductResult?.subscriptionTokenBalance,
         tokenBalance: deductResult?.tokenBalance,
@@ -1441,8 +1501,17 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const text =
         userFacingBatchErrors.length > 0
           ? userFacingBatchErrors[0]!
-          : pickGenerationFailedMessage(t, modelName, "design");
-      await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
+          : pickGenerationFailedMessage(t, displayName, "design");
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, text).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: text,
+        }).catch(() => void 0);
+      }
       logger.info(
         {
           dbJobId,
@@ -1456,82 +1525,105 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
     // Batch: multiple outputs → send as media group
     if (outputRecords.length > 1) {
-      const mediaGroup: Array<{
-        type: "photo";
-        media: string | InstanceType<typeof InputFile>;
-        caption?: string;
-        parse_mode?: "HTML";
-      }> = [];
+      if (telegramChatId !== null) {
+        const mediaGroup: Array<{
+          type: "photo";
+          media: string | InstanceType<typeof InputFile>;
+          caption?: string;
+          parse_mode?: "HTML";
+        }> = [];
 
-      const batchCaption = buildCaption();
-      const byteSizes: number[] = [];
-      for (let i = 0; i < outputRecords.length; i++) {
-        const rec = outputRecords[i];
-        const filename = `image-${i + 1}.png`;
-        const info = await resolveTelegramSource(rec.s3Key, rec.outputUrl ?? "");
-        byteSizes.push(info.byteSize);
-        const { source } = await prepareTelegramPhoto(info, rec.outputUrl ?? "", filename);
-        mediaGroup.push({
-          type: "photo",
-          media: source,
-          ...(i === 0 ? { caption: batchCaption, parse_mode: "HTML" as const } : {}),
-        });
-      }
-
-      // 2 попытки — multipart upload в Telegram изредка падает на network
-      // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
-      await withRetry("image.sendMediaGroup", 2, () =>
-        telegram.sendMediaGroup(telegramChatId, mediaGroup, replyToPrompt),
-      );
-
-      // Send a single message with refine + (orig|download) buttons for all outputs.
-      // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
-      {
-        const buttons: InlineKeyboardButton[] = [];
+        const batchCaption = buildCaption();
+        const byteSizes: number[] = [];
         for (let i = 0; i < outputRecords.length; i++) {
           const rec = outputRecords[i];
-          const n = i + 1;
-          buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
-          if (byteSizes[i] <= TELEGRAM_DOC_MAX_BYTES) {
-            buttons.push({ text: `${n}. 📎`, callback_data: `orig_${rec.id}` });
-          } else if (rec.s3Key) {
-            buttons.push(buildDownloadButton(`${n}. ⬇️`, rec.s3Key, userIdStr));
-          }
+          const filename = `image-${i + 1}.png`;
+          const info = await resolveTelegramSource(rec.s3Key, rec.outputUrl ?? "");
+          byteSizes.push(info.byteSize);
+          const { source } = await prepareTelegramPhoto(info, rec.outputUrl ?? "", filename);
+          mediaGroup.push({
+            type: "photo",
+            media: source,
+            ...(i === 0 ? { caption: batchCaption, parse_mode: "HTML" as const } : {}),
+          });
         }
-        // Layout: <3 pairs → 1 per row, even → 2 per row, odd → 3 per row
-        const rows: InlineKeyboardButton[][] = [];
-        const totalPairs = outputRecords.length;
-        const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
-        const chunkSize = 2 * pairsPerRow;
-        for (let i = 0; i < buttons.length; i += chunkSize) {
-          rows.push(buttons.slice(i, i + chunkSize));
-        }
-        // Drop the "⬇️ Скачать" line from the legend when no output produced
-        // a download button — happens whenever every photo fits under 50 MB
-        // (the common case), so we don't tease a button the user can't see.
-        const hasDownloadButton = buttons.some(
-          (b) => "url" in b || ("web_app" in b && b.web_app !== undefined),
-        );
-        const hintText = hasDownloadButton
-          ? t.design.batchActions
-          : t.design.batchActionsNoDownload;
-        await telegram.sendMessage(telegramChatId, hintText, {
-          reply_markup: { inline_keyboard: rows },
-        });
-      }
 
-      // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
-      // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
-      // равно один root-cause в 99% случаев — детали есть в ops alert).
-      if (batchErrors.length > 0) {
-        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
-        const text = t.design.batchPartialFooter
-          .replace("{success}", String(outputRecords.length))
-          .replace("{total}", String(requestedN))
-          .replace("{errors}", errorMessage);
-        await telegram
-          .sendMessage(telegramChatId, text)
-          .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+        // 2 попытки — multipart upload в Telegram изредка падает на network
+        // blip'ах. Single retry даёт безопасный второй шанс без double-send'а.
+        await withRetry("image.sendMediaGroup", 2, () =>
+          telegram.sendMediaGroup(telegramChatId, mediaGroup, replyToPrompt),
+        );
+
+        // Send a single message with refine + (orig|download) buttons for all outputs.
+        // Per output: "{N}. 🔄" paired with "{N}. 📎" (≤50 MB) or "{N}. ⬇️" (>50 MB).
+        // Refine is skipped when the job opts out (готовые сценарии без выбора модели).
+        {
+          const hideRefine = job.data.hideRefineButton === true;
+          const buttons: InlineKeyboardButton[] = [];
+          for (let i = 0; i < outputRecords.length; i++) {
+            const rec = outputRecords[i];
+            const n = i + 1;
+            if (!hideRefine) {
+              buttons.push({ text: `${n}. 🔄`, callback_data: `design_ref_${rec.id}` });
+            }
+            if (byteSizes[i] <= TELEGRAM_DOC_MAX_BYTES) {
+              buttons.push({ text: `${n}. 📎`, callback_data: `orig_${rec.id}` });
+            } else if (rec.s3Key) {
+              buttons.push(buildDownloadButton(`${n}. ⬇️`, rec.s3Key, userIdStr));
+            }
+          }
+          // Layout: <3 pairs → 1 per row, even → 2 per row, odd → 3 per row
+          const rows: InlineKeyboardButton[][] = [];
+          const totalPairs = outputRecords.length;
+          const pairsPerRow = totalPairs <= 3 ? 1 : totalPairs % 2 === 0 ? 2 : 3;
+          const chunkSize = 2 * pairsPerRow;
+          for (let i = 0; i < buttons.length; i += chunkSize) {
+            rows.push(buttons.slice(i, i + chunkSize));
+          }
+          // Drop the "⬇️ Скачать" line from the legend when no output produced
+          // a download button — happens whenever every photo fits under 50 MB
+          // (the common case), so we don't tease a button the user can't see.
+          const hasDownloadButton = buttons.some(
+            (b) => "url" in b || ("web_app" in b && b.web_app !== undefined),
+          );
+          const hintText = hasDownloadButton
+            ? t.design.batchActions
+            : t.design.batchActionsNoDownload;
+          await telegram.sendMessage(telegramChatId, hintText, {
+            reply_markup: { inline_keyboard: rows },
+          });
+        }
+
+        // Virtual-batch partial-success footer: K из N сгенерировано. Юзеру шлём
+        // одно общее сообщение про неудавшиеся, не перечисляя per-sub-job (всё
+        // равно один root-cause в 99% случаев — детали есть в ops alert).
+        if (batchErrors.length > 0) {
+          const errorMessage = t.design.batchSubJobFailedMessage.replace(
+            "{modelName}",
+            displayName,
+          );
+          const text = t.design.batchPartialFooter
+            .replace("{success}", String(outputRecords.length))
+            .replace("{total}", String(requestedN))
+            .replace("{errors}", errorMessage);
+          await telegram
+            .sendMessage(telegramChatId, text)
+            .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+        }
+      } else {
+        await apiNotifySuccess({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          outputs: outputRecords.map((r) => ({
+            id: r.id,
+            outputUrl: r.outputUrl ?? null,
+            s3Key: r.s3Key ?? null,
+          })),
+          ...(batchErrors.length > 0
+            ? { partial: { success: outputRecords.length, total: requestedN } }
+            : {}),
+        }).catch(() => void 0);
       }
 
       if (dialogId) {
@@ -1590,73 +1682,144 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       }
     }
 
-    const filename = finalImageResult.filename ?? "image.png";
-    const info = await resolveTelegramSource(s3Key, finalImageResult.url);
-    const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
-      info,
-      finalImageResult.url,
-      filename,
-    );
+    if (telegramChatId !== null) {
+      const filename = finalImageResult.filename ?? "image.png";
+      const info = await resolveTelegramSource(s3Key, finalImageResult.url);
+      const singleCaption = buildCaption();
+      const refineRow: InlineKeyboardButton[] | null = job.data.hideRefineButton
+        ? null
+        : [{ text: t.design.refine, callback_data: `design_ref_${outputId}` }];
 
-    const refineRow: InlineKeyboardButton[] = [
-      { text: t.design.refine, callback_data: `design_ref_${outputId}` },
-    ];
-    const actionRow: InlineKeyboardButton[] | null =
-      info.byteSize <= TELEGRAM_DOC_MAX_BYTES
-        ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
-        : s3Key
-          ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
-          : null;
-    const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
-    const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
+      if (modelMeta?.deliverAsDocument === true) {
+        // Апскейл и т.п.: результат отдаём ФАЙЛОМ. Размеры увеличенного фото
+        // превышают лимиты Telegram sendPhoto (PHOTO_INVALID_DIMENSIONS); документ
+        // сохраняет полное разрешение — это и нужно от апскейлера.
+        if (info.byteSize > TELEGRAM_DOC_MAX_BYTES) {
+          // Не влезает даже в sendDocument — отдаём только ссылку на скачивание.
+          const dlRow = s3Key
+            ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
+            : null;
+          await withRetry("image.sendMessage", 2, () =>
+            telegram.sendMessage(telegramChatId, singleCaption, {
+              parse_mode: "HTML",
+              reply_markup: dlRow ? { inline_keyboard: [dlRow] } : undefined,
+              ...replyToPrompt,
+            }),
+          );
+        } else {
+          // Грузим буфером (multipart): у sendDocument по URL лимит 20 МБ,
+          // апскейл-результат легко его превышает.
+          const docBuffer =
+            info.kind === "buffer"
+              ? info.buffer
+              : await withRetry("image.fetchDoc", 3, async () => {
+                  const r = await fetch(info.url);
+                  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                  return Buffer.from(await r.arrayBuffer());
+                });
+          await withRetry("image.sendDocument", 2, () =>
+            telegram.sendDocument(telegramChatId, new InputFile(docBuffer, filename), {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: refineRow ? { inline_keyboard: [refineRow] } : undefined,
+              ...replyToPrompt,
+            }),
+          );
+        }
+      } else {
+        const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
+          info,
+          finalImageResult.url,
+          filename,
+        );
+        const actionRow: InlineKeyboardButton[] | null =
+          info.byteSize <= TELEGRAM_DOC_MAX_BYTES
+            ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
+            : s3Key
+              ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
+              : null;
+        const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
+        const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
 
-    const singleCaption = buildCaption();
-    if (isSvg) {
-      // 2 попытки — multipart upload в Telegram'е иногда падает на network
-      // blip'ах. Single retry — безопасный второй шанс.
-      await withRetry("image.sendDocument", 2, () =>
-        telegram.sendDocument(telegramChatId, tgImageSource, {
-          caption: singleCaption,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          ...replyToPrompt,
-        }),
-      );
+        if (isSvg) {
+          // 2 попытки — multipart upload в Telegram'е иногда падает на network
+          // blip'ах. Single retry — безопасный второй шанс.
+          await withRetry("image.sendDocument", 2, () =>
+            telegram.sendDocument(telegramChatId, tgImageSource, {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+              ...replyToPrompt,
+            }),
+          );
+        } else {
+          await withRetry("image.sendPhoto", 2, () =>
+            telegram.sendPhoto(telegramChatId, tgImageSource, {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+              ...replyToPrompt,
+            }),
+          );
+        }
+      }
+
+      // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
+      // К одиночному фото добавляем footer-сообщение с одним общим текстом
+      // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
+      if (batchErrors.length > 0) {
+        const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", displayName);
+        const text = t.design.batchPartialFooter
+          .replace("{success}", String(outputRecords.length))
+          .replace("{total}", String(requestedN))
+          .replace("{errors}", errorMessage);
+        await telegram
+          .sendMessage(telegramChatId, text)
+          .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+      }
     } else {
-      await withRetry("image.sendPhoto", 2, () =>
-        telegram.sendPhoto(telegramChatId, tgImageSource, {
-          caption: singleCaption,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          ...replyToPrompt,
-        }),
-      );
-    }
-
-    // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
-    // К одиночному фото добавляем footer-сообщение с одним общим текстом
-    // про неудавшиеся (mirror'ит mediaGroup-ветку выше, см. там комментарий).
-    if (batchErrors.length > 0) {
-      const errorMessage = t.design.batchSubJobFailedMessage.replace("{modelName}", modelName);
-      const text = t.design.batchPartialFooter
-        .replace("{success}", String(outputRecords.length))
-        .replace("{total}", String(requestedN))
-        .replace("{errors}", errorMessage);
-      await telegram
-        .sendMessage(telegramChatId, text)
-        .catch((reason) => logger.warn(reason, "Could not send batch partial footer"));
+      await apiNotifySuccess({
+        section: "image",
+        userId: userIdStr,
+        dbJobId,
+        outputs: [
+          {
+            id: outputId,
+            outputUrl: outputUrl || null,
+            s3Key: s3Key,
+          },
+        ],
+        ...(batchErrors.length > 0
+          ? { partial: { success: outputRecords.length, total: requestedN } }
+          : {}),
+      }).catch(() => void 0);
     }
 
     logger.info({ dbJobId }, "Image job completed");
   } catch (err) {
     if (err instanceof DelayedError) throw err;
     if (isRateLimitLongWindowError(err)) {
-      const msg = pickGenerationFailedMessage(t, modelName, "design");
+      const msg = pickGenerationFailedMessage(t, displayName, "design");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        },
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     // Provider-side rate-limit/overload (например KIE 422 "high demand") —
@@ -1812,18 +1975,42 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       logger.warn({ dbJobId, err }, "Image job rejected: user-facing error");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: userMsg, errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: userMsg,
+          errorCode: classifyError(err),
+        },
       });
       if (shouldNotifyOps(err)) {
-        await notifyTechError(err, {
+        const opsCtx = {
           jobId: dbJobId,
           modelId,
           section: "image",
           userId: userIdStr,
           attempt: job.attemptsMade,
-        });
+        };
+        // opsAlertDedupKey ("kie-credits-exhausted" и пр.) — burst-throttle,
+        // иначе при пустом KIE-аккаунте каждый job шлёт отдельный алёрт.
+        const dedupKey = getOpsAlertDedupKey(err);
+        const channel = getOpsAlertChannel(err);
+        if (dedupKey) {
+          await notifyTechErrorThrottled(err, opsCtx, dedupKey, { channel });
+        } else {
+          await notifyTechError(err, opsCtx, channel);
+        }
       }
-      await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: userMsg,
+          errorCode: classifyError(err),
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(userMsg);
     }
 
@@ -1968,10 +2155,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         .findUnique({ where: { id: dbJobId }, select: { tokensSpent: true } })
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
+      const failureMsg = pickGenerationFailedMessage(t, displayName, "design");
 
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: failureMsg,
+          errorCode: classifyError(err),
+        },
       });
 
       if (tokensSpent > 0) {
@@ -1989,10 +2182,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         userId: userIdStr,
         attempt: job.attemptsMade,
       });
-
-      await telegram
-        .sendMessage(telegramChatId, pickGenerationFailedMessage(t, modelName, "design"))
-        .catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "image",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: failureMsg,
+        }).catch(() => void 0);
+      }
     }
 
     throw err;

@@ -19,6 +19,19 @@ interface FamilyCardProps {
   allModelSettings: Record<string, Record<string, unknown>>;
   selectedModes?: Record<string, string>;
   onModelActivate: (modelId: string) => Promise<void>;
+  /**
+   * Silent select при клике по версии/варианту в карусели — сохраняет
+   * выбранный modelId в БД без перевода state бота и без notification.
+   * Если не передан — клики только меняют локальное выделение (legacy).
+   */
+  onModelSelect?: (modelId: string) => void;
+  /**
+   * True пока pending silent-select notification ещё не fired (debounce
+   * крутится). Кнопка «Активировать» остаётся кликабельной даже при
+   * isGloballyActive — иначе после тапа по чипу аффорданс «применить и
+   * закрыть» исчезает (кнопка disabled с надписью «Активирована»).
+   */
+  hasPendingSelect?: boolean;
   onSettingChange: (modelId: string, key: string, value: unknown) => void;
   onModeChange?: (modelId: string, modeId: string) => void;
   onReset: (modelId: string) => void;
@@ -32,6 +45,8 @@ export function FamilyCard({
   allModelSettings,
   selectedModes,
   onModelActivate,
+  onModelSelect,
+  hasPendingSelect,
   onSettingChange,
   onModeChange,
   onReset,
@@ -78,7 +93,15 @@ export function FamilyCard({
     );
     const fallback = members.find((m) => m.versionLabel === version);
     const target = sameVariant ?? fallback;
-    if (target) setLocalId(target.id);
+    if (target) {
+      setLocalId(target.id);
+      onModelSelect?.(target.id);
+    }
+  };
+
+  const selectVariant = (modelId: string) => {
+    setLocalId(modelId);
+    onModelSelect?.(modelId);
   };
 
   const handleActivate = async () => {
@@ -136,7 +159,7 @@ export function FamilyCard({
               <button
                 key={m.id}
                 className={`ratio-btn${localId === m.id ? " ratio-btn--active" : ""}${m.variantLabel?.toLowerCase().includes("vector") ? " ratio-btn--svg" : ""}`}
-                onClick={() => setLocalId(m.id)}
+                onClick={() => selectVariant(m.id)}
               >
                 {m.variantLabel}
                 {m.variantLabel?.toLowerCase().includes("vector") && " 📐"}
@@ -182,11 +205,11 @@ export function FamilyCard({
         <button
           className="family-card__activate-btn"
           onClick={() => void handleActivate()}
-          disabled={activating || isGloballyActive}
+          disabled={activating || (isGloballyActive && !hasPendingSelect)}
         >
           {activating
             ? t("imageSettings.activating")
-            : isGloballyActive
+            : isGloballyActive && !hasPendingSelect
               ? t("imageSettings.activated")
               : t("imageSettings.activate")}
         </button>
@@ -201,7 +224,7 @@ export function FamilyCard({
         )}
       </div>
 
-      {isGloballyActive && isInSectionPicker(selected.section, activeState) && (
+      {activeModelId === localId && isInSectionPicker(selected.section, activeState) && (
         <button
           className="family-card__start-btn"
           onClick={() => void handleActivate()}

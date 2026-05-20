@@ -2,6 +2,7 @@ import { UnrecoverableError, DelayedError, type Job } from "bullmq";
 import { delayJob } from "../utils/delay-job.js";
 import { withRetry } from "../utils/with-retry.js";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
+import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { Api, InputFile } from "grammy";
 import type { AudioJobData } from "@metabox/api/queues";
 import { getAudioQueue } from "@metabox/api/queues";
@@ -45,6 +46,7 @@ import {
 } from "../utils/acquire-for-processor.js";
 import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
+import { isFiveXxError } from "@metabox/api/utils/rate-limit-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
@@ -589,22 +591,39 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
             where: { id: dbJobId },
             data: { status: "failed", error: "poll timeout (24h)", errorCode: POLL_TIMEOUT_CODE },
           });
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationTimedOut24h.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          const timeoutMsg = t.errors.generationTimedOut24h.replace("{modelName}", modelName);
+          if (telegramChatId !== null) {
+            await telegram.sendMessage(telegramChatId, timeoutMsg).catch(() => void 0);
+          } else {
+            await apiNotifyError({
+              section: "audio",
+              userId: userIdStr,
+              dbJobId,
+              userMessage: timeoutMsg,
+              errorCode: POLL_TIMEOUT_CODE,
+            }).catch(() => void 0);
+          }
+          // 24h-таймаут — не UserFacingError: poll крутился сутки (провайдер
+          // завис / баг). Шлём tech-alert — иначе сбой тихо тонет у ops.
+          await notifyTechError(new Error(`Audio poll timeout (24h): ${dbJobId}`), {
+            jobId: dbJobId,
+            modelId,
+            section: "audio",
+            userId: userIdStr,
+          });
           throw new UnrecoverableError("poll timeout 24h");
         }
 
         if (job.data.lastIntervalMs !== undefined && interval !== job.data.lastIntervalMs) {
-          await telegram
-            .sendMessage(
-              telegramChatId,
-              t.errors.generationStillRunning.replace("{modelName}", modelName),
-            )
-            .catch(() => void 0);
+          // "still running" hint имеет смысл только в TG-чате; web сам поллит статус.
+          if (telegramChatId !== null) {
+            await telegram
+              .sendMessage(
+                telegramChatId,
+                t.errors.generationStillRunning.replace("{modelName}", modelName),
+              )
+              .catch(() => void 0);
+          }
         }
 
         await delayJob(
@@ -767,24 +786,66 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       tokenBalance: deductResult?.tokenBalance,
     });
 
-    // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
-    // caption — отдельным сообщением сразу после.
-    try {
-      await sendAudioBatch(telegramChatId, tracks, audioCaption, promptMessageId);
-    } catch (sendErr) {
-      logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
+    if (telegramChatId !== null) {
+      // Шлём треки одной media-group'ой (или одиночным sendAudio для 1 трека),
+      // caption — отдельным сообщением сразу после.
+      try {
+        await sendAudioBatch(telegramChatId, tracks, audioCaption, promptMessageId);
+      } catch (sendErr) {
+        logger.warn({ err: sendErr, dbJobId }, "Audio finalize: failed to send tracks");
+      }
+    } else {
+      // Web: достаём финальные output-записи из БД (uploaded не в scope здесь,
+      // т.к. определён внутри `if (!existingOutput)` блока выше).
+      const outputs = await db.generationJobOutput
+        .findMany({
+          where: { jobId: dbJobId },
+          select: { id: true, outputUrl: true, s3Key: true },
+          orderBy: { index: "asc" },
+        })
+        .catch(() => []);
+      await apiNotifySuccess({
+        section: "audio",
+        userId: userIdStr,
+        dbJobId,
+        outputs: outputs.map((o) => ({
+          id: o.id,
+          outputUrl: o.outputUrl,
+          s3Key: o.s3Key,
+        })),
+      }).catch(() => void 0);
     }
 
     logger.info({ dbJobId }, "Audio job completed");
   } catch (err) {
     if (err instanceof DelayedError) throw err;
+    // 24h poll-timeout уже полностью обработан in-place (DB + сообщение юзеру +
+    // tech-alert) — не прогоняем через общий error-handling повторно, иначе при
+    // isLastAttempt терминальный блок перезатёр бы errorCode/errorUserMessage
+    // generic-значениями и продублировал бы сообщение и алерт.
+    if (err instanceof UnrecoverableError && err.message === "poll timeout 24h") throw err;
     if (isRateLimitLongWindowError(err)) {
       const msg = pickGenerationFailedMessage(t, modelName, "audio");
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: msg, errorCode: "RATE_LIMIT_LONG" },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        },
       });
-      await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: msg,
+          errorCode: "RATE_LIMIT_LONG",
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(msg);
     }
     // ── Poll-stage re-submit на provider temporary unavailable ──────────
@@ -882,7 +943,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           await notifyTechError(err, ctx, channel);
         }
       }
-      await telegram.sendMessage(telegramChatId, providerMsg).catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, providerMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: providerMsg,
+          errorCode: classifyError(err),
+        }).catch(() => void 0);
+      }
       throw new UnrecoverableError(providerMsg);
     }
 
@@ -975,9 +1046,42 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         .catch(() => null);
       const tokensSpent = dbJobNow?.tokensSpent ? Number(dbJobNow.tokensSpent) : 0;
 
+      // Локализованное user-facing сообщение вычисляем ДО update'а, чтобы
+      // записать его в `errorUserMessage` одним запросом вместе с `error`.
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // SENSITIVE_WORD_ERROR — контент-модерация: юзер ввёл запрещённый контент
+      // (копирайт / ограниченные слова) и получит понятное «измените описание».
+      // Это вина юзера, а не сбой системы — единственная терминальная ошибка,
+      // которую трактуем как user-facing и НЕ шлём в tech-канал.
+      const isUserContentRejection = errMsg.includes("SENSITIVE_WORD_ERROR");
+
+      let userMessage: string | null = null;
+      if (isFiveXxError(err)) {
+        // 5xx от Suno-провайдера (kie или apipass — оба проставляют `status`
+        // через providerHttpError) — серверный сбой, не вина юзера и не
+        // content-фильтр. НЕ маппим в audioGenerateFailed («измените запрос»):
+        // оставляем userMessage=null → generic «временно недоступен».
+      } else if (isUserContentRejection) {
+        userMessage = t.errors.audioSensitiveWord;
+      } else if (errMsg.includes("GENERATE_AUDIO_FAILED")) {
+        userMessage = t.errors.audioGenerateFailed;
+      } else if (errMsg.includes("CREATE_TASK_FAILED")) {
+        userMessage = t.errors.audioCreateTaskFailed;
+      } else if (errMsg.includes("Timed out")) {
+        userMessage = t.errors.generationTimeout;
+      }
+
+      const finalMsg = userMessage ?? pickGenerationFailedMessage(t, modelName, "audio");
+
       await db.generationJob.update({
         where: { id: dbJobId },
-        data: { status: "failed", error: String(err), errorCode: classifyError(err) },
+        data: {
+          status: "failed",
+          error: String(err),
+          errorUserMessage: finalMsg,
+          errorCode: classifyError(err),
+        },
       });
 
       if (tokensSpent > 0) {
@@ -988,22 +1092,12 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Audio failed after deduct: tokens refunded to user");
       }
 
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      let userMessage: string | null = null;
-      if (errMsg.includes("SENSITIVE_WORD_ERROR")) {
-        userMessage = t.errors.audioSensitiveWord;
-      } else if (errMsg.includes("GENERATE_AUDIO_FAILED")) {
-        userMessage = t.errors.audioGenerateFailed;
-      } else if (errMsg.includes("CREATE_TASK_FAILED")) {
-        userMessage = t.errors.audioCreateTaskFailed;
-      } else if (errMsg.includes("Timed out")) {
-        userMessage = t.errors.generationTimeout;
-      }
-
-      const isKnownError = userMessage !== null;
-
-      if (!isKnownError) {
+      // Все НЕ-юзерфейсинг ошибки в терминале шлём в tech-канал — даже когда
+      // юзеру показано специфичное сообщение (audioGenerateFailed и т.п.),
+      // иначе провайдерские и системные сбои тихо тонут у ops. UserFacingError
+      // сюда не доходят (отработаны выше в resolveUserFacingMessage-ветке со
+      // своим ops-алертом). Контент-модерацию исключаем — это вина юзера.
+      if (!isUserContentRejection) {
         await notifyTechError(err, {
           jobId: dbJobId,
           modelId,
@@ -1012,13 +1106,16 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
           attempt: job.attemptsMade,
         });
       }
-
-      await telegram
-        .sendMessage(
-          telegramChatId,
-          userMessage ?? pickGenerationFailedMessage(t, modelName, "audio"),
-        )
-        .catch(() => void 0);
+      if (telegramChatId !== null) {
+        await telegram.sendMessage(telegramChatId, finalMsg).catch(() => void 0);
+      } else {
+        await apiNotifyError({
+          section: "audio",
+          userId: userIdStr,
+          dbJobId,
+          userMessage: finalMsg,
+        }).catch(() => void 0);
+      }
     }
 
     throw err;

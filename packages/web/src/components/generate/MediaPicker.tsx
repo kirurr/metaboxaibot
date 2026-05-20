@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Check, Search, X } from "lucide-react";
+import { Check, Loader2, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 
 /**
  * Универсальный picker с сеткой превью (avatars / motions / soul styles).
@@ -11,6 +12,10 @@ import clsx from "clsx";
  * Single- или multi-select определяется через `maxItems`:
  *  - maxItems=1 (default) — single-select, выбор сразу закрывает picker
  *  - maxItems>1 — multi-select, item тогглится, picker закрывается явно
+ *
+ * Для пользовательских аватаров (HeyGen, Soul) проп `userItems` рисует отдельную
+ * секцию «Мои аватары» поверх каталога с кнопками rename/delete и плиткой
+ * «Создать новый», которая открывает upload-модалку (`onCreate`).
  */
 
 export type MediaPickItem = {
@@ -21,6 +26,12 @@ export type MediaPickItem = {
   previewUrl?: string | null;
   /** Доп. подпись справа от имени (например язык/категория). */
   meta?: string | null;
+};
+
+/** Пользовательский аватар — расширение `MediaPickItem` со status + actions. */
+export type MediaUserItem = MediaPickItem & {
+  /** "creating" блокирует выбор (показываем спиннер); "failed"/"orphaned" — серым. */
+  status: "creating" | "ready" | "failed" | "orphaned" | string;
 };
 
 export type MediaPickerProps = {
@@ -36,6 +47,15 @@ export type MediaPickerProps = {
   previewKind: "image" | "video";
   onChange: (selectedIds: string[]) => void;
   onClose: () => void;
+  /** Опциональная верхняя секция пользовательских аватаров. */
+  userItems?: readonly MediaUserItem[];
+  userItemsLoading?: boolean;
+  userItemsLabel?: string;
+  /** Опциональная пустая строка для catalog-section (если catalog нерелевантен — например, Soul). */
+  hideCatalog?: boolean;
+  onCreate?: () => void;
+  onRename?: (id: string, currentName: string) => void;
+  onDelete?: (id: string) => void;
 };
 
 export function MediaPicker({
@@ -48,9 +68,20 @@ export function MediaPicker({
   previewKind,
   onChange,
   onClose,
+  userItems,
+  userItemsLoading,
+  userItemsLabel,
+  hideCatalog = false,
+  onCreate,
+  onRename,
+  onDelete,
 }: MediaPickerProps) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
+  const resolvedUserItemsLabel = userItemsLabel ?? t("mediaPicker.myAvatars");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const isMulti = maxItems > 1;
+  const showUserSection = !!userItems || !!onCreate;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -62,6 +93,13 @@ export function MediaPicker({
         (it.meta ?? "").toLowerCase().includes(q),
     );
   }, [items, search]);
+
+  const filteredUserItems = useMemo(() => {
+    if (!userItems) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return userItems;
+    return userItems.filter((it) => it.name.toLowerCase().includes(q));
+  }, [userItems, search]);
 
   function toggle(item: MediaPickItem) {
     if (!isMulti) {
@@ -77,6 +115,154 @@ export function MediaPicker({
     }
   }
 
+  function renderTile(it: MediaPickItem, opts?: { disabled?: boolean }) {
+    const isSelected = selectedIds.includes(it.id);
+    return (
+      <button
+        key={it.id}
+        className={clsx(
+          "media-pick-tile",
+          isSelected && "is-selected",
+          opts?.disabled && "is-disabled",
+        )}
+        onClick={() => !opts?.disabled && toggle(it)}
+        type="button"
+        disabled={opts?.disabled}
+      >
+        <div className="media-pick-thumb">
+          {it.previewUrl ? (
+            previewKind === "video" ? (
+              <video
+                src={it.previewUrl}
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                onMouseEnter={(e) => {
+                  const v = e.currentTarget;
+                  v.play().catch(() => {});
+                }}
+                onMouseLeave={(e) => {
+                  const v = e.currentTarget;
+                  v.pause();
+                  v.currentTime = 0;
+                }}
+              />
+            ) : (
+              <img src={it.previewUrl} alt={it.name} loading="lazy" />
+            )
+          ) : (
+            <div className="media-pick-thumb-empty">—</div>
+          )}
+          {isSelected && (
+            <div className="media-pick-check">
+              <Check size={14} />
+            </div>
+          )}
+        </div>
+        <div className="media-pick-name" title={it.name}>
+          {it.name}
+        </div>
+        {(it.meta || it.description) && (
+          <div className="media-pick-meta">{it.meta ?? it.description}</div>
+        )}
+      </button>
+    );
+  }
+
+  function renderUserTile(it: MediaUserItem) {
+    const isReady = it.status === "ready";
+    const isSelected = selectedIds.includes(it.id);
+    const statusLabel =
+      it.status === "creating"
+        ? t("mediaPicker.userStatus.creating")
+        : it.status === "failed"
+          ? t("mediaPicker.userStatus.failed")
+          : it.status === "orphaned"
+            ? t("mediaPicker.userStatus.orphaned")
+            : null;
+    return (
+      <div
+        key={it.id}
+        className={clsx(
+          "media-pick-tile media-pick-user-tile",
+          isSelected && "is-selected",
+          !isReady && "is-disabled",
+        )}
+      >
+        <button
+          className="media-pick-thumb-btn"
+          onClick={() => isReady && toggle(it)}
+          type="button"
+          disabled={!isReady}
+        >
+          <div className="media-pick-thumb">
+            {it.previewUrl ? (
+              <img src={it.previewUrl} alt={it.name} loading="lazy" />
+            ) : (
+              <div className="media-pick-thumb-empty">—</div>
+            )}
+            {!isReady && (
+              <div className="media-pick-overlay">
+                {it.status === "creating" ? <Loader2 size={16} className="spin" /> : "!"}
+              </div>
+            )}
+            {isReady && isSelected && (
+              <div className="media-pick-check">
+                <Check size={14} />
+              </div>
+            )}
+          </div>
+        </button>
+        <div className="media-pick-user-row">
+          <div className="media-pick-name" title={it.name}>
+            {it.name}
+          </div>
+          {(onRename || onDelete) && (
+            <div className="media-pick-actions">
+              <button
+                className="media-pick-actions-btn"
+                onClick={() => setOpenMenuId(openMenuId === it.id ? null : it.id)}
+                aria-label={t("common.actions")}
+                type="button"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              {openMenuId === it.id && (
+                <div className="media-pick-menu" onMouseLeave={() => setOpenMenuId(null)}>
+                  {onRename && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenMenuId(null);
+                        onRename(it.id, it.name);
+                      }}
+                    >
+                      <Pencil size={12} /> {t("mediaPicker.rename")}
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      type="button"
+                      className="is-danger"
+                      onClick={() => {
+                        setOpenMenuId(null);
+                        onDelete(it.id);
+                      }}
+                    >
+                      <Trash2 size={12} /> {t("mediaPicker.delete")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {statusLabel && <div className="media-pick-meta">{statusLabel}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="voice-picker media-picker">
       <div className="voice-picker-head">
@@ -85,76 +271,64 @@ export function MediaPicker({
           {subtitle && <div className="voice-picker-sub">{subtitle}</div>}
           {isMulti && (
             <div className="voice-picker-sub">
-              Выбрано {selectedIds.length}/{maxItems}
+              {t("mediaPicker.selectedOf", { n: selectedIds.length, max: maxItems })}
             </div>
           )}
         </div>
-        <button className="voice-picker-close" onClick={onClose} aria-label="Закрыть">
+        <button className="voice-picker-close" onClick={onClose} aria-label={t("common.close")}>
           <X size={16} />
         </button>
       </div>
 
       <div className="voice-picker-search">
         <Search size={14} />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("mediaPicker.searchPlaceholder")}
+        />
       </div>
 
-      <div className="media-picker-grid">
-        {isLoading && <div className="voice-picker-empty">Загрузка…</div>}
-        {!isLoading && filtered.length === 0 && (
-          <div className="voice-picker-empty">{search ? "Ничего не найдено" : "Пусто"}</div>
-        )}
-        {filtered.map((it) => {
-          const isSelected = selectedIds.includes(it.id);
-          return (
-            <button
-              key={it.id}
-              className={clsx("media-pick-tile", isSelected && "is-selected")}
-              onClick={() => toggle(it)}
-              type="button"
-            >
-              <div className="media-pick-thumb">
-                {it.previewUrl ? (
-                  previewKind === "video" ? (
-                    <video
-                      src={it.previewUrl}
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                      onMouseEnter={(e) => {
-                        // Авто-плей на hover: легче, чем autoPlay сразу всех видео.
-                        const v = e.currentTarget;
-                        v.play().catch(() => {});
-                      }}
-                      onMouseLeave={(e) => {
-                        const v = e.currentTarget;
-                        v.pause();
-                        v.currentTime = 0;
-                      }}
-                    />
-                  ) : (
-                    <img src={it.previewUrl} alt={it.name} loading="lazy" />
-                  )
-                ) : (
-                  <div className="media-pick-thumb-empty">—</div>
-                )}
-                {isSelected && (
-                  <div className="media-pick-check">
-                    <Check size={14} />
-                  </div>
-                )}
+      {showUserSection && (
+        <div className="media-picker-section">
+          <div className="media-picker-section-head">
+            <span>{resolvedUserItemsLabel}</span>
+            {onCreate && (
+              <button type="button" className="media-picker-create-link" onClick={onCreate}>
+                <Plus size={12} /> {t("mediaPicker.create")}
+              </button>
+            )}
+          </div>
+          <div className="media-picker-grid">
+            {userItemsLoading && (
+              <div className="voice-picker-empty">{t("mediaPicker.loading")}</div>
+            )}
+            {!userItemsLoading && filteredUserItems.length === 0 && (
+              <div className="voice-picker-empty">
+                {search ? t("common.empty") : t("mediaPicker.noOwn")}
               </div>
-              <div className="media-pick-name" title={it.name}>
-                {it.name}
+            )}
+            {filteredUserItems.map((it) => renderUserTile(it))}
+          </div>
+        </div>
+      )}
+
+      {!hideCatalog && (
+        <div className="media-picker-section">
+          {showUserSection && (
+            <div className="media-picker-section-head">{t("mediaPicker.catalog")}</div>
+          )}
+          <div className="media-picker-grid">
+            {isLoading && <div className="voice-picker-empty">{t("mediaPicker.loading")}</div>}
+            {!isLoading && filtered.length === 0 && (
+              <div className="voice-picker-empty">
+                {search ? t("common.empty") : t("mediaPicker.empty")}
               </div>
-              {(it.meta || it.description) && (
-                <div className="media-pick-meta">{it.meta ?? it.description}</div>
-              )}
-            </button>
-          );
-        })}
-      </div>
+            )}
+            {filtered.map((it) => renderTile(it))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

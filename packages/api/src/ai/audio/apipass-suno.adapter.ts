@@ -1,6 +1,7 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const SUNOAPI_BASE = "https://api.sunoapi.org";
 
@@ -114,7 +115,7 @@ export class ApipassSunoAdapter implements AudioAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`Suno API error ${resp.status}: ${txt}`);
+      throw providerHttpError(`Suno API error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as SunoGenerateResponse;
@@ -151,7 +152,9 @@ export class ApipassSunoAdapter implements AudioAdapter {
           opsAlertDedupKey: "suno-credits-exhausted",
         });
       }
-      throw new Error(`Suno API: ${msg}`);
+      // `code` (напр. 500) включаем в текст и проставляем `status` для 5xx —
+      // иначе submitWithFallback не распознаёт серверный сбой провайдера.
+      throw providerHttpError(`Suno API error ${data.code}: ${msg}`, data.code);
     }
     return data.data.taskId;
   }
@@ -165,7 +168,7 @@ export class ApipassSunoAdapter implements AudioAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`Suno API poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`Suno API poll error ${resp.status}`, resp.status);
 
     const body = (await resp.json()) as SunoPollResponse;
     const taskData = body.data;
@@ -177,20 +180,34 @@ export class ApipassSunoAdapter implements AudioAdapter {
       status === "CREATE_TASK_FAILED" ||
       status === "SENSITIVE_WORD_ERROR"
     ) {
-      throw new Error(`Suno generation failed: ${status} ${taskData?.errorMessage ?? ""}`);
+      // errorCode несёт серверные сбои таски (напр. 500). Кладём его и в текст,
+      // и в `status` через providerHttpError — без 5xx-классификации процессор
+      // маппит ошибку как вину юзера ("измените запрос") и не шлёт tech-alert.
+      const failCode = taskData?.errorCode;
+      const detail = [status, failCode, taskData?.errorMessage]
+        .filter((p) => p !== null && p !== undefined && p !== "")
+        .join(" ");
+      throw providerHttpError(`Suno generation failed: ${detail}`, failCode);
     }
 
     // Not ready yet
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
-    // Suno возвращает 2 трека за один запрос. Собираем все валидные URL'ы;
-    // первый кладём в основной AudioResult, остальные — в `extras` (worker
-    // сохранит каждый как отдельный output и пришлёт юзеру отдельным
-    // сообщением).
+    // Suno возвращает 2 трека за один запрос. Собираем только финальные
+    // `audioUrl` (как kie-адаптер): `streamAudioUrl` — это HLS-эндпоинт,
+    // он не играется как mp3 в Telegram sendAudio, и он появляется рано —
+    // по нему нельзя судить о готовности трека. Первый URL кладём в основной
+    // AudioResult, остальные — в `extras` (worker сохранит каждый отдельным
+    // output'ом и пришлёт юзеру отдельным сообщением).
     const tracks = (taskData?.response?.sunoData ?? [])
-      .map((tr) => tr.streamAudioUrl ?? tr.audioUrl)
+      .map((tr) => tr.audioUrl)
       .filter((u): u is string => !!u);
     if (tracks.length === 0) return null;
+
+    // На FIRST_SUCCESS обычно готов только первый трек — не отдаём результат,
+    // пока готовы не оба, иначе юзер получит 1 трек за полную (2-трековую)
+    // цену запроса. На SUCCESS отдаём что есть (изредка Suno возвращает 1).
+    if (status === "FIRST_SUCCESS" && tracks.length < 2) return null;
 
     const [primaryUrl, ...restUrls] = tracks;
     return {

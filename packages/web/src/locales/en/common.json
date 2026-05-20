@@ -9,7 +9,65 @@
     "plans": "Plans",
     "tokens": "Tokens",
     "profile": "Profile",
-    "logout": "Log out"
+    "billing": "Billing",
+    "settings": "Settings",
+    "logout": "Sign out",
+    "tokensBalance": "Tokens balance",
+    "bottom": {
+      "home": "Home",
+      "gallery": "Gallery",
+      "generate": "Generate",
+      "learn": "Learn",
+      "profile": "Profile"
+    }
+  },
+  "capabilities": {
+    "chat": "Chat",
+    "image": "Image",
+    "video": "Video",
+    "audio": "Audio",
+    "columns": {
+      "features": "Features",
+      "models": "Models",
+      "loading": "Loading models…"
+    },
+    "features": {
+      "image": {
+        "generate": { "name": "Generate Image", "desc": "Create AI images from scratch." },
+        "product": { "name": "Product Shots", "desc": "Photoreal product shots." },
+        "edit": { "name": "Edit Photo", "desc": "Tweak light, background, details in one click." },
+        "upscale": { "name": "Upscale", "desc": "Boost resolution up to 4K." },
+        "lora": { "name": "LoRA Training", "desc": "Train a model on your face." },
+        "style": { "name": "Style Transfer", "desc": "Move the style of one photo onto another." },
+        "background": {
+          "name": "Background Edit",
+          "desc": "Background replacement and retouching."
+        }
+      },
+      "video": {
+        "create": { "name": "Create Video", "desc": "Generate AI video from a prompt." },
+        "cinema": { "name": "Cinema Studio", "desc": "Cinematography with an AI director." },
+        "mixed": { "name": "Mixed Media", "desc": "Blended projects: photo + video + audio." },
+        "edit": { "name": "Edit Video", "desc": "Edit scenes, shots and elements." },
+        "lipsync": { "name": "Lipsync Studio", "desc": "Talking clips from photos." },
+        "sketch": { "name": "Sketch to Video", "desc": "A sketch becomes a video." },
+        "upscale": { "name": "Video Upscale", "desc": "Improve video quality." },
+        "avatar": { "name": "Avatar Factory", "desc": "Build UGC videos with an avatar." }
+      },
+      "audio": {
+        "tts": { "name": "Text to Speech", "desc": "Turn text into realistic speech." },
+        "clone": { "name": "Voice Cloning", "desc": "Clone any voice in 30 seconds." },
+        "music": { "name": "Music Generation", "desc": "Full tracks with vocals from a prompt." },
+        "dubbing": { "name": "Dubbing", "desc": "Multilingual lip-sync dubbing." },
+        "transcribe": { "name": "Transcription", "desc": "Speech-to-text recognition." },
+        "cleanup": { "name": "Audio Cleanup", "desc": "Noise removal and restoration." },
+        "library": { "name": "Voice Library", "desc": "500+ ready-made voices." }
+      },
+      "badge": {
+        "TOP": "TOP",
+        "NEW": "NEW"
+      }
+    }
   },
   "common": {
     "save": "Save",
@@ -21,11 +79,420 @@
     "back": "Back",
     "next": "Next",
     "error": "Something went wrong",
-    "retry": "Retry"
+    "retry": "Retry",
+    "loading": "Loading…",
+    "search": "Search",
+    "empty": "Nothing found",
+    "actions": "Actions",
+    "rename": "Rename"
   },
-  "telegramLink": {
-    "title": "Connect the Telegram bot",
-    "openBot": "Open Telegram bot",
-    "waiting": "Waiting for connection…"
+  "auth": {
+    "welcomeBack": "Welcome back.",
+    "createAccount": "Create your account.",
+    "loginHint": "Sign in to continue your conversation.",
+    "signupHint": "Start with 50,000 free tokens. No card required.",
+    "signIn": "Sign in",
+    "createAccountBtn": "Create account",
+    "signingIn": "Signing in…",
+    "creating": "Creating…",
+    "fullName": "Full name",
+    "fullNamePlaceholder": "Ada Lovelace",
+    "email": "Email",
+    "emailPlaceholder": "you@company.com",
+    "password": "Password",
+    "forgot": "Forgot?",
+    "orContinueWith": "or continue with",
+    "termsHint": "By continuing you agree to our Terms & Privacy. Data never used for training.",
+    "loginError": "Couldn't sign in. Check your email and password.",
+    "signupError": "Couldn't create the account. Try again later.",
+    "checkEmail": "Check your email",
+    "checkEmailHint": "We sent a confirmation link to {{email}}. Click it to activate your account.",
+    "resendVerification": "Resend verification email",
+    "backToLogin": "Back to sign in",
+    "heroTitle": "A calmer way to work with intelligence.",
+    "heroSubtitle": "Pay for what you use. Eight frontier models. One quiet, focused workspace built for people who do real work."
+  },
+  "forgotPassword": {
+    "title": "Password reset",
+    "emailHint": "We'll send a password reset link to this address.",
+    "submit": "Send link",
+    "checkInbox": "Check your inbox",
+    "ifAccountExists": "If an account with <bold>{{email}}</bold> exists, we've sent a password reset link. It's valid for 1 hour.",
+    "backToLogin": "← Back to sign in",
+    "errorEmailRequired": "Email is required",
+    "errorEmailInvalid": "Invalid email",
+    "errorSendFailed": "Couldn't send the email. Check the address you entered."
+  },
+  "resetPassword": {
+    "title": "New password",
+    "newPassword": "New password",
+    "newPasswordHint": "At least 8 characters",
+    "confirmPassword": "Repeat password",
+    "submit": "Update password",
+    "invalidLink": "Invalid link",
+    "missingToken": "Reset token is missing.",
+    "requestNew": "Request a new one",
+    "successToast": "Password updated. Sign in with the new one.",
+    "errorUpdateFailed": "Couldn't update the password.",
+    "errorMinLength": "At least 8 characters",
+    "errorTooLong": "Too long",
+    "errorMismatch": "Passwords do not match"
+  },
+  "payment": {
+    "successTitle": "Payment successful",
+    "successDescription": "Balance topped up. Thanks for your purchase!",
+    "successOrderId": "Order #{{id}}",
+    "backToChat": "Back to chat",
+    "pendingTitle": "Waiting for confirmation",
+    "pendingDescription": "Payment is being processed. The page will refresh automatically.",
+    "pendingPaidTitle": "Payment received",
+    "failedTitle": "Payment failed",
+    "failedDescription": "Try again or pick a different payment method.",
+    "tryAgain": "Try again",
+    "toChat": "To chat"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "toHome": "Go home"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No new notifications"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "How you appear inside AI Box and how the product behaves for you.",
+    "sectionAccount": "Account",
+    "sectionBalance": "Balance",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "email": "Email",
+    "telegram": "Telegram",
+    "telegramNotLinked": "Not linked",
+    "telegramLinked": "Linked",
+    "telegramNotLinkedChip": "Not linked",
+    "telegramLink": {
+      "cta": "Link Telegram",
+      "hint": "Link the bot to use AI in Telegram and merge bot purchases with your web account.",
+      "modalTitle": "Connect the Telegram bot",
+      "modalIntro": "Click the button below — it opens the bot in Telegram. Press «Start» and your account will be linked automatically.",
+      "modalSteps": "Connecting takes a few seconds. The window will close on its own when done.",
+      "openBot": "Open Telegram bot",
+      "waiting": "Waiting for connection…",
+      "error": "Couldn't generate the link. Try again later."
+    },
+    "balanceTotal": "Total tokens",
+    "balanceTotalHint": "Purchased + subscription",
+    "balancePurchased": "Purchased",
+    "balancePurchasedHint": "Don't expire",
+    "balanceSubscription": "From subscription",
+    "balanceSubscriptionHint": "Expire when period ends"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Language preferences and account data controls.",
+    "sectionPreferences": "Preferences",
+    "languageLabel": "Interface language",
+    "languageHint": "Switches the UI immediately. Stored locally.",
+    "languageRu": "Русский",
+    "languageEn": "English",
+    "sectionDataPrivacy": "Data & privacy",
+    "dataPrivacyHint": "Your conversations are never used to train models. Export or delete everything any time.",
+    "exportData": "Export data",
+    "deleteAccount": "Delete account"
+  },
+  "plans": {
+    "title": "Pick the plan that fits.",
+    "subtitle": "Subscriptions refill tokens monthly. Top-ups extend your active subscription.",
+    "subscriptions": "Subscriptions",
+    "tokenPackages": "Token packages",
+    "tokensPerMonth": "tokens / month",
+    "tokensTotal": "tokens",
+    "period": {
+      "M1": "1 mo",
+      "M3": "3 mo",
+      "M6": "6 mo",
+      "M12": "12 mo"
+    },
+    "buy": "Buy",
+    "processing": "Processing…",
+    "loadError": "Couldn't load the catalog. Try again later.",
+    "badgeTop": "Top",
+    "badgeProfitable": "Best value"
+  },
+  "generate": {
+    "familyVersion": "Version",
+    "familyVariant": "Variant",
+    "btnGenerate": "Generate",
+    "btnGenerating": "Generating…",
+    "btnUploading": "Uploading files…",
+    "btnSelectModel": "Select a model",
+    "btnAddToSlot": "Add file to {{slot}}",
+    "btnEnterPrompt": "Enter a prompt",
+    "btnPromptOrMedia": "Enter a prompt or add a file",
+    "historyTitle": "Recent generations",
+    "historyGenerating": "Generating…",
+    "historyError": "Generation failed",
+    "imageTitle": "Create a frame.",
+    "imageSubtitle": "One prompt — all the best models. Pay only for what you actually generate.",
+    "imagePromptPlaceholder": "Describe the scene you imagine",
+    "videoTitle": "Create video.",
+    "videoSubtitle": "One prompt — all the best models. Pay only for what you actually generate.",
+    "videoPromptPlaceholder": "Describe the scene for video generation",
+    "audioTitle": "Create audio.",
+    "audioSubtitle": "TTS, voice cloning, music — pick a model and describe the scene.",
+    "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…"
+  },
+  "chat": {
+    "newDialog": "New dialog",
+    "newDialogShort": "New",
+    "newDialogBtn": "New dialog",
+    "searchDialogs": "Search dialogs",
+    "loadingHistory": "Loading history…",
+    "loadingDialogs": "Loading…",
+    "noDialogs": "No dialogs yet",
+    "recent": "Recent",
+    "messagesCount_one": "{{count}} message",
+    "messagesCount_other": "{{count}} messages",
+    "startNew": "Start a new dialog",
+    "startNewHint": "Ask, request, analyze — pick a model below.",
+    "promptAttach": "Attach file",
+    "promptPlaceholder": "Ask AI Box…",
+    "sending": "Sending…",
+    "waitUploads": "Wait for file uploads to finish",
+    "send": "Send",
+    "tokensEst": "tokens",
+    "renamePrompt": "New name",
+    "deletePrompt": "Delete this dialog? History can't be recovered.",
+    "errorCreateDialog": "Couldn't create dialog",
+    "errorSend": "Send failed",
+    "errorRename": "Couldn't rename",
+    "errorDelete": "Couldn't delete",
+    "errorModelLoading": "Model not loaded yet",
+    "errorUnsupportedMedia": "File type not supported",
+    "errorFileTooLarge": "File is too large (max 25 MB)",
+    "errorUploadFailed": "Upload failed",
+    "dialogsClose": "Close",
+    "dialogsCollapse": "Collapse",
+    "dialogsExpand": "Dialogs",
+    "exportSoon": "Soon",
+    "newShort": "New",
+    "uploading": "Uploading…",
+    "settings": {
+      "title": "Model settings",
+      "advanced": "Advanced settings"
+    },
+    "starterPrompts": {
+      "0": "Write a product launch plan",
+      "1": "Explain this code line by line",
+      "2": "Brainstorm a name for a tea brand",
+      "3": "Compress this financial report into 5 bullets"
+    },
+    "byteShort": "B",
+    "kbShort": "KB",
+    "mbShort": "MB",
+    "removeFile": "Remove",
+    "relTime": {
+      "now": "now",
+      "minutes": "{{n}}m",
+      "hours": "{{n}}h",
+      "yesterday": "Yesterday",
+      "weekday": {
+        "0": "Sun",
+        "1": "Mon",
+        "2": "Tue",
+        "3": "Wed",
+        "4": "Thu",
+        "5": "Fri",
+        "6": "Sat"
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "All frontier AI · One workspace",
+    "heroTitle": "AI Box",
+    "heroSubtitle": "One service — all leading models for text, images, video and voice. No per-product subscriptions, no tab switching. Pay with tokens for actual usage.",
+    "ctaStartChat": "Start chat",
+    "ctaSeePlans": "See plans",
+    "toolsTitle": "Jump into a tool.",
+    "toolsHint": "Each one is one click away.",
+    "tools": {
+      "chat": {
+        "name": "Chat",
+        "desc": "Reasoning, writing, code. The everyday model."
+      },
+      "image": {
+        "name": "Image",
+        "desc": "Photoreal, illustration, product shots."
+      },
+      "video": {
+        "name": "Video",
+        "desc": "Cinematic shots, motion, avatars."
+      },
+      "voice": {
+        "name": "Voice",
+        "desc": "Text-to-speech, dubbing, narration."
+      },
+      "avatar": {
+        "name": "Avatar",
+        "desc": "Train a likeness once, generate forever."
+      },
+      "code": {
+        "name": "Code",
+        "desc": "Refactor, debug, scaffold whole files."
+      }
+    },
+    "openTool": "Open",
+    "featuredTitle": "Featured today.",
+    "featuredHint": "Curated generations — tap any to open the tool with this prompt.",
+    "openGallery": "Open gallery",
+    "recentTitle": "Pick up where you left off.",
+    "recentHint": "Your last five sessions, ready to continue.",
+    "allHistory": "All history"
+  },
+  "history": {
+    "title": "History",
+    "subtitle": "Every conversation, organised by time. Search across all of them in one keystroke.",
+    "exportAll": "Export all",
+    "newChat": "New chat",
+    "searchPlaceholder": "Search dialogs and messages…",
+    "emptyMatch": "No conversations match «{{q}}».",
+    "emptyAll": "No dialogs yet.",
+    "loading": "Loading dialogs…",
+    "errorLoad": "Failed to load dialogs.",
+    "days": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "earlier": "Earlier"
+    },
+    "filters": {
+      "label": "Filter by section",
+      "all": "All",
+      "gpt": "Chat",
+      "design": "Image",
+      "video": "Video",
+      "audio": "Audio"
+    },
+    "statusFailed": "Failed"
+  },
+  "tokens": {
+    "title": "Top up.",
+    "subtitle": "Buy tokens once, use them whenever. They never expire, and bigger packs cost less per million.",
+    "currentBalance": "Current balance",
+    "tokensUnit": "tokens",
+    "includingSubscription": "including <mono>{{tokens}}</mono> from subscription",
+    "last28Days": "Last 28 days · daily usage",
+    "choosePack": "Choose a pack",
+    "bonusOf": "{{percent}} bonus",
+    "customAmount": "Or a custom amount",
+    "continueToPayment": "Continue to payment",
+    "minPaymentHint": "Minimum $5 · Tokens added instantly · Receipt emailed automatically",
+    "txHistory": "Transaction history",
+    "exportCsv": "Export CSV",
+    "filters": {
+      "all": "All",
+      "use": "AI usage",
+      "topup": "Top-ups",
+      "bonus": "Bonuses",
+      "refund": "Refunds"
+    },
+    "errorLoad": "Couldn't load transactions.",
+    "empty": "No transactions yet.",
+    "emptyForFilter": "No transactions match this filter.",
+    "tx": {
+      "aiUsage": "AI generation",
+      "purchase": "Tokens purchase",
+      "welcomeBonus": "Welcome bonus",
+      "referralBonus": "Referral bonus",
+      "admin": "Admin credit",
+      "refundFailed": "Refund for failed generation"
+    }
+  },
+  "billing": {
+    "title": "Billing",
+    "subtitle": "Subscription, payment methods, and every invoice ever issued. Download any of them as PDF.",
+    "exportInvoices": "Export invoices",
+    "stat": {
+      "currentPlan": "Current plan",
+      "renewsOn": "Renews {{date}}",
+      "monthlySpend": "Monthly spend",
+      "sameAsLast": "Same as last month",
+      "tokenSpend": "Token spend",
+      "vsLastMonth": "▲ {{percent}}% vs last",
+      "nextCharge": "Next charge"
+    },
+    "subscription": "Subscription",
+    "changePlan": "Change plan",
+    "planInfo": "{{plan}} · monthly",
+    "planFeatures": "{{tokens}} tokens included · priority queue · all frontier models",
+    "active": "Active",
+    "started": "Started",
+    "nextRenewal": "Next renewal",
+    "cancel": "Cancel",
+    "paymentMethods": "Payment methods",
+    "addPm": "Add",
+    "expires": "Expires {{date}}",
+    "defaultCard": "Default",
+    "setDefault": "Set default",
+    "invoices": "Invoices",
+    "paid": "Paid"
+  },
+  "prompts": {
+    "title": "Prompts for you to use",
+    "subtitle": "Click on image to see the prompt and settings",
+    "filters": {
+      "all": "All",
+      "images": "Images",
+      "videos": "Videos"
+    },
+    "loading": "Loading…",
+    "tryPrompt": "Try the same prompt",
+    "tryPromptAndSettings": "Try the same prompt and settings",
+    "promptUsed": "Prompt used for this generation:"
+  },
+  "voicePicker": {
+    "title": "Pick a voice",
+    "searchPlaceholder": "Search by name / language",
+    "loading": "Loading…",
+    "empty": "No voices yet",
+    "play": "Play",
+    "pause": "Pause"
+  },
+  "mediaPicker": {
+    "selectedOf": "Selected {{n}}/{{max}}",
+    "searchPlaceholder": "Search",
+    "myAvatars": "My avatars",
+    "myCharacters": "My characters",
+    "create": "Create",
+    "loading": "Loading…",
+    "noOwn": "No avatars of your own yet",
+    "catalog": "Catalog",
+    "empty": "Empty",
+    "rename": "Rename",
+    "delete": "Delete",
+    "actions": "Actions",
+    "userStatus": {
+      "creating": "Creating…",
+      "failed": "Failed",
+      "orphaned": "Unavailable"
+    }
+  },
+  "avatarModal": {
+    "heygenTitle": "Create a HeyGen avatar",
+    "soulTitle": "Create a Soul character",
+    "heygenHint": "Upload one face photo. The avatar will be ready right away.",
+    "soulHint": "Upload {{min}}–{{max}} varied photos (different angles, lighting, expressions).",
+    "name": "Name",
+    "namePlaceholderHeygen": "My avatar",
+    "namePlaceholderSoul": "My character",
+    "addPhoto": "Choose photo",
+    "addMore": "Add ({{n}}/{{max}})",
+    "removePhoto": "Remove photo",
+    "uploadError": "Upload failed",
+    "createError": "Couldn't create the avatar",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…"
   }
 }

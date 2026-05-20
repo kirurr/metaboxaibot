@@ -156,6 +156,20 @@ export class KieImageAdapter implements ImageAdapter {
       }
 
       body = { model: nanoBananaModel, input: inputPayload };
+    } else if (this.modelId === "image-upscale") {
+      // ── KIE Topaz Image Upscaler ───────────────────────────────────────────
+      // Доступна только через готовый сценарий «Апскейл фото». Промпта нет —
+      // upscale_factor приходит из modelSettings (выбор юзера inline-кнопками).
+      const src = imageUrls[0];
+      if (!src) throw new Error("KIE image-upscale: source image is required");
+      const uploaded = await uploadFileUrl(this.apiKey, src, buildKieUploadName(src));
+      body = {
+        model: "topaz/image-upscale",
+        input: {
+          image_url: uploaded,
+          upscale_factor: String(ms.upscale_factor ?? "2"),
+        },
+      };
     } else if (this.modelId === "gpt-image-2") {
       // ── GPT Image 2 via KIE: t2i / i2i via separate endpoints ──────────────
       // Временно проксируем gpt-image-2 через KIE, чтобы не зависеть от прямого
@@ -236,12 +250,43 @@ export class KieImageAdapter implements ImageAdapter {
       // понятный мессадж со списком поддерживаемых форматов вместо generic
       // «generationFailed». notifyOps + dedup: триггер означает, что
       // fileName-fix что-то пропустил — алёртим оператора, но не спамим.
-      if (/file type not supported|invalid image format|unsupported image format/i.test(msg)) {
+      if (
+        /file type not supported|invalid image format|unsupported image format|image format error/i.test(
+          msg,
+        )
+      ) {
         throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
           key: "chatInvalidImage",
           notifyOps: true,
           opsAlertDedupKey: `kie-image-unsupported-format-${this.modelId}`,
         });
+      }
+      // Topaz upscale: результат после увеличения превышает лимит провайдера
+      // («The image exceeds the limit after scaling»). Только для image-upscale
+      // и только по точной фразе — submit-блок общий для всех KIE image-моделей,
+      // широкий `exceeds.*limit` ложно сматчил бы чужие лимиты (nano-banana и т.п.).
+      if (this.modelId === "image-upscale" && /exceeds the limit after scaling/i.test(msg)) {
+        throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
+          key: "upscaleResultTooLarge",
+        });
+      }
+      // 402 «Credits insufficient ... Your current balance isn't enough» — наш
+      // KIE-аккаунт исчерпан, бьёт по всем юзерам до пополнения. Provider-wide
+      // состояние, не вина юзера. Чистая терминальная UserFacingError с ops-
+      // alert'ом (дедуп) в тему BALANCE — вместо plain Error, который жёг бы
+      // BullMQ-ретраи и уходил в общий поток tech-ошибок.
+      if (data.code === 402 || /credits? insufficient|balance.*enough|out of credits/i.test(msg)) {
+        throw new UserFacingError(
+          `KIE credits exhausted (${this.modelId}): ${data.code} — ${msg}`,
+          {
+            key: "modelTemporarilyUnavailable",
+            section: "design",
+            params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+            notifyOps: true,
+            opsAlertDedupKey: "kie-credits-exhausted",
+            opsAlertChannel: "balance",
+          },
+        );
       }
       throw new Error(`KIE image submit failed: ${data.code} — ${msg}`);
     }
@@ -281,6 +326,11 @@ export class KieImageAdapter implements ImageAdapter {
         return oneLine.length > 400 ? `${oneLine.slice(0, 400)}…` : oneLine;
       })();
       const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${sanitizedFailMsg}`;
+      // Topaz upscale: результат превышает лимит провайдера. KIE отдаёт это
+      // и на submit, и (для async-задач) на poll — покрываем обе стадии.
+      if (this.modelId === "image-upscale" && /exceeds the limit after scaling/i.test(rawFailMsg)) {
+        throw new UserFacingError(technicalMessage, { key: "upscaleResultTooLarge" });
+      }
       // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
       // их backend в трауре, но мы передали валидный taskId. Бросаем plain Error
       // (НЕ UserFacingError) чтобы BullMQ ретрайнул и на последней попытке
@@ -332,7 +382,7 @@ export class KieImageAdapter implements ImageAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected|failed (?:the )?review/i.test(
           rawFailMsg,
         );
       // Generic "model couldn't generate for this prompt" — Gemini (KIE

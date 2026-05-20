@@ -32,11 +32,45 @@ export default {
     audio: "🎧 AI Audio",
     video: "🎬 Video of the Future",
     storage: "📁 Media Storage",
+    scenarios: "🎯 Ready-made scenarios",
     help: "❓ Help",
     knowledgeBase: "📖 Knowledge Base",
     language: "🌐 Language",
     chooseLanguage: "Choose a language:",
     languageChanged: "✅ Language changed.",
+  },
+  scenarios: {
+    sectionTitle: "🎯 Ready-made scenarios",
+    sectionTooltip: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    chooseScenario: "🎯 Choose a scenario",
+    faceSwap: "🔄 Face swap",
+    backToMain: "🏠 Back to main menu",
+    faceSwapStep1:
+      "🔄 <b>Face swap — step 1/2</b>\n\nSend a <b>reference photo</b> — the pose, look, and frame you want to appear in.",
+    faceSwapStep2:
+      "🔄 <b>Face swap — step 2/2</b>\n\nSend a <b>photo of your face</b> — close-up, sharp and clear.",
+    faceSwapNotPhoto: "📷 That's not a photo. Please send an image.",
+    faceSwapGenerating: "🎨 Starting face swap...",
+    faceSwapPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
+    faceSwapAlbumNotice:
+      "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
+    faceSwapWelcome:
+      "Put your face onto any reference photo. Pose, framing, outfit and background stay from the reference — only the face changes. The aspect ratio of the result matches the reference.",
+    photoUpscale: "📷 Photo upscale",
+    videoUpscale: "🎬 Video upscale",
+    photoUpscaleWelcome:
+      "Increase the resolution and sharpness of a photo with Topaz AI. Great for old, blurry or low-res shots.",
+    videoUpscaleWelcome:
+      "Increase the resolution and sharpness of a video with Topaz AI. Great for old, blurry or low-quality clips.",
+    photoUpscaleStep: "Send the <b>photo</b> you want to enhance. Maximum is 10 MB.",
+    videoUpscaleStep: "Send the <b>video</b> you want to enhance. Maximum is 20 MB.",
+    upscaleChooseFactor: "Choose the upscale factor 👇",
+    upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
+    upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
+    upscalePhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",
+    upscaleFileTooLarge: "📦 File is too large. Maximum is 20 MB.",
+    upscaleVideoUnreadable: "🎬 Couldn't read the video. Please send an MP4 file.",
+    upscaleGenerating: "✨ Starting upscale...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
@@ -128,6 +162,8 @@ export default {
     voiceCloneSuccess:
       "✅ Voice «{name}» created! It is now available in speech synthesis and video avatar settings.",
     voiceCloneFailed: "❌ Failed to create voice. Please try again later.",
+    voiceCloneProviderUnavailable:
+      "❌ Voice cloning service is temporarily unavailable. Please try again in 1-2 minutes.",
     musicActivated:
       "🎵 Music generation (Suno) activated.\nDescribe the music you want (genre, mood, style) and I will create it.",
     musicElActivated:
@@ -270,6 +306,8 @@ export default {
       "❌ Video is too short ({actual} s). Minimum duration is {min} s. Please upload a different file.",
     mediaSlotDurationTooLong:
       "❌ Video is too long ({actual} s). Maximum duration is {max} s. Trim the video and try again.",
+    firstClipExceedsOutputDuration:
+      "❌ Reference clip duration ({actual} s) must be shorter than the output duration ({requested} s). Trim the clip or increase the output duration setting.",
     mediaSlotDurationOutOfRange:
       "❌ Video length of {actual} s is not accepted. Allowed duration is {min}–{max} s.",
     mediaSlotFileTooLarge: "❌ File is too large ({actualMb} MB). Maximum size is {maxMb} MB.",
@@ -330,6 +368,8 @@ export default {
       "❌ The reference image resolution {width}×{height} ({mp} MP) exceeds the Recraft img2img limit of 16 MP.",
     promptTooLong:
       "❌ Prompt is too long — this model supports up to {limit} characters. Please shorten your text and try again.",
+    providerInputRejected:
+      "❌ Provider rejected the request: {reason}. Try adjusting your parameters or prompt.",
     gptImageModerationBlocked:
       "❌ Your request was rejected by the safety system. Violations: {violations}. Please modify your prompt and try again.",
     audioSensitiveWord:
@@ -357,6 +397,8 @@ export default {
       "🧠 {modelName} only had room to think — no space left for the actual answer. Reasoning is above ☝ Try turning off «Extended thinking», shortening the prompt, or picking another model. Tokens for this request were not charged.",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
+    upscaleResultTooLarge:
+      "📷 This photo's resolution is already too high to enlarge further — the result would exceed what the AI model can process. Please send a lower-resolution photo. Tokens for this request were not charged.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",
     soulMissingAvatar:
       "⚠️ To generate with Higgsfield Soul, select your character in the Management menu.",
@@ -445,6 +487,8 @@ export default {
     runwayRejected: "❌ Runway rejected your request. Please check your settings and try again.",
     runwayImageTooLarge:
       "❌ The image is too large ({size} MB) for Runway. Please send a photo under {limit} MB or compress it.",
+    runwayImageBadAspect:
+      "❌ Image is too elongated for Runway (aspect ratio {got}, minimum {min}). Send a less elongated image.",
     // Replicate
     replicateOom:
       "❌ Input data is too large for this model. Please try reducing the image size or text length.",
@@ -454,6 +498,8 @@ export default {
       "❌ Failed to upload the file for generation. Please check the size (usually up to 50 MB) and file format.",
     replicateContentPolicy:
       "❌ Request rejected by the model. Possible reasons: content policy violation or unsupported file format. Try modifying your prompt or use a different image.",
+    loraUrlInvalid:
+      "❌ The “Extra LoRA” field in model settings is filled incorrectly — it expects a LoRA file URL (HuggingFace / CivitAI / Replicate / .safetensors), not free-form text. Clear this field or replace it with a valid URL.",
     promptNotEnglish:
       '❌ This model only accepts prompts in English. To automatically translate your prompt, enable "Auto-translate prompt" in ⚙ Management.',
     modelDoesNotSupportImages:
@@ -611,6 +657,8 @@ export default {
     tooManyMediaMultiSlot:
       "❌ You uploaded extra files — they were skipped.\n\n{modelName} accepts up to {totalMax} {fileNoun}:\n{breakdown}\n\nTap the buttons below to view the contents.",
     imageSavedSingle: "✅ {slot} uploaded.",
+    klingHeavyCropWarning:
+      "⚠️ Your photo's aspect ratio differs significantly from the selected format {aspect} — with “Autocrop photo to format” enabled, about {percent}% of the image will be cropped. Disable autocrop or pick a format closer to the photo's proportions.",
     slotRequired: '⚠️ "{slot}" is required.',
     replace: "🔄 Replace",
     remove: "Remove",
@@ -644,7 +692,9 @@ export default {
   },
   confirmGeneration: {
     message:
-      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Estimated price: {cost} ✦\n\nStart generation?",
+      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Estimated price: ~{cost} ✦\n\nStart generation?",
+    messagePerSecond:
+      "Model: {model}\n💬 Prompt:\n<blockquote expandable>{prompt}</blockquote>\n\n💰 Price per 1 second of video: {cost} ✦\nThe final price depends on the duration of the generated video and is charged after generation.\n\nStart generation?",
     voicePrompt: "🎵 voice message",
     start: "✅ Start",
     cancel: "❌ Cancel",
@@ -669,6 +719,7 @@ export default {
   },
   modelModes: {
     pickerTitle: "Choose mode:",
+    pickModeFirstForMedia: "Pick a mode first — without one you can't upload photo/file:",
     activated:
       "Mode «{mode}» activated.\n✉️ Send a text prompt to start generation.\n🖼 To attach images — use the slot buttons below.",
     activatedTextOnly: "Mode «{mode}» activated. Send a text prompt to start generation.",

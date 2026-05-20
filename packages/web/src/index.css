@@ -65,8 +65,7 @@
 
   /* Шрифты */
   --font-heading: "Comfortaa", "SF Pro Display", sans-serif;
-  --font-body: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Inter", sans-serif;
+  --font-body: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
 }
 
 *,
@@ -80,7 +79,7 @@
 html,
 body,
 #root {
-	scrollbar-gutter: stable;
+  scrollbar-gutter: stable;
   height: 100%;
   min-height: 100%;
 }
@@ -124,7 +123,8 @@ select {
 /* Headings — Comfortaa */
 .h1,
 .h2,
-.h3 {
+.h3,
+.h4 {
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -159,7 +159,9 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+  transition:
+    transform 180ms var(--ease),
+    border-color 180ms var(--ease),
     box-shadow 180ms var(--ease);
 }
 .card.hoverable:hover {
@@ -180,8 +182,11 @@ select {
   font-weight: 600;
   font-size: 15px;
   white-space: nowrap;
-  transition: transform 150ms var(--ease), background 150ms var(--ease),
-    border-color 150ms var(--ease), box-shadow 150ms var(--ease),
+  transition:
+    transform 150ms var(--ease),
+    background 150ms var(--ease),
+    border-color 150ms var(--ease),
+    box-shadow 150ms var(--ease),
     color 150ms var(--ease);
   user-select: none;
 }
@@ -240,7 +245,9 @@ select {
   border-radius: var(--radius);
   color: var(--text);
   font-size: 16px; /* prevent iOS zoom */
-  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    background 150ms var(--ease);
   outline: none;
 }
 .input::placeholder {
@@ -298,12 +305,7 @@ select {
 
 /* ===== Skeleton ===== */
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-elevated) 0%,
-    #25252c 50%,
-    var(--bg-elevated) 100%
-  );
+  background: linear-gradient(90deg, var(--bg-elevated) 0%, #25252c 50%, var(--bg-elevated) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
   border-radius: var(--radius-sm);
@@ -358,12 +360,22 @@ select {
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.5px;
-  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 6px 18px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .topnav .brand-text {
   font-size: 18px;
 }
 
+/* Hover-зона вокруг cap-tabs: padding 12px + margin -12px → визуально не меняет
+   layout, но расширяет hit-area, чтобы вертикальный overshoot курсором (выход
+   на 1-10px выше/ниже кнопок) не считался "leave" и не дёргал scheduleClose. */
+.cap-tabs-zone {
+  display: inline-flex;
+  padding: 12px;
+  margin: -12px;
+}
 .cap-tabs {
   display: inline-flex;
   align-items: center;
@@ -371,10 +383,16 @@ select {
   border: 1px solid var(--border);
   padding: 4px;
   border-radius: 12px;
-  gap: 2px;
+  /* gap: 0 — gap между cap-wrap'ами создавал dead-zone, где курсор не на одной
+     из кнопок. Вместо этого даём cap-wrap'ам internal padding (см. ниже). */
+  gap: 0;
 }
 .cap-wrap {
   position: relative;
+  /* 1px padding по горизонтали + 0 margin → между кнопками визуально 2px зазор
+     (1+1 от соседних cap-wrap'ов), а hit-area cap-wrap'ов смыкается → курсор
+     никогда не оказывается "между" cap-wrap'ами. */
+  padding: 0 1px;
 }
 .mega-menu {
   position: absolute;
@@ -536,7 +554,9 @@ select {
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 500;
-  transition: color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    color 150ms var(--ease),
+    background 150ms var(--ease);
   white-space: nowrap;
 }
 .cap-tabs .cap:hover {
@@ -556,7 +576,9 @@ select {
   height: 5px;
   border-radius: 50%;
   background: var(--text-hint);
-  transition: background 150ms var(--ease), box-shadow 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    box-shadow 150ms var(--ease);
 }
 .cap-tabs .cap.soon {
   opacity: 0.55;
@@ -601,7 +623,9 @@ select {
   height: 18px;
   border-radius: 50%;
   background: var(--accent-gradient);
-  box-shadow: 0 0 12px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 0 12px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .tn-balance .b-val {
   font-variant-numeric: tabular-nums;
@@ -609,6 +633,12 @@ select {
 }
 .tn-balance .b-lbl {
   color: var(--text-secondary);
+}
+/* Иконка-замена для «tokens»: показываем `Sparkles` в цвете акцента,
+   чтобы было визуально консистентно с CTA на кнопке Generate. */
+.tn-balance .b-ico {
+  color: var(--accent-light);
+  flex-shrink: 0;
 }
 .tn-balance .b-plus {
   width: 22px;
@@ -630,7 +660,9 @@ select {
   color: var(--text-secondary);
   background: transparent;
   position: relative;
-  transition: background 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .tn-icon-btn:hover {
   background: var(--bg-elevated);
@@ -656,7 +688,9 @@ select {
   border-radius: 999px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    background 150ms var(--ease);
 }
 .account-btn:hover {
   border-color: var(--accent);
@@ -735,7 +769,9 @@ select {
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 500;
-  transition: background 120ms var(--ease), color 120ms var(--ease);
+  transition:
+    background 120ms var(--ease),
+    color 120ms var(--ease);
 }
 .menu-item:hover {
   background: var(--bg-elevated);
@@ -873,16 +909,22 @@ select {
   color: #fff;
   display: grid;
   place-items: center;
-  box-shadow: var(--shadow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow:
+    var(--shadow-accent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
   margin-top: -22px;
   border: 4px solid var(--bg);
-  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
+  transition:
+    transform 180ms var(--ease),
+    box-shadow 180ms var(--ease);
 }
 .bottom-nav .bn-center:active .bn-fab {
   transform: translateY(1px) scale(0.97);
 }
 .bottom-nav .bn-center.active .bn-fab {
-  box-shadow: 0 6px 28px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 6px 28px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .bottom-nav .bn-center span:last-child {
   font-weight: 600;
@@ -1022,6 +1064,13 @@ select {
   justify-content: flex-end;
 }
 .msg .bubble {
+  /* fit-content нужен, иначе короткие сообщения (типа «Тест») сжимаются ниже
+     content-width: bubble — flex item в `.msg.user .msg-block` (column +
+     align-items:end + min-width:0), а `max-width: 78%` создаёт круговую
+     зависимость с auto-width → браузер резолвит в маленькую цифру и текст
+     вылезает за padding. `fit-content` заставляет считать ширину как
+     content+padding, при этом capается `max-width: 78%` для длинных строк. */
+  width: fit-content;
   max-width: 78%;
   padding: 14px 18px;
   border-radius: 18px;
@@ -1044,6 +1093,17 @@ select {
      («Тест», «ок») в `14px` смотрелись пухло. Горизонтальное padding'и
      одинаковые с AI, чтобы текст не упирался в рамку. */
   padding: 10px 18px;
+}
+.msg.user .msg-block {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+}
+.msg.ai .msg-block {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .msg .ai-mark {
   width: 32px;
@@ -1104,7 +1164,9 @@ select {
 }
 .composer-inner:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 4px var(--accent-lighter);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 4px var(--accent-lighter);
 }
 .composer-row {
   display: flex;
@@ -1153,7 +1215,9 @@ select {
   color: var(--text-secondary);
   display: grid;
   place-items: center;
-  transition: background 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .composer .tool:hover {
   background: var(--bg-elevated);
@@ -1533,8 +1597,13 @@ select {
 }
 .mp-pop {
   position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
+
+  /* Move the openned menu to the bottom insted of the top */
+  left: -50%;
+  top: calc(100% + 8px);
+  /* bottom: calc(100% + 8px); */
+  /* left: 0; */
+
   width: 320px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -1952,11 +2021,15 @@ select {
   border: 1px solid var(--border-strong);
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
-  transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    box-shadow 180ms var(--ease);
 }
 .home-prompt:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(74, 141, 245, 0.12);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 4px rgba(74, 141, 245, 0.12);
 }
 .home-prompt input {
   flex: 1;
@@ -2097,7 +2170,9 @@ select {
   flex-direction: column;
   gap: 14px;
   min-height: 168px;
-  transition: transform 200ms var(--ease), border-color 200ms var(--ease),
+  transition:
+    transform 200ms var(--ease),
+    border-color 200ms var(--ease),
     box-shadow 200ms var(--ease);
   overflow: hidden;
 }
@@ -2149,7 +2224,9 @@ select {
   align-items: center;
   gap: 4px;
   color: var(--text-secondary);
-  transition: color 150ms var(--ease), transform 200ms var(--ease);
+  transition:
+    color 150ms var(--ease),
+    transform 200ms var(--ease);
 }
 .tool-tile:hover .ti-foot .arr {
   color: var(--accent-light);
@@ -2180,7 +2257,9 @@ select {
   border: 1px solid var(--border);
   border-radius: 18px;
   overflow: hidden;
-  transition: transform 220ms var(--ease), border-color 220ms var(--ease),
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   display: flex;
   flex-direction: column;
@@ -2378,7 +2457,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease);
 }
 .recent-card:hover {
   border-color: var(--accent);
@@ -2449,7 +2530,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease),
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease),
     background 180ms var(--ease);
   cursor: pointer;
 }
@@ -2505,9 +2588,15 @@ select {
   border-radius: var(--radius-xl);
   padding: 26px;
   box-shadow: var(--shadow-sm);
-  transition: transform 220ms var(--ease), border-color 220ms var(--ease),
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   overflow: hidden;
+  /* Flex column → нижняя CTA-кнопка с `margin-top: auto` прижимается к низу
+     карточки даже когда контента у соседей больше. */
+  display: flex;
+  flex-direction: column;
 }
 .plan:hover {
   transform: translateY(-3px);
@@ -2515,10 +2604,13 @@ select {
   box-shadow: var(--shadow-md);
 }
 .plan.featured {
-  background: radial-gradient(120% 90% at 0% 0%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 55%),
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 55%),
     var(--bg-card);
   border-color: rgba(74, 141, 245, 0.35);
-  box-shadow: var(--shadow-md), 0 0 0 1px rgba(74, 141, 245, 0.2);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px rgba(74, 141, 245, 0.2);
 }
 .plan .ribbon {
   position: absolute;
@@ -2558,6 +2650,56 @@ select {
   font-size: 24px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/* Period selector — горизонтальный ряд chip'ов внутри `.plan` (1мес/3мес/...). */
+.plan-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.plan-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 120ms var(--ease),
+    color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+.plan-period:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period.on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.plan-period-off {
+  font-size: 11px;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+/* Зачёркнутая «была-цена» под актуальной — для подписок 3/6/12 мес. */
+.plan-old-price {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.plan-save {
+  color: var(--accent-light);
+  font-weight: 600;
+  margin-left: 8px;
 }
 .plan .feat-list {
   display: flex;
@@ -2602,7 +2744,9 @@ select {
   border-radius: var(--radius-lg);
   padding: 22px;
   cursor: pointer;
-  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+  transition:
+    transform 180ms var(--ease),
+    border-color 180ms var(--ease),
     box-shadow 180ms var(--ease);
   position: relative;
 }
@@ -2613,7 +2757,10 @@ select {
 }
 .pack.selected {
   border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent), 0 0 0 6px var(--accent-lighter);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px var(--accent),
+    0 0 0 6px var(--accent-lighter);
 }
 .pack .pack-amount {
   font-family: var(--font-heading);
@@ -2768,7 +2915,11 @@ select {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(60% 80% at 80% 20%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 60%);
+  background: radial-gradient(
+    60% 80% at 80% 20%,
+    rgba(74, 141, 245, 0.18) 0%,
+    rgba(74, 141, 245, 0) 60%
+  );
 }
 .token-orb {
   position: relative;
@@ -2777,8 +2928,10 @@ select {
   margin-left: auto;
   border-radius: 50%;
   background: radial-gradient(circle at 30% 25%, #6ba3f7 0%, #3a7de5 40%, #1e3a7e 80%);
-  box-shadow: 0 30px 90px rgba(74, 141, 245, 0.35),
-    inset 0 -20px 50px rgba(0, 0, 0, 0.4), inset 0 20px 50px rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 30px 90px rgba(74, 141, 245, 0.35),
+    inset 0 -20px 50px rgba(0, 0, 0, 0.4),
+    inset 0 20px 50px rgba(255, 255, 255, 0.15);
   animation: float 6s ease-in-out infinite;
 }
 .token-orb::after {
@@ -2831,7 +2984,9 @@ select {
   border-radius: 999px;
   position: relative;
   cursor: pointer;
-  transition: background 150ms var(--ease), border-color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    border-color 150ms var(--ease);
 }
 .toggle::after {
   content: "";
@@ -2842,7 +2997,9 @@ select {
   height: 16px;
   border-radius: 50%;
   background: var(--text-secondary);
-  transition: transform 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    transform 150ms var(--ease),
+    background 150ms var(--ease);
 }
 .toggle.on {
   background: var(--accent);
@@ -2909,7 +3066,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease);
 }
 .tx-row:hover {
   transform: translateY(-1px);
@@ -3037,7 +3196,8 @@ select {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: radial-gradient(80% 60% at 20% 10%, rgba(74, 141, 245, 0.16) 0%, rgba(74, 141, 245, 0) 60%),
+  background:
+    radial-gradient(80% 60% at 20% 10%, rgba(74, 141, 245, 0.16) 0%, rgba(74, 141, 245, 0) 60%),
     radial-gradient(60% 50% at 90% 90%, rgba(74, 141, 245, 0.12) 0%, rgba(74, 141, 245, 0) 60%),
     var(--bg-card);
   border-right: 1px solid var(--border);
@@ -3049,7 +3209,8 @@ select {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(60% 60% at 30% 40%, #000 0%, transparent 70%);
@@ -3113,7 +3274,9 @@ select {
   font-weight: 700;
   font-size: 16px;
   letter-spacing: -0.5px;
-  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 6px 18px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .auth-form .h2 {
   margin: 0 0 6px;
@@ -4214,7 +4377,9 @@ select {
   gap: 14px;
 }
 
-.gen-panel {
+/* Legacy `.gen-page` grid (старый layout). Скоупим, чтобы не конфликтовать
+   с новым `.gen-panel` в `.gen-scene` (v2). */
+.gen-page .gen-panel {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -4226,7 +4391,7 @@ select {
   position: sticky;
   top: calc(var(--topbar-h) + 16px);
 }
-.app.mobile .gen-panel {
+.app.mobile .gen-page .gen-panel {
   position: static;
 }
 .gen-panel-head {
@@ -4295,7 +4460,9 @@ select {
   color: var(--text-secondary);
   font-size: 12.5px;
   font-weight: 500;
-  transition: border-color 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .gen-chip:hover {
   color: var(--text);
@@ -4339,7 +4506,9 @@ select {
   font-weight: 600;
   font-size: 14px;
   box-shadow: var(--shadow-accent);
-  transition: transform 120ms var(--ease), box-shadow 150ms var(--ease);
+  transition:
+    transform 120ms var(--ease),
+    box-shadow 150ms var(--ease);
 }
 .gen-cta:hover {
   transform: translateY(-1px);
@@ -4406,14 +4575,22 @@ select {
   margin-right: -50vw;
   width: 100vw;
   max-width: 100vw;
-  min-height: calc(100vh - var(--topbar-h));
+  /* Фиксированная высота под viewport — страница не скроллится, скроллится
+     только `.gen-panel-scroll` внутри панели. */
+  height: calc(100vh - var(--topbar-h));
+  overflow: hidden;
   background: var(--bg);
-  padding: 32px 24px 48px;
+  padding: 24px 24px 24px 36px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start; /* панель слева, справа — место под результат */
+  align-items: stretch;
+  gap: 24px;
 }
 .app.mobile .gen-scene {
-  padding: 20px 14px calc(var(--mobile-nav-h) + 24px);
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-h));
+  padding: 14px;
+  /* Mobile: панель растягивается на всю ширину, gap не нужен. */
+  gap: 0;
 }
 .gen-bg {
   position: absolute;
@@ -4421,33 +4598,106 @@ select {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 80% at 50% 0%, var(--accent-lighter) 0%, transparent 60%),
-    radial-gradient(ellipse 40% 60% at 50% 100%, rgba(74, 141, 245, 0.04) 0%, transparent 70%);
+    radial-gradient(ellipse 60% 80% at 30% 0%, var(--accent-lighter) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 60% at 70% 100%, rgba(74, 141, 245, 0.04) 0%, transparent 70%);
 }
 
 .gen-panel {
   position: relative;
   z-index: 1;
-  width: 100%;
-  max-width: 520px;
+  flex: 0 0 auto;
+  width: 420px;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
+}
+.app.mobile .gen-panel {
+  width: 100%;
 }
 
+/* Скроллящийся middle-блок: слоты + промпт + chip-настройки. */
+.gen-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: visible; /* chip popover'ы могут торчать вправо */
+  /* Внутренний gap между блоками — slots / prompt / settings. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Невидимый скроллбар на webkit (видно только при hover'е). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  padding-right: 4px;
+}
+.gen-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.gen-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gen-panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* Прибитый low-pane: model picker + CTA. */
+.gen-panel-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.gen-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 2rem;
+}
 .gen-head h1 {
   font-family: var(--font-heading);
-  font-size: clamp(24px, 3vw, 32px);
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .gen-head .gen-sub {
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--text-secondary);
   margin: 0;
+}
+.gen-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.gen-reset-btn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+/* Mode tabs тоже фикс'нутые — над scroll-блоком. */
+.gen-scene .gen-mode-tabs {
+  flex: 0 0 auto;
 }
 
 /* Mode tabs — underline-style, как в референсе. */
@@ -4661,14 +4911,15 @@ select {
 /* Prompt textarea. */
 .gen-scene .gen-prompt {
   width: 100%;
-  min-height: 100px;
+  min-height: 80px;
+  max-height: 220px;
   resize: vertical;
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 12px 14px;
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--text);
   font-family: var(--font-body);
   transition: border-color 150ms var(--ease);
@@ -4682,45 +4933,336 @@ select {
   color: var(--text-hint);
 }
 
-/* Settings card — стэк из контролов. */
-.gen-settings {
+/* Settings v2 — flex-row wrap из chip-pill'ов. Каждый chip отображает
+   `Label : Value` и при клике открывает popover с фактическим контролом.
+   Высота блока минимальная — chip'ы переносятся в новую строку. */
+.gen-settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* ── Generation history pane ───────────────────────────────────────────────
+   Правая пэйн в `.gen-scene` — занимает всё пространство справа от `.gen-panel`.
+   Сам контейнер прокручивается отдельно от панели (у панели свой скролл
+   внутри `.gen-panel-scroll`). На мобильных скрываем — там панель full-width. */
+.gen-history-pane {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 4px 4px 0;
+  /* Тонкий скроллбар, как у `.gen-panel-scroll` — единый стиль. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.gen-history-pane::-webkit-scrollbar {
+  width: 6px;
+}
+.gen-history-pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gen-history-pane::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.app.mobile .gen-history-pane {
+  display: none;
+}
+
+/* ── Generation history ────────────────────────────────────────────────────
+   Карточки последних генераций для текущего семейства моделей. Pending
+   карточки сверху (с лоадером/ошибкой), завершённые с outputs снизу. */
+.gen-history {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px;
 }
-.gen-set {
+.gen-history-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-hint);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.gen-history-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.gen-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gen-history-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
-.gen-set-toggle {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.gen-history-card.is-pending {
+  border-style: dashed;
+  background: var(--bg-elevated);
 }
-.gen-set-label {
+.gen-history-card.is-error {
+  border-color: var(--danger, #d44);
+  background: rgba(220, 50, 50, 0.06);
+}
+.gen-history-card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
-}
-.gen-set-desc {
-  font-size: 11.5px;
-  font-weight: 400;
+  gap: 6px;
+  font-size: 12px;
   color: var(--text-hint);
 }
-.gen-set-val {
-  font-size: 13px;
-  color: var(--accent-light);
+.gen-history-card.is-error .gen-history-card-head {
+  color: var(--danger, #d44);
   font-weight: 600;
+}
+.gen-history-card-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.gen-history-card-prompt {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  /* 2-line clamp — длинные промпты не должны раздувать карточку. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gen-history-card-error {
+  font-size: 12.5px;
+  color: var(--danger, #d44);
+  word-break: break-word;
+}
+.gen-history-card-dismiss {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-hint);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.gen-history-card-dismiss:hover {
+  color: var(--text);
+}
+.gen-history-card-outputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.gen-history-output {
+  width: 100%;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  display: block;
+  object-fit: cover;
+  aspect-ratio: 1 / 1;
+}
+.gen-history-output--audio {
+  aspect-ratio: auto;
+  height: 36px;
+  grid-column: 1 / -1;
+}
+.gen-history-output--placeholder {
+  aspect-ratio: 1 / 1;
+  border: 1px dashed var(--border);
+}
+.gen-history-output-btn {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  line-height: 0;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.gen-history-output-btn:hover .gen-history-output {
+  filter: brightness(1.05);
+}
+
+/* ── Media preview lightbox (in-app) ─────────────────────────────────────
+   Открывается кликом по output-thumb. Backdrop кликабельный (close), сам
+   контент — нет (stopPropagation на враппере). */
+.gen-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.gen-preview-content {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+}
+.gen-preview-media {
+  display: block;
+  max-width: 100%;
+  /* На всю высоту окна минус paddings backdrop'а. */
+  max-height: calc(100vh - 48px);
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  background: #000;
+}
+.gen-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 120ms var(--ease);
+}
+.gen-preview-close:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.gen-chip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.gen-chip-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.gen-chip-pill.is-open {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.gen-chip-pill.is-on {
+  background: var(--accent-lighter);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.gen-chip-pill-label {
+  font-weight: 500;
+  color: var(--text-hint);
+}
+.gen-chip-pill.is-on .gen-chip-pill-label,
+.gen-chip-pill.is-open .gen-chip-pill-label {
+  color: var(--accent-light);
+}
+.gen-chip-pill-val {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gen-chip-pill.is-on .gen-chip-pill-val,
+.gen-chip-pill.is-open .gen-chip-pill-val {
+  color: var(--accent-light);
+}
+.gen-chip-pill-swatch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  text-transform: uppercase;
+  font-size: 11.5px;
+}
+.gen-chip-pill-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+/* Popover — рендерится в portal'е (document.body) с `position: fixed`,
+   позицию ставит ChipPopover через inline-style. Не клипается scroll-контейнерами. */
+.gen-chip-pop {
+  z-index: 60;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  padding: 12px;
+}
+.gen-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gen-pop-desc {
+  font-size: 11.5px;
+  color: var(--text-hint);
+  line-height: 1.4;
+}
+
+/* Опции / step'ы slider'а — компактный список столбиком с вертикальным скроллом.
+   Один и тот же layout на desktop и mobile: chip на всю ширину popover'а,
+   длинный список вертикально scroll'ится. */
+.gen-pop-chips-row {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(50vh, 320px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.gen-pop-chips-row::-webkit-scrollbar {
+  width: 6px;
+}
+.gen-pop-chips-row::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gen-pop-chips-row::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.gen-pop-chips-row .gen-chip {
+  width: 100%;
+  justify-content: flex-start;
+  flex: 0 0 auto;
 }
 
 /* Chip-row для select/dropdown. */
@@ -4892,18 +5434,15 @@ select {
   text-overflow: ellipsis;
 }
 .gen-model-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  /* Позиционирование (top/left/width) и max-height/overflow задаются inline
+     из ChipPopover — динамически считаются по доступному пространству и
+     ширине anchor'а. */
+  z-index: 60;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 6px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-  max-height: 420px;
-  overflow-y: auto;
 }
 .gen-model-row-item {
   width: 100%;
@@ -4954,6 +5493,9 @@ select {
   gap: 8px;
   width: 100%;
   height: 52px;
+  /* Боковой padding: иконка + label не упирается в левый край, цена — в правый.
+     `.gen-cta-cost` имеет margin-left: auto и отжимается к правому отступу. */
+  padding: 0 18px;
   border-radius: var(--radius);
   background: var(--accent-gradient);
   color: var(--text-on-accent);
@@ -4973,11 +5515,18 @@ select {
   box-shadow: 0 8px 28px var(--accent-glow);
 }
 .gen-scene .gen-cta:disabled {
-  opacity: 0.5;
+  /* Не приглушаем визуально — лейбл кнопки сам сообщает что мешает старту
+     («Введите запрос», «Загрузите файл …»). Оставляем только not-allowed
+     курсор как hover-сигнал. Override'им глобальный `.gen-cta:disabled
+     { opacity: 0.55 }` (legacy-правило для других CTA, см. выше). */
+  opacity: 1;
   cursor: not-allowed;
 }
 .gen-cta-cost {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12.5px;
   font-weight: 600;
   opacity: 0.85;
@@ -5035,11 +5584,10 @@ select {
   z-index: 2;
   width: 360px;
   flex-shrink: 0;
-  align-self: flex-start;
-  /* Sticky чтобы при длинном .gen-panel'е picker не уплывал вниз. */
-  position: sticky;
-  top: calc(var(--topbar-h) + 16px);
-  max-height: calc(100vh - var(--topbar-h) - 64px);
+  align-self: stretch;
+  /* `.gen-scene` уже viewport-bound + overflow:hidden, поэтому sticky не нужен.
+     Picker растягивается на всю высоту scene'а; внутренний контент скроллится. */
+  max-height: 100%;
   background: var(--bg-secondary);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -5279,6 +5827,371 @@ select {
   padding: 0 2px;
 }
 
+/* ── User-avatars section (Мои аватары / Мои персонажи) ────────────────── */
+.media-picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+.media-picker-section + .media-picker-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+.media-picker-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-hint);
+  padding: 0 2px;
+}
+.media-picker-create-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.media-picker-create-link:hover {
+  background: var(--surface-2);
+}
+
+/* User-tile отличается от каталога: внутри thumb — отдельная кнопка,
+   а под именем — actions-menu (rename/delete). */
+.media-pick-user-tile {
+  cursor: default;
+  background: var(--surface-2);
+  padding: 6px;
+  border-radius: 12px;
+}
+.media-pick-user-tile.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+.media-pick-user-tile.is-disabled .media-pick-thumb {
+  opacity: 0.55;
+}
+.media-pick-thumb-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.media-pick-thumb-btn:disabled {
+  cursor: not-allowed;
+}
+.media-pick-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.media-pick-overlay .spin {
+  animation: gen-spin 1s linear infinite;
+}
+/* Глобальный fallback — крутим любой `.spin` (Loader2 от lucide-react)
+   там, где скоупленные правила выше не покрывают. */
+.spin {
+  animation: gen-spin 1s linear infinite;
+}
+@keyframes gen-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.media-pick-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 4px;
+  position: relative;
+}
+.media-pick-actions {
+  position: relative;
+}
+.media-pick-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-hint);
+  cursor: pointer;
+}
+.media-pick-actions-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.media-pick-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 150px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.media-pick-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.media-pick-menu button:hover {
+  background: var(--surface-2);
+}
+.media-pick-menu button.is-danger {
+  color: var(--error, #e25b5b);
+}
+.media-pick-tile.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* ── Create-avatar modal (HeyGen single / Soul multi) ─────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-hint);
+  cursor: pointer;
+}
+.modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-hint);
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-hint);
+}
+.modal-field input[type="text"] {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.modal-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.modal-error {
+  font-size: 13px;
+  color: var(--error, #e25b5b);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--error, #e25b5b) 12%, transparent);
+  border-radius: 8px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.modal-actions .btn {
+  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.modal-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.modal-actions .btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.modal-actions .btn--ghost:hover:not(:disabled) {
+  background: var(--surface);
+}
+.modal-actions .btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+.modal-actions .btn--primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.modal-actions .btn .spin {
+  animation: gen-spin 1s linear infinite;
+}
+.create-avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.create-avatar-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.create-avatar-tile.is-error {
+  border-color: var(--error, #e25b5b);
+}
+.create-avatar-tile.is-uploading {
+  opacity: 0.7;
+}
+.create-avatar-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.create-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px;
+}
+.create-avatar-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+.create-avatar-remove:hover {
+  background: var(--error, #e25b5b);
+}
+.create-avatar-add {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-hint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.create-avatar-add:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.create-avatar-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Color picker — native input + hex текст. */
 .gen-color-row {
   display: flex;
@@ -5343,4 +6256,153 @@ select {
       transform: translateY(0);
     }
   }
+}
+
+/* ── Chat: gear → settings popover ─────────────────────────────────────────── */
+
+.composer .tool.is-open {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.chat-settings-pop {
+  z-index: 60;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  padding: 14px;
+}
+
+/* Cap the panel height so ChipPopover's measured scrollHeight stays bounded —
+   otherwise expanding "Advanced" makes the popup taller and ChipPopover re-anchors
+   the popover further up the viewport. Inner scroll keeps the gear popup
+   anchored predictably near the composer. */
+.chat-settings-pop .settings-panel {
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  /* Reserve scrollbar gutter so chip rows don't shift when scrollbar toggles. */
+  scrollbar-gutter: stable;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-panel-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-panel-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.settings-panel-desc {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-hint);
+}
+
+/* Settings panel reuses .gen-pop-body / .gen-pop-chips-row / .gen-chip from
+   the generate scene — they already match the visual language and live in
+   .composer-row context. No extra rules needed for slider/select/text/number. */
+
+.settings-panel-textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 240px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  outline: none;
+  transition: border-color 150ms var(--ease);
+}
+.settings-panel-textarea:focus {
+  border-color: var(--accent, #4a8df5);
+}
+
+.settings-panel-toggle {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.settings-panel-toggle-track {
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  position: relative;
+  transition:
+    background 160ms var(--ease),
+    border-color 160ms var(--ease);
+}
+.settings-panel-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition:
+    transform 160ms var(--ease),
+    background 160ms var(--ease);
+}
+.settings-panel-toggle.on .settings-panel-toggle-track {
+  background: var(--accent, #4a8df5);
+  border-color: var(--accent, #4a8df5);
+}
+.settings-panel-toggle.on .settings-panel-toggle-thumb {
+  background: #fff;
+  transform: translateX(16px);
+}
+
+.settings-panel-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.settings-panel-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  align-self: flex-start;
+}
+.settings-panel-advanced-toggle:hover {
+  color: var(--text);
+}
+.settings-panel-advanced-arrow {
+  transition: transform 160ms var(--ease);
+}
+.settings-panel-advanced-toggle.open .settings-panel-advanced-arrow {
+  transform: rotate(180deg);
 }

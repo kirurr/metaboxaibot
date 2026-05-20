@@ -159,18 +159,21 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { aibUserId, metaboxUserId } = request.webUser!;
+      const { telegramId, metaboxUserId } = request.webUser!;
       const { planId, period } = request.body ?? {};
       if (!planId || !period) return reply.code(400).send({ error: "planId и period обязательны" });
       if (!["M1", "M3", "M6", "M12"].includes(period))
         return reply.code(400).send({ error: "Некорректный period" });
+      // webTelegramLinkedPreHandler гарантирует aibUserId !== null, но telegramId
+      // может быть null если User создан без TG-привязки (web-only signup).
+      if (!telegramId) return reply.code(409).send({ error: "Telegram is not linked" });
 
       try {
         const result = await createSubscriptionInvoice({
           metaboxUserId,
           planId,
           period,
-          telegramId: aibUserId!,
+          telegramId,
         });
         return reply.send({
           orderId: result.subscriptionId,
@@ -214,15 +217,16 @@ export const webBillingRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { aibUserId, metaboxUserId } = request.webUser!;
+      const { telegramId, metaboxUserId } = request.webUser!;
       const { productId } = request.body ?? {};
       if (!productId) return reply.code(400).send({ error: "productId обязателен" });
+      if (!telegramId) return reply.code(409).send({ error: "Telegram is not linked" });
 
       try {
         const result = await createAiBotInvoice({
           metaboxUserId,
           productId,
-          telegramId: aibUserId!,
+          telegramId,
         });
         return reply.send({
           orderId: result.orderId,

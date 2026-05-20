@@ -4,13 +4,14 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
   uploadFileUrl,
   uploadFileUrlCroppedToAspect,
 } from "../../utils/kie-upload.js";
+import { KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
 
@@ -151,7 +152,18 @@ export class KieVideoAdapter implements VideoAdapter {
 
     let model: string;
 
-    if (klingMotionMode) {
+    if (this.modelId === "video-upscale") {
+      // ── KIE Topaz Video Upscaler ───────────────────────────────────────────
+      // Доступна только через готовый сценарий «Апскейл видео». Промпта нет —
+      // upscale_factor приходит из modelSettings (выбор юзера inline-кнопками).
+      model = "topaz/video-upscale";
+      const srcVideo = mi.motion_video?.[0] ?? input.imageUrl;
+      if (!srcVideo) throw new Error("KIE video-upscale: source video is required");
+      const uploaded = await uploadFileUrl(this.apiKey, srcVideo);
+      delete inputPayload.prompt;
+      inputPayload.video_url = uploaded;
+      inputPayload.upscale_factor = String(ms.upscale_factor ?? "2");
+    } else if (klingMotionMode) {
       // ── Kling 3.0 motion-control ──────────────────────────────────────────
       model = "kling-3.0/motion-control";
 
@@ -200,13 +212,16 @@ export class KieVideoAdapter implements VideoAdapter {
       // output под dimensions входной картинки (kling3.md §"Aspect Ratio
       // Auto-Adaptation"). Чтобы выбор юзера всегда побеждал, центр-кропаем
       // все картинки попадающие в image_urls под target aspect ПЕРЕД upload —
-      // тогда auto-adapt даёт ровно тот ratio, что выбран. Кропаем только
-      // если aspect ∈ Kling-поддерживаемые: parseAspectRatio пропустил бы
-      // "4:3"/"21:9" (валидный формат, но Kling всё равно отдаст 400 потом —
-      // wasted CPU на crop). Для unsupported → uncropped upload (KIE сам
-      // ответит 400 быстро, без нашей лишней работы).
-      const KLING_SUPPORTED_ASPECTS = ["16:9", "9:16", "1:1"];
-      const isCroppableAspect = KLING_SUPPORTED_ASPECTS.includes(targetAspect);
+      // тогда auto-adapt даёт ровно тот ratio, что выбран. Кроп — opt-in
+      // (setting `crop_to_aspect`, default OFF): по умолчанию юзер получает
+      // прежнее поведение (видео в формате фото), а тогл явно сигнализирует
+      // что он готов потерять края кадра ради выбранного aspect. Кропаем
+      // только если aspect ∈ KLING_SUPPORTED_ASPECTS: остальные ratio'и
+      // ("4:3"/"21:9" и т.п.) Kling всё равно отдаёт 400 — wasted CPU на
+      // crop. Для unsupported → uncropped upload (KIE сам ответит 400
+      // быстро, без нашей лишней работы).
+      const cropEnabled = ms.crop_to_aspect === true;
+      const isCroppableAspect = cropEnabled && KLING_SUPPORTED_ASPECTS.includes(targetAspect);
       const uploadForImageUrls = (url: string): Promise<string> =>
         isCroppableAspect
           ? uploadFileUrlCroppedToAspect(this.apiKey, url, targetAspect, buildKieUploadName(url))
@@ -422,6 +437,24 @@ export class KieVideoAdapter implements VideoAdapter {
     const data = (await resp.json()) as KieSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
       const msg = data.msg ?? "";
+      // 402 «Credits insufficient» — KIE-аккаунт пуст. Provider-wide состояние,
+      // не вина юзера. Терминальная UserFacingError с ops-alert'ом (balance,
+      // дедуп). `submitWithFallback` распознаёт её через `isKieCreditsExhausted`
+      // и переключается на fallback-провайдера (если зарегистрирован) — иначе
+      // юзер упирался бы в «модель недоступна» пока KIE без денег.
+      if (data.code === 402 || /credits? insufficient|balance.*enough|out of credits/i.test(msg)) {
+        throw new UserFacingError(
+          `KIE credits exhausted (${this.modelId}): ${data.code} — ${msg}`,
+          {
+            key: "modelTemporarilyUnavailable",
+            section: "video",
+            params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+            notifyOps: true,
+            opsAlertDedupKey: "kie-credits-exhausted",
+            opsAlertChannel: "balance",
+          },
+        );
+      }
       const durationMatch = /video duration must be between (\d+) and (\d+)/i.exec(msg);
       if (durationMatch) {
         throw new UserFacingError(`KIE: ${msg}`, {
@@ -510,7 +543,7 @@ export class KieVideoAdapter implements VideoAdapter {
       const isPolicy =
         failCode === "430" ||
         failCode === "431" ||
-        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected/i.test(
+        /sensitive|restrict|policy|prohibited|nsfw|violat|inappropriate|safety|content moderation|blocked|(prompt|request|input|content) (was |is )?rejected|failed (?:the )?review/i.test(
           failMsg,
         );
       // Kling Motion: ошибки про невалидное reference-фото. Включают:

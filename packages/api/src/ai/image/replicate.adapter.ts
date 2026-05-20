@@ -1,6 +1,6 @@
 import Replicate from "replicate";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logger } from "../../logger.js";
 import { logCall } from "../../utils/fetch.js";
 import { parseReplicatePredictionFailure } from "../../utils/replicate-error.js";
@@ -34,10 +34,37 @@ const MODEL_IDS: Record<string, string> = {
   "imagen-4-fast": "google/imagen-4-fast",
   "imagen-4": "google/imagen-4",
   "imagen-4-ultra": "google/imagen-4-ultra",
+  // Специализированный face-swap (InsightFace). Community-модель — у неё нет
+  // deployment-endpoint'а (POST /models/.../predictions → 404), поэтому пиним
+  // версию явно (POST /predictions с version). Параметры: input_image (сцена) +
+  // swap_image (лицо). Без prompt.
+  "face-swap-classic":
+    "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
+  // Topaz image upscaler — fallback для KIE primary `image-upscale`. Official
+  // Replicate model → deployment endpoint (owner/name, без пина версии).
+  "image-upscale": "topazlabs/image-upscale",
 };
+
+/**
+ * KIE `upscale_factor` ("1"/"2"/"4"/"8") → Replicate Topaz формат ("2x"/"4x"/"6x").
+ * Replicate Topaz масштабирует максимум до 6x, поэтому KIE-значение 8 клампится
+ * до "6x" (на fallback теряем часть увеличения — допустимая деградация).
+ */
+function kieFactorToReplicate(factor: string): string {
+  if (factor === "8") return "6x";
+  if (factor === "4") return "4x";
+  return "2x";
+}
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
 const IDEOGRAM_MODELS = new Set(["ideogram-quality", "ideogram-balanced", "ideogram-turbo"]);
+
+/**
+ * Dedicated face-swap models — принимают пару картинок (input_image + swap_image)
+ * и НЕ принимают prompt. Обрабатываются отдельной веткой в submit().
+ * mediaInputs.edit: [0] = input_image (сцена), [1] = swap_image (лицо).
+ */
+const FACE_SWAP_MODELS = new Set(["face-swap-classic"]);
 
 /**
  * Replicate adapter — async image generation.
@@ -76,8 +103,82 @@ export class ReplicateAdapter implements ImageAdapter {
     return { width: input.width ?? 1024, height: input.height ?? 1024 };
   }
 
+  /**
+   * Dedicated face-swap submit — пара картинок, без prompt. Отдельная ветка,
+   * т.к. cdingram/face-swap принимает input_image + swap_image и ничего больше.
+   */
+  private async submitFaceSwap(modelStr: string, input: ImageInput): Promise<string> {
+    const edit = input.mediaInputs?.edit ?? [];
+    const sceneUrl = edit[0];
+    const faceUrl = edit[1];
+    if (!sceneUrl || !faceUrl) {
+      throw new UserFacingError("Face swap needs two images (scene + face)", {
+        key: "mediaSlotExpired",
+      });
+    }
+    // Replicate не умеет фетчить Telegram/S3 presigned URL напрямую — качаем сами
+    // и отдаём Blob (SDK сериализует его в data-URL).
+    const toBlob = async (url: string): Promise<Blob | string> => {
+      const res = await fetch(url);
+      if (!res.ok) return url;
+      const buf = await res.arrayBuffer();
+      return new Blob([buf], { type: resolveImageMimeType(buf, res.headers.get("content-type")) });
+    };
+    const [sceneBlob, faceBlob] = await Promise.all([toBlob(sceneUrl), toBlob(faceUrl)]);
+    const predInput = { input_image: sceneBlob, swap_image: faceBlob };
+
+    logCall(modelStr, "submit", { input_image: "<blob>", swap_image: "<blob>" });
+    const colonIdx = modelStr.indexOf(":");
+    const prediction =
+      colonIdx !== -1
+        ? await this.client.predictions.create({
+            version: modelStr.slice(colonIdx + 1),
+            input: predInput,
+          })
+        : await this.client.predictions.create({
+            model: modelStr as `${string}/${string}`,
+            input: predInput,
+          });
+    return prediction.id;
+  }
+
+  /**
+   * Topaz image upscale submit — единственный вход `image`, без prompt.
+   * Fallback-ветка для KIE primary `image-upscale`.
+   */
+  private async submitUpscale(modelStr: string, input: ImageInput): Promise<string> {
+    const srcUrl = input.mediaInputs?.edit?.[0] ?? input.imageUrl;
+    if (!srcUrl) {
+      throw new UserFacingError("Upscale needs a source image", { key: "mediaSlotExpired" });
+    }
+    const res = await fetch(srcUrl);
+    let imageParam: Blob | string = srcUrl;
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      imageParam = new Blob([buf], {
+        type: resolveImageMimeType(buf, res.headers.get("content-type")),
+      });
+    }
+    const ms = input.modelSettings ?? {};
+    const upscaleFactor = kieFactorToReplicate(String(ms.upscale_factor ?? "2"));
+    const predInput = { image: imageParam, upscale_factor: upscaleFactor };
+
+    logCall(modelStr, "submit", { image: "<blob>", upscale_factor: upscaleFactor });
+    const prediction = await this.client.predictions.create({
+      model: modelStr as `${string}/${string}`,
+      input: predInput,
+    });
+    return prediction.id;
+  }
+
   async submit(input: ImageInput): Promise<string> {
     const modelStr = MODEL_IDS[this.modelId] ?? this.modelId;
+    if (FACE_SWAP_MODELS.has(this.modelId)) {
+      return this.submitFaceSwap(modelStr, input);
+    }
+    if (this.modelId === "image-upscale") {
+      return this.submitUpscale(modelStr, input);
+    }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
     if (ms.negative_prompt) msExtras.negative_prompt = ms.negative_prompt;
@@ -85,13 +186,30 @@ export class ReplicateAdapter implements ImageAdapter {
     if (ms.guidance_scale !== undefined) msExtras.guidance_scale = ms.guidance_scale;
     if (ms.cfg !== undefined) msExtras.cfg = ms.cfg;
     if (ms.num_inference_steps !== undefined) msExtras.num_inference_steps = ms.num_inference_steps;
-    const stylePreset = ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
-    if (stylePreset) msExtras.style_preset = stylePreset;
     // Resolve image URL from structured media inputs, falling back to legacy imageUrl.
     // Ideogram models use "style_ref" slot; other models use "edit" slot.
+    // Считаем ДО style_preset — чтобы драгнуть style_preset при конфликте с
+    // загруженной картинкой (см. ниже).
     const imageUrl = IDEOGRAM_MODELS.has(this.modelId)
       ? (input.mediaInputs?.style_ref?.[0] ?? input.imageUrl)
       : (input.mediaInputs?.edit?.[0] ?? input.imageUrl);
+    // Ideogram взаимоисключает `style_preset` / `style_codes` / `style_reference_images` —
+    // Replicate отбивает payload с "Please provide just one of ...". UI знает про
+    // конфликт style_preset ↔ style_type (через unavailableIf), но НЕ про конфликт
+    // style_preset ↔ uploaded reference image. Если юзер загрузил картинку в slot
+    // `style_ref` — uploaded-картинка побеждает (это более явное действие чем
+    // saved-в-advanced preset), preset молча дропаем с warn'ом.
+    const stylePresetRaw =
+      ms.style_preset && ms.style_preset !== "None" ? ms.style_preset : undefined;
+    const ideogramHasUploadedRef = IDEOGRAM_MODELS.has(this.modelId) && !!imageUrl;
+    if (ideogramHasUploadedRef && stylePresetRaw) {
+      logger.warn(
+        { modelId: this.modelId, stylePreset: stylePresetRaw },
+        "Replicate adapter: dropped style_preset because style_ref image present (Ideogram mutex)",
+      );
+    }
+    const stylePreset = ideogramHasUploadedRef ? undefined : stylePresetRaw;
+    if (stylePreset) msExtras.style_preset = stylePreset;
     // Ideogram constraint: when style_preset, style_codes, or style_reference_images
     // is used, style_type must be Auto or General. A reference image sent by the
     // user becomes style_reference_images further down, so detect that here too.
@@ -139,7 +257,34 @@ export class ReplicateAdapter implements ImageAdapter {
       msExtras.num_inference_steps = 10;
     }
     if (ms.lora_scale !== undefined) msExtras.lora_scale = ms.lora_scale;
-    if (ms.extra_lora) msExtras.extra_lora = ms.extra_lora;
+    if (ms.extra_lora !== undefined && ms.extra_lora !== null) {
+      // Replicate runtime LoRA-loader принимает только: <owner>/<name>[:version],
+      // huggingface.co/..., civitai.com/models/..., либо URL на .safetensors.
+      // Все валидные форматы — без whitespace и в пределах ~256 chars. Юзеры
+      // регулярно путают поле с «доп. промптом» и вписывают свободный текст —
+      // тогда мы платим Replicate за заведомо обречённый predict и юзер ждёт
+      // 30s polling'а ради «Ошибка генерации». Up-front guard: rejectim
+      // очевидно-не-URL значения сразу. Остальные кривые URL (валидный формат,
+      // но неподдерживаемый хост) дойдут до Replicate-rejection — тогда
+      // USER_FACING_TEXT_PATTERN в replicate-error.ts смапит на тот же ключ.
+      const rawValue = typeof ms.extra_lora === "string" ? ms.extra_lora.trim() : "";
+      if (rawValue) {
+        if (/\s/.test(rawValue) || rawValue.length > 256) {
+          logger.warn(
+            {
+              modelId: this.modelId,
+              extraLoraSample: rawValue.slice(0, 80),
+              extraLoraLength: rawValue.length,
+            },
+            "Replicate adapter: rejected invalid extra_lora value (not a URL/identifier)",
+          );
+          throw new UserFacingError("Invalid extra_lora value (not a URL/identifier)", {
+            key: "loraUrlInvalid",
+          });
+        }
+        msExtras.extra_lora = rawValue;
+      }
+    }
     if (ms.extra_lora_scale !== undefined) msExtras.extra_lora_scale = ms.extra_lora_scale;
     if (ms.seed != null) msExtras.seed = ms.seed;
     if (ms.disable_safety_checker !== undefined)

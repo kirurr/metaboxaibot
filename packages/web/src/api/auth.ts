@@ -27,12 +27,46 @@ export function login(body: LoginBody) {
   });
 }
 
+/** В prod-режиме метабокс отправляет письмо подтверждения и НЕ выдаёт сессию,
+ *  поэтому signup может вернуть `{ requiresVerification, email }` вместо
+ *  `AuthSession`. */
+export type SignupResponse =
+  | AuthSession
+  | { requiresVerification: true; email: string; firstName: string | null };
+
 export function signup(body: SignupBody) {
-  return apiClient<AuthSession, SignupBody>("/auth/web-signup", {
+  return apiClient<SignupResponse, SignupBody>("/auth/web-signup", {
     method: "POST",
     body,
     skipAuth: true,
   });
+}
+
+export function resendVerification(email: string) {
+  return apiClient<{ ok: true }, { email: string }>("/auth/web-resend-verification", {
+    method: "POST",
+    body: { email },
+    skipAuth: true,
+  });
+}
+
+// Telegram link via deep-link flow ─────────────────────────────────────────
+//
+// `/auth/web-link-telegram/init`  — генерирует state в Redis, возвращает
+//   deep-link `t.me/<bot>?start=linkweb_<state>`.
+// `/auth/web-link-telegram/status` — фронт polls пока bot не закроет state.
+
+export function linkTelegramInit() {
+  return apiClient<{ deepLinkUrl: string; state: string }>("/auth/web-link-telegram/init", {
+    method: "POST",
+  });
+}
+
+export function linkTelegramStatus(state: string) {
+  return apiClient<{ linked: boolean; telegramUsername: string | null }>(
+    "/auth/web-link-telegram/status",
+    { method: "POST", body: { state } },
+  );
 }
 
 export function logout() {
@@ -48,6 +82,21 @@ export function refresh() {
 
 export function me() {
   return apiClient<{ user: WebUser; csrfToken: string }>("/auth/web-me");
+}
+
+/**
+ * Обновляет `user.language` в БД. Воркеры читают это поле для формирования
+ * user-facing сообщений (включая ошибки генераций), поэтому смену UI-языка в
+ * Settings нужно прокинуть на бэк — иначе ошибки придут в старом языке.
+ *
+ * Web-only юзеры без линкованного Telegram получают 204 (нет User-row, менять
+ * нечего). UI на ошибке не валим — language всё равно сохранён локально.
+ */
+export function updatePreferences(body: { language?: string }) {
+  return apiClient<{ ok: true; language?: string }, { language?: string }>("/auth/web-me", {
+    method: "PATCH",
+    body,
+  });
 }
 
 export interface TransactionDto {
@@ -88,21 +137,4 @@ export function changePassword(oldPassword: string, newPassword: string) {
     "/auth/web-change-password",
     { method: "POST", body: { oldPassword, newPassword } },
   );
-}
-
-export function linkTelegramInit() {
-  return apiClient<{ deepLinkUrl: string; state: string }>("/auth/web-link-telegram/init", {
-    method: "POST",
-  });
-}
-
-export function linkTelegramStatus(state: string) {
-  return apiClient<{ linked: boolean; telegramUsername: string | null }>(
-    "/auth/web-link-telegram/status",
-    { method: "POST", body: { state } },
-  );
-}
-
-export function unlinkTelegram() {
-  return apiClient<{ ok: true }>("/auth/web-unlink-telegram", { method: "POST" });
 }

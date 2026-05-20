@@ -22,26 +22,30 @@ import { logger } from "../logger.js";
  * update'ов (updateMany отфильтрует по `referredById: null`).
  */
 export async function backfillBotReferrals(
-  mentorTelegramId: bigint,
+  mentorUserId: bigint,
   mentorMetaboxUserId: string,
 ): Promise<void> {
   const referrals = await fetchDirectReferralsWithTelegram(mentorMetaboxUserId);
   if (referrals.length === 0) return;
 
+  // Metabox возвращает tgid рефералов; после decoupling-миграции
+  // `referredById` — это FK к внутреннему `User.id`, а матчить пользователей
+  // надо по `telegramId`. Поэтому ищем по `telegramId` IN (...) и проставляем
+  // mentor'у внутренний id.
   const telegramIds = referrals.map((r) => BigInt(r.telegramId));
 
   const result = await db.user.updateMany({
     where: {
-      id: { in: telegramIds },
+      telegramId: { in: telegramIds },
       referredById: null,
     },
-    data: { referredById: mentorTelegramId },
+    data: { referredById: mentorUserId },
   });
 
   if (result.count > 0) {
     logger.info(
       {
-        mentorTelegramId: mentorTelegramId.toString(),
+        mentorUserId: mentorUserId.toString(),
         mentorMetaboxUserId,
         candidates: telegramIds.length,
         linked: result.count,

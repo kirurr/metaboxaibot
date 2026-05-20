@@ -49,6 +49,14 @@ const MI_REF_ELEMENTS: MediaInputSlot[] = [1, 2, 3].map((i) => ({
  */
 const KLING_IMAGE_ASPECT = { minAspectRatio: 0.4, maxAspectRatio: 2.5 } as const;
 
+/**
+ * Runway требует w/h ≥ 0.5 (= 1:2 портрет максимум). Наблюдали 2026-05:
+ * submit падал с 400 «Invalid asset aspect ratio. width / height ratio must
+ * be at least 0.5. Got 0.462.» Валидируем на upload'е, иначе юзер ждёт
+ * 3 пустых BullMQ-ретрая.
+ */
+const RUNWAY_IMAGE_ASPECT = { minAspectRatio: 0.5 } as const;
+
 // KIE Kling принимает first/last frame одним массивом image_urls, поэтому
 // last_frame standalone не имеет смысла — кнопка появляется только после
 // загрузки first_frame.
@@ -121,11 +129,15 @@ const MI_DRIVING_AUDIO: MediaInputSlot = {
   mode: "driving_audio",
   labelKey: "drivingAudio",
 };
-/** Wan 2.7 first-clip slot — video that model continues. */
+/** Wan 2.7 first-clip slot — video that model continues. Wan жёстко режет
+ *  входной клип >10s (выяснено по prod-логам: `duration should be at most 10s,
+ *  got 14.2s`). Ставим upload-time guard, чтобы юзер не сабмитил заведомо
+ *  обречённый payload и не тратил Wan-кредиты. */
 const MI_FIRST_CLIP: MediaInputSlot = {
   slotKey: "first_clip",
   mode: "first_clip",
   labelKey: "firstClip",
+  constraints: { maxDurationSec: 10 },
 };
 
 /** Seedance 2 first/last frame slots — exclusive with reference slots. */
@@ -486,6 +498,14 @@ const WAN_MODES: ModelMode[] = [
 const KLING_SETTINGS: ModelSettingDef[] = [
   mkAspectRatio(["16:9", "9:16", "1:1"]),
   {
+    key: "crop_to_aspect",
+    label: "Автокроп фото под формат",
+    description:
+      "По умолчанию Kling подгоняет видео под пропорции фото. Включи, чтобы вместо этого обрезать фото под выбранный формат (края обрежутся).",
+    type: "toggle",
+    default: false,
+  },
+  {
     key: "duration",
     label: "Длительность",
     description: "Продолжительность видеоклипа в секундах.",
@@ -503,6 +523,28 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     default: true,
   },
 ];
+
+/**
+ * Topaz видео-апскейл: per-second ставка по результату — `upscale_factor` ×
+ * `target_resolution` × `fps` (сцена вычисляет тиры из размера/fps исходника).
+ * Каждая ячейка = max(посекундная ставка KIE — фиксирована по фактору:
+ * ×2 $0.04/s, ×4 $0.07/s; посекундная цена Replicate за тир разрешения/fps) —
+ * покрывает обоих провайдеров, в минус на fallback не уходим.
+ */
+const TOPAZ_VIDEO_COST: Record<string, number> = {
+  "2__720p__30": 0.04,
+  "2__720p__60": 0.04,
+  "2__1080p__30": 0.04,
+  "2__1080p__60": 0.04,
+  "2__4k__30": 0.075,
+  "2__4k__60": 0.15,
+  "4__720p__30": 0.07,
+  "4__720p__60": 0.07,
+  "4__1080p__30": 0.07,
+  "4__1080p__60": 0.07,
+  "4__4k__30": 0.075,
+  "4__4k__60": 0.15,
+};
 
 export const VIDEO_MODELS: Record<string, AIModel> = {
   kling: {
@@ -610,6 +652,47 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     mediaInputs: KLING_MOTION_MEDIA_INPUTS,
     settings: [...KLING_MOTION_SETTINGS],
+  },
+  // KIE Topaz Video Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
+  // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
+  // Цена — посекундная, ставка по результату (фактор × разрешение × fps):
+  // сцена вычисляет тиры из размера и fps исходника, цена видна на кнопке.
+  "video-upscale": {
+    id: "video-upscale",
+    name: "🎬 Апскейл видео",
+    description: "Увеличивает разрешение и чёткость видео с помощью Topaz AI.",
+    section: "video",
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.07, // fallback-база, если costMatrix-тиры не переданы
+    costMatrix: {
+      dims: ["upscale_factor", "target_resolution", "fps"],
+      table: TOPAZ_VIDEO_COST,
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: [{ slotKey: "motion_video", mode: "motion_video", labelKey: "motionVideo" }],
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту видео. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+        ],
+        default: "2",
+      },
+    ],
   },
   seedance: {
     id: "seedance",
@@ -1541,7 +1624,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     supportsImages: true,
     // first_frame опциональный: с ним → POST /v1/image_to_video; без него →
     // POST /v1/text_to_video (адаптер выбирает endpoint автоматически).
-    mediaInputs: [MI_FIRST_FRAME],
+    mediaInputs: [{ ...MI_FIRST_FRAME, constraints: RUNWAY_IMAGE_ASPECT }],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
@@ -2470,5 +2553,48 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     supportedAspectRatios: ["16:9", "9:16"],
     supportedDurations: [8],
     settings: VEO_KIE_SETTINGS,
+  },
+  // ── Video upscale via Replicate Topaz (fallback к KIE primary) ───────────────
+  // KIE primary `video-upscale` (topaz/video-upscale) роутится на Replicate
+  // topazlabs/video-upscale. Replicate принимает абсолютное `target_resolution`,
+  // а не множитель — адаптер маппит upscale_factor → разрешение. Биллинг —
+  // всегда по KIE-цене primary.
+  {
+    id: "video-upscale",
+    name: "Video upscale (Replicate fallback)",
+    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    section: "video",
+    provider: "replicate",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.07,
+    costMatrix: {
+      dims: ["upscale_factor", "target_resolution", "fps"],
+      table: TOPAZ_VIDEO_COST,
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: [{ slotKey: "motion_video", mode: "motion_video", labelKey: "motionVideo" }],
+    // Prebuilt для plug-and-play promotion в primary (как у kling-motion fallback'ов).
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту видео. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+        ],
+        default: "2",
+      },
+    ],
   },
 ];

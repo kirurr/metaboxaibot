@@ -6,6 +6,7 @@
 import { config } from "@metabox/shared";
 import { Api } from "grammy";
 import { getRedis } from "@metabox/api/redis";
+import { scrubBotTokens } from "@metabox/api/utils/bot-token-scrub";
 
 const telegram = new Api(config.bot.token);
 
@@ -36,6 +37,9 @@ export interface ErrorContext {
  * реальную причину в `cause` (с полем `code` типа "ECONNRESET"). Walk'аем
  * cause-chain, на каждом уровне выводим code/errno/syscall/address если есть —
  * без этого alert получается бесполезным "fetch failed".
+ *
+ * Перед return скрабится Telegram bot token (см. `scrubBotTokens`). Рекурсивные
+ * вызовы scrub'ятся независимо, top-level join тоже — идемпотентность ок.
  */
 function serializeError(err: unknown): string {
   if (err === null || err === undefined) return String(err);
@@ -85,7 +89,7 @@ function serializeError(err: unknown): string {
     parts.push(String(err));
   }
 
-  return parts.join("\n");
+  return scrubBotTokens(parts.join("\n"));
 }
 
 const PROVIDER_OUT_ALERT_TTL_MS = 30 * 60 * 1000;
@@ -285,6 +289,7 @@ export interface FallbackNotificationContext {
     | "long_window_rate_limit"
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
+    | "kie_credits_exhausted"
     | "all_candidates_failed"
     /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
     | "primary_failed";

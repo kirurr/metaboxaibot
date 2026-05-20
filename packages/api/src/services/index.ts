@@ -7,14 +7,21 @@ export {
 export type { SendMessageParams, SendMessageResult } from "./chat.service.js";
 export { dialogService } from "./dialog.service.js";
 export type { CreateDialogParams, StoredAttachment } from "./dialog.service.js";
+export {
+  webNotificationService,
+  toWebNotificationDTO,
+  dispatchJobNotification,
+} from "./web-notification.service.js";
+export type { CreateWebNotificationParams } from "./web-notification.service.js";
 export { generationService } from "./generation.service.js";
 export type { SubmitImageParams, SubmitImageResult } from "./generation.service.js";
 export { userStateService } from "./user-state.service.js";
 export { videoGenerationService } from "./video-generation.service.js";
 export type { SubmitVideoParams, SubmitVideoResult } from "./video-generation.service.js";
+export { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 export { audioGenerationService } from "./audio-generation.service.js";
 export type { SubmitAudioParams, SubmitAudioResult } from "./audio-generation.service.js";
-export { costPreviewService } from "./cost-preview.service.js";
+export { costPreviewService, probeHeygenAudioDuration } from "./cost-preview.service.js";
 export type {
   ImageCostPreview,
   VideoCostPreview,
@@ -47,8 +54,10 @@ export {
   objectExists,
   measureImageMegapixels,
   probeImageMetadata,
+  uploadNormalizedImage,
 } from "./s3.service.js";
-export type { ImageProbeInfo } from "./s3.service.js";
+export { probeAudioDurationSec } from "../utils/audio-transcode.js";
+export type { ImageProbeInfo, NormalizedImageUpload } from "./s3.service.js";
 export {
   verifyLinkToken,
   issueSsoToken,
@@ -74,6 +83,10 @@ export {
   resendMetaboxVerification,
   changeMetaboxEmailPending,
   transferOnDeletion,
+  linkTelegramFromWeb,
+  followMetaboxMergeChain,
+  setAiboxId,
+  reconcileByAibox,
 } from "./metabox-bridge.service.js";
 export type {
   AiBotProduct,
@@ -82,6 +95,7 @@ export type {
   CatalogProduct,
   RecordSaleResult,
   MergedAccountInfo,
+  LinkTelegramFromWebResult,
 } from "./metabox-bridge.service.js";
 export { getRate, calcStars, updateRate } from "./exchange-rate.service.js";
 export { userUploadsService } from "./user-uploads.service.js";
@@ -101,6 +115,7 @@ export type {
 
 // ── Web (ai.metabox.global) ─────────────────────────────────────────────
 export { consumeLinkTelegramState, markLinkTelegramLinked } from "./web-session.service.js";
+export { ensureAibUserForMetabox, mergeWebUserIntoBotUser } from "./account-sync.service.js";
 
 // ── Account deletion ────────────────────────────────────────────────────
 export {

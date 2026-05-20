@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { randomUUID } from "node:crypto";
 import { webTelegramLinkedPreHandler } from "../middlewares/web-auth.js";
 import { dialogService, type StoredAttachment } from "../services/dialog.service.js";
+import { historyService } from "../services/history.service.js";
 import {
   chatService,
   ContextOverflowError,
@@ -23,6 +24,7 @@ import { getFileUrl, uploadBuffer } from "../services/s3.service.js";
 import { logger } from "../logger.js";
 import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+import type { OutgoingHttpHeaders } from "node:http";
 
 // ── Загрузка вложений для чата ───────────────────────────────────────────────
 // Принимаемые типы соответствуют пайплайну `chat.service`:
@@ -210,15 +212,24 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ── GET /web/dialogs ────────────────────────────────────────────────────
-  fastify.get<{ Querystring: { section?: string } }>(
+  // `q` и `withStats` опциональны; без них поведение прежнее (используется
+  // ChatSidebar / Chat.tsx, не платит за SUM(tokensUsed) и full-content поиск).
+  // С `q` ищет в title + содержимом сообщений, возвращает `snippet`;
+  // с `withStats=1` возвращает `totalTokens` per dialog.
+  fastify.get<{ Querystring: { section?: string; q?: string; withStats?: string } }>(
     "/web/dialogs",
     {
       schema: {
-        description: "List user dialogs optionally filtered by section",
+        description: "List user dialogs (optional search + stats)",
         querystring: {
           type: "object",
           properties: {
             section: { type: "string" },
+            q: { type: "string", description: "Search in title and message content" },
+            withStats: {
+              type: "string",
+              description: "When '1'/'true', include totalTokens per dialog",
+            },
           },
         },
         response: {
@@ -234,6 +245,9 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 title: { type: "string", nullable: true },
                 createdAt: { type: "string" },
                 updatedAt: { type: "string" },
+                totalTokens: { type: "number" },
+                snippet: { type: "string", nullable: true },
+                latestJobId: { type: "string", nullable: true },
               },
             },
           },
@@ -242,10 +256,25 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request) => {
       const { aibUserId } = request.webUser!;
-      const dialogs = await dialogService.listByUser(
-        aibUserId!,
-        request.query.section as Section | undefined,
-      );
+      const section = request.query.section as Section | undefined;
+      const q = request.query.q?.trim() || undefined;
+      const withStats = request.query.withStats === "1" || request.query.withStats === "true";
+
+      // Легаси-путь: без q/withStats не нагружаем БД лишним groupBy/ILIKE —
+      // важно для ChatSidebar, который дёргает этот же endpoint.
+      if (!q && !withStats) {
+        const dialogs = await dialogService.listByUser(aibUserId!, section);
+        return dialogs.map((d) => ({
+          id: d.id,
+          section: d.section,
+          modelId: d.modelId,
+          title: d.title ?? null,
+          createdAt: d.createdAt.toISOString(),
+          updatedAt: d.updatedAt.toISOString(),
+        }));
+      }
+
+      const dialogs = await dialogService.listForHistory(aibUserId!, { section, q, withStats });
       return dialogs.map((d) => ({
         id: d.id,
         section: d.section,
@@ -253,7 +282,60 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         title: d.title ?? null,
         createdAt: d.createdAt.toISOString(),
         updatedAt: d.updatedAt.toISOString(),
+        ...(withStats ? { totalTokens: d.totalTokens ?? 0 } : {}),
+        ...(q ? { snippet: d.snippet ?? null } : {}),
+        latestJobId: d.latestJobId ?? null,
       }));
+    },
+  );
+
+  // ── GET /web/history ────────────────────────────────────────────────────
+  // Unified list для страницы /history:
+  //  - kind="dialog": для gpt — Dialog с агрегированными tokensUsed по сообщениям.
+  //  - kind="job": для image/video/audio — GenerationJob (по userId, dialogId
+  //    игнорируется), потому что media-джобы часто создаются с пустым dialogId.
+  //
+  // Без q возвращает всю историю; с q фильтрует по title/контенту (gpt) и по
+  // prompt (media). Без пагинации, sort: updatedAt desc.
+  fastify.get<{ Querystring: { section?: string; q?: string } }>(
+    "/web/history",
+    {
+      schema: {
+        description: "Unified history (gpt dialogs + media generation jobs)",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "gpt | image | design | video | audio" },
+            q: { type: "string", description: "Search in title/content (gpt) and prompt (media)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+                section: { type: "string" },
+                modelId: { type: "string" },
+                title: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+                totalTokens: { type: "number" },
+                snippet: { type: "string", nullable: true },
+                status: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { aibUserId } = request.webUser!;
+      const { section, q } = request.query;
+      return historyService.list(aibUserId!, { section, q });
     },
   );
 
@@ -448,6 +530,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 content: { type: "string" },
                 mediaUrl: { type: "string", nullable: true },
                 mediaType: { type: "string", nullable: true },
+                inputTokens: { type: "integer" },
+                outputTokens: { type: "integer" },
                 createdAt: { type: "string" },
                 attachments: {
                   type: "array",
@@ -499,6 +583,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             mediaUrl: string | null;
             mediaType: string | null;
             attachments: unknown;
+            inputTokens: number;
+            outputTokens: number;
             createdAt: Date;
           }>
         ).map(async (m) => {
@@ -538,6 +624,8 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
             content: m.content,
             mediaUrl,
             mediaType: m.mediaType ?? null,
+            inputTokens: m.inputTokens,
+            outputTokens: m.outputTokens,
             createdAt: m.createdAt.toISOString(),
             attachments: attachments.length > 0 ? attachments : null,
           };
@@ -588,12 +676,28 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     if (!dialog) return reply.code(404).send({ error: "Dialog not found" });
     if (dialog.userId !== aibUserId) return reply.code(403).send({ error: "Forbidden" });
 
-    reply.raw.writeHead(200, {
+    // @ts-expect-error some weird fastify magic
+    const headers: OutgoingHttpHeaders = {
+      ...reply.getHeaders(),
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
-    });
+    };
+
+    // @fastify/cors ставит Access-Control-Allow-Origin через reply.header(),
+    // которые попадают в raw только при reply.send(). Здесь мы пишем напрямую
+    // в reply.raw — поэтому сливаем ранее установленные fastify-заголовки
+    // (CORS, прочие хуки) в writeHead, иначе браузер режет ответ по CORS.
+    // reply.raw.writeHead(200, {
+    //   ...reply.getHeaders(),
+    //   "Content-Type": "text/event-stream",
+    //   "Cache-Control": "no-cache, no-transform",
+    //   Connection: "keep-alive",
+    //   "X-Accel-Buffering": "no",
+    // });
+    reply.raw.writeHead(200, headers);
+    reply.hijack();
 
     const send = (event: string, data: unknown) => {
       reply.raw.write(`event: ${event}\n`);
@@ -636,19 +740,16 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         send("chunk", { text: result.value });
       }
 
-      const balance = await db.user.findUnique({
-        where: { id: aibUserId! },
-        select: {
-          tokenBalance: true,
-          subscriptionTokenBalance: true,
-        },
-      });
-
+      // Post-deduct balance уже лежит в `result.value` (см. `SendMessageResult`
+      // в chat.service.ts) — отдельный `db.user.findUnique` повторял бы работу,
+      // которую только что сделал `deductTokens`. Берём прямо из стрима.
       send("done", {
         tokensUsed: result.value?.tokensUsed ?? 0,
+        inputTokens: result.value?.inputTokens ?? 0,
+        outputTokens: result.value?.outputTokens ?? 0,
         balance: {
-          tokenBalance: balance?.tokenBalance.toString() ?? "0",
-          subscriptionTokenBalance: balance?.subscriptionTokenBalance.toString() ?? "0",
+          tokenBalance: result.value?.tokenBalance?.toString() ?? "0",
+          subscriptionTokenBalance: result.value?.subscriptionTokenBalance?.toString() ?? "0",
         },
       });
     } catch (err) {

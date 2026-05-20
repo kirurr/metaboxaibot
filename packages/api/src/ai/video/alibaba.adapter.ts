@@ -1,6 +1,8 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { probeVideoMetadata } from "../../utils/mp4-duration.js";
+import { logger } from "../../logger.js";
 
 const DASHSCOPE_BASE = "https://dashscope-intl.aliyuncs.com/api/v1";
 const SUBMIT_PATH = "/services/aigc/video-generation/video-synthesis";
@@ -120,6 +122,41 @@ export class AlibabaVideoAdapter implements VideoAdapter {
     const resolution = (ms.resolution as string | undefined) ?? "720P";
     const duration = (ms.duration as number | undefined) ?? input.duration ?? 5;
 
+    // Pre-validation для first_clip mode. Pattern 1 (clip >10s) уже отбит на
+    // upload'е через slot constraint, но если клип попал в payload каким-то
+    // другим путём (webapp / direct API) — страхуемся здесь же. Pattern 2
+    // (clip ≥ output duration) — динамический констрейнт, slot его не ловит.
+    // На probe-failure → не блокируем submit, post-poll mapping страхует.
+    if (isI2V && firstClip) {
+      try {
+        const probed = await probeVideoMetadata(firstClip);
+        const clipDur = probed.durationSec;
+        if (clipDur !== null) {
+          if (clipDur > 10) {
+            throw new UserFacingError(`Wan: first_clip duration ${clipDur}s exceeds 10s limit`, {
+              key: "mediaSlotDurationTooLong",
+              params: { actual: Math.round(clipDur), max: 10 },
+            });
+          }
+          if (clipDur >= duration) {
+            throw new UserFacingError(
+              `Wan: first_clip (${clipDur}s) >= output duration (${duration}s)`,
+              {
+                key: "firstClipExceedsOutputDuration",
+                params: { actual: Math.round(clipDur), requested: duration },
+              },
+            );
+          }
+        }
+      } catch (err) {
+        if (err instanceof UserFacingError) throw err;
+        logger.warn(
+          { err, firstClipUrl: firstClip },
+          "Wan adapter: first_clip probe failed, deferring duration check to post-poll",
+        );
+      }
+    }
+
     const apiInput: Record<string, unknown> = { prompt: input.prompt };
     if (isI2V) apiInput.media = media;
     if (ms.negative_prompt) apiInput.negative_prompt = ms.negative_prompt;
@@ -180,7 +217,53 @@ export class AlibabaVideoAdapter implements VideoAdapter {
     const { task_status, video_url, message } = data.output;
 
     if (task_status === "FAILED") {
-      throw new Error(`Alibaba Wan generation failed: ${message ?? "unknown error"}`);
+      const errMsg = message ?? "unknown error";
+      // Wan I2V жёстко ограничивает input-video <=10s. Когда юзер грузит более
+      // длинное — submit проходит, fail приходит только на poll'е. Мапим в
+      // UserFacingError(mediaSlotDurationTooLong), чтобы юзер увидел понятное
+      // «обрежьте видео», а не generic «generationFailed» + ops-alert.
+      // Формат сообщения от Wan: «<url> duration should be at most 10s, got 14.2s».
+      const durationMatch =
+        /duration should be at most (\d+(?:\.\d+)?)s, got (\d+(?:\.\d+)?)s/i.exec(errMsg);
+      if (durationMatch) {
+        const max = durationMatch[1]!;
+        const actual = Math.round(Number(durationMatch[2]!));
+        throw new UserFacingError(`Alibaba Wan: input video duration exceeds limit (${errMsg})`, {
+          key: "mediaSlotDurationTooLong",
+          params: { actual, max },
+        });
+      }
+      // Wan i2v `first_clip` mode требует чтобы длительность референс-клипа
+      // была меньше параметра выходной длительности (`parameters.duration`).
+      // Юзер выбрал output=2s, грузит клип на 6s — Wan отбивает. Решение
+      // двойное: либо клип короче, либо output длиннее. Отдельный ключ
+      // (не mediaSlotDurationTooLong), чтобы сообщение объяснило оба пути.
+      // Формат: «first_clip duration (6.05s) must be less than the requested duration (2s)».
+      const firstClipMatch =
+        /first_clip duration \((\d+(?:\.\d+)?)s\) must be less than the requested duration \((\d+(?:\.\d+)?)s\)/i.exec(
+          errMsg,
+        );
+      if (firstClipMatch) {
+        const actual = Math.round(Number(firstClipMatch[1]!));
+        const requested = Math.round(Number(firstClipMatch[2]!));
+        throw new UserFacingError(
+          `Alibaba Wan: first_clip duration exceeds output duration (${errMsg})`,
+          {
+            key: "firstClipExceedsOutputDuration",
+            params: { actual, requested },
+          },
+        );
+      }
+      // Wan content policy: «Input data may contain inappropriate content.» —
+      // провайдер фильтрует input (фото/видео-референс или промпт). Без
+      // mapping'а юзер видит generic «generationFailed» + летит ops-alert на
+      // совершенно юзер-фолтовый кейс.
+      if (/Input data may contain inappropriate content/i.test(errMsg)) {
+        throw new UserFacingError(`Alibaba Wan: input flagged as inappropriate (${errMsg})`, {
+          key: "contentPolicyViolation",
+        });
+      }
+      throw new Error(`Alibaba Wan generation failed: ${errMsg}`);
     }
     if (task_status !== "SUCCEEDED") return null;
     if (!video_url) throw new Error("Alibaba Wan: no video URL in result");

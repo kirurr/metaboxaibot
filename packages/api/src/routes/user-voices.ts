@@ -16,7 +16,9 @@ import type { Language } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов Bot API. После decoupling-миграции они различаются у web-only юзеров.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
@@ -113,7 +115,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const returnTo = request.body?.returnTo;
 
       if (returnTo !== undefined && returnTo !== "heygen") {
@@ -149,7 +151,7 @@ export const userVoicesRoutes: FastifyPluginAsync = async (fastify) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            chat_id: String(userId),
+            chat_id: String(telegramId),
             text: `${t.audio.voiceClone}\n\n${t.audio.voiceCloneActivated}`,
             parse_mode: "HTML",
           }),

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { verifyTelegramInitData } from "../middlewares/telegram-auth.js";
 import { db } from "../db.js";
-import { verifyWebToken, config } from "@metabox/shared";
+import { generateWebToken, verifyWebToken, WebTokenError, config } from "@metabox/shared";
 import { badRequestResponse, userIsBlockedResponse } from "../utils/openapi.js";
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
@@ -60,14 +60,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       const { initData } = request.body;
       if (!initData) return reply.code(400).send({ error: "initData is required" });
 
-      let userId: bigint;
+      let telegramId: bigint;
       try {
-        userId = verifyTelegramInitData(initData);
+        telegramId = verifyTelegramInitData(initData);
       } catch {
         return reply.code(401).send({ error: "Invalid initData" });
       }
 
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const user = await db.user.findUnique({ where: { telegramId } });
       if (!user) {
         return reply
           .code(404)
@@ -122,7 +122,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
             type: "object",
             additionalProperties: true,
             description: "Invalid or expired token",
-            properties: { error: { type: "string" } },
+            properties: {
+              error: { type: "string" },
+              code: { type: "string", enum: ["TOKEN_EXPIRED", "TOKEN_INVALID"] },
+            },
           },
           403: userIsBlockedResponse,
           404: {
@@ -141,20 +144,34 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       const { token } = request.body;
       if (!token) return reply.code(400).send({ error: "token is required" });
 
-      let userId: bigint;
+      let telegramId: bigint;
+      let refreshIat: number | null = null;
       try {
-        userId = verifyWebToken(token, config.bot.token);
-      } catch {
-        return reply.code(401).send({ error: "Invalid or expired token" });
+        const result = verifyWebToken(token, config.bot.token);
+        telegramId = result.userId;
+        if (result.needsRefresh) refreshIat = result.iat;
+      } catch (err) {
+        const code =
+          err instanceof WebTokenError && err.code === "EXPIRED"
+            ? "TOKEN_EXPIRED"
+            : "TOKEN_INVALID";
+        return reply.code(401).send({ error: "Invalid or expired token", code });
       }
 
-      const user = await db.user.findUnique({ where: { id: userId } });
+      const user = await db.user.findUnique({ where: { telegramId } });
       if (!user) {
         return reply
           .code(404)
           .send({ error: "User not found — open the bot first", code: "USER_NOT_FOUND" });
       }
       if (user.isBlocked) return reply.code(403).send({ error: "User is blocked" });
+
+      if (refreshIat !== null) {
+        reply.header(
+          "X-Refresh-Wtoken",
+          generateWebToken(telegramId, config.bot.token, refreshIat),
+        );
+      }
 
       return {
         id: user.id.toString(),

@@ -1,17 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Check,
   ChevronDown,
-  ChevronRight,
   Image as ImageIcon,
+  Loader2,
   Plus,
+  RotateCcw,
   Sparkles,
   X,
 } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
-import type { ApiError } from "@/api/client";
+import { ApiError } from "@/api/client";
+import { ChipPopover } from "@/components/settings/ChipPopover";
+import { SettingControl } from "@/components/settings/SettingControl";
+import { isSettingVisible, UNSUPPORTED_TYPES } from "@/components/settings/utils";
+import {
+  submitImageGeneration,
+  submitVideoGeneration,
+  submitAudioGeneration,
+  previewGeneration,
+  type SubmitImageGenerationBody,
+  type SubmitVideoGenerationBody,
+  type SubmitAudioGenerationBody,
+  type SubmitGenerationResponse,
+} from "@/api/generation";
 import { listVoices, type VoiceItem, type VoiceProvider } from "@/api/voices";
 import {
   listHeyGenAvatars,
@@ -21,8 +37,18 @@ import {
   type MotionItem,
   type SoulStyleItem,
 } from "@/api/pickers";
+import {
+  listUserAvatars,
+  renameUserAvatar,
+  deleteUserAvatar,
+  type UserAvatarDto,
+} from "@/api/userAvatars";
 import { VoicePicker } from "./VoicePicker";
-import { MediaPicker, type MediaPickItem } from "./MediaPicker";
+import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
+import { CreateAvatarModal } from "./CreateAvatarModal";
+import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { useUIStore } from "@/stores/uiStore";
+import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -41,6 +67,24 @@ export type GenerateSceneProps = {
   promptPlaceholder: string;
   /** Список моделей (дедуплированный по `familyId`). Первая по умолчанию. */
   models: readonly WebModelDto[];
+  /**
+   * Скрыть UI выбора модели (дропдаун + family-axis chips). Используется
+   * пресетами с зафиксированной моделью (например, /image/swap).
+   */
+  hideModelPicker?: boolean;
+  /**
+   * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
+   * вручную изменил modelId / prompt / settings относительно пресет-снимка.
+   * Слот-файлы НЕ сбрасываются. Callback должен запустить повторное
+   * применение префила (обычно — `navigate(pathname, { state: { prefill } })`).
+   */
+  onReset?: () => void;
+  /**
+   * Мапа `modelId → { key: value }` из пресета. При ручной смене модели
+   * (когда у пресета `hideModelPicker: false` и есть `allowedModelIds`)
+   * автоматически применяются настройки соответствующей модели.
+   */
+  presetSettingsByModel?: Record<string, Record<string, unknown>>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -82,24 +126,6 @@ function getActiveSlots(
     .map((s) => (requiredOverride ? { ...s, required: requiredOverride.has(s.slotKey) } : s));
 }
 
-/** Грубо: видна ли настройка с учётом `dependsOn` (другая настройка == value). */
-function isSettingVisible(s: ModelSettingDto, values: Record<string, unknown>): boolean {
-  if (!s.dependsOn) return true;
-  return values[s.dependsOn.key] === s.dependsOn.value;
-}
-
-/** Типы пикеров, которые web пока не реализует — прячем их. */
-const UNSUPPORTED_TYPES = new Set<string>([
-  // Generic voice-picker (без конкретного провайдера) и d-id-voice-picker —
-  // пока не подключены. Остальные voice-picker'ы (cartesia/elevenlabs/openai)
-  // обрабатываются через VoicePicker. avatar-/motion-/soul-style-picker и color
-  // обрабатываются через MediaPicker. soul-picker (пользовательские soul-id'ы)
-  // оставлен — требует доп. логики на user-state.
-  "voice-picker",
-  "did-voice-picker",
-  "soul-picker",
-]);
-
 /** Map setting.type → провайдер каталога голосов. */
 const VOICE_PROVIDER_BY_TYPE: Record<string, VoiceProvider> = {
   "cartesia-voice-picker": "cartesia",
@@ -108,11 +134,14 @@ const VOICE_PROVIDER_BY_TYPE: Record<string, VoiceProvider> = {
 };
 
 /** Типы media-пикеров (картинки/видео-превью, не voice). */
-type MediaPickerKind = "avatar" | "motion" | "soul-style";
+type MediaPickerKind = "avatar" | "motion" | "soul-style" | "soul-character";
 const MEDIA_KIND_BY_TYPE: Record<string, MediaPickerKind> = {
   "avatar-picker": "avatar",
   "motion-picker": "motion",
   "soul-style-picker": "soul-style",
+  // soul-picker — выбор пользовательского Soul-персонажа (созданного через
+  // /web/user-avatars/higgsfield-soul). Каталога нет — только Мои персонажи.
+  "soul-picker": "soul-character",
 };
 
 /** Для motion-picker значение — массив `{ id, strength }`. Мы храним strength=1. */
@@ -248,7 +277,14 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
 
 // ── Sub: setting control ─────────────────────────────────────────────────────
 
-function SettingControl({
+/**
+ * Одна настройка = один chip с label + текущим значением.
+ * Клик по chip'у открывает popover с фактическим control'ом (slider / chip-row
+ * вариантов / input). Toggle и voice/media-pickers — спец-случаи без popover'а:
+ *  - toggle: клик мгновенно переключает значение
+ *  - voice/media: клик открывает существующий side-drawer
+ */
+function SettingChip({
   setting,
   value,
   onChange,
@@ -265,227 +301,248 @@ function SettingControl({
   openMediaPicker?: (kind: MediaPickerKind) => void;
   mediaNameLookup?: (kind: MediaPickerKind, id: string) => string | null;
 }) {
-  // Voice picker buttons — рендерим до общей логики, чтобы не уходить в неподходящие
-  // ветки (например select при пустых options).
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  // Outside-click закрывает popover. Учитываем и chip, и popover (portal).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chipRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  // ── Voice picker chip → открывает side-drawer (не popover) ────────────────
   const voiceProvider = VOICE_PROVIDER_BY_TYPE[setting.type];
   if (voiceProvider && openVoicePicker) {
     const currentId = String(value ?? setting.default ?? "");
     const name = currentId ? (voiceNameLookup?.(voiceProvider, currentId) ?? null) : null;
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button
-          className="gen-voice-btn"
-          onClick={() => openVoicePicker(voiceProvider)}
-          type="button"
-        >
-          <span className="gen-voice-btn-name">{name ?? currentId ?? "Выбрать голос"}</span>
-          <ChevronRight size={14} />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="gen-chip-pill"
+        onClick={() => openVoicePicker(voiceProvider)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}:</span>
+        <span className="gen-chip-pill-val">{name ?? "Не выбрано"}</span>
+      </button>
     );
   }
 
-  // Media picker buttons (avatar / motion / soul-style).
+  // ── Media picker chip → открывает side-drawer ─────────────────────────────
   const mediaKind = MEDIA_KIND_BY_TYPE[setting.type];
   if (mediaKind && openMediaPicker) {
     let summary: string;
     if (mediaKind === "motion") {
       const entries = parseMotionValue(value ?? setting.default);
-      if (entries.length === 0) {
-        summary = "Не выбрано";
-      } else if (entries.length === 1) {
-        summary = mediaNameLookup?.(mediaKind, entries[0].id) ?? entries[0].id;
-      } else {
-        summary = `${entries.length} пресета`;
-      }
+      summary =
+        entries.length === 0
+          ? "Не выбрано"
+          : entries.length === 1
+            ? (mediaNameLookup?.(mediaKind, entries[0].id) ?? entries[0].id)
+            : `${entries.length} пресета`;
     } else {
       const currentId = String(value ?? setting.default ?? "");
       summary = currentId ? (mediaNameLookup?.(mediaKind, currentId) ?? currentId) : "Не выбрано";
     }
     return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button className="gen-voice-btn" onClick={() => openMediaPicker(mediaKind)} type="button">
-          <span className="gen-voice-btn-name">{summary}</span>
-          <ChevronRight size={14} />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="gen-chip-pill"
+        onClick={() => openMediaPicker(mediaKind)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}:</span>
+        <span className="gen-chip-pill-val">{summary}</span>
+      </button>
     );
   }
 
-  // Color — native input inline. Без drawer'а, всё сразу видно.
-  if (setting.type === "color") {
-    const hex = typeof value === "string" && value ? value : String(setting.default ?? "#000000");
-    return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <div className="gen-color-row">
-          <input
-            type="color"
-            className="gen-color-input"
-            value={hex}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <input
-            type="text"
-            className="gen-text gen-color-text"
-            value={hex}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="#RRGGBB"
-          />
-        </div>
-      </div>
-    );
-  }
-
+  // ── Toggle chip → клик переключает, popover не нужен ──────────────────────
   if (setting.type === "toggle") {
     const checked = Boolean(value);
     return (
-      <div className="gen-set gen-set-toggle">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          {setting.description && <span className="gen-set-desc">{setting.description}</span>}
-        </div>
-        <button
-          className={clsx("gen-toggle", checked && "on")}
-          onClick={() => onChange(!checked)}
-          role="switch"
-          aria-checked={checked}
-        >
-          <span className="gen-toggle-knob" />
-        </button>
-      </div>
+      <button
+        type="button"
+        className={clsx("gen-chip-pill", checked && "is-on")}
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}:</span>
+        <span className="gen-chip-pill-val">{checked ? "Вкл" : "Выкл"}</span>
+      </button>
     );
   }
-  if (setting.type === "slider") {
-    const min = setting.min ?? 0;
-    const max = setting.max ?? 100;
-    const step = setting.step ?? 1;
-    const num = typeof value === "number" ? value : Number(setting.default ?? min);
-    return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-          <span className="gen-set-val mono">{num}</span>
-        </div>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={num}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="gen-slider"
-        />
-      </div>
+
+  // ── Summary для chip-display ──────────────────────────────────────────────
+  let summary: React.ReactNode;
+  if (setting.type === "color") {
+    const hex = typeof value === "string" && value ? value : String(setting.default ?? "#000000");
+    summary = (
+      <span className="gen-chip-pill-swatch-wrap">
+        <span className="gen-chip-pill-swatch" style={{ background: hex }} />
+        <span>{hex}</span>
+      </span>
     );
-  }
-  if (setting.type === "number") {
-    return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
-        <input
-          type="number"
-          min={setting.min}
-          max={setting.max}
-          step={setting.step}
-          value={typeof value === "number" ? value : Number(setting.default ?? 0)}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="gen-num"
-        />
-      </div>
-    );
-  }
-  if (setting.type === "text") {
-    return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
-        <input
-          type="text"
-          value={typeof value === "string" ? value : String(setting.default ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          className="gen-text"
-        />
-      </div>
-    );
-  }
-  // select / dropdown — рендерим как chip-row (компактно) или dropdown для >6 опций.
-  if (setting.type === "select" || setting.type === "dropdown") {
+  } else if (setting.type === "slider" || setting.type === "number") {
+    const num = typeof value === "number" ? value : Number(setting.default ?? 0);
+    summary = String(num);
+  } else if (setting.type === "text") {
+    const text = typeof value === "string" ? value : String(setting.default ?? "");
+    summary = text || "Не задано";
+  } else if (setting.type === "select" || setting.type === "dropdown") {
     const opts = setting.options ?? [];
-    if (opts.length === 0) return null;
-    if (opts.length > 6) {
-      // Dropdown — нативный select для большого числа опций.
-      return (
-        <div className="gen-set">
-          <div className="gen-set-label">
-            <span>{setting.label}</span>
-          </div>
-          <select
-            className="gen-select"
-            value={String(value ?? setting.default ?? "")}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            {opts.map((o) => (
-              <option key={String(o.value)} value={String(o.value)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      );
-    }
-    // Chip-row — компактно, видно всё сразу.
-    return (
-      <div className="gen-set">
-        <div className="gen-set-label">
-          <span>{setting.label}</span>
-        </div>
-        <div className="gen-chips">
-          {opts.map((o) => {
-            const active = String(value ?? setting.default) === String(o.value);
-            return (
-              <button
-                key={String(o.value)}
-                className={clsx("gen-chip", active && "on")}
-                onClick={() => onChange(o.value)}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
+    const cur = String(value ?? setting.default ?? "");
+    const found = opts.find((o) => String(o.value) === cur);
+    summary = found?.label ?? cur ?? "—";
+  } else {
+    return null; // unknown type
   }
-  return null;
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className={clsx("gen-chip-pill", open && "is-open")}
+        onClick={() => setOpen((v) => !v)}
+        title={setting.description ?? setting.label}
+      >
+        <span className="gen-chip-pill-label">{setting.label}:</span>
+        <span className="gen-chip-pill-val">{summary}</span>
+      </button>
+      {open && (
+        <ChipPopover anchorRef={chipRef} popRef={popRef}>
+          <SettingControl setting={setting} value={value} onChange={onChange} />
+        </ChipPopover>
+      )}
+    </>
+  );
+}
+
+/**
+ * Chip-выбор для оси семейства моделей (версия / вариант). Структурно — то же
+ * самое, что generic `SettingChip` для select, но значение не идёт в
+ * `settingValues`: клик меняет `modelId` сцены (свопаем сиблинга семейства).
+ *
+ * Если в семействе только одно значение на оси (например все Recraft-сиблинги
+ * имеют `versionLabel="v4"`), компонент возвращает `null` — лишний chip без
+ * выбора прятать чище, чем показывать noop-кнопку.
+ */
+function FamilyAxisChip({
+  label,
+  current,
+  options,
+  onSelect,
+}: {
+  label: string;
+  current: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chipRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  if (options.length <= 1) return null;
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className={clsx("gen-chip-pill", open && "is-open")}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="gen-chip-pill-label">{label}:</span>
+        <span className="gen-chip-pill-val">{current}</span>
+      </button>
+      {open && (
+        <ChipPopover anchorRef={chipRef} popRef={popRef}>
+          <div className="gen-pop-body">
+            <div className="gen-pop-chips-row">
+              {options.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  className={clsx("gen-chip", o === current && "on")}
+                  onClick={() => {
+                    onSelect(o);
+                    setOpen(false);
+                  }}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+          </div>
+        </ChipPopover>
+      )}
+    </>
+  );
 }
 
 // ── Main scene ───────────────────────────────────────────────────────────────
 
-export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+export function GenerateScene({
+  title,
+  subtitle,
+  promptPlaceholder,
+  models,
+  hideModelPicker = false,
+  onReset,
+  presetSettingsByModel,
+}: GenerateSceneProps) {
+  const { t } = useTranslation();
+
+  // ── Family grouping ───────────────────────────────────────────────────────
+  // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
+  // здесь делаем дедуп по familyId для дропдауна моделей в footer'е и считаем
+  // siblings + версии/варианты для chip'ов в блоке настроек.
+  const families = useMemo(() => {
+    const seen = new Set<string>();
+    const out: WebModelDto[] = [];
+    for (const m of models) {
+      const key = m.familyId ?? m.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }, [models]);
+
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(models[0]?.id ?? "");
+  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
-  const modelPickRef = useRef<HTMLDivElement | null>(null);
+  const modelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const modelPopRef = useRef<HTMLDivElement | null>(null);
 
   // Voice picker state: какой setting сейчас открыт и кеш каталогов голосов.
   // Кеш живёт в локальном стейте компонента — не глобальный, чтобы при logout
@@ -511,15 +568,137 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const [soulStyleCache, setSoulStyleCache] = useState<SoulStyleItem[] | null>(null);
   const [soulStyleLoading, setSoulStyleLoading] = useState(false);
 
-  // Когда модели приехали — выставляем дефолт.
-  useEffect(() => {
-    if (!modelId && models.length > 0) setModelId(models[0].id);
-  }, [models, modelId]);
+  // Пользовательские аватары — отдельные кеши per provider, отображаются в верхней
+  // секции пикера. Поллим если есть pending (status="creating") Soul-аватары.
+  const [heygenUserCache, setHeygenUserCache] = useState<UserAvatarDto[] | null>(null);
+  const [heygenUserLoading, setHeygenUserLoading] = useState(false);
+  const [soulUserCache, setSoulUserCache] = useState<UserAvatarDto[] | null>(null);
+  const [soulUserLoading, setSoulUserLoading] = useState(false);
 
+  // Модалка создания аватара — provider определяет UI (1 фото vs 10-30 фото).
+  const [createAvatarProvider, setCreateAvatarProvider] = useState<
+    "heygen" | "higgsfield_soul" | null
+  >(null);
+
+  // Динамическая стоимость генерации — пересчитывается после изменения
+  // настроек/слотов/промпта/модели (с дебаунсом). `null` до первого ответа —
+  // тогда UI использует статический `tokenCostApprox` из каталога.
+  const [previewCost, setPreviewCost] = useState<number | null>(null);
+  const [previewPricingMode, setPreviewPricingMode] = useState<"total" | "per_second">("total");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
+
+  // Локально трекаемые job'ы между submit'ом и финальным WS-event'ом.
+  // GenerationHistory сама подписывается на notification:new и зовёт
+  // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
+  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
+
+  // Когда модели приехали — выставляем дефолт (первый из дедуплированных
+  // семейств, не из полного списка: иначе можно случайно стартовать с
+  // not-default-варианта).
+  useEffect(() => {
+    if (!modelId && families.length > 0) setModelId(families[0].id);
+  }, [families, modelId]);
+
+  // ── URL → modelId sync ────────────────────────────────────────────────────
+  // `?model=<id>` в URL — источник правды для навигации (mega-menu в navbar'е,
+  // shareable links). Когда юзер уже в текущем разделе и кликает другую модель
+  // в navbar'е, route не меняется → размонта нет → без этого effect'а modelId
+  // не переключился бы.
+  //
+  // Обратный синк (state → URL) делаем НЕ через effect, а атомарным `pickModel`
+  // helper'ом — иначе два effect'а отвечающие друг другу зациклились бы
+  // (state="A" эхает в URL "A", тем временем URL="B" эхает в state "B" → swap).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlModelId = searchParams.get("model");
+
+  useEffect(() => {
+    if (!urlModelId) return;
+    if (urlModelId === modelId) return;
+    // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
+    // (например юзер вручную набил кривой ?model=, не валим default-flow).
+    if (models.some((m) => m.id === urlModelId)) {
+      setModelId(urlModelId);
+    }
+  }, [urlModelId, models, modelId]);
+
+  // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
+  // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
+  // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  function pickModel(id: string) {
+    setModelId(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("model", id);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
+  // дропдаун показывает только families[0] на семейство, но юзер может
+  // переключиться на sibling через version/variant chip'ы.
   const selectedModel = useMemo(
-    () => models.find((m) => m.id === modelId) ?? models[0],
-    [models, modelId],
+    () => models.find((m) => m.id === modelId) ?? families[0],
+    [models, families, modelId],
   );
+
+  // ── Family axis (version / variant) ────────────────────────────────────────
+  // Считаем siblings выбранной модели и доступные version/variant под them.
+  // Возвращаем null если у модели нет familyId или в семействе всего 1 модель.
+  //
+  // Не у всех семейств есть version-ось: например kling имеет только variantLabel
+  // (Standard/Pro), без versionLabel. В этом случае variants берутся из ВСЕХ
+  // siblings, а не из подмножества с тем же versionLabel'ом — иначе chip не
+  // рендерился бы (variantSource был бы пуст).
+  const familyAxis = useMemo(() => {
+    if (!selectedModel?.familyId) return null;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    if (siblings.length <= 1) return null;
+    // Уникальные version'ы в порядке появления (Set сохраняет insertion order).
+    const versions = Array.from(
+      new Set(siblings.map((m) => m.versionLabel).filter((v): v is string => !!v)),
+    );
+    const currentVersion = selectedModel.versionLabel ?? null;
+    // Если у семейства есть version-ось — фильтруем variants по текущей версии,
+    // иначе берём из всех siblings.
+    const variantSource =
+      versions.length > 0 && currentVersion
+        ? siblings.filter((m) => m.versionLabel === currentVersion)
+        : siblings;
+    const variants = Array.from(
+      new Set(variantSource.map((m) => m.variantLabel).filter((v): v is string => !!v)),
+    );
+    return {
+      versions,
+      currentVersion,
+      variants,
+      currentVariant: selectedModel.variantLabel ?? null,
+    };
+  }, [models, selectedModel]);
+
+  // Свопаем modelId на sibling с указанной версией. Стараемся сохранить
+  // вариант (Pro→Pro), иначе берём первый sibling в новой версии.
+  function selectFamilyVersion(version: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target =
+      siblings.find(
+        (m) => m.versionLabel === version && m.variantLabel === selectedModel.variantLabel,
+      ) ?? siblings.find((m) => m.versionLabel === version);
+    if (target) pickModel(target.id);
+  }
+
+  function selectFamilyVariant(variant: string) {
+    if (!selectedModel?.familyId) return;
+    const siblings = models.filter((m) => m.familyId === selectedModel.familyId);
+    const target = siblings.find(
+      (m) => m.versionLabel === selectedModel.versionLabel && m.variantLabel === variant,
+    );
+    if (target) pickModel(target.id);
+  }
 
   // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
   useEffect(() => {
@@ -527,6 +706,100 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     setSettingValues({});
     setSlotFiles({});
   }, [modelId]);
+
+  // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
+  // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
+  // на каждый navigate (страж — `location.key`, не булевый флаг — иначе
+  // самопереход /image → /image с новым префилом не сработает).
+  //
+  // Двухстадийное применение нужно из-за того, что reset-effect выше (на смену
+  // modelId) обнуляет settingValues, а defaults-effect ниже (на selectedModel)
+  // заполняет дефолты. Если бы мы сразу setSettingValues(prefill.settings) —
+  // оба effect'а затёрли бы префил. Решение: кладём payload в ref, второй
+  // effect ниже (зависит от selectedModel — выполнится ПОСЛЕ reset и defaults)
+  // применяет ref поверх дефолтов.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pushToast = useUIStore((s) => s.pushToast);
+  const lastConsumedPrefillKey = useRef<string | null>(null);
+  const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  // Снимок последнего применённого префила — используется для определения
+  // «юзер что-то поменял» (isDirty) и показа кнопки «Сбросить» на пресетных
+  // страницах. Включает modelId / prompt / settings; slotFiles не трекаем.
+  const [presetSnapshot, setPresetSnapshot] = useState<{
+    modelId: string;
+    prompt: string;
+    settings: Record<string, unknown>;
+  } | null>(null);
+  useEffect(() => {
+    const prefill = (location.state as { prefill?: GeneratePrefill } | null)?.prefill;
+    if (!prefill) return;
+    if (lastConsumedPrefillKey.current === location.key) return;
+    if (models.length === 0) return; // ждём загрузку каталога
+
+    const modelExists = models.some((m) => m.id === prefill.modelId);
+    const targetId = modelExists ? prefill.modelId : (families[0]?.id ?? null);
+    if (!targetId) return; // ни запрошенной, ни дефолтной модели нет — выходим
+
+    lastConsumedPrefillKey.current = location.key;
+
+    // settings оставляем только если модель найдена — чужие ключи для дефолтной
+    // модели смысла не имеют (юзер увидит, что чипы не реагируют на префил).
+    const resolved: GeneratePrefill = {
+      section: prefill.section,
+      modelId: targetId,
+      prompt: prefill.prompt,
+      settings: modelExists ? prefill.settings : undefined,
+    };
+
+    if (modelId === targetId) {
+      // Модель уже выбрана — никаких reset/defaults effect'ов не будет.
+      // Применяем напрямую, без ref'а.
+      setPrompt(resolved.prompt ?? "");
+      if (resolved.settings) {
+        setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
+      }
+      // Снимок для isDirty-детекта.
+      setPresetSnapshot({
+        modelId: targetId,
+        prompt: resolved.prompt ?? "",
+        settings: resolved.settings ?? {},
+      });
+    } else {
+      // Отложенное применение — после reset и defaults effect'ов.
+      pendingPrefillRef.current = resolved;
+      setModelId(targetId);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("model", targetId);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+
+    if (!modelExists) {
+      pushToast({
+        type: "info",
+        message: "Модель из примера больше недоступна — открыли с дефолтной",
+      });
+    }
+
+    // Чистим location.state — чтобы F5 / back-navigation не повторили префил.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [
+    location.key,
+    location.state,
+    location.pathname,
+    location.search,
+    models,
+    families,
+    modelId,
+    navigate,
+    setSearchParams,
+    pushToast,
+  ]);
 
   const activeMode = useMemo(
     () => resolveActiveMode(selectedModel?.modes ?? null, modeId),
@@ -546,6 +819,20 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     );
   }, [selectedModel, settingValues]);
 
+  // Юзер расходится с применённым пресет-снимком? Показ кнопки «Сбросить»
+  // на пресетных страницах. Сравниваем только то, что снимок описывает —
+  // modelId / prompt / ключи из snapshot.settings. Дополнительные ручные
+  // настройки за пределами snapshot.settings не считаем «изменением пресета».
+  const isDirtyFromPreset = useMemo(() => {
+    if (!presetSnapshot) return false;
+    if (presetSnapshot.modelId !== modelId) return true;
+    if (presetSnapshot.prompt !== prompt) return true;
+    for (const [k, v] of Object.entries(presetSnapshot.settings)) {
+      if (settingValues[k] !== v) return true;
+    }
+    return false;
+  }, [presetSnapshot, modelId, prompt, settingValues]);
+
   // Инициализируем дефолтные значения настроек при смене модели/набора параметров.
   useEffect(() => {
     if (!selectedModel) return;
@@ -559,13 +846,56 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     });
   }, [selectedModel]);
 
-  // Outside-click для popover'а моделей.
+  // Stage 2 префила — выполняется ПОСЛЕ defaults-effect выше (порядок useEffect
+  // соответствует порядку объявления), поэтому накладываем prefill.settings
+  // поверх свежевыставленных дефолтов.
+  useEffect(() => {
+    const pending = pendingPrefillRef.current;
+    if (!pending) return;
+    if (!selectedModel || selectedModel.id !== pending.modelId) return;
+    pendingPrefillRef.current = null;
+    setPrompt(pending.prompt ?? "");
+    if (pending.settings) {
+      const pendingSettings = pending.settings;
+      setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
+    }
+    setPresetSnapshot({
+      modelId: pending.modelId,
+      prompt: pending.prompt ?? "",
+      settings: pending.settings ?? {},
+    });
+  }, [selectedModel]);
+
+  // Авто-применение per-model настроек пресета при ручной смене модели.
+  // Срабатывает только в пресет-режиме (есть snapshot) и только когда юзер
+  // сменил модель на ОТЛИЧНУЮ от той, что в snapshot'е — иначе после первичного
+  // префила (stage-2 выше) snapshot.modelId === selectedModel.id и мы no-op.
+  // prompt в snapshot оставляем прежним, чтобы dirty-индикатор по prompt
+  // продолжал работать корректно после смены модели.
+  useEffect(() => {
+    if (!presetSettingsByModel) return;
+    if (!selectedModel || !presetSnapshot) return;
+    if (presetSnapshot.modelId === selectedModel.id) return;
+
+    const next = presetSettingsByModel[selectedModel.id];
+    if (next) {
+      setSettingValues((prev) => ({ ...prev, ...next }));
+    }
+    setPresetSnapshot({
+      modelId: selectedModel.id,
+      prompt: presetSnapshot.prompt,
+      settings: next ?? {},
+    });
+  }, [selectedModel, presetSettingsByModel, presetSnapshot]);
+
+  // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
   useEffect(() => {
     if (!modelOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (modelPickRef.current && !modelPickRef.current.contains(e.target as Node)) {
-        setModelOpen(false);
-      }
+      const t = e.target as Node;
+      if (modelBtnRef.current?.contains(t)) return;
+      if (modelPopRef.current?.contains(t)) return;
+      setModelOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -651,6 +981,32 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }
   }
 
+  // Пользовательские аватары — force-reload поддерживается через `reload=true`
+  // (после создания/удаления/переименования).
+  async function ensureUserAvatars(
+    provider: "heygen" | "higgsfield_soul",
+    opts?: { reload?: boolean },
+  ) {
+    const isHey = provider === "heygen";
+    if (!opts?.reload) {
+      if (isHey && (heygenUserCache || heygenUserLoading)) return;
+      if (!isHey && (soulUserCache || soulUserLoading)) return;
+    }
+    if (isHey) setHeygenUserLoading(true);
+    else setSoulUserLoading(true);
+    try {
+      const list = await listUserAvatars(provider);
+      if (isHey) setHeygenUserCache(list);
+      else setSoulUserCache(list);
+    } catch {
+      if (isHey) setHeygenUserCache([]);
+      else setSoulUserCache([]);
+    } finally {
+      if (isHey) setHeygenUserLoading(false);
+      else setSoulUserLoading(false);
+    }
+  }
+
   // Eager-prefetch media каталогов когда у модели есть соответствующие settings.
   useEffect(() => {
     if (!selectedModel) return;
@@ -659,25 +1015,76 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       const k = MEDIA_KIND_BY_TYPE[s.type];
       if (k) kinds.add(k);
     }
-    if (kinds.has("avatar")) ensureAvatars();
+    if (kinds.has("avatar")) {
+      ensureAvatars();
+      ensureUserAvatars("heygen");
+    }
     if (kinds.has("motion")) ensureMotions();
     if (kinds.has("soul-style")) ensureSoulStyles();
+    if (kinds.has("soul-character")) ensureUserAvatars("higgsfield_soul");
     // Кеши намеренно вне deps — иначе после первой загрузки triggered бы заново.
   }, [selectedModel]);
 
   function mediaNameLookup(kind: MediaPickerKind, id: string): string | null {
-    const list = kind === "avatar" ? avatarCache : kind === "motion" ? motionCache : soulStyleCache;
-    if (!list) return null;
-    const found = list.find((x) => x.id === id);
-    return found ? found.name : null;
+    // Пользовательские пикеры — ищем по своему кешу, иначе фоллбэк на каталог.
+    if (kind === "avatar") {
+      const userHit = heygenUserCache?.find((x) => x.externalId === id || x.id === id);
+      if (userHit) return userHit.name;
+      const catalogHit = avatarCache?.find((x) => x.id === id);
+      return catalogHit?.name ?? null;
+    }
+    if (kind === "soul-character") {
+      const hit = soulUserCache?.find((x) => x.externalId === id || x.id === id);
+      return hit?.name ?? null;
+    }
+    if (kind === "motion") {
+      const hit = motionCache?.find((x) => x.id === id);
+      return hit?.name ?? null;
+    }
+    const hit = soulStyleCache?.find((x) => x.id === id);
+    return hit?.name ?? null;
   }
 
   function openMediaPicker(settingKey: string, kind: MediaPickerKind) {
-    if (kind === "avatar") ensureAvatars();
+    if (kind === "avatar") {
+      ensureAvatars();
+      ensureUserAvatars("heygen");
+    }
     if (kind === "motion") ensureMotions();
     if (kind === "soul-style") ensureSoulStyles();
+    if (kind === "soul-character") ensureUserAvatars("higgsfield_soul");
     setVoicePickerSetting(null);
     setMediaPickerSetting({ key: settingKey, kind });
+  }
+
+  async function handleRenameUserAvatar(id: string, currentName: string) {
+    const newName = window.prompt("Новое название", currentName)?.trim();
+    if (!newName || newName === currentName) return;
+    try {
+      await renameUserAvatar(id, newName);
+    } finally {
+      // reload оба кеша лениво — мы не знаем какой именно provider у id
+      if (heygenUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("heygen", { reload: true });
+      }
+      if (soulUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("higgsfield_soul", { reload: true });
+      }
+    }
+  }
+
+  async function handleDeleteUserAvatar(id: string) {
+    if (!window.confirm("Удалить аватар? Это действие нельзя отменить.")) return;
+    try {
+      await deleteUserAvatar(id);
+    } finally {
+      if (heygenUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("heygen", { reload: true });
+      }
+      if (soulUserCache?.some((x) => x.id === id)) {
+        void ensureUserAvatars("higgsfield_soul", { reload: true });
+      }
+    }
   }
 
   // Upload-handler: грузит файлы в S3 через chat-uploads endpoint, обновляет
@@ -736,23 +1143,170 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }));
   }
 
-  // Готовность к отправке: prompt непустой ИЛИ модель позволяет пустой prompt при
-  // наличии обязательного слота. Все required-слоты должны быть заполнены.
-  const requiredSlotsOk = activeSlots
-    .filter((s) => s.required)
-    .every((s) => (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) > 0);
-  const promptOk =
-    prompt.trim().length > 0 ||
-    (selectedModel?.promptOptional &&
-      (!selectedModel.promptOptionalRequiresMedia ||
-        Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "ready"))));
-  const canGenerate = !!selectedModel && requiredSlotsOk && promptOk && !busy;
+  // Аплоад в процессе → дизейблим CTA. Без этого юзер может стартовать
+  // генерацию с пустым/неполным набором ассетов (s3Key'и ещё не выданы).
+  const uploadInProgress = useMemo(
+    () => Object.values(slotFiles).some((arr) => arr.some((f) => f.status === "uploading")),
+    [slotFiles],
+  );
 
-  function generate() {
-    if (!canGenerate) return;
+  // Если генерация недоступна — на кнопке отображается ПРИЧИНА (а не дизейбл-стилистика
+  // с opacity), чтобы юзер понял, что именно нужно доделать. `null` = всё готово.
+  const blockerReason = useMemo<string | null>(() => {
+    if (busy) return t("generate.btnGenerating");
+    if (uploadInProgress) return t("generate.btnUploading");
+    if (!selectedModel) return t("generate.btnSelectModel");
+
+    const missingSlot = activeSlots.find(
+      (s) =>
+        s.required && (slotFiles[s.slotKey]?.filter((f) => f.status === "ready").length ?? 0) === 0,
+    );
+    if (missingSlot) return t("generate.btnAddToSlot", { slot: missingSlot.label });
+
+    const hasReadyMedia = Object.values(slotFiles).some((arr) =>
+      arr.some((f) => f.status === "ready"),
+    );
+    const promptIsEmpty = prompt.trim().length === 0;
+    if (promptIsEmpty) {
+      if (!selectedModel.promptOptional) return t("generate.btnEnterPrompt");
+      if (selectedModel.promptOptionalRequiresMedia && !hasReadyMedia) {
+        return t("generate.btnPromptOrMedia");
+      }
+    }
+    return null;
+  }, [busy, uploadInProgress, selectedModel, activeSlots, slotFiles, prompt, t]);
+
+  const canGenerate = blockerReason === null;
+
+  // ── Debounced cost preview ─────────────────────────────────────────────────
+  // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
+  // дебаунсом. На последовательные изменения отменяем предыдущий запрос через
+  // AbortController — на сервер не уходят устаревшие комбинации.
+  // Не зовём пока есть незавершённые аплоады: после готовности slotFiles
+  // обновится и effect перезапустится с актуальными s3Key'ами.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (uploadInProgress) return;
+
+    const mediaInputs: Record<string, string[]> = {};
+    for (const [slotKey, files] of Object.entries(slotFiles)) {
+      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+      if (keys.length > 0) mediaInputs[slotKey] = keys;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      previewAbortRef.current?.abort();
+      previewAbortRef.current = controller;
+      setPreviewLoading(true);
+      previewGeneration(
+        {
+          modelId: selectedModel.id,
+          ...(modeId ? { modeId } : {}),
+          prompt,
+          ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
+          ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
+        },
+        { signal: controller.signal },
+      )
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          setPreviewCost(res.cost);
+          setPreviewPricingMode(res.pricingMode);
+        })
+        .catch((err) => {
+          // Прерванный — никакой обработки. Прочие ошибки тоже игнорируем:
+          // оставляем последнюю валидную оценку (или фоллбэк tokenCostApprox).
+          if ((err as ApiError)?.code === "TIMEOUT") return;
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setPreviewLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [selectedModel, modeId, prompt, settingValues, slotFiles, uploadInProgress]);
+
+  // Reset preview при смене модели — старая цифра не имеет смысла для новой
+  // модели, лучше показать фоллбэк tokenCostApprox чем устаревшую оценку.
+  useEffect(() => {
+    setPreviewCost(null);
+    setPreviewPricingMode("total");
+  }, [selectedModel?.id]);
+
+  async function generate() {
+    if (!canGenerate || !selectedModel) return;
     setBusy(true);
-    // Заглушка: бекенда для генерации с web ещё нет.
-    setTimeout(() => setBusy(false), 1600);
+    setSubmitError(null);
+    try {
+      // В payload — только ready-файлы (uploading/error пропускаем). Передаём
+      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит.
+      const mediaInputs: Record<string, string[]> = {};
+      for (const [slotKey, files] of Object.entries(slotFiles)) {
+        const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+        if (keys.length > 0) mediaInputs[slotKey] = keys;
+      }
+
+      const section = selectedModel.section;
+      const settingsField =
+        Object.keys(settingValues).length > 0 ? { settings: settingValues } : {};
+      const mediaField = Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
+
+      let result: SubmitGenerationResponse;
+      if (section === "design" || section === "image") {
+        const body: SubmitImageGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitImageGeneration(body);
+      } else if (section === "video") {
+        const body: SubmitVideoGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...(modeId ? { modeId } : {}),
+          ...settingsField,
+          ...mediaField,
+        };
+        result = await submitVideoGeneration(body);
+      } else if (section === "audio") {
+        const body: SubmitAudioGenerationBody = {
+          modelId: selectedModel.id,
+          prompt,
+          ...settingsField,
+        };
+        result = await submitAudioGeneration(body);
+      } else {
+        throw new Error(`Unsupported section: ${section}`);
+      }
+      // Локально трекаем pending-job: GenerationHistory подхватит её и
+      // переключит в success/error когда придёт `notification:new`.
+      // section пишем нормализованный под DB-словарь ("image"/"video"/"audio"),
+      // т.к. модель имеет "design" в каталоге — у success-карточки рендер
+      // outputs зависит от типа медиа.
+      const trackedSection = section === "design" || section === "image" ? "image" : section;
+      setPendingJobs((prev) => [
+        {
+          id: result.dbJobId,
+          modelId: selectedModel.id,
+          section: trackedSection,
+          prompt,
+          startedAt: Date.now(),
+          status: "pending",
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
+      setSubmitError(msg);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Активный picker — резолвим один раз для render'а.
@@ -783,13 +1337,47 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
         meta: m.category,
       }));
     }
-    return (soulStyleCache ?? []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      previewUrl: s.previewUrl,
-    }));
+    if (mediaPickerSetting.kind === "soul-style") {
+      return (soulStyleCache ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        previewUrl: s.previewUrl,
+      }));
+    }
+    // soul-character — каталога нет, только пользовательские; рендерится из user-section.
+    return [];
   }, [mediaPickerSetting, avatarCache, motionCache, soulStyleCache]);
+
+  // User-items: HeyGen-аватары для kind=avatar, Soul-персонажи для kind=soul-character.
+  // Передаём в picker как `userItems`; в value сохраняем `externalId` (HeyGen
+  // asset_id или Soul character_id) — именно его ждёт worker/адаптер при submit.
+  const mediaUserItems: MediaUserItem[] | undefined = useMemo(() => {
+    if (!mediaPickerSetting) return undefined;
+    const source =
+      mediaPickerSetting.kind === "avatar"
+        ? heygenUserCache
+        : mediaPickerSetting.kind === "soul-character"
+          ? soulUserCache
+          : null;
+    if (!source) return undefined;
+    return source.map((u) => ({
+      // Для выбора используем externalId (то, что пойдёт в провайдер). Пока
+      // status=creating externalId может быть null — используем cuid как
+      // временный id, но тогда tile disabled.
+      id: u.externalId ?? u.id,
+      name: u.name,
+      previewUrl: u.previewUrl,
+      status: u.status,
+    }));
+  }, [mediaPickerSetting, heygenUserCache, soulUserCache]);
+
+  const mediaUserItemsLoading =
+    mediaPickerSetting?.kind === "avatar"
+      ? heygenUserLoading
+      : mediaPickerSetting?.kind === "soul-character"
+        ? soulUserLoading
+        : false;
 
   const mediaPickerLoading =
     mediaPickerSetting?.kind === "avatar"
@@ -816,17 +1404,32 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
   const mediaPickerTitle = mediaPickerSetting
     ? mediaPickerSetting.kind === "avatar"
       ? "Выбор аватара"
-      : mediaPickerSetting.kind === "motion"
-        ? "Пресеты движения"
-        : "Стиль изображения"
+      : mediaPickerSetting.kind === "soul-character"
+        ? "Soul-персонаж"
+        : mediaPickerSetting.kind === "motion"
+          ? "Пресеты движения"
+          : "Стиль изображения"
     : "";
   const mediaPickerSubtitle = mediaPickerSetting
     ? mediaPickerSetting.kind === "avatar"
       ? "HeyGen"
-      : "HiggsField"
+      : mediaPickerSetting.kind === "soul-character"
+        ? "Higgsfield Soul"
+        : "HiggsField"
     : "";
   // motion-picker — multi, максимум 2 (из описания shared'-модели). Остальные — single.
   const mediaPickerMaxItems = mediaPickerSetting?.kind === "motion" ? 2 : 1;
+
+  // create-button: открывает модалку аплоада для соответствующего провайдера.
+  const mediaPickerOnCreate =
+    mediaPickerSetting?.kind === "avatar"
+      ? () => setCreateAvatarProvider("heygen")
+      : mediaPickerSetting?.kind === "soul-character"
+        ? () => setCreateAvatarProvider("higgsfield_soul")
+        : undefined;
+
+  // soul-character: каталога нет, скрываем нижнюю секцию.
+  const mediaPickerHideCatalog = mediaPickerSetting?.kind === "soul-character";
 
   function onMediaSelect(ids: string[]) {
     if (!mediaPickerSetting) return;
@@ -847,8 +1450,16 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       <div className="gen-bg" aria-hidden />
       <div className="gen-panel">
         <div className="gen-head">
-          <h1>{title}</h1>
-          <p className="gen-sub">{subtitle}</p>
+          <div>
+            <h1>{title}</h1>
+            <p className="gen-sub">{subtitle}</p>
+          </div>
+          {onReset && isDirtyFromPreset && (
+            <button type="button" className="gen-reset-btn" onClick={onReset}>
+              <RotateCcw size={14} />
+              <span>Сбросить</span>
+            </button>
+          )}
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -866,100 +1477,177 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
           </div>
         )}
 
-        {/* Media slots — фильтруются по активному режиму. */}
-        {activeSlots.length > 0 && (
-          <div
-            className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
-            style={{
-              gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
-            }}
-          >
-            {activeSlots.map((slot) => (
-              <SlotCard
-                key={slot.slotKey}
-                slot={slot}
-                files={slotFiles[slot.slotKey] ?? []}
-                onAdd={(fl) => addToSlot(slot.slotKey, fl)}
-                onRemove={(id) => removeFromSlot(slot.slotKey, id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Prompt. */}
-        <textarea
-          className="gen-prompt"
-          placeholder={promptPlaceholder}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={3}
-        />
-
-        {/* Настройки модели (все, что не aspect/duration — для них своя строка). */}
-        {visibleSettings.length > 0 && (
-          <div className="gen-settings">
-            {visibleSettings.map((s) => (
-              <SettingControl
-                key={s.key}
-                setting={s}
-                value={settingValues[s.key] ?? s.default}
-                onChange={(v) => setSettingValues((prev) => ({ ...prev, [s.key]: v }))}
-                openVoicePicker={(provider) => openVoicePicker(s.key, provider)}
-                voiceNameLookup={voiceNameLookup}
-                openMediaPicker={(kind) => openMediaPicker(s.key, kind)}
-                mediaNameLookup={mediaNameLookup}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Model picker (chip). */}
-        <div ref={modelPickRef} className="gen-model-row">
-          <button className="gen-model-btn" onClick={() => setModelOpen(!modelOpen)}>
-            <div className="gen-model-glyph">
-              {selectedModel ? modelLetter(selectedModel) : "·"}
+        {/* Скроллящийся блок с слотами / промптом / настройками.
+            Фикс'нутый footer ниже (model picker + CTA) всегда виден. */}
+        <div className="gen-panel-scroll">
+          {/* Media slots — фильтруются по активному режиму. */}
+          {activeSlots.length > 0 && (
+            <div
+              className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
+              }}
+            >
+              {activeSlots.map((slot) => (
+                <SlotCard
+                  key={slot.slotKey}
+                  slot={slot}
+                  files={slotFiles[slot.slotKey] ?? []}
+                  onAdd={(fl) => addToSlot(slot.slotKey, fl)}
+                  onRemove={(id) => removeFromSlot(slot.slotKey, id)}
+                />
+              ))}
             </div>
-            <div className="gen-model-text">
-              <span className="gen-model-meta">Model</span>
-              <span className="gen-model-name">
-                {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
-              </span>
-            </div>
-            <ChevronDown size={16} />
-          </button>
-          {modelOpen && (
-            <div className="gen-model-pop">
-              {models.map((m) => (
-                <button
-                  key={m.id}
-                  className={clsx("gen-model-row-item", m.id === modelId && "on")}
-                  onClick={() => {
-                    setModelId(m.id);
-                    setModelOpen(false);
-                  }}
-                >
-                  <div className="gen-model-glyph">{modelLetter(m)}</div>
-                  <div className="gen-model-item-body">
-                    <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                    <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                  </div>
-                  {m.id === modelId && <Check size={14} />}
-                </button>
+          )}
+
+          {/* Prompt. */}
+          <textarea
+            className="gen-prompt"
+            placeholder={promptPlaceholder}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={3}
+          />
+
+          {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
+              Family axis chip'ы (version / variant) идут первыми — это про
+              «какую модель из семейства взять», логически выше per-model
+              tuning settings. FamilyAxisChip сам прячется если выбора нет
+              (1 версия/вариант). */}
+          {((!hideModelPicker && familyAxis) || visibleSettings.length > 0) && (
+            <div className="gen-settings-chips">
+              {!hideModelPicker && familyAxis && familyAxis.currentVersion && (
+                <FamilyAxisChip
+                  label={t("generate.familyVersion")}
+                  current={familyAxis.currentVersion}
+                  options={familyAxis.versions}
+                  onSelect={selectFamilyVersion}
+                />
+              )}
+              {!hideModelPicker && familyAxis && familyAxis.currentVariant && (
+                <FamilyAxisChip
+                  label={t("generate.familyVariant")}
+                  current={familyAxis.currentVariant}
+                  options={familyAxis.variants}
+                  onSelect={selectFamilyVariant}
+                />
+              )}
+              {visibleSettings.map((s) => (
+                <SettingChip
+                  key={s.key}
+                  setting={s}
+                  value={settingValues[s.key] ?? s.default}
+                  onChange={(v) => setSettingValues((prev) => ({ ...prev, [s.key]: v }))}
+                  openVoicePicker={(provider) => openVoicePicker(s.key, provider)}
+                  voiceNameLookup={voiceNameLookup}
+                  openMediaPicker={(kind) => openMediaPicker(s.key, kind)}
+                  mediaNameLookup={mediaNameLookup}
+                />
               ))}
             </div>
           )}
         </div>
 
-        {/* Generate CTA. */}
-        <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
-          <Sparkles size={16} />
-          <span>{busy ? "Generating…" : "Generate"}</span>
-          {selectedModel && (
-            <span className="gen-cta-cost mono">
-              ≈ {Math.round(selectedModel.tokenCostApprox)} т
-            </span>
+        {/* Footer: model picker + CTA. Sticky, всегда видны. */}
+        <div className="gen-panel-footer">
+          {!hideModelPicker && (
+            <div className="gen-model-row">
+              <button
+                ref={modelBtnRef}
+                className="gen-model-btn"
+                onClick={() => setModelOpen(!modelOpen)}
+              >
+                <div className="gen-model-glyph">
+                  {selectedModel ? modelLetter(selectedModel) : "·"}
+                </div>
+                <div className="gen-model-text">
+                  <span className="gen-model-meta">Model</span>
+                  <span className="gen-model-name">
+                    {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                  </span>
+                </div>
+                <ChevronDown size={16} />
+              </button>
+              {modelOpen && (
+                <ChipPopover
+                  anchorRef={modelBtnRef}
+                  popRef={modelPopRef}
+                  className="gen-model-pop"
+                  matchAnchorWidth
+                >
+                  {families.map((m) => {
+                    // Active = выбранная модель из этого семейства (даже если
+                    // юзер переключился на sibling-вариант через chip'ы).
+                    const isActive = selectedModel?.familyId
+                      ? m.familyId === selectedModel.familyId
+                      : m.id === modelId;
+                    return (
+                      <button
+                        key={m.id}
+                        className={clsx("gen-model-row-item", isActive && "on")}
+                        onClick={() => {
+                          pickModel(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <div className="gen-model-item-body">
+                          <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                          <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                        </div>
+                        {isActive && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </ChipPopover>
+              )}
+            </div>
           )}
-        </button>
+
+          <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
+            {busy || uploadInProgress ? (
+              <Loader2 size={16} className="spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            <span>{blockerReason ?? t("generate.btnGenerate")}</span>
+            {selectedModel && (
+              <span className="gen-cta-cost mono">
+                {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
+                {(previewCost ?? selectedModel.tokenCostApprox).toFixed(2)}
+                {previewPricingMode === "per_second" ? " / сек" : ""}
+              </span>
+            )}
+          </button>
+
+          {submitError && (
+            <div className="gen-error" role="alert">
+              {submitError}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* История генераций — отдельная пэйн справа от `.gen-panel`. Занимает
+          всё оставшееся пустое место экрана. На мобильных скрывается через
+          CSS (там панель и так full-width). */}
+      <div className="gen-history-pane">
+        <GenerationHistory
+          selectedModel={selectedModel}
+          allModels={models}
+          pendingJobs={pendingJobs}
+          onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
+          onJobFailed={(jobId, errorMessage) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
+            )
+          }
+          onJobSucceeded={(jobId, outputs) =>
+            setPendingJobs((prev) =>
+              prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
+            )
+          }
+        />
       </div>
 
       {voicePickerSetting && activePickerProvider && (
@@ -1001,8 +1689,35 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             previewKind={mediaPickerPreviewKind}
             onChange={onMediaSelect}
             onClose={() => setMediaPickerSetting(null)}
+            userItems={mediaUserItems}
+            userItemsLoading={mediaUserItemsLoading}
+            userItemsLabel={
+              mediaPickerSetting?.kind === "soul-character"
+                ? t("mediaPicker.myCharacters")
+                : t("mediaPicker.myAvatars")
+            }
+            hideCatalog={mediaPickerHideCatalog}
+            onCreate={mediaPickerOnCreate}
+            onRename={mediaPickerOnCreate ? handleRenameUserAvatar : undefined}
+            onDelete={mediaPickerOnCreate ? handleDeleteUserAvatar : undefined}
           />
         </>
+      )}
+
+      {createAvatarProvider && (
+        <CreateAvatarModal
+          provider={createAvatarProvider}
+          onClose={() => setCreateAvatarProvider(null)}
+          onCreated={(_avatar) => {
+            // Свежесозданный аватар — reload соответствующего кеша. Это
+            // подхватит и status="ready" (HeyGen), и status="creating" (Soul).
+            if (createAvatarProvider === "heygen") {
+              void ensureUserAvatars("heygen", { reload: true });
+            } else {
+              void ensureUserAvatars("higgsfield_soul", { reload: true });
+            }
+          }}
+        />
       )}
     </div>
   );

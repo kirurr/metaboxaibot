@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
 import type { WebModelDto } from "@/api/models";
 
@@ -16,18 +17,24 @@ import type { WebModelDto } from "@/api/models";
  * Источник дизайна: `aibox_template/ai-box-pre-tilted.html` (CapabilityTabs).
  */
 
-type Capability = { id: "text" | "image" | "video" | "audio"; label: string; route: string };
+type Capability = {
+  id: "text" | "image" | "video" | "audio";
+  /** i18n-ключ для подписи капабилити (резолвится в рендере). */
+  labelKey: string;
+  route: string;
+};
 
 const CAPABILITIES: readonly Capability[] = [
-  { id: "text", label: "Chat", route: "/chat" },
-  { id: "image", label: "Image", route: "/image" },
-  { id: "video", label: "Video", route: "/video" },
-  { id: "audio", label: "Audio", route: "/audio" },
+  { id: "text", labelKey: "capabilities.chat", route: "/chat" },
+  { id: "image", labelKey: "capabilities.image", route: "/image" },
+  { id: "video", labelKey: "capabilities.video", route: "/video" },
+  { id: "audio", labelKey: "capabilities.audio", route: "/audio" },
 ] as const;
 
 type MenuItem = {
-  name: string;
-  desc: string;
+  /** i18n-ключи для name/desc. */
+  nameKey: string;
+  descKey: string;
   glyph?: string;
   letter?: string;
   badge?: "TOP" | "NEW";
@@ -53,37 +60,123 @@ function modelLetter(m: WebModelDto): string {
 
 const FEATURE_MENUS: Record<string, MenuItem[]> = {
   image: [
-    { name: "Generate Image", desc: "Создавайте AI-картинки с нуля.", glyph: "▢" },
-    { name: "Product Shots", desc: "Фотореалистичные продакт-снимки.", glyph: "◈" },
-    { name: "Edit Photo", desc: "Правьте свет, фон, детали одним кликом.", glyph: "◯" },
-    { name: "Upscale", desc: "Повышение разрешения до 4k.", glyph: "▲" },
-    { name: "LoRA Training", desc: "Обучите модель на своём лице.", glyph: "✪" },
-    { name: "Style Transfer", desc: "Перенос стиля одного фото на другое.", glyph: "◇" },
-    { name: "Background Edit", desc: "Замена и ретушь фона.", glyph: "▦" },
+    {
+      nameKey: "capabilities.features.image.generate.name",
+      descKey: "capabilities.features.image.generate.desc",
+      glyph: "▢",
+    },
+    {
+      nameKey: "capabilities.features.image.product.name",
+      descKey: "capabilities.features.image.product.desc",
+      glyph: "◈",
+    },
+    {
+      nameKey: "capabilities.features.image.edit.name",
+      descKey: "capabilities.features.image.edit.desc",
+      glyph: "◯",
+    },
+    {
+      nameKey: "capabilities.features.image.upscale.name",
+      descKey: "capabilities.features.image.upscale.desc",
+      glyph: "▲",
+    },
+    {
+      nameKey: "capabilities.features.image.lora.name",
+      descKey: "capabilities.features.image.lora.desc",
+      glyph: "✪",
+    },
+    {
+      nameKey: "capabilities.features.image.style.name",
+      descKey: "capabilities.features.image.style.desc",
+      glyph: "◇",
+    },
+    {
+      nameKey: "capabilities.features.image.background.name",
+      descKey: "capabilities.features.image.background.desc",
+      glyph: "▦",
+    },
   ],
   video: [
-    { name: "Create Video", desc: "Генерируйте AI-видео по промпту.", glyph: "▷" },
-    { name: "Cinema Studio", desc: "Кинематография с AI-режиссёром.", glyph: "▣", badge: "TOP" },
-    { name: "Mixed Media", desc: "Смешанные проекты: фото + видео + аудио.", glyph: "◫" },
-    { name: "Edit Video", desc: "Правьте сцены, планы, элементы.", glyph: "▥" },
-    { name: "Lipsync Studio", desc: "Говорящие клипы из фото.", glyph: "◎" },
-    { name: "Sketch to Video", desc: "Набросок превращается в видео.", glyph: "✏" },
-    { name: "Video Upscale", desc: "Улучшение качества видео.", glyph: "▱" },
-    { name: "Avatar Factory", desc: "Соберите UGC-видео с аватаром.", glyph: "◍", badge: "NEW" },
+    {
+      nameKey: "capabilities.features.video.create.name",
+      descKey: "capabilities.features.video.create.desc",
+      glyph: "▷",
+    },
+    {
+      nameKey: "capabilities.features.video.cinema.name",
+      descKey: "capabilities.features.video.cinema.desc",
+      glyph: "▣",
+      badge: "TOP",
+    },
+    {
+      nameKey: "capabilities.features.video.mixed.name",
+      descKey: "capabilities.features.video.mixed.desc",
+      glyph: "◫",
+    },
+    {
+      nameKey: "capabilities.features.video.edit.name",
+      descKey: "capabilities.features.video.edit.desc",
+      glyph: "▥",
+    },
+    {
+      nameKey: "capabilities.features.video.lipsync.name",
+      descKey: "capabilities.features.video.lipsync.desc",
+      glyph: "◎",
+    },
+    {
+      nameKey: "capabilities.features.video.sketch.name",
+      descKey: "capabilities.features.video.sketch.desc",
+      glyph: "✏",
+    },
+    {
+      nameKey: "capabilities.features.video.upscale.name",
+      descKey: "capabilities.features.video.upscale.desc",
+      glyph: "▱",
+    },
+    {
+      nameKey: "capabilities.features.video.avatar.name",
+      descKey: "capabilities.features.video.avatar.desc",
+      glyph: "◍",
+      badge: "NEW",
+    },
   ],
   audio: [
-    { name: "Text to Speech", desc: "Превратите текст в реалистичную речь.", glyph: "◀" },
     {
-      name: "Voice Cloning",
-      desc: "Клонируйте любой голос за 30 секунд.",
+      nameKey: "capabilities.features.audio.tts.name",
+      descKey: "capabilities.features.audio.tts.desc",
+      glyph: "◀",
+    },
+    {
+      nameKey: "capabilities.features.audio.clone.name",
+      descKey: "capabilities.features.audio.clone.desc",
       glyph: "○",
       badge: "TOP",
     },
-    { name: "Music Generation", desc: "Полные треки с вокалом по промпту.", glyph: "♫" },
-    { name: "Dubbing", desc: "Многоязычный дубляж в липсинк.", glyph: "◯" },
-    { name: "Transcription", desc: "Распознавание речи в текст.", glyph: "▤" },
-    { name: "Audio Cleanup", desc: "Шумоподавление и реставрация.", glyph: "△" },
-    { name: "Voice Library", desc: "500+ готовых голосов.", glyph: "▼" },
+    {
+      nameKey: "capabilities.features.audio.music.name",
+      descKey: "capabilities.features.audio.music.desc",
+      glyph: "♫",
+    },
+    {
+      nameKey: "capabilities.features.audio.dubbing.name",
+      descKey: "capabilities.features.audio.dubbing.desc",
+      glyph: "◯",
+    },
+    {
+      nameKey: "capabilities.features.audio.transcribe.name",
+      descKey: "capabilities.features.audio.transcribe.desc",
+      glyph: "▤",
+    },
+    {
+      nameKey: "capabilities.features.audio.cleanup.name",
+      descKey: "capabilities.features.audio.cleanup.desc",
+      glyph: "△",
+    },
+    {
+      nameKey: "capabilities.features.audio.library.name",
+      descKey: "capabilities.features.audio.library.desc",
+      glyph: "▼",
+    },
   ],
 };
 
@@ -93,6 +186,7 @@ function isActiveRoute(capRoute: string, currentPath: string): boolean {
 }
 
 export function CapabilityTabs() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const allModels = useModelsStore((s) => s.models);
@@ -126,13 +220,22 @@ export function CapabilityTabs() {
     } satisfies Record<Capability["id"], WebModelDto[]>;
   }, [allModels]);
 
-  const openMenu = (id: string) => {
+  const openMenu = (id: string, hasMenu = true) => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    setHovered(id);
+    // Не переключаем `hovered` на cap без mega-меню (например Chat). Иначе при
+    // hover'е на edge соседней кнопки курсор задевает её cap-wrap, сбрасывает
+    // hovered → showMenu для текущего раздела становится false → попап
+    // моргает/исчезает на пересечении gap'а между cap-wrap'ами.
+    if (hasMenu) setHovered(id);
+  };
+  const cancelClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
   };
   const scheduleClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setHovered(null), 140);
+    // 220ms — даём юзеру шанс вернуть курсор в hover-зону, если он промахнулся
+    // мимо bridge'а на вертикальном overshoot'е.
+    closeTimer.current = setTimeout(() => setHovered(null), 220);
   };
 
   // Сдвиг popup, чтобы не вылезал за края viewport'а.
@@ -148,76 +251,86 @@ export function CapabilityTabs() {
     if (shift) el.style.setProperty("--mm-shift", shift + "px");
   }, [hovered]);
 
-  function pick(cap: Capability) {
+  function pick(cap: Capability, modelId?: string) {
     setHovered(null);
-    navigate(cap.route);
+    // Передаём modelId как ?model=...: если юзер уже в этом разделе и кликает
+    // другую модель в mega-menu, route не меняется и страница без query-param
+    // не узнала бы о смене. GenerateScene читает `?model=` и синкает modelId.
+    const target = modelId ? `${cap.route}?model=${encodeURIComponent(modelId)}` : cap.route;
+    navigate(target);
   }
 
   return (
-    <div className="cap-tabs" onMouseLeave={scheduleClose}>
-      {CAPABILITIES.map((c) => {
-        const features = FEATURE_MENUS[c.id] ?? [];
-        const models = modelsByCap[c.id] ?? [];
-        const isMega = c.id !== "text" && features.length > 0;
-        const showMenu = hovered === c.id && isMega;
-        const active = isActiveRoute(c.route, location.pathname);
-        return (
-          <div key={c.id} className="cap-wrap" onMouseEnter={() => openMenu(c.id)}>
-            <button className={clsx("cap", active && "on")} onClick={() => pick(c)}>
-              <span className="cap-dot" />
-              <span>{c.label}</span>
-            </button>
-            {showMenu && (
-              <div
-                className="mega-menu"
-                ref={menuRef}
-                onMouseEnter={() => openMenu(c.id)}
-                onMouseLeave={scheduleClose}
-              >
-                <div className="mega-col">
-                  <div className="mega-col-head">Features</div>
-                  <div className="mega-list">
-                    {features.map((f, i) => (
-                      <button key={i} className="mega-item" onClick={() => pick(c)}>
-                        <span className="mega-ico">{f.glyph}</span>
-                        <span className="mega-body">
-                          <span className="mega-name">
-                            {f.name}
-                            {f.badge && (
-                              <span className={"mega-badge " + f.badge.toLowerCase()}>
-                                {f.badge}
-                              </span>
-                            )}
-                          </span>
-                          <span className="mega-desc">{f.desc}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="mega-col">
-                  <div className="mega-col-head">Models</div>
-                  <div className="mega-list">
-                    {models.length === 0 ? (
-                      <div className="mega-empty">Загрузка моделей…</div>
-                    ) : (
-                      models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
-                        <button key={m.id} className="mega-item" onClick={() => pick(c)}>
-                          <span className="mega-ico letter">{modelLetter(m)}</span>
+    // Wrapper-зона с padding'ом ±10px по периметру: расширяет hover-area вокруг
+    // cap-tabs так, чтобы вертикальный overshoot мышью (выход курсора на 1-5px
+    // выше/ниже кнопок) не считался "leave". Margin компенсирует визуально —
+    // layout не меняется.
+    <div className="cap-tabs-zone" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}>
+      <div className="cap-tabs">
+        {CAPABILITIES.map((c) => {
+          const features = FEATURE_MENUS[c.id] ?? [];
+          const models = modelsByCap[c.id] ?? [];
+          const isMega = c.id !== "text" && features.length > 0;
+          const showMenu = hovered === c.id && isMega;
+          const active = isActiveRoute(c.route, location.pathname);
+          return (
+            <div key={c.id} className="cap-wrap" onMouseEnter={() => openMenu(c.id, isMega)}>
+              <button className={clsx("cap", active && "on")} onClick={() => pick(c)}>
+                <span className="cap-dot" />
+                <span>{t(c.labelKey)}</span>
+              </button>
+              {showMenu && (
+                <div
+                  className="mega-menu"
+                  ref={menuRef}
+                  onMouseEnter={() => openMenu(c.id)}
+                  onMouseLeave={scheduleClose}
+                >
+                  <div className="mega-col">
+                    <div className="mega-col-head">{t("capabilities.columns.features")}</div>
+                    <div className="mega-list">
+                      {features.map((f, i) => (
+                        <button key={i} className="mega-item" onClick={() => pick(c)}>
+                          <span className="mega-ico">{f.glyph}</span>
                           <span className="mega-body">
-                            <span className="mega-name">{displayModelName(m)}</span>
-                            <span className="mega-desc">{displayModelDesc(m)}</span>
+                            <span className="mega-name">
+                              {t(f.nameKey)}
+                              {f.badge && (
+                                <span className={"mega-badge " + f.badge.toLowerCase()}>
+                                  {t(`capabilities.features.badge.${f.badge}`)}
+                                </span>
+                              )}
+                            </span>
+                            <span className="mega-desc">{t(f.descKey)}</span>
                           </span>
                         </button>
-                      ))
-                    )}
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mega-col">
+                    <div className="mega-col-head">{t("capabilities.columns.models")}</div>
+                    <div className="mega-list">
+                      {models.length === 0 ? (
+                        <div className="mega-empty">{t("capabilities.columns.loading")}</div>
+                      ) : (
+                        models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                          <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
+                            <span className="mega-ico letter">{modelLetter(m)}</span>
+                            <span className="mega-body">
+                              <span className="mega-name">{displayModelName(m)}</span>
+                              <span className="mega-desc">{displayModelDesc(m)}</span>
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -44,14 +44,55 @@ export function isKieFiveXxError(err: unknown): boolean {
  * сработать как при 5xx. Без этой ветки fallback пропускался на последней
  * попытке, юзер получал generic «модель устала».
  *
+ * `400` + `"Internal Error, Please try again later."` — KIE нестандартно
+ * сигналит transient через 400-failCode (наблюдали 2026-05 на gpt-image-2).
+ * Сочетание «Internal Error» + «try again later» — однозначный transient-
+ * маркер (не модерация, не валидация), и под другие regex'ы (isPolicy /
+ * isProviderTemporaryUnavailable) не попадает. Без этой ветки cascade на
+ * evolink-fallback не запускался → юзер получал generic «модель устала».
+ *
+ * `422` + `429 Too Many Requests` (обычно для url `tempfile.redpandaai.co/...`)
+ * — KIE завернул rate-limit от своего же storage CDN в свой failed-task
+ * (наблюдали 2026-05 на kling-motion). Их временный storage по нашему
+ * reference-видео отбил 429 → KIE не смог скачать его для генерации →
+ * вернул failCode=422 с failMsg, содержащим оригинальный «429 Too Many
+ * Requests». Это инфра-проблема на их стороне, retry с тем же ключом не
+ * поможет (RL на самом storage, не на нашем ключе). Trigger'им fallback
+ * на evolink — у kling-motion он зарегистрирован.
+ *
  * Используется в image/video processor'ах в качестве fallback-trigger'а.
  */
 export function isKieTransientError(err: unknown): boolean {
   if (isKieFiveXxError(err)) return true;
   const message = err instanceof Error ? err.message : String(err ?? "");
   if (!/^KIE\b/i.test(message)) return false;
-  return (
+  const is422Transient =
     /\b422\b/.test(message) &&
-    /playground failed|task id is blank|client closed request/i.test(message)
-  );
+    /playground failed|task id is blank|client closed request/i.test(message);
+  const is400InternalRetry =
+    /\b400\b/.test(message) && /internal error.*try again later/i.test(message);
+  const is422TooManyRequests =
+    /\b422\b/.test(message) && /\b429\b|too many requests/i.test(message);
+  return is422Transient || is400InternalRetry || is422TooManyRequests;
+}
+
+/**
+ * Возвращает true если ошибка — KIE 402 «Insufficient Credits»: наш
+ * KIE-аккаунт пуст. Это не вина юзера и не вина запроса — provider-wide
+ * состояние до пополнения. Ни retry, ни смена ключа не помогут.
+ *
+ * Используется в `submitWithFallback` как fallback-триггер: при пустом
+ * KIE-аккаунте сразу переключаемся на fallback-провайдера (если зарегистрирован),
+ * вместо того чтобы упирать юзера в «модель недоступна». Параллельно летит
+ * ops-алёрт в balance-канал — KIE надо пополнить независимо от того, спас ли
+ * fallback конкретный запрос.
+ *
+ * Матчит обе формы: обёрнутый UserFacingError из адаптера ("KIE credits
+ * exhausted (...)") и generic-ошибку ("KIE submit failed: 402 — ...").
+ */
+export function isKieCreditsExhausted(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (!/^KIE\b/i.test(message)) return false;
+  if (/credits?\s+exhausted/i.test(message)) return true;
+  return /\b402\b/.test(message) && /credits?\b|insufficient|balance.*enough/i.test(message);
 }

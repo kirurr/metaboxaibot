@@ -24,7 +24,129 @@ import { getRedis } from "../redis.js";
 import { logger } from "../logger.js";
 import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов Bot API. После decoupling-миграции они различаются у web-only юзеров.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
+
+/**
+ * Per-user trailing-edge debounce таймеры для уведомления «модель сменилась».
+ * Ключ — User.id; значение — pending setTimeout. Каждый /state/select-model
+ * сбрасывает старый таймер и взводит новый на NOTIFY_DEBOUNCE_MS. После окна
+ * тишины (юзер закрыл миниапп или перестал тыкать варианты) таймер фаерится
+ * один раз с финальной моделью.
+ *
+ * Map module-scope-овый и живёт всё время процесса. На рестарте API pending
+ * таймеры теряются — модель уже сохранена в БД через select-model, теряем
+ * только уведомление в чат. Acceptable trade-off vs тащить BullMQ-очередь.
+ *
+ * Multi-instance: API в проде однопроцессный (см. docker-compose.prod.yml,
+ * `api` без `replicas`/`deploy.scale`). Если поедем в кластер — заменить на
+ * BullMQ delayed job с jobId=`notify-model:{userId}`.
+ */
+const pendingNotifyTimers = new Map<bigint, NodeJS.Timeout>();
+
+/**
+ * In-memory дубль `last-notified:{userId}` Redis-ключа. Нужен потому что
+ * `setLastNotified` глотает ошибки Redis (.catch warn) — если Redis в этот
+ * момент моргнул, ключ не записался, и на следующий silent-select для той же
+ * модели сработает duplicate notify. Map работает как fallback: даже при
+ * полном падении Redis dedup остаётся корректным внутри одного процесса.
+ * На рестарте API теряется вместе с pendingNotifyTimers — приемлемо.
+ */
+const inMemoryLastNotified = new Map<bigint, string>();
+
+const NOTIFY_DEBOUNCE_MS = 3000;
+/** Сколько Redis помнит «последняя модель про которую слали пинг» для дедупа. */
+const LAST_NOTIFIED_TTL_SEC = 24 * 60 * 60;
+
+/** Redis key для дедупа повторных уведомлений о той же модели. */
+function lastNotifiedRedisKey(userId: bigint): string {
+  return `state:last-notified-model:${userId}`;
+}
+
+/**
+ * Cancel pending model-changed notification для этого юзера, если есть.
+ * Вызывать из /state/activate — full activate шлёт своё уведомление, pending
+ * silent-select notify ему дублём не нужен.
+ *
+ * Удаление из Map — это и есть «сигнал отмены» для уже-запущенного таймера:
+ * IIFE внутри scheduleModelChangedNotify проверяет `pendingNotifyTimers.get`
+ * перед/после await'ов и тихо выходит, если запись пропала или заменена.
+ */
+function cancelPendingNotify(userId: bigint): void {
+  const existing = pendingNotifyTimers.get(userId);
+  if (existing) {
+    clearTimeout(existing);
+    pendingNotifyTimers.delete(userId);
+  }
+}
+
+/** Читаем last-notified из Redis, при ошибке/отсутствии — fallback на in-memory. */
+async function getLastNotified(userId: bigint): Promise<string | null> {
+  const fromRedis = await getRedis()
+    .get(lastNotifiedRedisKey(userId))
+    .catch((err) => {
+      logger.warn({ err, userId: userId.toString() }, "getLastNotified Redis read failed");
+      return null;
+    });
+  if (fromRedis !== null) return fromRedis;
+  return inMemoryLastNotified.get(userId) ?? null;
+}
+
+/**
+ * Сохранить «последняя модель про которую отправили пинг» — для последующего
+ * dedup'а в trailing-debounce: если юзер попрыгал по моделям и вернулся к этой
+ * же, второго одинакового пинга мы не шлём (старое сообщение в чате уже
+ * корректное). In-memory обновление синхронное и без catch — оно надёжное
+ * даже когда Redis отвалился.
+ */
+async function setLastNotified(userId: bigint, modelId: string): Promise<void> {
+  inMemoryLastNotified.set(userId, modelId);
+  await getRedis()
+    .set(lastNotifiedRedisKey(userId), modelId, "EX", LAST_NOTIFIED_TTL_SEC)
+    .catch((err) =>
+      logger.warn({ err, userId: userId.toString() }, "setLastNotified Redis write failed"),
+    );
+}
+
+/**
+ * Trailing-edge debounce: каждый вызов сбрасывает предыдущий таймер. После
+ * NOTIFY_DEBOUNCE_MS тишины сравниваем с last-notified — если модель та же,
+ * молчим (юзер вернулся к исходной); иначе шлём уведомление и обновляем
+ * last-notified.
+ *
+ * Race-guard: IIFE дважды проверяет `pendingNotifyTimers.get(userId) === timer`
+ * — один раз сразу при входе, второй раз после await Redis-read. Если за это
+ * время пришёл `cancelPendingNotify` (от /state/activate) или новый
+ * scheduleModelChangedNotify (новый select-model заменил наш timer), мы тихо
+ * выходим без отправки. Полностью атомарным это не делает — но окно гонки
+ * сжимается до микросекунд между check и собственно sendModelActivatedNotification.
+ */
+function scheduleModelChangedNotify(userId: bigint, section: string, modelId: string): void {
+  cancelPendingNotify(userId);
+  const timer: NodeJS.Timeout = setTimeout(() => {
+    void (async () => {
+      if (pendingNotifyTimers.get(userId) !== timer) return;
+      try {
+        const lastNotified = await getLastNotified(userId);
+        if (pendingNotifyTimers.get(userId) !== timer) return;
+        if (lastNotified === modelId) return;
+        await sendModelActivatedNotification(userId, section, modelId, false);
+        await setLastNotified(userId, modelId);
+      } catch (err) {
+        logger.warn(
+          { err, userId: userId.toString(), section, modelId },
+          "scheduleModelChangedNotify: fire failed",
+        );
+      } finally {
+        if (pendingNotifyTimers.get(userId) === timer) {
+          pendingNotifyTimers.delete(userId);
+        }
+      }
+    })();
+  }, NOTIFY_DEBOUNCE_MS);
+  pendingNotifyTimers.set(userId, timer);
+}
 
 /**
  * Build localised cost line with optional min–max range.
@@ -161,7 +283,7 @@ function buildActivationCostLine(
  * Возвращает null если section не имеет persistent-keyboard'а (gpt и т.п.).
  */
 function buildSectionReplyMarkup(
-  userId: bigint,
+  telegramId: bigint,
   section: string,
   t: Translations,
   token: string,
@@ -171,7 +293,7 @@ function buildSectionReplyMarkup(
   resize_keyboard: boolean;
   is_persistent: boolean;
 } | null {
-  const wtoken = webappUrl ? generateWebToken(userId, token) : "";
+  const wtoken = webappUrl ? generateWebToken(telegramId, token) : "";
   const makeMgmtBtn = (label: string) =>
     webappUrl
       ? {
@@ -211,13 +333,13 @@ function buildSectionReplyMarkup(
 
 /** Send a section-entry message with the appropriate reply keyboard (mirrors bot menu.ts). */
 async function sendSectionMessage(
-  userId: bigint,
+  telegramId: bigint,
   section: string,
   t: Translations,
   token: string,
   webappUrl: string | undefined,
 ): Promise<void> {
-  const replyMarkup = buildSectionReplyMarkup(userId, section, t, token, webappUrl);
+  const replyMarkup = buildSectionReplyMarkup(telegramId, section, t, token, webappUrl);
   if (!replyMarkup) return;
 
   const text =
@@ -231,7 +353,7 @@ async function sendSectionMessage(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: String(userId),
+      chat_id: String(telegramId),
       text,
       reply_markup: replyMarkup,
     }),
@@ -248,16 +370,23 @@ async function sendModelActivatedNotification(
   if (!model || !config.bot.token) return;
 
   const [user, allSettings] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { language: true } }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { language: true, telegramId: true },
+    }),
     userStateService.getModelSettings(userId),
   ]);
-  const t = getT((user?.language ?? "en") as Language);
+  // Без telegramId юзеру некуда слать активационное сообщение (web-only без TG).
+  // Бесшумно скипаем — фронт уже показал нужное состояние из ответа /state-select.
+  if (!user?.telegramId) return;
+  const telegramId = user.telegramId;
+  const t = getT((user.language ?? "en") as Language);
   const modelSettings = allSettings[modelId] ?? {};
 
   // Section switch (state/section) was already performed synchronously in the route handler.
   // Here we only send the optional section-switch keyboard message if needed.
   if (sectionSwitched) {
-    await sendSectionMessage(userId, section, t, config.bot.token, config.bot.webappUrl).catch(
+    await sendSectionMessage(telegramId, section, t, config.bot.token, config.bot.webappUrl).catch(
       (reason) => logger.warn(reason, "Could not send section switch message"),
     );
   }
@@ -290,7 +419,7 @@ async function sendModelActivatedNotification(
     "d-id": t.video.hintDid,
   };
 
-  const lang = (user?.language ?? "en") as string;
+  const lang = (user.language ?? "en") as string;
   const { name: modelName, description: modelDesc } = resolveModelDisplay(modelId, lang, model);
   const webappUrl = config.bot.webappUrl;
 
@@ -301,7 +430,7 @@ async function sendModelActivatedNotification(
       // voice-clone: plain label + hint, no inline kb. Раз нет inline —
       // прикрепляем нижнюю persistent клавиатуру со свежим wtoken.
       const bottomKb = buildSectionReplyMarkup(
-        userId,
+        telegramId,
         section,
         t,
         config.bot.token,
@@ -313,7 +442,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: `${t.audio.voiceClone}\n\n${audioHint}`,
           parse_mode: "HTML",
           ...(bottomKb ? { reply_markup: bottomKb } : {}),
@@ -342,7 +471,7 @@ async function sendModelActivatedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: String(userId),
+        chat_id: String(telegramId),
         text: audioText,
         ...(audioReplyMarkup ? { reply_markup: audioReplyMarkup } : {}),
         ...(ttsTextOnly ? { parse_mode: "HTML" } : {}),
@@ -407,7 +536,7 @@ async function sendModelActivatedNotification(
   // Bottom persistent keyboard со свежим wtoken — для сообщений БЕЗ inline kb,
   // чтобы юзер при следующем клике на «Управление» использовал не протухший token.
   const bottomKb = buildSectionReplyMarkup(
-    userId,
+    telegramId,
     section,
     t,
     config.bot.token,
@@ -424,7 +553,7 @@ async function sendModelActivatedNotification(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: String(userId),
+      chat_id: String(telegramId),
       text,
       ...(descriptionMarkup ? { reply_markup: descriptionMarkup } : {}),
     }),
@@ -437,7 +566,7 @@ async function sendModelActivatedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: String(userId),
+        chat_id: String(telegramId),
         text: hint,
         ...(hintMarkup ? { reply_markup: hintMarkup } : {}),
       }),
@@ -488,7 +617,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: modeText,
           ...(modeKb.length ? { reply_markup: { inline_keyboard: modeKb } } : {}),
         }),
@@ -509,7 +638,7 @@ async function sendModelActivatedNotification(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id: String(userId),
+          chat_id: String(telegramId),
           text: t.modelModes.pickerTitle,
           reply_markup: { inline_keyboard: pickerKb },
         }),
@@ -679,6 +808,99 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  /**
+   * POST /state/select-model — silent variant of /state/activate.
+   *
+   * Меняет только активную модель в секции (designModelId / videoModelId /
+   * audioModelId / gptModelId). НЕ переводит state бота в *_ACTIVE.
+   *
+   * Telegram-уведомление: НЕ шлём сразу — взводим server-side trailing
+   * debounce. Пока юзер тыкает варианты в мини-аппе (карусель «PRO / 2 / 1»),
+   * каждый тап сбрасывает таймер. После NOTIFY_DEBOUNCE_MS тишины (= юзер
+   * либо закрыл миниапп, либо просто перестал переключаться) фаерится одно
+   * уведомление с финальной моделью — и то только если она отличается от
+   * `last-notified` (юзер не вернулся к исходной).
+   *
+   * Раньше debounce жил на клиенте (5с setTimeout в MediaSettingsView +
+   * pagehide-beacon на закрытие). Telegram WebView X-close не даёт JS
+   * выстрелить надёжно — notify терялся. Теперь таймер на сервере, fast-close
+   * не страшен; клиент шлёт `selectModel` с `keepalive:true` чтобы сам запрос
+   * пережил закрытие WebView.
+   *
+   * Кнопка «Активировать» по-прежнему вызывает /state/activate для full
+   * activation (state + notification + miniapp close) — там pending debounce
+   * этого юзера гасится через `cancelPendingNotify`.
+   */
+  fastify.post<{
+    Body: { section: string; modelId: string };
+  }>(
+    "/state/select-model",
+    {
+      schema: {
+        description: "Silently set model for section; trailing-debounced notify scheduled",
+        body: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            section: { type: "string", description: "Section (gpt, design, audio, video)" },
+            modelId: { type: "string", description: "Model ID to select" },
+          },
+          required: ["section", "modelId"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { success: { type: "boolean" } },
+          },
+          400: {
+            type: "object",
+            additionalProperties: true,
+            properties: { error: { type: "string" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId } = request as AuthRequest;
+      const { section, modelId } = request.body;
+
+      // Reject unknown / mismatched modelId — иначе клиент (баг или малициоз)
+      // может воткнуть image-модель в video slot, и бот при следующем запросе
+      // упадёт на `AI_MODELS[invalidId] === undefined`. Аналогично
+      // `/state/selected-mode` валидирует модель перед записью.
+      const model = AI_MODELS[modelId];
+      const validSection = ["design", "audio", "video", "gpt"].includes(section);
+      if (!validSection || !model || model.section !== section) {
+        return reply.code(400).send({ error: "invalid section/modelId" });
+      }
+
+      if (section === "gpt") {
+        await userStateService.setGptModel(userId, modelId);
+      } else {
+        await userStateService.setModelForSection(
+          userId,
+          section as "design" | "audio" | "video",
+          modelId,
+        );
+      }
+
+      // Зеркало /state/activate: при выборе voice-clone стираем pending
+      // return-сценарий, иначе бот при следующем тапе voice-clone будет тянуть
+      // данные предыдущей сессии. До этого фикса /state/select-model
+      // расходился с /state/activate — silent select оставлял Redis-key.
+      if (modelId === "voice-clone") {
+        await getRedis()
+          .del(voiceCloneReturnRedisKey(userId))
+          .catch(() => void 0);
+      }
+
+      scheduleModelChangedNotify(userId, section, modelId);
+
+      return { success: true };
+    },
+  );
+
   /** POST /state/activate — set model for section and send Telegram notification */
   fastify.post<{
     Body: { section: string; modelId: string };
@@ -746,7 +968,15 @@ export const stateRoutes: FastifyPluginAsync = async (fastify) => {
         await userStateService.setState(userId, newState, section as Section);
       }
 
+      // Гасим pending trailing-debounce ПОСЛЕ всех DB-write'ов, но до своего
+      // notify. Если что-то выше throw'нет — exception вернётся 500, pending
+      // таймер мы не трогаем и юзер всё равно получит notify через debounce
+      // (от silent select'ов, которые предшествовали этой активации).
+      cancelPendingNotify(userId);
       await sendModelActivatedNotification(userId, section, modelId, sectionSwitched);
+      // Запоминаем что про эту модель только что прислали пинг — последующий
+      // silent select на ту же модель внутри 24ч окна не задублирует сообщение.
+      await setLastNotified(userId, modelId);
 
       return { success: true };
     },

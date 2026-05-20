@@ -1,6 +1,7 @@
 import type { BotContext } from "../types/context.js";
 import { paymentService, checkPaidSubscription } from "@metabox/api/services";
 import type { SaleUserInfo } from "@metabox/api/services";
+import { db } from "@metabox/api/db";
 import { logger } from "../logger.js";
 import { config, getT } from "@metabox/shared";
 
@@ -11,9 +12,12 @@ export async function handlePreCheckoutQuery(ctx: BotContext): Promise<void> {
 
   try {
     // Token packages require an active PAID subscription (trial не проходит).
+    // ctx.user может быть пуст если pre_checkout пришёл раньше start.upsert —
+    // в таком случае подписки тоже нет, отбиваем по тому же error path.
     if (payload.startsWith("product:") && ctx.from?.id) {
       try {
-        await checkPaidSubscription(BigInt(ctx.from.id));
+        if (!ctx.user) throw new Error("NO_USER");
+        await checkPaidSubscription(ctx.user.id);
       } catch {
         const t = ctx.t ?? getT("en");
         await ctx.answerPreCheckoutQuery(false, t.errors.noSubscriptionForPurchase);
@@ -31,7 +35,7 @@ export async function handlePreCheckoutQuery(ctx: BotContext): Promise<void> {
 
 /** Credit tokens after Stars payment is confirmed. */
 export async function handleSuccessfulPayment(ctx: BotContext): Promise<void> {
-  if (!ctx.user) return;
+  if (!ctx.user || !ctx.user.telegramId) return;
   const payment = ctx.message?.successful_payment;
   if (!payment) return;
 
@@ -43,12 +47,22 @@ export async function handleSuccessfulPayment(ctx: BotContext): Promise<void> {
     const stars = payment.total_amount; // actual Stars charged by Telegram
     const starRate = config.payments.starPriceRub;
 
+    // referredById — внутренний User.id; Metabox recordSale ожидает tgid.
+    let referrerTelegramId: bigint | undefined;
+    if (ctx.user.referredById) {
+      const referrer = await db.user.findUnique({
+        where: { id: ctx.user.referredById },
+        select: { telegramId: true },
+      });
+      referrerTelegramId = referrer?.telegramId ?? undefined;
+    }
+
     // Build user info from Telegram context
     const userInfo: SaleUserInfo = {
       firstName: ctx.from?.first_name ?? "Unknown",
       lastName: ctx.from?.last_name,
       username: ctx.from?.username,
-      referrerTelegramId: ctx.user.referredById ?? undefined,
+      referrerTelegramId,
       stars,
       starRate,
     };
@@ -66,6 +80,7 @@ export async function handleSuccessfulPayment(ctx: BotContext): Promise<void> {
 
       await paymentService.creditDynamicPurchase(
         ctx.user.id,
+        ctx.user.telegramId,
         tokens,
         productId,
         priceRub,
@@ -76,7 +91,7 @@ export async function handleSuccessfulPayment(ctx: BotContext): Promise<void> {
       );
     } else {
       // Legacy format: planId directly
-      await paymentService.creditPurchase(ctx.user.id, payload, userInfo);
+      await paymentService.creditPurchase(ctx.user.id, ctx.user.telegramId, payload, userInfo);
     }
 
     await ctx.reply(ctx.t.payments.success);

@@ -12,8 +12,8 @@ export interface ImageJobData {
   sourceImageUrl?: string;
   /** Named media input slots: { [slotKey]: string[] } */
   mediaInputs?: Record<string, string[]>;
-  /** Telegram chat id to notify when done */
-  telegramChatId: number;
+  /** Telegram chat id to notify when done; null when generation originated outside Telegram (web). */
+  telegramChatId: number | null;
   /**
    * Telegram message_id of the user's prompt message. When set, the worker
    * sends the result as a reply to this message so the user can match
@@ -42,6 +42,17 @@ export interface ImageJobData {
    * с разнесением во времени и склеит результат в существующий multi-output UX.
    */
   numImages?: number;
+  /**
+   * Готовые сценарии (Face Swap и пр.) показывают пользователю собственное
+   * имя сценария в подписи к результату, а не имя реальной модели под капотом
+   * (`Nano Banana PRO` etc.). Если задано — воркер использует это значение
+   * вместо `model.name`.
+   */
+  displayNameOverride?: string;
+  /** Прячем «цитату промпта» в подписи результата (для сценариев с захардкоженным промптом). */
+  hidePromptInCaption?: boolean;
+  /** Скрываем кнопку «Доработать» в результате (для сценариев без выбора модели). */
+  hideRefineButton?: boolean;
 }
 
 export function getImageQueue(): Queue<ImageJobData> {

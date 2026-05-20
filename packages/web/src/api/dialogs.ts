@@ -17,6 +17,16 @@ export type DialogDto = {
   title: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Возвращается только при `listDialogs({ withStats: true })`. */
+  totalTokens?: number;
+  /** Возвращается только при `listDialogs({ q })` — сниппет первого матч-сообщения. */
+  snippet?: string | null;
+  /**
+   * id последнего done-job в этом диалоге (для image/video/audio секций).
+   * Используется страницей /history для навигации в `/gallery/:jobId`.
+   * Для gpt-диалогов и для не-media диалогов без завершённых джобов = `null`.
+   */
+  latestJobId?: string | null;
 };
 
 export type MessageAttachmentDto = {
@@ -38,6 +48,10 @@ export type MessageDto = {
   createdAt: string;
   /** Прикреплённые файлы (картинки + документы), `null` если их нет. */
   attachments?: MessageAttachmentDto[] | null;
+  /** Raw input tokens (для assistant-сообщений; 0 для user). */
+  inputTokens?: number;
+  /** Raw output tokens (для assistant-сообщений; 0 для user). */
+  outputTokens?: number;
 };
 
 /** Payload для streamMessage — документы как в chatService.SendMessageParams. */
@@ -48,8 +62,27 @@ export type SendDocumentAttachment = {
   size?: number;
 };
 
-export function listDialogs(section?: string) {
-  return apiClient<DialogDto[]>("/web/dialogs", section ? { query: { section } } : undefined);
+export type ListDialogsOptions = {
+  section?: string;
+  /** Поиск по title + содержимому сообщений (server-side). */
+  q?: string;
+  /** Включить агрегированные `totalTokens` per dialog (легче `withStats=false`). */
+  withStats?: boolean;
+  /** AbortSignal — TanStack Query прокидывает свой при смене queryKey. */
+  signal?: AbortSignal;
+};
+
+export function listDialogs(opts: ListDialogsOptions | string = {}): Promise<DialogDto[]> {
+  // Backward-compat: некоторые места передают section строкой.
+  const o = typeof opts === "string" ? { section: opts } : opts;
+  const query: Record<string, string> = {};
+  if (o.section) query.section = o.section;
+  if (o.q) query.q = o.q;
+  if (o.withStats) query.withStats = "1";
+  return apiClient<DialogDto[]>("/web/dialogs", {
+    query: Object.keys(query).length ? query : undefined,
+    signal: o.signal,
+  });
 }
 
 export function createDialog(input: { section: string; modelId: string; title?: string }) {
@@ -84,7 +117,12 @@ export type StreamBalance = {
 };
 export type StreamCallbacks = {
   onChunk: (text: string) => void;
-  onDone: (info: { tokensUsed: number; balance: StreamBalance }) => void;
+  onDone: (info: {
+    tokensUsed: number;
+    inputTokens: number;
+    outputTokens: number;
+    balance: StreamBalance;
+  }) => void;
   onError: (err: { code: string; message: string }) => void;
 };
 
@@ -194,9 +232,16 @@ function processEvent(block: string, callbacks: StreamCallbacks) {
     const text = (data as { text?: string }).text;
     if (typeof text === "string") callbacks.onChunk(text);
   } else if (eventName === "done") {
-    const d = data as { tokensUsed?: number; balance?: StreamBalance };
+    const d = data as {
+      tokensUsed?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      balance?: StreamBalance;
+    };
     callbacks.onDone({
       tokensUsed: d.tokensUsed ?? 0,
+      inputTokens: d.inputTokens ?? 0,
+      outputTokens: d.outputTokens ?? 0,
       balance: d.balance ?? { tokenBalance: "0", subscriptionTokenBalance: "0" },
     });
   } else if (eventName === "error") {

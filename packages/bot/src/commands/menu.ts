@@ -1,11 +1,30 @@
 import type { BotContext } from "../types/context.js";
 import { buildMainMenuKeyboard } from "../keyboards/main-menu.keyboard.js";
 import { userStateService, dialogService } from "@metabox/api/services";
-import { config, generateWebToken, AI_MODELS, buildDialogHint } from "@metabox/shared";
-import type { Section } from "@metabox/shared";
+import {
+  config,
+  generateWebToken,
+  AI_MODELS,
+  buildDialogHint,
+  FACE_SWAP_BUFFER_MODEL_ID,
+  PHOTO_UPSCALE_BUFFER_MODEL_ID,
+  VIDEO_UPSCALE_BUFFER_MODEL_ID,
+} from "@metabox/shared";
+import type { Section, Translations } from "@metabox/shared";
+import { InlineKeyboard } from "grammy";
 import { buildDesignModelKeyboard } from "../scenes/design.js";
 import { buildVideoModelKeyboard } from "../scenes/video.js";
 import { clearActiveSlot } from "../utils/media-input-state.js";
+
+/** Inline keyboard listing the ready-made scenarios (Face swap, upscale). */
+export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t.scenarios.faceSwap, "scenario:face_swap")
+    .row()
+    .text(t.scenarios.photoUpscale, "scenario:photo_upscale")
+    .row()
+    .text(t.scenarios.videoUpscale, "scenario:video_upscale");
+}
 
 /** Returns the active dialog label + modelId for a section, or undefined. */
 async function activeDialogInfo(
@@ -22,10 +41,40 @@ async function activeDialogInfo(
 export async function handleMenu(ctx: BotContext): Promise<void> {
   if (ctx.user) {
     await userStateService.setState(ctx.user.id, "MAIN_MENU", null);
+    // Гасим висящие буферы сценариев на случай, если юзер выпрыгнул из flow на
+    // середине шага: не оставляем S3-ключи мёртвыми в user-state.
+    await Promise.all([
+      userStateService.clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID).catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, PHOTO_UPSCALE_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, VIDEO_UPSCALE_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+    ]);
     clearActiveSlot(ctx.user.id);
   }
   await ctx.reply(ctx.t.start.mainMenuTitle, {
-    reply_markup: buildMainMenuKeyboard(ctx.t, ctx.user?.id),
+    reply_markup: buildMainMenuKeyboard(ctx.t, ctx.user?.telegramId),
+  });
+}
+
+export async function handleScenarios(ctx: BotContext): Promise<void> {
+  if (!ctx.user) return;
+  clearActiveSlot(ctx.user.id);
+  await userStateService.setState(ctx.user.id, "SCENARIOS_SECTION", null);
+  await ctx.reply(ctx.t.scenarios.sectionTitle, {
+    reply_markup: {
+      keyboard: [
+        [{ text: ctx.t.scenarios.chooseScenario }],
+        [{ text: ctx.t.scenarios.backToMain }],
+      ],
+      resize_keyboard: true,
+      is_persistent: true,
+    },
+  });
+  await ctx.reply(ctx.t.scenarios.sectionTooltip, {
+    reply_markup: buildScenariosKeyboard(ctx.t),
   });
 }
 
@@ -48,7 +97,8 @@ export async function handleGpt(ctx: BotContext): Promise<void> {
   }
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const newDialogBtn = webappUrl
     ? {
         text: ctx.t.gpt.newDialog,
@@ -80,7 +130,8 @@ export async function handleDesign(ctx: BotContext): Promise<void> {
   const text = ctx.t.design.sectionTitle;
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.design.management,
@@ -110,7 +161,8 @@ export async function handleAudio(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "AUDIO_SECTION", "audio");
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.audio.management,
@@ -139,7 +191,8 @@ export async function handleVideo(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "VIDEO_SECTION", "video");
 
   const webappUrl = config.bot.webappUrl;
-  const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+  const token =
+    webappUrl && ctx.user.telegramId ? generateWebToken(ctx.user.telegramId, config.bot.token) : "";
   const managementBtn = webappUrl
     ? {
         text: ctx.t.video.management,

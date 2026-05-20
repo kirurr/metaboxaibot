@@ -15,7 +15,9 @@ import {
 import type { Language } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов Bot API. После decoupling-миграции они различаются у web-only юзеров.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 export const dialogsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
@@ -386,10 +388,16 @@ async function sendDialogSelectedNotification(
   if (!config.bot.token) return;
 
   const [user, botState] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { language: true } }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { language: true, telegramId: true },
+    }),
     userStateService.get(userId),
   ]);
-  const t = getT((user?.language ?? "en") as Language);
+  // Web-only юзеру (без telegramId) бот-сообщение слать некуда.
+  if (!user?.telegramId) return;
+  const telegramId = user.telegramId;
+  const t = getT((user.language ?? "en") as Language);
   const modelFull = AI_MODELS[modelId]?.name ?? modelId;
   const spaceIdx = modelFull.indexOf(" ");
   const modelIcon = spaceIdx > 0 ? modelFull.slice(0, spaceIdx + 1) : "";
@@ -406,7 +414,7 @@ async function sendDialogSelectedNotification(
     ]);
 
     const webappUrl = config.bot.webappUrl;
-    const token = webappUrl ? generateWebToken(userId, config.bot.token) : "";
+    const token = webappUrl ? generateWebToken(telegramId, config.bot.token) : "";
     const newDialogBtn = webappUrl
       ? {
           text: t.gpt.newDialog,
@@ -435,7 +443,7 @@ async function sendDialogSelectedNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: String(userId),
+        chat_id: String(telegramId),
         text: fullText,
         parse_mode: "HTML",
         reply_markup: {
@@ -461,6 +469,6 @@ async function sendDialogSelectedNotification(
   await fetch(`https://api.telegram.org/bot${config.bot.token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: String(userId), text: fullText, parse_mode: "HTML" }),
+    body: JSON.stringify({ chat_id: String(telegramId), text: fullText, parse_mode: "HTML" }),
   });
 }

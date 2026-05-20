@@ -330,8 +330,22 @@ jobs:
             echo "Pruning old images..."
             docker image prune -af
 
-            # Ensure nginx configs are symlinked
-            sudo ln -sf /opt/metaboxaibot-test/infra/nginx/nginx.web-test.conf /etc/nginx/sites-enabled/metabox-web-test 2>/dev/null || true
+            # Ensure nginx configs are symlinked. Все first-deploy-safe
+            # (`|| true` swallows "already exists") и идемпотентны:
+            #   • nginx.web-test.conf            — Web SPA на stage.ai.metabox.global (legacy)
+            #   • nginx.myaibox-tma-stage.conf   — Mini App + API на stage.tma.myaibox.ai (зеркало)
+            #   • nginx.myaibox-web-stage.conf   — Web SPA на stage.myaibox.ai (зеркало)
+            #   • nginx.nbsp-stage.conf          — vanity-редирект stage.nbsp.myaibox.ai → stage.myaibox.ai/admin
+            #
+            # Для новых доменов перед первым reload'ом nginx нужно вручную
+            # получить SSL-серты (Certbot не запускается из CI):
+            #   sudo certbot --nginx -d stage.tma.myaibox.ai
+            #   sudo certbot --nginx -d stage.myaibox.ai
+            #   sudo certbot --nginx -d stage.nbsp.myaibox.ai
+            sudo ln -sf /opt/metaboxaibot-test/infra/nginx/nginx.web-test.conf          /etc/nginx/sites-enabled/metabox-web-test    2>/dev/null || true
+            sudo ln -sf /opt/metaboxaibot-test/infra/nginx/nginx.myaibox-tma-stage.conf /etc/nginx/sites-enabled/myaibox-tma-stage   2>/dev/null || true
+            sudo ln -sf /opt/metaboxaibot-test/infra/nginx/nginx.myaibox-web-stage.conf /etc/nginx/sites-enabled/myaibox-web-stage   2>/dev/null || true
+            sudo ln -sf /opt/metaboxaibot-test/infra/nginx/nginx.nbsp-stage.conf        /etc/nginx/sites-enabled/nbsp-stage          2>/dev/null || true
 
             sudo nginx -t && sudo nginx -s reload
 

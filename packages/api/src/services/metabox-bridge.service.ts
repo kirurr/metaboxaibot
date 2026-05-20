@@ -390,6 +390,102 @@ export async function getPendingTokenGrants(
   return data.orders ?? [];
 }
 
+/** Same as getPendingTokenGrants, но ключуется по metaboxUserId для web-only юзеров. */
+export async function getPendingTokenGrantsByMetabox(
+  metaboxUserId: string,
+): Promise<Array<{ orderId: string; tokens: number; description: string }>> {
+  const data = await get<{
+    orders: Array<{ orderId: string; tokens: number; description: string }>;
+  }>(`/internal/pending-token-grants?metaboxUserId=${encodeURIComponent(metaboxUserId)}`);
+  return data.orders ?? [];
+}
+
+export interface LinkTelegramFromWebResult {
+  ok: boolean;
+  metaboxUserId: string;
+  mergedFrom?: MergedAccountInfo;
+  alreadyLinked?: boolean;
+}
+
+/**
+ * Линкует Telegram-юзера к metabox-аккаунту в web-initiated flow (linkweb_).
+ * Если на metabox-стороне был stub с этим telegramId — мержит его в R.
+ * Может бросать `MetaboxApiError` 409 с кодами:
+ *   - TELEGRAM_MISMATCH — на metaboxUserId уже другой telegramId
+ *   - TELEGRAM_ALREADY_LINKED — telegramId занят другим real-аккаунтом
+ */
+export async function linkTelegramFromWeb(params: {
+  metaboxUserId: string;
+  telegramId: bigint;
+  telegramUsername?: string | null;
+  aiboxUserId?: bigint | string;
+}): Promise<LinkTelegramFromWebResult> {
+  return post<LinkTelegramFromWebResult>("/link-telegram-from-web", {
+    metaboxUserId: params.metaboxUserId,
+    telegramId: params.telegramId.toString(),
+    telegramUsername: params.telegramUsername ?? undefined,
+    aiboxUserId:
+      typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
+  });
+}
+
+/**
+ * Резолвит metaboxUserId через merge-chain на metabox-стороне. Возвращает
+ * live id (если переданный id — frozen secondary, возвращается primary'й).
+ * Если merge-chain не активен, возвращается тот же id.
+ */
+export async function followMetaboxMergeChain(metaboxUserId: string): Promise<string> {
+  const res = await get<{ metaboxUserId: string }>(
+    `/internal/follow-merge?metaboxUserId=${encodeURIComponent(metaboxUserId)}`,
+  );
+  return res.metaboxUserId;
+}
+
+/**
+ * Пушит AI Box User.id на metabox-сторону, чтобы metabox мог напрямую слать
+ * к нам админ-гранты/subscriptions для web-only юзеров без telegramId.
+ * Best-effort: ошибки логируются, но не пробрасываются (linked-flow не должен
+ * падать только из-за этого call'а).
+ */
+export async function setAiboxId(params: {
+  metaboxUserId: string;
+  aiboxUserId: bigint | string;
+}): Promise<{ ok: true; alreadySet?: boolean } | null> {
+  try {
+    return await post<{ ok: true; alreadySet?: boolean }>("/set-aibox-id", {
+      metaboxUserId: params.metaboxUserId,
+      aiboxUserId:
+        typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
+    });
+  } catch {
+    // Логирование оставляем caller'у (он знает контекст: linkweb / register /
+    // ensureAibUser). Здесь молча возвращаем null, чтобы основной flow продолжился.
+    return null;
+  }
+}
+
+/**
+ * Триггерит `reconcileSubscription` на metabox-стороне для web-only юзера.
+ * Метабокс flush'ит pendingBot* (накопленные при админ-грантах ДО фикса A1)
+ * в бот через syncBotSubscription по `aiboxUserId`. Best-effort: на ошибке
+ * возвращает null. Не критично для login flow — это catch-up для legacy
+ * pendingBot* данных, новые гранты идут напрямую через grantAiBoxTokens.
+ */
+export async function reconcileByAibox(params: {
+  metaboxUserId: string;
+  aiboxUserId: bigint | string;
+}): Promise<{ ok: boolean; case?: number | string } | null> {
+  try {
+    return await post<{ ok: boolean; case?: number | string }>("/reconcile-by-aibox", {
+      metaboxUserId: params.metaboxUserId,
+      aiboxUserId:
+        typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Mark a token-pack order as granted in the bot (sets tokensGrantedToBot = true on Metabox). */
 export async function markOrderGrantedOnMetabox(orderId: string): Promise<void> {
   try {
@@ -412,8 +508,7 @@ export async function markTokensGrantedOnMetabox(subscriptionId: string): Promis
   }
 }
 
-/** Fetch subscription status for a user from Metabox. */
-export async function getSubscriptionStatus(telegramId: bigint): Promise<{
+export interface SubscriptionStatus {
   subscription: {
     subscriptionId: string;
     planName: string;
@@ -424,8 +519,18 @@ export async function getSubscriptionStatus(telegramId: bigint): Promise<{
     tokensGranted: number;
     tokensGrantedToBot: boolean;
   } | null;
-}> {
+}
+
+/** Fetch subscription status for a user from Metabox by telegramId. */
+export async function getSubscriptionStatus(telegramId: bigint): Promise<SubscriptionStatus> {
   return get(`/internal/subscription-status?telegramId=${telegramId.toString()}`);
+}
+
+/** Same as getSubscriptionStatus, но для web-only юзеров — ключуется по metaboxUserId. */
+export async function getSubscriptionStatusByMetabox(
+  metaboxUserId: string,
+): Promise<SubscriptionStatus> {
+  return get(`/internal/subscription-status?metaboxUserId=${encodeURIComponent(metaboxUserId)}`);
 }
 
 // ── Web (ai.metabox.global) методы ──────────────────────────────────────────
@@ -441,6 +546,10 @@ export interface WebValidateResult {
   firstName: string | null;
   lastName: string | null;
   name: string | null;
+  /** Metabox referralCode — кешируется в `User.metaboxReferralCode` при
+   *  ensureAibUserForMetabox, чтобы web-фронт мог показать его в Profile/Plans
+   *  без отдельного запроса к metabox-стороне. */
+  referralCode: string | null;
   /** true если на стороне meta-box у юзера есть telegramId (может быть привязан через сайт ранее). */
   hasTelegramOnSite: boolean;
 }
@@ -459,9 +568,17 @@ export interface WebRegisterResult {
   firstName: string | null;
   lastName: string | null;
   referralCode: string;
+  /** true в prod-режиме (отправлено письмо подтверждения, юзер не может
+   * залогиниться пока не подтвердит email). false в STAGE_MODE (autoverify). */
+  requiresVerification?: boolean;
 }
 
-/** Регистрация нового юзера с ai.metabox.global. Создаёт MetaBox User. */
+/** Регистрация нового юзера с ai.metabox.global. Создаёт MetaBox User.
+ *
+ * При коллизии по email возвращается `MetaboxApiError` со `status === 409` и
+ * `data.metaboxUserId` — id существующего metabox-юзера. caller использует
+ * его, чтобы посмотреть, есть ли уже привязанный AI Box User, и сформировать
+ * правильное сообщение для фронта. */
 export async function webRegister(params: {
   email: string;
   password: string;
@@ -470,6 +587,13 @@ export async function webRegister(params: {
   referralCode?: string;
 }): Promise<WebRegisterResult> {
   return post<WebRegisterResult>("/web-register", params);
+}
+
+/** Перевыпустить verification email по email-адресу (для post-signup экрана). */
+export async function webResendVerification(
+  email: string,
+): Promise<{ ok: true; alreadyVerified?: boolean }> {
+  return post<{ ok: true; alreadyVerified?: boolean }>("/web-resend-verification", { email });
 }
 
 /** Запрос на восстановление пароля — meta-box создаёт PasswordResetToken и шлёт email. */
@@ -593,6 +717,8 @@ export async function registerBotUser(params: {
   username?: string;
   referrerTelegramId?: bigint | null;
   referrerUserId?: string;
+  /** AI Box User.id для двусторонней связи (см. metabox.User.aiboxUserId). */
+  aiboxUserId?: bigint | string;
 }): Promise<{
   ok: boolean;
   userId: string;
@@ -608,5 +734,7 @@ export async function registerBotUser(params: {
     username: params.username,
     referrerTelegramId: params.referrerTelegramId?.toString(),
     referrerUserId: params.referrerUserId,
+    aiboxUserId:
+      typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
   });
 }

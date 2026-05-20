@@ -8,55 +8,57 @@ import {
   Play,
   User as UserIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ShaderHero } from "@/components/home/ShaderHero";
 import { TiltedFeatured, type TiltedItem } from "@/components/home/TiltedFeatured";
 
+/** Каталог инструментов на главной — `name`/`desc` берутся из i18n по `nameKey`/`descKey`. */
 const HOME_TOOLS = [
   {
     id: "chat",
-    name: "Chat",
-    desc: "Reasoning, writing, code. The everyday model.",
+    nameKey: "home.tools.chat.name",
+    descKey: "home.tools.chat.desc",
     tag: "Sonnet 4.5",
     icon: <MessageSquare size={22} />,
     route: "/chat",
   },
   {
     id: "image",
-    name: "Image",
-    desc: "Photoreal, illustration, product shots.",
+    nameKey: "home.tools.image.name",
+    descKey: "home.tools.image.desc",
     tag: "nano-banana-pro",
     icon: <ImageIcon size={22} />,
     route: "/image",
   },
   {
     id: "video",
-    name: "Video",
-    desc: "Cinematic shots, motion, avatars.",
+    nameKey: "home.tools.video.name",
+    descKey: "home.tools.video.desc",
     tag: "heygen · runway",
     icon: <Play size={22} />,
     route: "/video",
   },
   {
     id: "voice",
-    name: "Voice",
-    desc: "Text-to-speech, dubbing, narration.",
+    nameKey: "home.tools.voice.name",
+    descKey: "home.tools.voice.desc",
     tag: "cartesia",
     icon: <AudioWaveform size={22} />,
     route: "/audio",
   },
   {
     id: "avatar",
-    name: "Avatar",
-    desc: "Train a likeness once, generate forever.",
+    nameKey: "home.tools.avatar.name",
+    descKey: "home.tools.avatar.desc",
     tag: "flux-lora",
     icon: <UserIcon size={22} />,
     route: "/image",
   },
   {
     id: "code",
-    name: "Code",
-    desc: "Refactor, debug, scaffold whole files.",
+    nameKey: "home.tools.code.name",
+    descKey: "home.tools.code.desc",
     tag: "GPT-5",
     icon: <Code2 size={22} />,
     route: "/chat",
@@ -153,6 +155,7 @@ const RECENT_GENS = [
  * Hero вытягивается под прозрачный topnav через отрицательный `margin-top`.
  */
 export default function Home() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
@@ -163,19 +166,16 @@ export default function Home() {
         <div className="brand-hero-veil" />
         <div className="brand-hero-content">
           <span className="eyebrow">
-            <span className="live-dot" /> All frontier AI · One workspace
+            <span className="live-dot" /> {t("home.eyebrow")}
           </span>
-          <h1 className="brand-hero-title">AI Box</h1>
-          <p className="brand-hero-sub">
-            Один сервис — все ведущие модели для текста, изображений, видео и голоса. Без подписок
-            на каждый продукт, без переключения вкладок. Платите токенами по факту использования.
-          </p>
+          <h1 className="brand-hero-title">{t("home.heroTitle")}</h1>
+          <p className="brand-hero-sub">{t("home.heroSubtitle")}</p>
           <div className="brand-hero-cta">
             <button className="btn btn-primary" onClick={() => navigate("/chat")}>
-              Начать чат <ArrowRight size={16} />
+              {t("home.ctaStartChat")} <ArrowRight size={16} />
             </button>
             <button className="btn btn-ghost" onClick={() => navigate("/plans")}>
-              Посмотреть тарифы
+              {t("home.ctaSeePlans")}
             </button>
           </div>
         </div>
@@ -185,23 +185,23 @@ export default function Home() {
         <section className="rise d1">
           <div className="home-sec-head">
             <div>
-              <h2>Jump into a tool.</h2>
-              <p>Each one is one click away.</p>
+              <h2>{t("home.toolsTitle")}</h2>
+              <p>{t("home.toolsHint")}</p>
             </div>
           </div>
           <div className="tools-grid">
-            {HOME_TOOLS.map((t) => (
-              <button key={t.id} className="tool-tile" onClick={() => navigate(t.route)}>
+            {HOME_TOOLS.map((tool) => (
+              <button key={tool.id} className="tool-tile" onClick={() => navigate(tool.route)}>
                 <span className="ti-glow" />
-                <div className="ti-ico">{t.icon}</div>
-                <div className="ti-name">{t.name}</div>
-                <div className="ti-desc">{t.desc}</div>
+                <div className="ti-ico">{tool.icon}</div>
+                <div className="ti-name">{t(tool.nameKey)}</div>
+                <div className="ti-desc">{t(tool.descKey)}</div>
                 <div className="ti-foot">
                   <span className="mono" style={{ fontSize: 11 }}>
-                    {t.tag}
+                    {tool.tag}
                   </span>
                   <span className="arr">
-                    Open <ArrowRight size={13} />
+                    {t("home.openTool")} <ArrowRight size={13} />
                   </span>
                 </div>
               </button>
@@ -212,11 +212,11 @@ export default function Home() {
         <section className="rise d2">
           <div className="home-sec-head">
             <div>
-              <h2>Featured today.</h2>
-              <p>Curated generations — tap any to open the tool with this prompt.</p>
+              <h2>{t("home.featuredTitle")}</h2>
+              <p>{t("home.featuredHint")}</p>
             </div>
             <button className="see-all" onClick={() => navigate("/history")}>
-              Open gallery <ArrowRight size={14} />
+              {t("home.openGallery")} <ArrowRight size={14} />
             </button>
           </div>
           <TiltedFeatured
@@ -235,11 +235,11 @@ export default function Home() {
         <section className="rise d3">
           <div className="home-sec-head">
             <div>
-              <h2>Pick up where you left off.</h2>
-              <p>Your last five sessions, ready to continue.</p>
+              <h2>{t("home.recentTitle")}</h2>
+              <p>{t("home.recentHint")}</p>
             </div>
             <button className="see-all" onClick={() => navigate("/history")}>
-              All history <ArrowRight size={14} />
+              {t("home.allHistory")} <ArrowRight size={14} />
             </button>
           </div>
           <div className="recent-row">

@@ -27,12 +27,20 @@ export type BotState =
   | "VIDEO_ACTIVE"
   | "HEYGEN_AVATAR_PHOTO"
   | "HIGGSFIELD_SOUL_PHOTO"
+  | "SCENARIOS_SECTION"
+  | "FACE_SWAP_AWAIT_FACE"
+  | "FACE_SWAP_AWAIT_REFERENCE"
+  | "PHOTO_UPSCALE_AWAIT_PHOTO"
+  | "VIDEO_UPSCALE_AWAIT_VIDEO"
   | "AWAITING_DELETE_CONFIRMATION";
 
 export type Section = "gpt" | "design" | "audio" | "video";
 
 export interface UserDto {
+  /** Внутренний автоинкрементный `User.id` (FK semantics). */
   id: bigint;
+  /** Telegram user ID — null для web-only юзеров без TG-привязки. */
+  telegramId: bigint | null;
   username?: string;
   firstName?: string;
   lastName?: string;

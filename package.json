@@ -43,6 +43,7 @@
       "@prisma/engines",
       "esbuild",
       "ffmpeg-static",
+      "ffprobe-static",
       "msgpackr-extract",
       "prisma"
     ]

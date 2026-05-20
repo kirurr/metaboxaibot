@@ -33,17 +33,27 @@ export function setWebToken(token: string): void {
   _webToken = token;
 }
 
+export function clearWebToken(): void {
+  _webToken = null;
+}
+
+/**
+ * Возвращает Authorization header для текущей сессии — Telegram initData
+ * (mini-app) или web JWT. Расшарено между `request()` и `uploadRequest()`
+ * чтобы schema auth не дрейфовала между ними.
+ */
+function buildAuthHeader(): { Authorization: string } | Record<string, never> {
+  if (_initDataRaw) return { Authorization: `tma ${_initDataRaw}` };
+  if (_webToken) return { Authorization: `wtoken ${_webToken}` };
+  return {};
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
     ...(options.headers as Record<string, string>),
+    ...buildAuthHeader(),
   };
-
-  if (_initDataRaw) {
-    headers["Authorization"] = `tma ${_initDataRaw}`;
-  } else if (_webToken) {
-    headers["Authorization"] = `wtoken ${_webToken}`;
-  }
 
   const method = options.method ?? "GET";
   let res: Response;
@@ -57,6 +67,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     console.error(`[api] network error ${method} ${path}`, networkErr);
     throw networkErr;
   }
+
+  // Rolling-refresh wtoken: сервер кладёт свежий токен, когда наш приближается
+  // к hard-expiry. Подхватываем сразу, до проверки res.ok — даже на 4xx ответе
+  // токен мог обновиться (например, при ошибке домена, но валидной auth).
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as Record<
@@ -79,12 +95,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (_initDataRaw) {
-    headers["Authorization"] = `tma ${_initDataRaw}`;
-  } else if (_webToken) {
-    headers["Authorization"] = `wtoken ${_webToken}`;
-  }
+  const headers: Record<string, string> = { ...buildAuthHeader() };
 
   let res: Response;
   try {
@@ -97,6 +108,9 @@ async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
     console.error(`[api] network error POST ${path}`, networkErr);
     throw networkErr;
   }
+
+  const refreshed = res.headers.get("X-Refresh-Wtoken");
+  if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -123,11 +137,14 @@ export const api = {
 
   profile: {
     get: () => request<UserProfile>("/profile"),
-    updatePreferences: (body: { confirmBeforeGenerate?: boolean }) =>
-      request<{ ok: boolean; confirmBeforeGenerate: boolean }>("/profile/preferences", {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+    updatePreferences: (body: { confirmBeforeGenerate?: boolean; autoActivateModel?: boolean }) =>
+      request<{ ok: boolean; confirmBeforeGenerate: boolean; autoActivateModel: boolean }>(
+        "/profile/preferences",
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
     partnerBalance: () =>
       request<{
         balance: number;
@@ -215,10 +232,34 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ section, modelId }),
       }),
+    /**
+     * Silent model select. `keepalive: true` критично: юзер может тапнуть
+     * вариант и сразу закрыть мини-аппу (X в Telegram WebView) до того как
+     * запрос дойдёт до сервера. Без keepalive WebView убивает in-flight
+     * fetch'и при закрытии → модель не сохраняется. С keepalive браузер
+     * добивает запрос даже после закрытия страницы.
+     *
+     * Notify (Telegram-сообщение «модель X активирована») здесь НЕ дёргается:
+     * сервер сам шедулит trailing-debounce и отправляет финальный пинг после
+     * 5с тишины — см. `/state/select-model` в `routes/state.ts`.
+     */
+    selectModel: (section: string, modelId: string) =>
+      request<{ success: boolean }>("/state/select-model", {
+        method: "POST",
+        body: JSON.stringify({ section, modelId }),
+        keepalive: true,
+      }),
     setSelectedMode: (modelId: string, modeId: string) =>
       request<{ success: boolean }>("/state/selected-mode", {
         method: "POST",
         body: JSON.stringify({ modelId, modeId }),
+        // Симметрично с selectModel: юзер может тапнуть mode-чип и сразу X-close
+        // webview до того как запрос дойдёт до сервера. Без keepalive WebView
+        // убивает in-flight fetch → выбор mode'а теряется и bot работает по
+        // старому mode. Auto-activate через 3с (handleModeChange) при быстром
+        // X-close тоже отменится, поэтому keepalive здесь — единственная
+        // гарантия что mode change долетит.
+        keepalive: true,
       }),
   },
 
@@ -387,12 +428,9 @@ export const api = {
      * приемлемо).
      */
     previewBlobUrl: async (voiceId: string): Promise<string> => {
-      const headers: Record<string, string> = {};
-      if (_initDataRaw) headers["Authorization"] = `tma ${_initDataRaw}`;
-      else if (_webToken) headers["Authorization"] = `wtoken ${_webToken}`;
       const res = await fetch(
         `${API_BASE}/cartesia-voices/${encodeURIComponent(voiceId)}/preview`,
-        { headers, cache: "no-store" },
+        { headers: buildAuthHeader(), cache: "no-store" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();

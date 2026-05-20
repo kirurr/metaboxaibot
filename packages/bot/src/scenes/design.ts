@@ -64,6 +64,9 @@ export function buildDesignModelKeyboard(savedModelId?: string | null): InlineKe
   const addedFamilies = new Set<string>();
 
   for (const m of allModels) {
+    // Скрытые сценарные модели (face-swap-classic и пр.) не показываем в карусели —
+    // они доступны только через свои готовые сценарии.
+    if (m.hiddenFromCarousel) continue;
     const familyId = MODEL_TO_FAMILY[m.id];
     if (familyId) {
       if (addedFamilies.has(familyId)) continue;
@@ -152,7 +155,10 @@ export async function activateDesignModel(
     // у пользователя со СВЕЖИМ wtoken для кнопки «Управление» (web_app).
     // Без этого token'ы протухают через ~24ч и юзер видит "ссылка устарела".
     if (!replyMarkup) {
-      const token = webappUrl ? generateWebToken(ctx.user.id, config.bot.token) : "";
+      const token =
+        webappUrl && ctx.user.telegramId
+          ? generateWebToken(ctx.user.telegramId, config.bot.token)
+          : "";
       const managementBtn = webappUrl
         ? {
             text: ctx.t.design.management,
@@ -979,13 +985,13 @@ export async function handleDesignPhoto(ctx: BotContext): Promise<void> {
 // ── Management — opens Mini App ───────────────────────────────────────────────
 
 export async function handleDesignManagement(ctx: BotContext): Promise<void> {
-  if (!ctx.user) return;
+  if (!ctx.user || !ctx.user.telegramId) return;
   const webappUrl = config.bot.webappUrl;
   if (!webappUrl) {
     await ctx.reply(ctx.t.errors.unexpected);
     return;
   }
-  const token = generateWebToken(ctx.user.id, config.bot.token);
+  const token = generateWebToken(ctx.user.telegramId, config.bot.token);
   const kb = new InlineKeyboard().webApp(
     ctx.t.design.management,
     `${webappUrl}?page=management&section=design&wtoken=${token}`,

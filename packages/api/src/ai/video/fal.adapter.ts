@@ -1,8 +1,95 @@
 import { fal } from "@fal-ai/client";
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
+
+/**
+ * Конвертирует ApiError из @fal-ai/client в чистый Error с коротким message
+ * и сохранённым numeric `status` (для isFiveXxError → cascade-fallback).
+ *
+ * Зачем: fal SDK строит `ApiError.message` как
+ * `"<short text>\nHTTP <code>\nbody: <full json>"`. Для `downstream_service_error`
+ * (xAI/Grok upstream down) body содержит полный input запроса — prompt +
+ * presigned S3 URL с `X-Amz-Signature`. Без обрезки это утекает в ops-алёрты
+ * многокилобайтной портянкой, плюс лёгкий security smell (signed URL — короткий
+ * credential). Чистая версия — статус + тип ошибки + первые 200 символов msg.
+ *
+ * Наши собственные `throw new Error("FAL …")` (валидация входа) пропускаются
+ * без изменений — у них `name === "Error"`, а fal SDK ставит `name = "ApiError"`
+ * или `"ValidationError"` (последний — subclass от ApiError, бросается на 422
+ * от pydantic-валидации входа; тоже несёт `body.detail` с эхом запроса).
+ *
+ * Возвращает `never` (всегда throw'ит) — для TS narrowing в catch-блоке вызова.
+ */
+function rethrowFalApiError(err: unknown): never {
+  const e = err as {
+    name?: unknown;
+    status?: unknown;
+    body?: unknown;
+    message?: unknown;
+  };
+  if (e?.name === "ApiError" || e?.name === "ValidationError") {
+    const status = typeof e.status === "number" && e.status >= 100 && e.status < 600 ? e.status : 0;
+    const body = e.body as
+      | { detail?: Array<{ msg?: string; type?: string; input?: { prompt?: unknown } }> }
+      | undefined;
+    const detail = body?.detail?.[0];
+    const errType = detail?.type ?? "unknown";
+    const rawMsg =
+      detail?.msg ?? (typeof e.message === "string" ? e.message.split("\n")[0] : "FAL error");
+    const briefMsg = rawMsg.slice(0, 200);
+
+    // ValidationError (422) — это user-fault, BullMQ-ретраи бесполезны, ops
+    // алёртить незачем. Маппим в UserFacingError, чтобы video processor
+    // показал юзеру осмысленный текст и пометил job как UnrecoverableError.
+    //
+    // Спец-кейс: «Prompt length exceeds the maximum allowed length of N» →
+    // используем готовый ключ `promptTooLong` (в обоих i18n-namespace), число
+    // из ошибки провайдера подогнано под bytes-per-char ratio (см. ниже).
+    if (e?.name === "ValidationError") {
+      const limitMatch = /maximum allowed length of (\d+)/i.exec(rawMsg);
+      if (limitMatch) {
+        // Считаем char-лимит из реального промпта юзера, эхающегося в body.
+        // fal в ValidationError возвращает `body.detail[0].input.prompt` —
+        // оригинальный prompt, который мы только что послали. Это позволяет
+        // показать юзеру char-лимит, точный для **его** языка: 1.0×byteLimit
+        // для ASCII, 0.5× для русского, etc. Без эхо-промпта — fallback halve.
+        //
+        // Используем существующий ключ `promptTooLong` (уже в обоих
+        // i18n-namespace), не вводим новый — см. video-generation.service.ts.
+        const inputPrompt = detail?.input?.prompt;
+        const promptStr = typeof inputPrompt === "string" ? inputPrompt : undefined;
+        const limitFromError = Number(limitMatch[1]);
+        let charLimit: number;
+        if (promptStr) {
+          const charLen = [...promptStr].length;
+          const byteLen = Buffer.byteLength(promptStr, "utf8");
+          const bytesPerChar = charLen > 0 ? byteLen / charLen : 2;
+          charLimit = Math.floor(limitFromError / bytesPerChar);
+        } else {
+          charLimit = Math.floor(limitFromError / 2);
+        }
+        throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+          key: "promptTooLong",
+          params: { limit: charLimit },
+        });
+      }
+      throw new UserFacingError(`FAL ValidationError: ${briefMsg}`, {
+        key: "providerInputRejected",
+        params: { reason: briefMsg },
+      });
+    }
+
+    const cleaned = new Error(`FAL ${status || "??"} ${errType}: ${briefMsg}`) as Error & {
+      status?: number;
+    };
+    if (status) cleaned.status = status;
+    throw cleaned;
+  }
+  throw err;
+}
 
 /**
  * Text-to-video endpoint for each model.
@@ -111,6 +198,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async submit(input: VideoInput): Promise<string> {
+    try {
+      return await this._submitImpl(input);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _submitImpl(input: VideoInput): Promise<string> {
     const imageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
@@ -202,8 +297,27 @@ export class FalVideoAdapter implements VideoAdapter {
       const isI2V = endpoint === FAL_I2V_ENDPOINTS[this.modelId];
       const isR2V = endpoint === FAL_R2V_ENDPOINTS[this.modelId];
 
-      const startUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
-      const endUrl = input.mediaInputs?.last_frame?.[0];
+      let startUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
+      let endUrl = input.mediaInputs?.last_frame?.[0];
+
+      // Pre-crop frames под выбранный aspect, если юзер включил
+      // `crop_to_aspect` (см. KLING_SETTINGS). FAL Kling-o3 принимает image
+      // URLs напрямую и сам качает, поэтому подменяем URL на cropped
+      // presigned URL ДО отправки. Кропаем только frame'ы (start/end) —
+      // elements.frontal_image_url / reference_image_urls на aspect не
+      // влияют, как и в KIE-адаптере. cropImageUrlAndMaterialize сам no-op'ит
+      // для unsupported aspect / aligned image / S3 misconfig / fetch fail.
+      const aspectForCrop = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio;
+      const cropEnabled = ms.crop_to_aspect === true;
+      if (cropEnabled && aspectForCrop && KLING_SUPPORTED_ASPECTS.includes(aspectForCrop)) {
+        const cropOne = (url: string | undefined): Promise<string | undefined> =>
+          url
+            ? cropImageUrlAndMaterialize(url, aspectForCrop, { userId: input.userId })
+            : Promise.resolve(undefined);
+        const [croppedStart, croppedEnd] = await Promise.all([cropOne(startUrl), cropOne(endUrl)]);
+        startUrl = croppedStart;
+        endUrl = croppedEnd;
+      }
 
       const klingBody: Record<string, unknown> = {};
       if (input.prompt) klingBody.prompt = translatePromptRefs(input.prompt, { dialect: "fal" });
@@ -327,6 +441,14 @@ export class FalVideoAdapter implements VideoAdapter {
   }
 
   async poll(providerJobId: string): Promise<VideoResult | null> {
+    try {
+      return await this._pollImpl(providerJobId);
+    } catch (err) {
+      rethrowFalApiError(err);
+    }
+  }
+
+  private async _pollImpl(providerJobId: string): Promise<VideoResult | null> {
     // Support legacy plain request_id format (pre-encoding) for backwards compat
     let endpoint: string;
     let requestId: string;

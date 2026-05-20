@@ -22,6 +22,8 @@ export const userAvatarService = {
       status?: string;
       previewUrl?: string;
       providerKeyId?: string | null;
+      /** Используется для Soul (хранение исходников до запуска worker-джобы). */
+      sourceS3Keys?: string[];
     },
   ): Promise<UserAvatar> {
     return db.userAvatar.create({

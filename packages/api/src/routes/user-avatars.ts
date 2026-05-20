@@ -12,7 +12,9 @@ import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openap
 /** Должна совпадать со значениями в bot/scenes/video.ts и worker/processors/avatar.processor.ts. */
 const SOUL_COST_USD = 2.5;
 
-type AuthRequest = FastifyRequest & { userId: bigint };
+// `userId` — внутренний `User.id` (FK). `telegramId` — Telegram chat_id для
+// прямых вызовов Bot API. После decoupling-миграции они различаются у web-only юзеров.
+type AuthRequest = FastifyRequest & { userId: bigint; telegramId: bigint };
 
 export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", telegramAuthHook);
@@ -105,7 +107,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const { userId } = request as AuthRequest;
+      const { userId, telegramId } = request as AuthRequest;
       const { provider } = request.body ?? {};
 
       if (!provider) return reply.status(400).send({ error: "provider is required" });
@@ -114,7 +116,7 @@ export const userAvatarsRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.status(400).send({ error: `Unsupported provider: ${provider}` });
       }
 
-      const telegramChatId = Number(userId);
+      const telegramChatId = Number(telegramId);
 
       if (provider === "higgsfield_soul") {
         await userStateService.setState(userId, "HIGGSFIELD_SOUL_PHOTO", "design");

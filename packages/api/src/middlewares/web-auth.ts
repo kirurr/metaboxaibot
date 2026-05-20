@@ -15,10 +15,15 @@ declare module "fastify" {
      * Выставляется `webAuthPreHandler` после проверки JWT.
      * aibUserId === null означает: юзер зарегистрирован на вебе,
      * но ещё не привязал Telegram — доступ к чатам/токенам/галерее запрещён.
+     *
+     * telegramId — tgid для вызовов Metabox API, которые ключуются по tgid
+     * (subscription-invoice, aibot-invoice, partner-balance). null когда
+     * aibUserId есть, но `User.telegramId` не выставлен (web-only без TG).
      */
     webUser?: {
       metaboxUserId: string;
       aibUserId: bigint | null;
+      telegramId: bigint | null;
       sessionId: string;
     };
   }
@@ -40,19 +45,22 @@ export async function extractWebUserFromRequest(
   }
 
   let aibUserId: bigint | null = null;
+  let telegramId: bigint | null = null;
   if (claims.aib) {
     const user = await db.user.findUnique({
       where: { id: BigInt(claims.aib) },
-      select: { id: true, isBlocked: true },
+      select: { id: true, telegramId: true, isBlocked: true },
     });
     if (!user) return null;
     if (user.isBlocked) return null;
     aibUserId = user.id;
+    telegramId = user.telegramId;
   }
 
   return {
     metaboxUserId: claims.sub,
     aibUserId,
+    telegramId,
     sessionId: claims.sid,
   };
 }

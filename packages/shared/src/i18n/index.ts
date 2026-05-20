@@ -28,11 +28,39 @@ export interface Translations {
     audio: string;
     video: string;
     storage: string;
+    scenarios: string;
     help: string;
     knowledgeBase: string;
     language: string;
     chooseLanguage: string;
     languageChanged: string;
+  };
+  scenarios: {
+    sectionTitle: string;
+    sectionTooltip: string;
+    chooseScenario: string;
+    faceSwap: string;
+    backToMain: string;
+    faceSwapStep1: string;
+    faceSwapStep2: string;
+    faceSwapNotPhoto: string;
+    faceSwapGenerating: string;
+    faceSwapPhotoTooLarge: string;
+    faceSwapAlbumNotice: string;
+    faceSwapWelcome: string;
+    photoUpscale: string;
+    videoUpscale: string;
+    photoUpscaleWelcome: string;
+    videoUpscaleWelcome: string;
+    photoUpscaleStep: string;
+    videoUpscaleStep: string;
+    upscaleChooseFactor: string;
+    upscaleNotPhoto: string;
+    upscaleNotVideo: string;
+    upscalePhotoTooLarge: string;
+    upscaleFileTooLarge: string;
+    upscaleVideoUnreadable: string;
+    upscaleGenerating: string;
   };
   gpt: {
     sectionTitle: string;
@@ -108,6 +136,7 @@ export interface Translations {
     voiceCloneProcessing: string;
     voiceCloneSuccess: string;
     voiceCloneFailed: string;
+    voiceCloneProviderUnavailable: string;
     musicActivated: string;
     musicElActivated: string;
     soundsActivated: string;
@@ -189,6 +218,7 @@ export interface Translations {
     mediaSlotExpired: string;
     mediaSlotDurationTooShort: string;
     mediaSlotDurationTooLong: string;
+    firstClipExceedsOutputDuration: string;
     mediaSlotDurationOutOfRange: string;
     mediaSlotFileTooLarge: string;
     mediaSlotImageTooSmall: string;
@@ -196,6 +226,7 @@ export interface Translations {
     mediaSlotAspectRatioOutOfRange: string;
     mediaSlotFramePixelsOutOfRange: string;
     mediaSlotReadMetadataFailed: string;
+    promptTooLong: string;
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
@@ -220,6 +251,7 @@ export interface Translations {
     recraftImg2imgFileTooLarge: string;
     recraftImg2imgDimensionsTooLarge: string;
     recraftImg2imgResolutionTooLarge: string;
+    providerInputRejected: string;
     gptImageModerationBlocked: string;
     audioSensitiveWord: string;
     audioGenerateFailed: string;
@@ -235,6 +267,7 @@ export interface Translations {
     outputLimitOnlyThinking: string;
     modelOnlyThinking: string;
     chatInvalidImage: string;
+    upscaleResultTooLarge: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;
     soulAvatarNotReady: string;
@@ -296,6 +329,7 @@ export interface Translations {
     replicateInvalidParams: string;
     replicateFileTooLarge: string;
     replicateContentPolicy: string;
+    loraUrlInvalid: string;
     promptNotEnglish: string;
     modelDoesNotSupportImages: string;
     // Fal
@@ -424,6 +458,7 @@ export interface Translations {
     uploadPromptVideoRefAudios: string;
     imageSaved: string;
     imageSavedSingle: string;
+    klingHeavyCropWarning: string;
     tooManyMediaSingleSlot: string;
     tooManyMediaMultiSlot: string;
     slotRequired: string;
@@ -455,6 +490,7 @@ export interface Translations {
   };
   confirmGeneration: {
     message: string;
+    messagePerSecond: string;
     voicePrompt: string;
     start: string;
     cancel: string;
@@ -479,6 +515,7 @@ export interface Translations {
   };
   modelModes: {
     pickerTitle: string;
+    pickModeFirstForMedia: string;
     activated: string;
     activatedTextOnly: string;
     change: string;
@@ -572,6 +609,24 @@ export function getT(lang: Language): Translations {
  */
 function formatTokens(n: number): string {
   return String(parseFloat(n.toFixed(2)));
+}
+
+/**
+ * Возвращает standalone строку «💸 Списано: X ✦\n💳 Баланс: Y ✦» по тому же
+ * шаблону `t.common.generationCostLine`, что и cost-блок в caption'ах
+ * image/video результатов. Используется когда нужно показать списание
+ * отдельным сообщением (например, после ответа LLM в чате — там caption'а нет).
+ */
+export function formatGenerationCostLine(
+  t: Translations,
+  cost: number,
+  subscriptionBalance: number,
+  tokenBalance: number,
+): string {
+  const total = subscriptionBalance + tokenBalance;
+  return t.common.generationCostLine
+    .replace("{cost}", formatTokens(cost))
+    .replace("{total}", formatTokens(total));
 }
 
 /**

@@ -20,7 +20,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@metabox/shared-browser": "workspace:*"
+    "@metabox/shared-browser": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

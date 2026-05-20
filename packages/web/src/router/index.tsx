@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute, GuestOnlyRoute, AdminRoute } from "./guards";
+import GalleryPage from "@/pages/Gallery";
 
 // Lazy-loaded pages — каждый роут отдельным чанком
 const LoginPage = lazy(() => import("@/pages/Login"));
@@ -19,6 +20,7 @@ const PlansPage = lazy(() => import("@/pages/Plans"));
 const TokensPage = lazy(() => import("@/pages/Tokens"));
 const ProfilePage = lazy(() => import("@/pages/Profile"));
 const BillingPage = lazy(() => import("@/pages/Billing"));
+const SettingsPage = lazy(() => import("@/pages/Settings"));
 
 const PaymentSuccessPage = lazy(() => import("@/pages/PaymentSuccess"));
 const PaymentPendingPage = lazy(() => import("@/pages/PaymentPending"));
@@ -30,7 +32,8 @@ const AdminLayout = lazy(() => import("@/pages/AdminLayout"));
 const AdminKeysPage = lazy(() => import("@/pages/AdminKeys"));
 const AdminProxiesPage = lazy(() => import("@/pages/AdminProxies"));
 const AdminPricingPage = lazy(() => import("@/pages/AdminPricing"));
-const WebSocketPage = lazy(() => import("@/pages/WebSocket"));
+const AdminPromptsListPage = lazy(() => import("@/pages/AdminPromptsList"));
+const AdminPromptEditorPage = lazy(() => import("@/pages/AdminPromptEditor"));
 const PromptsPage = lazy(() => import("@/pages/PromptsPage"));
 
 function PageFallback() {
@@ -46,12 +49,6 @@ function withSuspense(node: React.ReactNode) {
 }
 
 export const router = createBrowserRouter([
-  // WebSocket
-  {
-    path: "/ws",
-    element: <WebSocketPage />,
-  },
-
   // Гостевые роуты
   {
     path: "/login",
@@ -83,14 +80,20 @@ export const router = createBrowserRouter([
       { path: "chat", element: withSuspense(<ChatPage />) },
       { path: "chat/:id", element: withSuspense(<ChatPage />) },
       { path: "image", element: withSuspense(<ImagePage />) },
+      { path: "image/:preset", element: withSuspense(<ImagePage />) },
       { path: "video", element: withSuspense(<VideoPage />) },
+      { path: "video/:preset", element: withSuspense(<VideoPage />) },
       { path: "audio", element: withSuspense(<AudioPage />) },
+      { path: "audio/:preset", element: withSuspense(<AudioPage />) },
       { path: "history", element: withSuspense(<HistoryPage />) },
       { path: "plans", element: withSuspense(<PlansPage />) },
       { path: "tokens", element: withSuspense(<TokensPage />) },
       { path: "profile", element: withSuspense(<ProfilePage />) },
       { path: "billing", element: withSuspense(<BillingPage />) },
+      { path: "settings", element: withSuspense(<SettingsPage />) },
       { path: "prompts", element: withSuspense(<PromptsPage />) },
+      { path: "gallery", element: withSuspense(<GalleryPage />) },
+      { path: "gallery/:jobId", element: withSuspense(<GalleryPage />) },
     ],
   },
 
@@ -103,6 +106,9 @@ export const router = createBrowserRouter([
       { path: "keys", element: withSuspense(<AdminKeysPage />) },
       { path: "proxies", element: withSuspense(<AdminProxiesPage />) },
       { path: "pricing", element: withSuspense(<AdminPricingPage />) },
+      { path: "prompts", element: withSuspense(<AdminPromptsListPage />) },
+      { path: "prompts/new", element: withSuspense(<AdminPromptEditorPage />) },
+      { path: "prompts/:id/edit", element: withSuspense(<AdminPromptEditorPage />) },
     ],
   },
 

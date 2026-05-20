@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import OpenAI, { type ClientOptions as OpenAIClientOptions } from "openai";
 import {
   BaseLLMAdapter,
@@ -10,6 +11,27 @@ import { logCall } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
 
 /**
+ * Кэш org-keys которые OpenAI отбил при запросе `reasoning.summary: "auto"`
+ * с 400 «Your organization must be verified to generate reasoning summaries».
+ * Это org-level policy gate (нужно нажать «Verify Organization» в OpenAI
+ * dashboard'е), а не баг кода. Пока org не верифицирован — превентивно гасим
+ * `showReasoning` для этих ключей, чтобы не платить лишним 400-roundtrip'ом
+ * на каждый запрос. Ключи — sha256-хэш apiKey (16 hex chars) чтобы не светить
+ * raw-ключ в логах и не давать утечь содержимому через memory dump.
+ *
+ * Кэш живёт в памяти процесса — пересоздаётся на рестарте, что норм:
+ * пользы от персистенса нет, propagation после verify ≤ 15 мин.
+ */
+const orgsRejectingReasoningSummary = new Set<string>();
+
+function isOrgUnverifiedForReasoningSummary(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const status = (err as Error & { status?: number }).status;
+  if (status !== 400) return false;
+  return /organization must be verified to generate reasoning summaries/i.test(err.message);
+}
+
+/**
  * OpenAI Responses API adapter (provider_chain strategy).
  * Uses previous_response_id to chain responses — no history transfer needed.
  */
@@ -20,11 +42,16 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
   private client: OpenAI;
   private model: string;
+  private readonly apiKeyHash: string;
 
   constructor(model: string, apiKey = config.ai.openai, fetchFn?: typeof globalThis.fetch) {
     super();
     this.model = model;
     this.modelId = model;
+    this.apiKeyHash = createHash("sha256")
+      .update(apiKey ?? "")
+      .digest("hex")
+      .slice(0, 16);
     this.client = new OpenAI({
       apiKey,
       ...(fetchFn ? { fetch: fetchFn as unknown as OpenAIClientOptions["fetch"] } : {}),
@@ -147,17 +174,49 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         .output_tokens_details?.reasoning_tokens;
     };
 
-    try {
-      const stream = await (
+    // Если эта org-key ранее отказывала на `reasoning.summary` (см. кэш
+    // выше) — превентивно гасим `showReasoning`, чтобы не платить лишним
+    // 400-roundtrip'ом на каждый запрос пока org не верифицирован.
+    if (input.showReasoning && orgsRejectingReasoningSummary.has(this.apiKeyHash)) {
+      input = { ...input, showReasoning: false };
+    }
+
+    const openStream = (
+      eff: LLMInput,
+    ): Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>> =>
+      (
         this.client.responses.create as (
           p: unknown,
         ) => Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>>
       )({
         model: this.model,
-        input: this.buildInput(input),
-        ...this.buildParams(input),
+        input: this.buildInput(eff),
+        ...this.buildParams(eff),
         stream: true,
       });
+
+    try {
+      let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>;
+      try {
+        stream = await openStream(input);
+      } catch (err) {
+        // Org policy gate: OpenAI требует verified-organization для запроса
+        // `reasoning.summary: "auto"`. Без верификации — 400. Graceful
+        // degrade: молча выключаем showReasoning, ретраим без summary'я.
+        // Юзер получит ответ (просто без `<think>`-блока) вместо дженерик-
+        // ошибки. Помечаем org как unverified в module-level кэше, чтобы
+        // следующие запросы пропустили попытку и сразу шли без summary.
+        if (!isOrgUnverifiedForReasoningSummary(err) || !input.showReasoning) {
+          throw err;
+        }
+        logger.warn(
+          { modelId: this.model, apiKeyHash: this.apiKeyHash },
+          "openai.chatStream: org not verified for reasoning summaries — degrading without summary",
+        );
+        orgsRejectingReasoningSummary.add(this.apiKeyHash);
+        input = { ...input, showReasoning: false };
+        stream = await openStream(input);
+      }
 
       for await (const event of stream) {
         if (event.type === "response.output_text.delta") {
@@ -237,6 +296,46 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         }
       }
     } catch (err) {
+      // Диагностика: SSE-стрим OpenAI бросает APIError из streaming.mjs:57
+      // без HTTP-статуса. Без контекста невозможно отличить server-side
+      // transient от нашей дырки в payload'е (stale previous_response_id /
+      // удалённый file_id / просроченная presigned-ссылка на картинку).
+      // Логируем срез payload-метаданных (без user content) на КАЖДОЙ ошибке
+      // этого catch'а — следующий хит даст root cause.
+      const errAny = err as {
+        message?: unknown;
+        status?: unknown;
+        code?: unknown;
+        param?: unknown;
+        type?: unknown;
+      };
+      const docs = input.documentAttachments ?? [];
+      logger.warn(
+        {
+          modelId: this.model,
+          errorName: err instanceof Error ? err.constructor.name : typeof err,
+          errorType: typeof errAny.type === "string" ? errAny.type : undefined,
+          errorCode: typeof errAny.code === "string" ? errAny.code : undefined,
+          errorParam: typeof errAny.param === "string" ? errAny.param : undefined,
+          errorStatus: typeof errAny.status === "number" ? errAny.status : undefined,
+          errorMessage: typeof errAny.message === "string" ? errAny.message : undefined,
+          visibleDeltas: deltaCount,
+          hasPreviousResponseId: !!input.previousResponseId,
+          historyLen: input.history?.length ?? 0,
+          docsCount: docs.length,
+          docsWithFileId: docs.filter((d) => !!d.openaiFileId).length,
+          docsUrlOnly: docs.filter((d) => !d.openaiFileId && !!d.url).length,
+          imagesCount: input.imageUrls?.length ?? (input.imageUrl ? 1 : 0),
+          promptLen: input.prompt?.length ?? 0,
+          systemPromptLen: input.systemPrompt?.length ?? 0,
+          reasoningEffort: input.reasoningEffort,
+          showReasoning: input.showReasoning,
+          maxTokensLimitEnabled: input.maxTokensLimitEnabled,
+          maxTokens: input.maxTokens,
+        },
+        "openai.chatStream: SDK threw from stream — payload context",
+      );
+
       // OpenAI Stream.iterator бросает Error/APIError без числового .status,
       // когда сервер падает прямо в SSE-стриме. Без status'а isFiveXxError →
       // false, retry/fallback в chat.service не срабатывает и юзер ловит

@@ -19,6 +19,7 @@ import { authRoutes } from "./routes/auth.js";
 import { webAuthRoutes } from "./routes/web-auth.js";
 import { webChatRoutes } from "./routes/web-chat.js";
 import { webModelsRoutes } from "./routes/web-models.js";
+import { webGalleryRoutes } from "./routes/web-gallery.js";
 import { webVoicesRoutes } from "./routes/web-voices.js";
 import { webPickersRoutes } from "./routes/web-pickers.js";
 import { webBillingRoutes } from "./routes/web-billing.js";
@@ -30,6 +31,8 @@ import { adminRoutes } from "./routes/admin.js";
 import { adminKeysRoutes } from "./routes/admin-keys.js";
 import { adminPricingRoutes } from "./routes/admin-pricing.js";
 import { initPricingConfig } from "./services/pricing-config.service.js";
+import { startJobNotificationsSubscriber } from "./services/job-notifications.subscriber.js";
+import { dispatchJobNotification } from "./services/web-notification.service.js";
 import { paymentsRoutes } from "./routes/payments.js";
 import { galleryRoutes } from "./routes/gallery.js";
 import { slidesRoutes } from "./routes/slides.js";
@@ -53,6 +56,8 @@ import { userVoicesRoutes } from "./routes/user-voices.js";
 import { downloadRoutes } from "./routes/download.js";
 import { wsRoutes } from "./routes/ws.js";
 import { webPromptsRoutes } from "./routes/web-prompts.js";
+import { webGenerationRoutes } from "./routes/web-generation.js";
+import { webUserAvatarsRoutes } from "./routes/web-user-avatars.js";
 import { startRateScheduler } from "./services/exchange-rate.service.js";
 import { startSubscriptionScheduler } from "./services/subscription.service.js";
 import { config, preloadLocales, SUPPORTED_LANGUAGES } from "@metabox/shared";
@@ -70,6 +75,9 @@ await server.register(cookie, {
 await server.register(cors, {
   origin: true, // restrict in prod via env
   credentials: true, // нужно для httpOnly cookie refresh-токена
+  // X-Refresh-Wtoken — rolling refresh для KeyboardButtonWebApp auth-токена.
+  // Без exposedHeaders браузер скрывает его от webapp-кода.
+  exposedHeaders: ["X-Refresh-Wtoken"],
 });
 await server.register(helmet);
 
@@ -201,6 +209,7 @@ await server.register(authRoutes);
 await server.register(webAuthRoutes);
 await server.register(webChatRoutes);
 await server.register(webModelsRoutes);
+await server.register(webGalleryRoutes);
 await server.register(webVoicesRoutes);
 await server.register(webPickersRoutes);
 await server.register(webBillingRoutes);
@@ -234,6 +243,8 @@ await server.register(userVoicesRoutes);
 await server.register(downloadRoutes);
 await server.register(wsRoutes);
 await server.register(webPromptsRoutes);
+await server.register(webGenerationRoutes);
+await server.register(webUserAvatarsRoutes);
 
 // Start USDT/RUB exchange rate scheduler (fetches from Binance 4× daily)
 startRateScheduler();
@@ -243,6 +254,11 @@ startSubscriptionScheduler();
 // Должен быть до server.listen() — иначе первые запросы получат пустой кэш и
 // формула usdToTokens возьмёт config-default targetMargin до первого DB-hit.
 await initPricingConfig();
+
+// Subscribe to job-completion notifications from worker (web-source jobs).
+// Каждое событие пишется в `web_notifications` и пушится подписанным сокетам
+// юзера через `notification:new`. Ошибки внутри dispatch ловит subscriber.
+await startJobNotificationsSubscriber(dispatchJobNotification);
 
 const port = config.api.port;
 await server.listen({ port, host: "0.0.0.0" });

@@ -16,7 +16,12 @@ enum Role {
 // Пользователь
 // ─────────────────────────────────────────────
 model User {
-  id                       BigInt  @id // Telegram user ID
+  id                       BigInt  @id @default(autoincrement())
+  // Telegram user ID — nullable, чтобы web-only юзеры существовали без привязки бота.
+  // У существующих/линкованных юзеров `telegramId` совпадает с историческим `id`
+  // (backfill в миграции). Все Telegram-операции (chat_id, ctx.from.id lookup) и
+  // записи `WelcomeBonusReceipt` / `GrantedMetaboxOrder` (ключ без FK) — по `telegramId`.
+  telegramId               BigInt? @unique
   username                 String?
   firstName                String?
   lastName                 String?
@@ -27,11 +32,12 @@ model User {
   isNew                    Boolean @default(true)
   isBlocked                Boolean @default(false)
   referredById             BigInt?
-  metaboxUserId            String? // UUID пользователя в Metabox (после привязки)
+  metaboxUserId            String? @unique // UUID пользователя в Metabox (после привязки)
   metaboxReferralCode      String? // Реферальный код Metabox (кешируется при привязке)
   finishedOnboarding       Boolean @default(false)
   generationCount          Int     @default(0)
   confirmBeforeGenerate    Boolean @default(true)
+  autoActivateModel        Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -48,6 +54,7 @@ model User {
   galleryFolders    GalleryFolder[]
   pendingGeneration PendingGeneration?
   generationJobs    GenerationJob[]
+  webNotifications  WebNotification[]
 
   @@map("users")
 }
@@ -105,6 +112,15 @@ model UserState {
 
   // Голосовое сообщение для HeyGen audio voice: Telegram file URL (one-shot, сбрасывается после использования)
   videoRefVoiceUrl String?
+
+  // Длительность последнего загруженного юзером аудио для HeyGen voice_audio
+  // слота (в секундах, ffprobe'нута на байтах при загрузке — не доверяем
+  // metadata-полю Telegram audio messages, чтобы не было billing-exploit'а).
+  // Используется как `audioDurationSecHint` в cost-preview, чтобы не падать
+  // в per_second режим из-за flaky probe в submit-time. Перезаписывается на
+  // каждой новой загрузке voice'а; не очищается при сабмите — `hasVoiceAudio`
+  // guard в боте отсекает stale значения когда mediaInputs.voice_audio пуст.
+  videoVoiceDurationSec Int?
 
   // Настройки генерации изображений: { [modelId]: { aspectRatio: string } }
   imageSettings Json?
@@ -177,6 +193,8 @@ model Message {
   mediaType         String? // image | video | audio
   attachments       Json? // [{ s3Key, mimeType, name, size }] — documents attached to the message
   tokensUsed        Decimal @default(0) @db.Decimal(10, 4)
+  inputTokens       Int     @default(0) // raw provider input tokens (assistant messages only; 0 для user)
+  outputTokens      Int     @default(0) // raw provider output tokens (assistant messages only; 0 для user)
   providerMessageId String? // OpenAI Assistants: message_id (для управления историей)
   failed            Boolean @default(false) // true if the LLM request failed; excluded from history
 
@@ -244,7 +262,14 @@ model GenerationJob {
   sourceMessageId String? // "{chatId}:{messageId}" of the inline button that triggered this job
   pollStartedAt   DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
   tokensSpent     Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
+  // Сырое exception-сообщение для ops/debugging. Никогда не показывается
+  // пользователю напрямую — для UI используется `errorUserMessage` ниже.
   error           String?
+  // Локализованное user-facing сообщение об ошибке (из `resolveUserFacingMessage`
+  // / `pickGenerationFailedMessage`). То же, что бот шлёт в чат и что пишется
+  // в WS-нотификацию. Web-UI читает это поле для истории генераций. null =
+  // job ещё не упал или старая job до выкатки колонки.
+  errorUserMessage String?
   // Структурированная категория ошибки для статистики. Значения — из
   // `GenerationErrorCode` в `packages/shared/src/error-codes.ts`:
   // INPUT_MODERATION, OUTPUT_MODERATION, INPUT_VALIDATION, INPUT_MEDIA_FORMAT,
@@ -262,8 +287,9 @@ model GenerationJob {
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
 
-  outputs     GenerationJobOutput[]
-  folderItems GalleryFolderItem[]
+  outputs          GenerationJobOutput[]
+  folderItems      GalleryFolderItem[]
+  webNotifications WebNotification[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -272,6 +298,36 @@ model GenerationJob {
   @@index([userId, sourceMessageId, status])
   @@index([errorCode]) // GROUP BY в admin-аналитике по видам отказов
   @@map("generation_jobs")
+}
+
+// ─────────────────────────────────────────────
+// Персистентные уведомления для веб-фронта (packages/web).
+// Дополняют эфемерный Redis pub/sub `job-notifications`: если фронт офлайн в
+// момент завершения джобы — событие сохраняется и подтянется при следующем
+// заходе в личный кабинет.
+// type: image_success | image_error | video_success | video_error | audio_success | audio_error
+// data — payload из JobNotificationMessage (outputs[], errorCode, partial, ...).
+// ─────────────────────────────────────────────
+model WebNotification {
+  id      String  @id @default(cuid())
+  userId  BigInt
+  jobId   String?
+  type    String
+  title   String
+  message String
+  isSeen  Boolean @default(false)
+  data    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  GenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, isSeen])
+  @@index([jobId])
+  @@map("web_notifications")
 }
 
 model GenerationJobOutput {
@@ -325,6 +381,12 @@ model UserAvatar {
   // (talking_photo_id и т.п.) живут в аккаунте конкретного API-ключа, поэтому
   // потреблять их можно только тем же ключом. null = был использован env-fallback.
   providerKeyId String?
+  // Исходные s3-ключи фото, из которых обучается Soul-персонаж. Заполняются
+  // при создании аватара через web-приложение (когда мы держим pending-record
+  // в status="creating" до того, как worker отправит их в Higgsfield Soul API).
+  // Для HeyGen остаётся пустым массивом — там аплоад синхронный, исходник
+  // потребляется сразу адаптером.
+  sourceS3Keys  String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -550,7 +612,10 @@ model PricingOverride {
 // ─────────────────────────────────────────────
 model GrantedMetaboxOrder {
   orderId     String   @id
-  telegramId  BigInt
+  // Nullable: web-only юзеры (создан через ai.metabox.global без TG-привязки)
+  // тоже получают token-grants синком, и для них telegramId отсутствует.
+  // Дедуп всё равно работает по orderId как PK.
+  telegramId  BigInt?
   tokens      Decimal  @db.Decimal(12, 4)
   description String?
   grantedAt   DateTime @default(now())
@@ -586,7 +651,8 @@ model DeletedUser {
   // НЕ unique: один и тот же telegramId может удалиться несколько раз
   // (юзер удалил аккаунт → /start создаёт новый → снова удаляет). Каждое
   // удаление — отдельный snapshot для аудита и retry-reconcile.
-  telegramId                BigInt
+  // Nullable: web-only юзер мог удалить аккаунт без TG-привязки.
+  telegramId                BigInt?
   username                  String?
   firstName                 String?
   lastName                  String?

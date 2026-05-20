@@ -30,7 +30,7 @@ const PRESIGN_TTL = 3600;
  * considered retryable. Logs both the failed first attempt and the final
  * outcome so silent drops are impossible.
  */
-async function withRetry<T>(
+export async function withRetry<T>(
   op: string,
   ctx: Record<string, unknown>,
   fn: () => Promise<T>,
@@ -225,22 +225,18 @@ export async function uploadFromUrl(
 }
 
 /**
- * Returns a URL to access the stored file:
- * - public URL (if S3_PUBLIC_URL is configured)
- * - presigned GET URL (valid for PRESIGN_TTL seconds)
- * Returns null if S3 is not configured.
+ * Returns a presigned GET URL for an object in the PRIVATE bucket
+ * (valid for PRESIGN_TTL seconds). Returns null if S3 is not configured.
+ *
+ * For publicly served assets, use `publicS3Service.getFileUrl` instead.
  *
  * Pass `downloadFilename` to force browser download via Content-Disposition: attachment.
  */
 export async function getFileUrl(key: string, downloadFilename?: string): Promise<string | null> {
-  const { bucket, publicUrl } = config.s3;
+  const { bucket } = config.s3;
   if (!bucket) {
     logger.warn({ key }, "getFileUrl: S3 bucket not configured");
     return null;
-  }
-
-  if (publicUrl) {
-    return `${publicUrl.replace(/\/$/, "")}/${key}`;
   }
 
   const client = makeClient();
@@ -289,6 +285,54 @@ export async function measureImageMegapixels(imageUrl: string): Promise<number> 
   const meta = await sharp(buf).metadata();
   if (!meta.width || !meta.height) throw new Error("Could not read image dimensions");
   return (meta.width * meta.height) / 1_000_000;
+}
+
+export interface NormalizedImageUpload {
+  /** S3 key of the uploaded normalized JPEG. */
+  key: string;
+  /** Megapixels of the normalized image. */
+  megapixels: number;
+  /** Width of the normalized image, px. */
+  width: number;
+  /** Height of the normalized image, px. */
+  height: number;
+}
+
+/**
+ * Fetches an image, normalizes it to a provider-safe JPEG and uploads to S3.
+ *
+ * Re-encoding through sharp fixes inputs that AI upscale providers (Topaz)
+ * reject with "Image format error" — HEIC, CMYK, 16-bit, progressive JPEG,
+ * animated/odd WebP, broken ICC/EXIF. EXIF orientation is baked in (`.rotate()`)
+ * and alpha is flattened on white (JPEG has no alpha channel).
+ *
+ * Returns the S3 key and the normalized image's megapixels (single fetch +
+ * decode — caller doesn't need a separate `measureImageMegapixels` call).
+ * Throws on fetch/decode/upload failure so the caller can surface an error.
+ */
+export async function uploadNormalizedImage(
+  key: string,
+  sourceUrl: string,
+): Promise<NormalizedImageUpload> {
+  const res = await fetch(sourceUrl);
+  if (!res.ok) throw new Error(`Failed to fetch image for normalization: ${res.status}`);
+  const srcBuf = Buffer.from(await res.arrayBuffer());
+  const { data, info } = await sharp(srcBuf)
+    .rotate()
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 92 })
+    .toBuffer({ resolveWithObject: true });
+  const uploaded = await uploadBuffer(key, data, "image/jpeg");
+  // uploadBuffer возвращает null если S3 не сконфигурирован — НЕ выдаём
+  // фейковый success с несуществующим ключом, иначе вызывающий код пойдёт
+  // дальше с мёртвым S3-ключом. Бросаем — caller обработает как сбой.
+  if (!uploaded) throw new Error("uploadNormalizedImage: S3 upload failed (not configured?)");
+  return {
+    key: uploaded,
+    megapixels: (info.width * info.height) / 1_000_000,
+    width: info.width,
+    height: info.height,
+  };
 }
 
 export interface ImageProbeInfo {
@@ -603,6 +647,7 @@ export const s3Service = {
   sectionMeta,
   uploadBuffer,
   uploadFromUrl,
+  uploadNormalizedImage,
   getFileUrl,
   deleteFile,
   generateThumbnail,

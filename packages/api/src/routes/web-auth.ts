@@ -22,6 +22,7 @@ import {
   webConfirmPasswordReset,
   webChangePassword,
   webGetProfile,
+  webResendVerification,
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import {
@@ -36,7 +37,13 @@ import {
   checkLinkTelegramLinked,
 } from "../services/web-session.service.js";
 import { extractWebUserFromRequest, webAuthPreHandler } from "../middlewares/web-auth.js";
-import { config } from "@metabox/shared";
+import { ensureAibUserForMetabox } from "../services/account-sync.service.js";
+import { config, SUPPORTED_LANGUAGES } from "@metabox/shared";
+
+// Set для O(1) валидации `language` в `/web/me` PATCH. Без проверки фронт мог бы
+// прислать кривой код → запись в DB → воркер при `getT(unknown)` упал бы в
+// en-фоллбэк молча. Лучше отбить на API-уровне.
+const SUPPORTED_LANG_SET = new Set<string>(SUPPORTED_LANGUAGES);
 import { validateEmail } from "../utils/email-validation.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
@@ -75,6 +82,7 @@ async function findAibUser(metaboxUserId: string) {
     where: { metaboxUserId },
     select: {
       id: true,
+      telegramId: true,
       username: true,
       firstName: true,
       lastName: true,
@@ -99,7 +107,12 @@ async function buildWebUserResponse(args: {
 }) {
   const aib = await findAibUser(args.metaboxUserId);
 
-  const telegramId = aib ? aib.id.toString() : (args.telegramOnSite?.telegramId ?? null);
+  // `aib.telegramId` — корректное поле после decoupling. Раньше читали `aib.id`
+  // (работало пока id == tgid), но у web-only юзеров id ≠ tgid, и `id` теперь
+  // вообще не tgid. Если у aib нет привязки tg — fallback на telegramOnSite.
+  const telegramId = aib?.telegramId
+    ? aib.telegramId.toString()
+    : (args.telegramOnSite?.telegramId ?? null);
   const telegramUsername = aib?.username ?? args.telegramOnSite?.telegramUsername ?? null;
 
   return {
@@ -112,7 +125,11 @@ async function buildWebUserResponse(args: {
     language: (aib?.language as "ru" | "en" | undefined) ?? "ru",
     telegramId,
     telegramUsername,
-    isTelegramLinked: !!aib,
+    // Привязка TG = именно наличие telegramId на AI Box User (или fallback на
+    // metabox-side telegramId если AI Box User ещё не создан). Раньше было
+    // `!!aib` — web-only юзеры (создаются `ensureAibUser` без TG) видели в
+    // профиле «Linked» + «id null» и не могли кликнуть «Привязать Telegram».
+    isTelegramLinked: !!telegramId,
     tokenBalance: aib?.tokenBalance.toString() ?? "0",
     subscriptionTokenBalance: aib?.subscriptionTokenBalance.toString() ?? "0",
     role: aib?.role ?? "USER",
@@ -274,17 +291,63 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           });
         } catch (err) {
           if (err instanceof MetaboxApiError) {
-            if (err.status === 409)
-              return reply.code(409).send({ error: "Email уже зарегистрирован" });
+            if (err.status === 409) {
+              // Email уже зарегистрирован на Metabox. Если этот юзер уже
+              // привязан к AI Box (есть User с этим metaboxUserId) — даём
+              // спец-сообщение, чтобы UX подсказывал «логиньтесь Metabox-
+              // кредами», а не «регистрируйтесь заново». Если не привязан —
+              // тоже отправляем на login (там auto-create через
+              // ensureAibUserForMetabox), но с более общим текстом.
+              const existingMetaboxId =
+                typeof err.data?.metaboxUserId === "string" ? err.data.metaboxUserId : undefined;
+              if (existingMetaboxId) {
+                const aibLinked = await findAibUser(existingMetaboxId);
+                if (aibLinked) {
+                  return reply.code(409).send({
+                    code: "EMAIL_LINKED_TO_AIBOX",
+                    error:
+                      "Аккаунт с такой почтой уже существует. Используйте для входа email и пароль Metabox-аккаунта.",
+                  });
+                }
+              }
+              return reply.code(409).send({
+                code: "EMAIL_EXISTS",
+                error:
+                  "Аккаунт с такой почтой уже существует. Войдите, используя ваш Metabox-пароль.",
+              });
+            }
             if (err.status === 400) return reply.code(400).send({ error: err.message });
           }
           logger.error({ err }, "web-signup: metabox register failed");
           return reply.code(502).send({ error: "Не удалось создать аккаунт" });
         }
 
+        // Если требуется подтверждение email (prod-режим, не STAGE_MODE) —
+        // НЕ создаём сессию и НЕ создаём AI Box User. Иначе фронт залогинит
+        // юзера, и при первом рефреше webValidateCredentials упадёт с 403
+        // EMAIL_NOT_VERIFIED → юзер увидит выкид из сессии без объяснений.
+        // AI Box User будет создан при первом успешном login (после клика
+        // по ссылке подтверждения в письме).
+        if (registered.requiresVerification) {
+          return reply.send({
+            requiresVerification: true,
+            email: registered.email,
+            firstName: registered.firstName,
+          });
+        }
+
+        // Stage / autoverify ветка — создаём AI Box User сразу. (Так же
+        // работает существующий путь, если фичу подтверждения отключают.)
+        const ensured = await ensureAibUserForMetabox({
+          metaboxUserId: registered.metaboxUserId,
+          firstName: registered.firstName,
+          lastName: registered.lastName,
+          metaboxReferralCode: registered.referralCode,
+        });
+
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
           metaboxUserId: registered.metaboxUserId,
-          aibUserId: null, // регистрация на вебе не создаёт AI Box User
+          aibUserId: ensured.id.toString(),
           email: registered.email,
           firstName: registered.firstName,
           rememberMe: true,
@@ -378,18 +441,38 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           if (err instanceof MetaboxApiError) {
             if (err.status === 401)
               return reply.code(401).send({ error: "Неверный email или пароль" });
-            if (err.status === 403)
-              return reply.code(403).send({ error: err.message || "Вход запрещён" });
+            if (err.status === 403) {
+              // EMAIL_NOT_VERIFIED — клин-месседж + code, фронт покажет CTA
+              // «отправить письмо повторно». Без code (banned / другая 403) —
+              // возвращаем дефолт «Вход запрещён», БЕЗ технического
+              // `err.message` (он содержит `Metabox internal API … → 403: …`).
+              if (err.code === "EMAIL_NOT_VERIFIED") {
+                return reply.code(403).send({
+                  code: "EMAIL_NOT_VERIFIED",
+                  error: "Email не подтверждён. Перейдите по ссылке из письма или запросите новое.",
+                  email: emailNorm,
+                });
+              }
+              return reply.code(403).send({ error: "Вход запрещён" });
+            }
           }
           logger.error({ err }, "web-login: metabox validate failed");
           return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
         }
 
-        const aib = await findAibUser(validated.metaboxUserId);
+        // Auto-create AI Box User если ещё нет. Также sync token-grants и
+        // подписку с metabox-стороны (полезно для юзеров, которые могли
+        // что-то купить через metabox до того, как зашли в AI Box).
+        const ensured = await ensureAibUserForMetabox({
+          metaboxUserId: validated.metaboxUserId,
+          firstName: validated.firstName,
+          lastName: validated.lastName,
+          metaboxReferralCode: validated.referralCode,
+        });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
           metaboxUserId: validated.metaboxUserId,
-          aibUserId: aib?.id.toString() ?? null,
+          aibUserId: ensured.id.toString(),
           email: validated.email,
           firstName: validated.firstName,
           rememberMe,
@@ -446,9 +529,14 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
       const session = await getRefreshSession(refreshToken);
       if (!session) return reply.code(401).send({ error: "Session expired" });
 
-      // Рестартуем: может быть, юзер привязал TG между рефрешами — проверяем
-      const aib = await findAibUser(session.metaboxUserId);
-      session.aibUserId = aib?.id.toString() ?? null;
+      // Auto-create AI Box User для существующих сессий, которые были выданы
+      // ДО изменения signup/login flow (когда aibUserId оставался null до
+      // привязки TG). После апдейта они продолжают работать без логаута.
+      const ensured = await ensureAibUserForMetabox({
+        metaboxUserId: session.metaboxUserId,
+        firstName: session.firstName,
+      });
+      session.aibUserId = ensured.id.toString();
 
       const { csrfToken } = await touchRefreshSession(refreshToken, session);
 
@@ -548,6 +636,55 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  // ── PATCH /auth/web-me ─────────────────────────────────────────────────
+  // Обновление пользовательских предпочтений web-юзера. Сейчас поддерживается
+  // только `language` — он же source of truth для воркеров: при формировании
+  // user-facing сообщений об ошибках они зовут `getT(user.language)`. Без
+  // sync'а DB после смены языка в Settings UI юзер видел бы свою историю
+  // в одном языке, а ошибки в другом.
+  //
+  // Web-only юзеры без линкованного TG (`aibUserId === null`) — нет `User`-row
+  // в нашей БД (только metabox-аккаунт), обновлять нечего → 204.
+  fastify.patch<{ Body: { language?: string } }>(
+    "/auth/web-me",
+    {
+      preHandler: webAuthPreHandler,
+      schema: {
+        description: "Update web user preferences (language).",
+        body: {
+          type: "object",
+          properties: { language: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" }, language: { type: "string" } },
+          },
+          204: { type: "null" },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aibUserId } = request.webUser!;
+      const language = request.body?.language;
+      if (!language) {
+        return reply.code(400).send({ error: "language is required" });
+      }
+      if (!SUPPORTED_LANG_SET.has(language)) {
+        return reply.code(400).send({ error: "Unsupported language" });
+      }
+      if (aibUserId === null) {
+        // Web-only без User-row — менять негде; фронт уже держит выбор в
+        // localStorage, этого достаточно для UI до момента линковки TG.
+        return reply.code(204).send();
+      }
+      await db.user.update({ where: { id: aibUserId }, data: { language } });
+      return reply.send({ ok: true, language });
+    },
+  );
+
   // ── GET /auth/web-transactions ───────────────────────────────────────────
   // Последние 20 транзакций токенового баланса для авторизованного web-юзера.
   // Используется на странице Tokens (история операций) + Profile (краткая лента).
@@ -608,6 +745,41 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           createdAt: t.createdAt.toISOString(),
         })),
       });
+    },
+  );
+
+  // ── POST /auth/web-resend-verification ──────────────────────────────────
+  // Прокси к metabox `/api/internal/web-resend-verification`. Используется
+  // post-signup экраном «Проверьте почту» (юзер ещё не залогинен).
+  fastify.post<{ Body: { email?: string } }>(
+    "/auth/web-resend-verification",
+    {
+      schema: {
+        description: "Resend email verification link",
+        security: [],
+        body: {
+          type: "object",
+          properties: { email: { type: "string" } },
+          required: ["email"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const email = (request.body?.email ?? "").toLowerCase().trim();
+      if (!isValidEmail(email)) return reply.send({ ok: true });
+      try {
+        await webResendVerification(email);
+      } catch (err) {
+        logger.warn({ err, email }, "web-resend-verification: metabox call failed");
+      }
+      return reply.send({ ok: true });
     },
   );
 

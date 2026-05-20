@@ -4,8 +4,6 @@ import { TopNav } from "./TopNav";
 import { MobileTop } from "./MobileTop";
 import { BottomNav } from "./BottomNav";
 import { ToastContainer } from "@/components/common/ToastContainer";
-import { TelegramLinkModal } from "@/components/TelegramLinkModal";
-import { useUIStore } from "@/stores/uiStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 /**
@@ -14,8 +12,6 @@ import { useIsMobile } from "@/hooks/useIsMobile";
  */
 export function AppShell() {
   const isMobile = useIsMobile();
-  const telegramLinkModal = useUIStore((s) => s.telegramLinkModal);
-  const closeTelegramLinkModal = useUIStore((s) => s.closeTelegramLinkModal);
 
   return (
     <div className={clsx("app", isMobile && "mobile")}>
@@ -28,12 +24,6 @@ export function AppShell() {
       {isMobile && <BottomNav />}
 
       <ToastContainer />
-
-      <TelegramLinkModal
-        open={telegramLinkModal.open}
-        onClose={closeTelegramLinkModal}
-        context={telegramLinkModal.context}
-      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { getVideoQueue } from "../queues/video.queue.js";
 import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
+import { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 import { createVideoAdapter } from "../ai/video/factory.js";
 import { validatePromptRefs } from "./prompt-ref.service.js";
 import type {
@@ -29,7 +30,8 @@ export interface SubmitVideoParams {
   imageUrl?: string;
   /** Named media input slots: { [slotKey]: string[] } */
   mediaInputs?: Record<string, string[]>;
-  telegramChatId: number;
+  /** Telegram chat id; `null` для генераций, запущенных с веба. */
+  telegramChatId: number | null;
   /** Pre-translated label for the "Send as file" inline button. */
   sendOriginalLabel?: string;
   /** Aspect ratio chosen by user, e.g. "16:9". */
@@ -42,6 +44,13 @@ export interface SubmitVideoParams {
   sourceMessageId?: string;
   /** Telegram message_id of the user's prompt — worker replies to it when sending the result. */
   promptMessageId?: number;
+  /**
+   * Pre-known duration of `mediaInputs.voice_audio[0]` в секундах. Заполняется
+   * `ensureHeygenTtsForVideo` после вызова HeyGen TTS endpoint'а (HeyGen
+   * возвращает `duration` в ответе). Если задан — `previewVideo` пропускает
+   * повторный fetch+ffprobe того же mp3 (экономит ~200–500ms на HeyGen-сабмите).
+   */
+  audioDurationSecHint?: number;
 }
 
 export interface SubmitVideoResult {
@@ -84,15 +93,37 @@ export const videoGenerationService = {
     if (refError) return refError;
 
     // Pre-flight hardcap: ловим заведомо слишком длинный промпт до enqueue +
-    // submit'а в провайдер (e.g. xAI/Grok 4096 chars). Без этого юзер ждёт
-    // round-trip к провайдеру и получает generic «модель временно недоступна»
-    // вместо конкретного «промпт длиннее N — сократите».
+    // submit'а в провайдер (e.g. xAI/Grok 4096). Без этого юзер ждёт round-trip
+    // к провайдеру и получает generic «модель временно недоступна» вместо
+    // конкретного «промпт длиннее N — сократите».
     //
-    // Счёт по code points (`[...prompt].length`), а НЕ по `.length` (UTF-16
-    // code units): иначе один эмодзи стоит 2 unit'а и юзер с 4090 кириллицей
-    // + 4 эмодзи получает ложный отказ при реальной длине ≈ 4094 chars.
-    if (model?.maxPromptLength && [...params.prompt].length > model.maxPromptLength) {
-      return { key: "promptTooLong", params: { limit: model.maxPromptLength } };
+    // Меряем UTF-8 byte length, а НЕ code points / .length:
+    //  - xAI наблюдаемо отбивает русский промпт ~3500 chars как exceeding 4096,
+    //    что соответствует ~7000 UTF-8 bytes (Cyrillic = 2 байта на символ).
+    //    Code-point счёт (`[...prompt].length`) недосчитывал и пропускал такие
+    //    кейсы на сабмит → 422 от провайдера, юзер видел generic-error.
+    //  - Для ASCII-промптов поведение эквивалентно прежнему (1 char = 1 byte).
+    //  - Для не-ASCII промптов проверка чуть строже — это безопасно: точная
+    //    единица счёта у xAI задокументирована неточно, лучше консервативно
+    //    отказать в нашем коде с понятным сообщением, чем словить рандомный 422.
+    if (model?.maxPromptLength) {
+      const byteLen = Buffer.byteLength(params.prompt, "utf8");
+      if (byteLen > model.maxPromptLength) {
+        // Юзеру показываем «символы», а не байты. Считаем реальный
+        // bytes-per-char ratio для ЕГО промпта: 1.0 для ASCII, 2.0 для
+        // кириллицы, 3-4 для эмодзи/китайского/etc. Отображаемый char-лимит =
+        // byteLimit / ratio — точно сколько символов его языка влезет.
+        //
+        // Возвращаем существующий ключ `promptTooLong` (есть в обоих
+        // i18n-namespace — `errors.*` и `video.*`), не вводим новый: исключаем
+        // риск рассинхрона namespace'ов и crash'а в `applyValidationParams`.
+        //
+        // charLen ≥ 1 гарантированно: byteLen > maxPromptLength ≥ 1 → деление безопасно.
+        const charLen = [...params.prompt].length;
+        const bytesPerChar = byteLen / charLen;
+        const charLimit = Math.floor(model.maxPromptLength / bytesPerChar);
+        return { key: "promptTooLong", params: { limit: charLimit } };
+      }
     }
 
     const adapter = createVideoAdapter(params.modelId);
@@ -110,10 +141,19 @@ export const videoGenerationService = {
   },
 
   async submitVideo(params: SubmitVideoParams): Promise<SubmitVideoResult> {
-    const { userId, modelId, prompt, imageUrl, telegramChatId, sendOriginalLabel } = params;
+    const model = AI_MODELS[params.modelId];
+    if (!model) throw new Error(`Unknown model: ${params.modelId}`);
 
-    const model = AI_MODELS[modelId];
-    if (!model) throw new Error(`Unknown model: ${modelId}`);
+    // HeyGen native voice (без EL/Cartesia и без юзерского аудио): синтезим
+    // речь у себя ДО `previewVideo`, чтобы probe увидел реальную длительность
+    // и `checkBalance` сравнил с настоящей ценой. Без этого HeyGen TTS
+    // происходил бы внутри генерации, цена была бы известна постфактум, и
+    // юзер с пустым балансом запускал бы генерацию которую мы не сможем
+    // полностью списать (`deductTokens` клампится до баланса → мы съедаем
+    // убыток). См. heygen-tts.service.ts.
+    params = await ensureHeygenTtsForVideo(params);
+
+    const { userId, modelId, prompt, imageUrl, telegramChatId, sendOriginalLabel } = params;
 
     const preview = await costPreviewService.previewVideo(params);
     const modelSettings = preview.effectiveModelSettings;

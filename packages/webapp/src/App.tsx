@@ -116,36 +116,62 @@ function AppContent() {
   };
 
   if (error) {
+    const botUsername = import.meta.env.VITE_BOT_USERNAME as string | undefined;
+    const openBotWith = (startPayload: string) => {
+      if (!botUsername) return;
+      const url = `https://t.me/${botUsername}?start=${startPayload}`;
+      const tg = (
+        window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (u: string) => void } } }
+      ).Telegram?.WebApp;
+      if (tg?.openTelegramLink) tg.openTelegramLink(url);
+      else window.open(url, "_blank");
+      // Закрываем mini-app — дальнейший flow идёт в боте.
+      closeMiniApp();
+    };
+
     // USER_NOT_FOUND — юзер открыл mini-app до регистрации в боте (или после
     // удаления аккаунта). Блокируем UI, объясняем что нужно нажать /start
     // в боте, и даём deep-link на бота.
     if (errorCode === "USER_NOT_FOUND") {
-      const botUsername = import.meta.env.VITE_BOT_USERNAME as string | undefined;
-      const botUrl = botUsername ? `https://t.me/${botUsername}?start=fromminiapp` : null;
-      const openBot = () => {
-        if (!botUrl) return;
-        const tg = (
-          window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (u: string) => void } } }
-        ).Telegram?.WebApp;
-        if (tg?.openTelegramLink) tg.openTelegramLink(botUrl);
-        else window.open(botUrl, "_blank");
-        // Закрываем mini-app сразу после открытия чата с ботом — юзеру нечего
-        // делать в неавторизованной mini-app, всё взаимодействие теперь в боте.
-        closeMiniApp();
-      };
       return (
         <div className="splash">
           <div className="splash__icon">👋</div>
           <div className="splash__title">{t("auth.notRegisteredTitle")}</div>
           <div className="splash__text">{t("auth.notRegisteredText")}</div>
-          {botUrl && (
-            <button className="btn btn--primary splash__cta" onClick={openBot}>
+          {botUsername && (
+            <button
+              className="btn btn--primary splash__cta"
+              onClick={() => openBotWith("fromminiapp")}
+            >
               {t("auth.openBot")}
             </button>
           )}
         </div>
       );
     }
+
+    // TOKEN_EXPIRED — wtoken в URL пережил soft TTL (30д с последнего refresh'а)
+    // или absolute cap (90д с issuance). TOKEN_INVALID — битый формат / подпись:
+    // на практике у юзера такой же flow восстановления (тапнуть Профиль ещё раз),
+    // поэтому показываем тот же экран, чтобы не плодить три копии UI.
+    if (errorCode === "TOKEN_EXPIRED" || errorCode === "TOKEN_INVALID") {
+      return (
+        <div className="splash">
+          <div className="splash__icon">⚠️</div>
+          <div className="splash__title">{t("auth.tokenExpiredTitle")}</div>
+          <div className="splash__text">{t("auth.tokenExpiredText")}</div>
+          {botUsername && (
+            <button
+              className="btn btn--primary splash__cta"
+              onClick={() => openBotWith("refresh_menu")}
+            >
+              {t("auth.refreshMenu")}
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="splash">
         <div className="splash__icon">⚠️</div>

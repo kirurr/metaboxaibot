@@ -114,6 +114,21 @@ export async function uploadFileUrl(
 
   const data = (await resp.json()) as KieFileUploadResponse;
   if (!data.success || data.code !== 200 || !data.data?.downloadUrl) {
+    // KIE сам пытается GET'нуть `fileUrl` (наш presigned S3 URL) и проксирует
+    // ошибку upstream'а в `data.msg`. Если апстрим вернул 404 — файл удалили
+    // ПОСЛЕ submit'а (юзер дропнул output из галереи) или HEAD-check на
+    // bot-side fail-open'нулся. Это юзерская ситуация, не баг — кидаем
+    // UserFacingError(mediaSlotExpired) вместо generic Error, чтобы юзер
+    // увидел понятное «загрузите файл повторно», и notifyOps не зажигался.
+    if (
+      data.code === 400 &&
+      typeof data.msg === "string" &&
+      /File download failed[\s\S]*?404 Not Found/i.test(data.msg)
+    ) {
+      throw new UserFacingError(`KIE upload: source returned 404`, {
+        key: "mediaSlotExpired",
+      });
+    }
     throw new Error(`KIE file upload failed: ${data.code} — ${data.msg}`);
   }
 

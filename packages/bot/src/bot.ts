@@ -10,7 +10,25 @@ import {
   handleLanguageChangeSelect,
   handleOnboardingOk,
 } from "./commands/start.js";
-import { handleMenu, handleGpt, handleDesign, handleAudio, handleVideo } from "./commands/menu.js";
+import {
+  handleMenu,
+  handleGpt,
+  handleDesign,
+  handleAudio,
+  handleVideo,
+  handleScenarios,
+  buildScenariosKeyboard,
+} from "./commands/menu.js";
+import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
+import {
+  handlePhotoUpscaleEnter,
+  handlePhotoUpscalePhoto,
+  handleVideoUpscaleEnter,
+  handleVideoUpscaleVideo,
+  handleUpscaleFactorSelect,
+  isVideoDocument,
+  isImageDocument,
+} from "./scenes/upscale.js";
 import { handleNoTool } from "./handlers/no-tool.handler.js";
 import {
   handleNewGptDialog,
@@ -306,6 +324,16 @@ export function createBot(token: string): Bot<BotContext> {
   // ── Send original file callback ───────────────────────────────────────────
   bot.callbackQuery(/^orig_/, handleSendOriginal);
 
+  // ── Ready-made scenarios (Готовые сценарии) ──────────────────────────────
+  bot.callbackQuery(/^scenario:/, async (ctx) => {
+    const which = ctx.callbackQuery.data.split(":")[1];
+    await ctx.answerCallbackQuery();
+    if (which === "face_swap") return handleFaceSwapEnter(ctx);
+    if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
+    if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
+  });
+  bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
+
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
 
@@ -362,6 +390,13 @@ export function createBot(token: string): Bot<BotContext> {
       [t.menu.design]: () => handleDesign(ctx),
       [t.menu.audio]: () => handleAudio(ctx),
       [t.menu.video]: () => handleVideo(ctx),
+      [t.menu.scenarios]: () => handleScenarios(ctx),
+      [t.scenarios.chooseScenario]: async () => {
+        await ctx.reply(t.scenarios.sectionTooltip, {
+          reply_markup: buildScenariosKeyboard(t),
+        });
+      },
+      [t.scenarios.backToMain]: () => handleMenu(ctx),
       [t.common.backToMain]: () => handleMenu(ctx),
       [t.gpt.backToMain]: () => handleMenu(ctx),
       [t.design.backToMain]: () => handleMenu(ctx),
@@ -463,6 +498,26 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document?.mime_type?.startsWith("image/"))
         return handleSoulPhotoCapture(ctx);
       return; // ignore non-image messages while waiting for soul photos
+    }
+    if (state?.state === "FACE_SWAP_AWAIT_REFERENCE" || state?.state === "FACE_SWAP_AWAIT_FACE") {
+      if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
+      return;
+    }
+    if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handlePhotoUpscalePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoUpscalePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
+      return;
+    }
+    if (state?.state === "VIDEO_UPSCALE_AWAIT_VIDEO") {
+      if (ctx.message?.video) return handleVideoUpscaleVideo(ctx);
+      if (ctx.message?.document && isVideoDocument(ctx.message.document))
+        return handleVideoUpscaleVideo(ctx);
+      await ctx.reply(ctx.t.scenarios.upscaleNotVideo);
+      return;
     }
     if (state?.state === "AUDIO_ACTIVE") {
       if (state.audioModelId === "voice-clone") {

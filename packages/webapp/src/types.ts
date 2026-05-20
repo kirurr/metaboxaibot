@@ -14,6 +14,7 @@ export interface UserProfile {
   metaboxReferralCode: string | null;
   finishedOnboarding: boolean;
   confirmBeforeGenerate: boolean;
+  autoActivateModel: boolean;
   subscription: {
     planName: string;
     period: string;

@@ -12,8 +12,8 @@ export interface AudioJobData {
   voiceId?: string;
   /** Optional source audio URL for voice cloning */
   sourceAudioUrl?: string;
-  /** Telegram chat id to notify when done */
-  telegramChatId: number;
+  /** Telegram chat id to notify when done; null when generation originated outside Telegram (web). */
+  telegramChatId: number | null;
   /** Telegram message_id of the user's prompt message (for reply threading on result). */
   promptMessageId?: number;
   /** Per-model user settings (voice, speed, stability, etc.) */
