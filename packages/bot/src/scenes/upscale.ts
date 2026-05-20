@@ -5,7 +5,6 @@ import {
   userStateService,
   s3Service,
   calculateCost,
-  measureImageMegapixels,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import {
@@ -20,6 +19,7 @@ import {
   VIDEO_UPSCALE_MODEL_ID,
   PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
+  UPSCALE_MAX_OUTPUT_MP,
   videoResolutionTier,
   videoFpsTier,
   photoEffectiveMpTier,
@@ -68,6 +68,29 @@ interface UpscaleMeta {
   fps?: number;
   /** Source image megapixels. */
   inputMp?: number;
+}
+
+/**
+ * Видео-расширения, по которым принимаем документ, даже если Telegram прислал
+ * generic mime (`application/octet-stream` / пусто) — так делают некоторые
+ * клиенты. Только ISO-BMFF (mp4/mov) — их умеет читать `probeVideoMetadata`.
+ */
+const VIDEO_DOC_EXT_RE = /\.(mp4|mov|m4v)$/i;
+
+/** True если Telegram-документ — это видео (по mime ИЛИ по расширению имени). */
+export function isVideoDocument(doc: { mime_type?: string; file_name?: string }): boolean {
+  return !!doc.mime_type?.startsWith("video/") || VIDEO_DOC_EXT_RE.test(doc.file_name ?? "");
+}
+
+/**
+ * Расширения изображений, по которым принимаем документ при generic mime —
+ * симметрично `isVideoDocument`. Формат всё равно нормализуется через sharp.
+ */
+const IMAGE_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif)$/i;
+
+/** True если Telegram-документ — это изображение (по mime ИЛИ по расширению). */
+export function isImageDocument(doc: { mime_type?: string; file_name?: string }): boolean {
+  return !!doc.mime_type?.startsWith("image/") || IMAGE_DOC_EXT_RE.test(doc.file_name ?? "");
 }
 
 /**
@@ -140,17 +163,18 @@ function buildFactorKeyboard(
 
 // ── Photo upscale ────────────────────────────────────────────────────────────
 
-/** Entry — user tapped «🔼 Апскейл фото» in the Scenarios submenu. */
+/** Entry — user tapped «📷 Апскейл фото» in the Scenarios submenu. */
 export async function handlePhotoUpscaleEnter(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
   await userStateService.clearMediaInputs(ctx.user.id, PHOTO_UPSCALE_BUFFER_MODEL_ID);
   await userStateService.setState(ctx.user.id, "PHOTO_UPSCALE_AWAIT_PHOTO", null);
 
-  const welcome = [`<b>${ctx.t.scenarios.photoUpscale}</b>`, ctx.t.scenarios.photoUpscaleWelcome]
-    .filter(Boolean)
-    .join("\n\n");
-  await ctx.reply(welcome, { parse_mode: "HTML" });
-  await ctx.reply(ctx.t.scenarios.photoUpscaleStep, { parse_mode: "HTML" });
+  const text = [
+    `<b>${ctx.t.scenarios.photoUpscale}</b>`,
+    ctx.t.scenarios.photoUpscaleWelcome,
+    ctx.t.scenarios.photoUpscaleStep,
+  ].join("\n\n");
+  await ctx.reply(text, { parse_mode: "HTML" });
 }
 
 /** Handles a photo (compressed or image-document) in PHOTO_UPSCALE_AWAIT_PHOTO. */
@@ -163,21 +187,13 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
 
   let fileId: string | undefined;
   let fileSize: number | undefined;
-  let mimeHint: string | undefined;
-  // Сжатое фото отдаёт размеры прямо в сообщении — берём мегапиксели оттуда,
-  // без лишнего скачивания. Для image-документа измеряем после загрузки.
-  let inputMp: number | undefined;
   if (ctx.message?.photo) {
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-    if (largest?.width && largest?.height) {
-      inputMp = (largest.width * largest.height) / 1_000_000;
-    }
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
-    mimeHint = ctx.message.document.mime_type;
   }
   if (!fileId) {
     await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
@@ -191,21 +207,29 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   const userId = ctx.user.id;
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  const contentType = mimeHint?.startsWith("image/") ? mimeHint : "image/jpeg";
-  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
-  const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.${ext}`;
-  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
-  if (!uploadedKey) {
+  // Перекодируем вход в JPEG: Topaz отбивает HEIC / CMYK / 16-bit /
+  // прогрессивный JPEG и т.п. («Image format error»). uploadNormalizedImage
+  // заодно отдаёт мегапиксели результата — отдельное измерение не нужно.
+  const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.jpg`;
+  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
+  if (!normalized) {
     await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
     return;
   }
+  const uploadedKey = normalized.key;
+  const meta: UpscaleMeta = { inputMp: normalized.megapixels };
 
-  // Image-документ размеров в сообщении не несёт — измеряем сами. Сбой
-  // измерения → дефолтная оценка (цена посчитается консервативно).
-  if (inputMp === undefined) {
-    inputMp = await measureImageMegapixels(tgUrl).catch(() => undefined);
+  // Факторы, чей результат укладывается в потолок Topaz. Если даже минимальный
+  // фактor не влезает — фото слишком крупное; не показываем обречённую
+  // клавиатуру (юзер бы зациклился на единственной кнопке), сразу — понятная
+  // ошибка. Состояние не меняем — следующее (меньшее) фото обработается.
+  const allowedFactors = PHOTO_UPSCALE_FACTORS.filter(
+    (f) => normalized.megapixels * Number(f) ** 2 <= UPSCALE_MAX_OUTPUT_MP,
+  );
+  if (allowedFactors.length === 0) {
+    await ctx.reply(ctx.t.errors.upscaleResultTooLarge);
+    return;
   }
-  const meta: UpscaleMeta = { inputMp };
 
   await userStateService.addMediaInput(
     userId,
@@ -218,13 +242,13 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     userId,
     PHOTO_UPSCALE_BUFFER_MODEL_ID,
     UPSCALE_MP_SLOT,
-    String(inputMp ?? DEFAULT_PHOTO_MP),
+    String(normalized.megapixels),
     true,
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
   await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard("photo", PHOTO_UPSCALE_FACTORS, PHOTO_UPSCALE_MODEL_ID, meta),
+    reply_markup: buildFactorKeyboard("photo", allowedFactors, PHOTO_UPSCALE_MODEL_ID, meta),
   });
 }
 
@@ -236,11 +260,12 @@ export async function handleVideoUpscaleEnter(ctx: BotContext): Promise<void> {
   await userStateService.clearMediaInputs(ctx.user.id, VIDEO_UPSCALE_BUFFER_MODEL_ID);
   await userStateService.setState(ctx.user.id, "VIDEO_UPSCALE_AWAIT_VIDEO", null);
 
-  const welcome = [`<b>${ctx.t.scenarios.videoUpscale}</b>`, ctx.t.scenarios.videoUpscaleWelcome]
-    .filter(Boolean)
-    .join("\n\n");
-  await ctx.reply(welcome, { parse_mode: "HTML" });
-  await ctx.reply(ctx.t.scenarios.videoUpscaleStep, { parse_mode: "HTML" });
+  const text = [
+    `<b>${ctx.t.scenarios.videoUpscale}</b>`,
+    ctx.t.scenarios.videoUpscaleWelcome,
+    ctx.t.scenarios.videoUpscaleStep,
+  ].join("\n\n");
+  await ctx.reply(text, { parse_mode: "HTML" });
 }
 
 /** Handles a video (or video-document) in VIDEO_UPSCALE_AWAIT_VIDEO. */
@@ -265,10 +290,21 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     fileSize = ctx.message.video.file_size;
     durationSec = ctx.message.video.duration;
     heightPx = ctx.message.video.height;
-  } else if (ctx.message?.document?.mime_type?.startsWith("video/")) {
-    fileId = ctx.message.document.file_id;
-    fileSize = ctx.message.document.file_size;
-    contentType = ctx.message.document.mime_type;
+  } else if (ctx.message?.document && isVideoDocument(ctx.message.document)) {
+    const doc = ctx.message.document;
+    fileId = doc.file_id;
+    fileSize = doc.file_size;
+    // mime может быть generic (octet-stream) — тогда контейнер определяем по
+    // расширению имени файла.
+    const mime = doc.mime_type ?? "";
+    const name = (doc.file_name ?? "").toLowerCase();
+    if (mime.startsWith("video/")) {
+      contentType = mime;
+    } else if (name.endsWith(".mov") || name.endsWith(".m4v")) {
+      contentType = "video/quicktime";
+    } else {
+      contentType = "video/mp4";
+    }
     ext = contentType.includes("matroska")
       ? "mkv"
       : contentType.includes("quicktime")
@@ -401,6 +437,31 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     await userStateService.setState(userId, awaitState, null);
     await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
+  }
+
+  // Тап по устаревшей клавиатуре (юзер загрузил фото поверх) мог принести
+  // фактор, который для текущего файла превышает потолок Topaz. Перепроверяем
+  // зажим и, если не проходит, показываем свежую клавиатуру с валидными
+  // факторами вместо обречённого сабмита.
+  if (isPhoto) {
+    const inputMp = meta.inputMp ?? DEFAULT_PHOTO_MP;
+    if (inputMp * Number(factor) ** 2 > UPSCALE_MAX_OUTPUT_MP) {
+      const allowed = PHOTO_UPSCALE_FACTORS.filter(
+        (f) => inputMp * Number(f) ** 2 <= UPSCALE_MAX_OUTPUT_MP,
+      );
+      if (allowed.length === 0) {
+        // Даже минимальный фактор не влезает — фото слишком крупное. НЕ
+        // перерисовываем клавиатуру (зациклили бы юзера на ×2), сразу ошибка.
+        await userStateService.clearMediaInputs(userId, bufferId);
+        await userStateService.setState(userId, awaitState, null);
+        await ctx.reply(ctx.t.errors.upscaleResultTooLarge);
+        return;
+      }
+      await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
+        reply_markup: buildFactorKeyboard("photo", allowed, PHOTO_UPSCALE_MODEL_ID, meta),
+      });
+      return;
+    }
   }
 
   const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);

@@ -381,7 +381,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   // фото × фактор²): юзер платит за фактический результат, цена видна на кнопке.
   "image-upscale": {
     id: "image-upscale",
-    name: "🔼 Апскейл фото",
+    name: "📷 Апскейл фото",
     description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
     section: "design",
     provider: "kie",
@@ -397,6 +397,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportsWeb: false,
     isAsync: true,
     hiddenFromCarousel: true,
+    deliverAsDocument: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
@@ -2512,6 +2513,7 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     supportsWeb: false,
     isAsync: true,
     hiddenFromCarousel: true,
+    deliverAsDocument: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
