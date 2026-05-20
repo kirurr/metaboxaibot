@@ -79,7 +79,22 @@ await server.register(cors, {
   // Без exposedHeaders браузер скрывает его от webapp-кода.
   exposedHeaders: ["X-Refresh-Wtoken"],
 });
-await server.register(helmet);
+// CORP relax: дефолт helmet — `Cross-Origin-Resource-Policy: same-origin`,
+// что режет cross-origin embed превью галереи. Сценарий:
+//   - Mini App на `tma.myaibox.ai` запрашивает GET /download/<token>
+//     на `aibox.metabox.global` (cross-origin) → API отдаёт 302 на S3.
+//   - Браузер проверяет CORP заголовок на 302 → видит same-origin → блокирует.
+//
+// Ставим `cross-origin` — API сейчас обслуживает 4 фронта:
+//   - aibox.metabox.global  (Mini App, same-origin)
+//   - tma.myaibox.ai        (Mini App mirror, cross-origin)
+//   - ai.metabox.global     (Web, same-origin через nginx /api/ proxy)
+//   - myaibox.ai            (Web mirror, same-origin через nginx /api/ proxy)
+// Все 4 — наши; cross-origin embed по подписанным URL'ам это by design.
+// Доступ к чувствительным данным защищён JWT + CSRF, не header'ом CORP.
+await server.register(helmet, {
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+});
 
 await server.register(rateLimit, {
   max: 120,
