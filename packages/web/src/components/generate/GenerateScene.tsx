@@ -58,6 +58,11 @@ export type GenerateSceneProps = {
   promptPlaceholder: string;
   /** Список моделей (дедуплированный по `familyId`). Первая по умолчанию. */
   models: readonly WebModelDto[];
+  /**
+   * Скрыть UI выбора модели (дропдаун + family-axis chips). Используется
+   * пресетами с зафиксированной моделью (например, /image/swap).
+   */
+  hideModelPicker?: boolean;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -478,7 +483,13 @@ function FamilyAxisChip({
 
 // ── Main scene ───────────────────────────────────────────────────────────────
 
-export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+export function GenerateScene({
+  title,
+  subtitle,
+  promptPlaceholder,
+  models,
+  hideModelPicker = false,
+}: GenerateSceneProps) {
   const { t } = useTranslation();
 
   // ── Family grouping ───────────────────────────────────────────────────────
@@ -1416,9 +1427,9 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               «какую модель из семейства взять», логически выше per-model
               tuning settings. FamilyAxisChip сам прячется если выбора нет
               (1 версия/вариант). */}
-          {(familyAxis || visibleSettings.length > 0) && (
+          {((!hideModelPicker && familyAxis) || visibleSettings.length > 0) && (
             <div className="gen-settings-chips">
-              {familyAxis && familyAxis.currentVersion && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVersion && (
                 <FamilyAxisChip
                   label={t("generate.familyVersion")}
                   current={familyAxis.currentVersion}
@@ -1426,7 +1437,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                   onSelect={selectFamilyVersion}
                 />
               )}
-              {familyAxis && familyAxis.currentVariant && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVariant && (
                 <FamilyAxisChip
                   label={t("generate.familyVariant")}
                   current={familyAxis.currentVariant}
@@ -1452,57 +1463,59 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
         <div className="gen-panel-footer">
-          <div className="gen-model-row">
-            <button
-              ref={modelBtnRef}
-              className="gen-model-btn"
-              onClick={() => setModelOpen(!modelOpen)}
-            >
-              <div className="gen-model-glyph">
-                {selectedModel ? modelLetter(selectedModel) : "·"}
-              </div>
-              <div className="gen-model-text">
-                <span className="gen-model-meta">Model</span>
-                <span className="gen-model-name">
-                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
-                </span>
-              </div>
-              <ChevronDown size={16} />
-            </button>
-            {modelOpen && (
-              <ChipPopover
-                anchorRef={modelBtnRef}
-                popRef={modelPopRef}
-                className="gen-model-pop"
-                matchAnchorWidth
+          {!hideModelPicker && (
+            <div className="gen-model-row">
+              <button
+                ref={modelBtnRef}
+                className="gen-model-btn"
+                onClick={() => setModelOpen(!modelOpen)}
               >
-                {families.map((m) => {
-                  // Active = выбранная модель из этого семейства (даже если
-                  // юзер переключился на sibling-вариант через chip'ы).
-                  const isActive = selectedModel?.familyId
-                    ? m.familyId === selectedModel.familyId
-                    : m.id === modelId;
-                  return (
-                    <button
-                      key={m.id}
-                      className={clsx("gen-model-row-item", isActive && "on")}
-                      onClick={() => {
-                        pickModel(m.id);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <div className="gen-model-glyph">{modelLetter(m)}</div>
-                      <div className="gen-model-item-body">
-                        <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                        <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                      </div>
-                      {isActive && <Check size={14} />}
-                    </button>
-                  );
-                })}
-              </ChipPopover>
-            )}
-          </div>
+                <div className="gen-model-glyph">
+                  {selectedModel ? modelLetter(selectedModel) : "·"}
+                </div>
+                <div className="gen-model-text">
+                  <span className="gen-model-meta">Model</span>
+                  <span className="gen-model-name">
+                    {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                  </span>
+                </div>
+                <ChevronDown size={16} />
+              </button>
+              {modelOpen && (
+                <ChipPopover
+                  anchorRef={modelBtnRef}
+                  popRef={modelPopRef}
+                  className="gen-model-pop"
+                  matchAnchorWidth
+                >
+                  {families.map((m) => {
+                    // Active = выбранная модель из этого семейства (даже если
+                    // юзер переключился на sibling-вариант через chip'ы).
+                    const isActive = selectedModel?.familyId
+                      ? m.familyId === selectedModel.familyId
+                      : m.id === modelId;
+                    return (
+                      <button
+                        key={m.id}
+                        className={clsx("gen-model-row-item", isActive && "on")}
+                        onClick={() => {
+                          pickModel(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <div className="gen-model-item-body">
+                          <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                          <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                        </div>
+                        {isActive && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </ChipPopover>
+              )}
+            </div>
+          )}
 
           <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
             {busy || uploadInProgress ? (
