@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Check,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
@@ -38,6 +47,8 @@ import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { useUIStore } from "@/stores/uiStore";
+import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -56,6 +67,24 @@ export type GenerateSceneProps = {
   promptPlaceholder: string;
   /** Список моделей (дедуплированный по `familyId`). Первая по умолчанию. */
   models: readonly WebModelDto[];
+  /**
+   * Скрыть UI выбора модели (дропдаун + family-axis chips). Используется
+   * пресетами с зафиксированной моделью (например, /image/swap).
+   */
+  hideModelPicker?: boolean;
+  /**
+   * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
+   * вручную изменил modelId / prompt / settings относительно пресет-снимка.
+   * Слот-файлы НЕ сбрасываются. Callback должен запустить повторное
+   * применение префила (обычно — `navigate(pathname, { state: { prefill } })`).
+   */
+  onReset?: () => void;
+  /**
+   * Мапа `modelId → { key: value }` из пресета. При ручной смене модели
+   * (когда у пресета `hideModelPicker: false` и есть `allowedModelIds`)
+   * автоматически применяются настройки соответствующей модели.
+   */
+  presetSettingsByModel?: Record<string, Record<string, unknown>>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -476,7 +505,15 @@ function FamilyAxisChip({
 
 // ── Main scene ───────────────────────────────────────────────────────────────
 
-export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+export function GenerateScene({
+  title,
+  subtitle,
+  promptPlaceholder,
+  models,
+  hideModelPicker = false,
+  onReset,
+  presetSettingsByModel,
+}: GenerateSceneProps) {
   const { t } = useTranslation();
 
   // ── Family grouping ───────────────────────────────────────────────────────
@@ -670,6 +707,100 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     setSlotFiles({});
   }, [modelId]);
 
+  // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
+  // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
+  // на каждый navigate (страж — `location.key`, не булевый флаг — иначе
+  // самопереход /image → /image с новым префилом не сработает).
+  //
+  // Двухстадийное применение нужно из-за того, что reset-effect выше (на смену
+  // modelId) обнуляет settingValues, а defaults-effect ниже (на selectedModel)
+  // заполняет дефолты. Если бы мы сразу setSettingValues(prefill.settings) —
+  // оба effect'а затёрли бы префил. Решение: кладём payload в ref, второй
+  // effect ниже (зависит от selectedModel — выполнится ПОСЛЕ reset и defaults)
+  // применяет ref поверх дефолтов.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pushToast = useUIStore((s) => s.pushToast);
+  const lastConsumedPrefillKey = useRef<string | null>(null);
+  const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  // Снимок последнего применённого префила — используется для определения
+  // «юзер что-то поменял» (isDirty) и показа кнопки «Сбросить» на пресетных
+  // страницах. Включает modelId / prompt / settings; slotFiles не трекаем.
+  const [presetSnapshot, setPresetSnapshot] = useState<{
+    modelId: string;
+    prompt: string;
+    settings: Record<string, unknown>;
+  } | null>(null);
+  useEffect(() => {
+    const prefill = (location.state as { prefill?: GeneratePrefill } | null)?.prefill;
+    if (!prefill) return;
+    if (lastConsumedPrefillKey.current === location.key) return;
+    if (models.length === 0) return; // ждём загрузку каталога
+
+    const modelExists = models.some((m) => m.id === prefill.modelId);
+    const targetId = modelExists ? prefill.modelId : (families[0]?.id ?? null);
+    if (!targetId) return; // ни запрошенной, ни дефолтной модели нет — выходим
+
+    lastConsumedPrefillKey.current = location.key;
+
+    // settings оставляем только если модель найдена — чужие ключи для дефолтной
+    // модели смысла не имеют (юзер увидит, что чипы не реагируют на префил).
+    const resolved: GeneratePrefill = {
+      section: prefill.section,
+      modelId: targetId,
+      prompt: prefill.prompt,
+      settings: modelExists ? prefill.settings : undefined,
+    };
+
+    if (modelId === targetId) {
+      // Модель уже выбрана — никаких reset/defaults effect'ов не будет.
+      // Применяем напрямую, без ref'а.
+      setPrompt(resolved.prompt ?? "");
+      if (resolved.settings) {
+        setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
+      }
+      // Снимок для isDirty-детекта.
+      setPresetSnapshot({
+        modelId: targetId,
+        prompt: resolved.prompt ?? "",
+        settings: resolved.settings ?? {},
+      });
+    } else {
+      // Отложенное применение — после reset и defaults effect'ов.
+      pendingPrefillRef.current = resolved;
+      setModelId(targetId);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("model", targetId);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+
+    if (!modelExists) {
+      pushToast({
+        type: "info",
+        message: "Модель из примера больше недоступна — открыли с дефолтной",
+      });
+    }
+
+    // Чистим location.state — чтобы F5 / back-navigation не повторили префил.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [
+    location.key,
+    location.state,
+    location.pathname,
+    location.search,
+    models,
+    families,
+    modelId,
+    navigate,
+    setSearchParams,
+    pushToast,
+  ]);
+
   const activeMode = useMemo(
     () => resolveActiveMode(selectedModel?.modes ?? null, modeId),
     [selectedModel, modeId],
@@ -688,6 +819,20 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     );
   }, [selectedModel, settingValues]);
 
+  // Юзер расходится с применённым пресет-снимком? Показ кнопки «Сбросить»
+  // на пресетных страницах. Сравниваем только то, что снимок описывает —
+  // modelId / prompt / ключи из snapshot.settings. Дополнительные ручные
+  // настройки за пределами snapshot.settings не считаем «изменением пресета».
+  const isDirtyFromPreset = useMemo(() => {
+    if (!presetSnapshot) return false;
+    if (presetSnapshot.modelId !== modelId) return true;
+    if (presetSnapshot.prompt !== prompt) return true;
+    for (const [k, v] of Object.entries(presetSnapshot.settings)) {
+      if (settingValues[k] !== v) return true;
+    }
+    return false;
+  }, [presetSnapshot, modelId, prompt, settingValues]);
+
   // Инициализируем дефолтные значения настроек при смене модели/набора параметров.
   useEffect(() => {
     if (!selectedModel) return;
@@ -700,6 +845,48 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       return next;
     });
   }, [selectedModel]);
+
+  // Stage 2 префила — выполняется ПОСЛЕ defaults-effect выше (порядок useEffect
+  // соответствует порядку объявления), поэтому накладываем prefill.settings
+  // поверх свежевыставленных дефолтов.
+  useEffect(() => {
+    const pending = pendingPrefillRef.current;
+    if (!pending) return;
+    if (!selectedModel || selectedModel.id !== pending.modelId) return;
+    pendingPrefillRef.current = null;
+    setPrompt(pending.prompt ?? "");
+    if (pending.settings) {
+      const pendingSettings = pending.settings;
+      setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
+    }
+    setPresetSnapshot({
+      modelId: pending.modelId,
+      prompt: pending.prompt ?? "",
+      settings: pending.settings ?? {},
+    });
+  }, [selectedModel]);
+
+  // Авто-применение per-model настроек пресета при ручной смене модели.
+  // Срабатывает только в пресет-режиме (есть snapshot) и только когда юзер
+  // сменил модель на ОТЛИЧНУЮ от той, что в snapshot'е — иначе после первичного
+  // префила (stage-2 выше) snapshot.modelId === selectedModel.id и мы no-op.
+  // prompt в snapshot оставляем прежним, чтобы dirty-индикатор по prompt
+  // продолжал работать корректно после смены модели.
+  useEffect(() => {
+    if (!presetSettingsByModel) return;
+    if (!selectedModel || !presetSnapshot) return;
+    if (presetSnapshot.modelId === selectedModel.id) return;
+
+    const next = presetSettingsByModel[selectedModel.id];
+    if (next) {
+      setSettingValues((prev) => ({ ...prev, ...next }));
+    }
+    setPresetSnapshot({
+      modelId: selectedModel.id,
+      prompt: presetSnapshot.prompt,
+      settings: next ?? {},
+    });
+  }, [selectedModel, presetSettingsByModel, presetSnapshot]);
 
   // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
   useEffect(() => {
@@ -1263,8 +1450,16 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       <div className="gen-bg" aria-hidden />
       <div className="gen-panel">
         <div className="gen-head">
-          <h1>{title}</h1>
-          <p className="gen-sub">{subtitle}</p>
+          <div>
+            <h1>{title}</h1>
+            <p className="gen-sub">{subtitle}</p>
+          </div>
+          {onReset && isDirtyFromPreset && (
+            <button type="button" className="gen-reset-btn" onClick={onReset}>
+              <RotateCcw size={14} />
+              <span>Сбросить</span>
+            </button>
+          )}
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -1319,9 +1514,9 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               «какую модель из семейства взять», логически выше per-model
               tuning settings. FamilyAxisChip сам прячется если выбора нет
               (1 версия/вариант). */}
-          {(familyAxis || visibleSettings.length > 0) && (
+          {((!hideModelPicker && familyAxis) || visibleSettings.length > 0) && (
             <div className="gen-settings-chips">
-              {familyAxis && familyAxis.currentVersion && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVersion && (
                 <FamilyAxisChip
                   label={t("generate.familyVersion")}
                   current={familyAxis.currentVersion}
@@ -1329,7 +1524,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                   onSelect={selectFamilyVersion}
                 />
               )}
-              {familyAxis && familyAxis.currentVariant && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVariant && (
                 <FamilyAxisChip
                   label={t("generate.familyVariant")}
                   current={familyAxis.currentVariant}
@@ -1355,57 +1550,59 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
         <div className="gen-panel-footer">
-          <div className="gen-model-row">
-            <button
-              ref={modelBtnRef}
-              className="gen-model-btn"
-              onClick={() => setModelOpen(!modelOpen)}
-            >
-              <div className="gen-model-glyph">
-                {selectedModel ? modelLetter(selectedModel) : "·"}
-              </div>
-              <div className="gen-model-text">
-                <span className="gen-model-meta">Model</span>
-                <span className="gen-model-name">
-                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
-                </span>
-              </div>
-              <ChevronDown size={16} />
-            </button>
-            {modelOpen && (
-              <ChipPopover
-                anchorRef={modelBtnRef}
-                popRef={modelPopRef}
-                className="gen-model-pop"
-                matchAnchorWidth
+          {!hideModelPicker && (
+            <div className="gen-model-row">
+              <button
+                ref={modelBtnRef}
+                className="gen-model-btn"
+                onClick={() => setModelOpen(!modelOpen)}
               >
-                {families.map((m) => {
-                  // Active = выбранная модель из этого семейства (даже если
-                  // юзер переключился на sibling-вариант через chip'ы).
-                  const isActive = selectedModel?.familyId
-                    ? m.familyId === selectedModel.familyId
-                    : m.id === modelId;
-                  return (
-                    <button
-                      key={m.id}
-                      className={clsx("gen-model-row-item", isActive && "on")}
-                      onClick={() => {
-                        pickModel(m.id);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <div className="gen-model-glyph">{modelLetter(m)}</div>
-                      <div className="gen-model-item-body">
-                        <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                        <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                      </div>
-                      {isActive && <Check size={14} />}
-                    </button>
-                  );
-                })}
-              </ChipPopover>
-            )}
-          </div>
+                <div className="gen-model-glyph">
+                  {selectedModel ? modelLetter(selectedModel) : "·"}
+                </div>
+                <div className="gen-model-text">
+                  <span className="gen-model-meta">Model</span>
+                  <span className="gen-model-name">
+                    {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                  </span>
+                </div>
+                <ChevronDown size={16} />
+              </button>
+              {modelOpen && (
+                <ChipPopover
+                  anchorRef={modelBtnRef}
+                  popRef={modelPopRef}
+                  className="gen-model-pop"
+                  matchAnchorWidth
+                >
+                  {families.map((m) => {
+                    // Active = выбранная модель из этого семейства (даже если
+                    // юзер переключился на sibling-вариант через chip'ы).
+                    const isActive = selectedModel?.familyId
+                      ? m.familyId === selectedModel.familyId
+                      : m.id === modelId;
+                    return (
+                      <button
+                        key={m.id}
+                        className={clsx("gen-model-row-item", isActive && "on")}
+                        onClick={() => {
+                          pickModel(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <div className="gen-model-item-body">
+                          <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                          <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                        </div>
+                        {isActive && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </ChipPopover>
+              )}
+            </div>
+          )}
 
           <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
             {busy || uploadInProgress ? (

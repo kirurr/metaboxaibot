@@ -42,6 +42,17 @@ export interface ImageJobData {
    * с разнесением во времени и склеит результат в существующий multi-output UX.
    */
   numImages?: number;
+  /**
+   * Готовые сценарии (Face Swap и пр.) показывают пользователю собственное
+   * имя сценария в подписи к результату, а не имя реальной модели под капотом
+   * (`Nano Banana PRO` etc.). Если задано — воркер использует это значение
+   * вместо `model.name`.
+   */
+  displayNameOverride?: string;
+  /** Прячем «цитату промпта» в подписи результата (для сценариев с захардкоженным промптом). */
+  hidePromptInCaption?: boolean;
+  /** Скрываем кнопку «Доработать» в результате (для сценариев без выбора модели). */
+  hideRefineButton?: boolean;
 }
 
 export function getImageQueue(): Queue<ImageJobData> {

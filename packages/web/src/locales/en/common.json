@@ -355,14 +355,26 @@
     "subtitle": "Every conversation, organised by time. Search across all of them in one keystroke.",
     "exportAll": "Export all",
     "newChat": "New chat",
-    "searchPlaceholder": "Search dialogs…",
+    "searchPlaceholder": "Search dialogs and messages…",
     "emptyMatch": "No conversations match «{{q}}».",
+    "emptyAll": "No dialogs yet.",
+    "loading": "Loading dialogs…",
+    "errorLoad": "Failed to load dialogs.",
     "days": {
       "today": "Today",
       "yesterday": "Yesterday",
       "thisWeek": "This week",
       "earlier": "Earlier"
-    }
+    },
+    "filters": {
+      "label": "Filter by section",
+      "all": "All",
+      "gpt": "Chat",
+      "design": "Image",
+      "video": "Video",
+      "audio": "Audio"
+    },
+    "statusFailed": "Failed"
   },
   "tokens": {
     "title": "Top up.",

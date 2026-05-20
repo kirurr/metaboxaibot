@@ -44,7 +44,7 @@ export default {
     faceSwap: "🔄 Face swap",
     backToMain: "🏠 Back to main menu",
     faceSwapStep1:
-      "🔄 <b>Face swap — step 1/2</b>\n\nSend a <b>reference photo</b> — the pose, look, and frame you want to appear in. The result will use the aspect ratio of this photo.",
+      "🔄 <b>Face swap — step 1/2</b>\n\nSend a <b>reference photo</b> — the pose, look, and frame you want to appear in.",
     faceSwapStep2:
       "🔄 <b>Face swap — step 2/2</b>\n\nSend a <b>photo of your face</b> — close-up, sharp and clear.",
     faceSwapNotPhoto: "📷 That's not a photo. Please send an image.",
@@ -52,6 +52,8 @@ export default {
     faceSwapPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
     faceSwapAlbumNotice:
       "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
+    faceSwapWelcome:
+      "Put your face onto any reference photo. Pose, framing, outfit and background stay from the reference — only the face changes. The aspect ratio of the result matches the reference.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

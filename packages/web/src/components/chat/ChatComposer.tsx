@@ -16,7 +16,7 @@ import { uploadChatFile } from "@/api/uploads";
 import { useObjectUrl } from "@/hooks/useObjectUrl";
 import { ChipPopover } from "@/components/settings/ChipPopover";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
-import { formatBytes } from "./chatHelpers";
+import { formatBytes, formatTokensK } from "./chatHelpers";
 import type { PendingAttachment } from "./chatTypes";
 
 /** `accept` для file picker'а — синхронизирован с серверным `isAllowedUploadMime`. */
@@ -25,17 +25,6 @@ const ACCEPT_MIMES =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet," +
   "text/csv,text/plain,text/markdown";
-
-/**
- * Форматирует число токенов как `1.2K` / `128K` / `850`. Для значений ≥10K
- * округляем до целого (`128K`, не `128.0K`); для 1K..10K оставляем 1 знак
- * после запятой (`1.2K`); ниже — как есть.
- */
-function formatTokensK(n: number): string {
-  if (n < 1000) return String(n);
-  const v = n / 1000;
-  return v >= 10 ? `${Math.round(v)}K` : `${v.toFixed(1)}K`;
-}
 
 export function ChatComposer({
   draft,

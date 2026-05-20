@@ -1,117 +1,110 @@
-import { Fragment, useState, useMemo } from "react";
+import { Fragment, useState, useTransition } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight, Download, Plus, Search } from "lucide-react";
+import { ChevronRight, Download, Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import clsx from "clsx";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { listHistory, type HistoryItemDto } from "@/api/history";
+import { formatTokensK } from "@/components/chat/chatHelpers";
 
-type Item = {
-  title: string;
-  preview: string;
-  model: string;
-  time: string;
-  tokens: string;
-};
+type DayKey = "today" | "yesterday" | "thisWeek" | "earlier";
 
-// Mock-данные группированы по `dayKey` (i18n-ключ заголовка), сами тексты —
-// дизайн-плейсхолдеры (имитация истории чатов). Реальная история подтягивается
-// в чате через /web/dialogs, эта страница — каталог-агрегатор по дням.
-const historyData: { dayKey: string; items: Item[] }[] = [
-  {
-    dayKey: "history.days.today",
-    items: [
-      {
-        title: "Restructure product launch announcement",
-        preview: "Open with the pain, not the brand. Lead with what was annoying…",
-        model: "Sonnet 4.5",
-        time: "14:02",
-        tokens: "2.1k",
-      },
-      {
-        title: "Q3 OKR draft review",
-        preview: "Three of the five OKRs are activity, not outcome. Specifically…",
-        model: "GPT-5",
-        time: "11:47",
-        tokens: "3.8k",
-      },
-    ],
-  },
-  {
-    dayKey: "history.days.yesterday",
-    items: [
-      {
-        title: "SQL for cohort retention by signup channel",
-        preview: "Use a self-join on a generated date spine; here's the pattern…",
-        model: "Sonnet 4.5",
-        time: "18:21",
-        tokens: "5.2k",
-      },
-      {
-        title: "Translate contract clauses to plain English",
-        preview: "Clause 4.2 effectively means you can be charged twice if…",
-        model: "Sonnet 4.5",
-        time: "10:03",
-        tokens: "1.9k",
-      },
-      {
-        title: "Logo concepts for Northbound",
-        preview: "Try a compass needle as the negative space inside an N…",
-        model: "Image · v3",
-        time: "09:14",
-        tokens: "—",
-      },
-    ],
-  },
-  {
-    dayKey: "history.days.thisWeek",
-    items: [
-      {
-        title: "Brainstorm: pricing experiment for paid tier",
-        preview: "Three frames to test, in order of riskiest assumption…",
-        model: "GPT-5",
-        time: "Mon 16:30",
-        tokens: "4.4k",
-      },
-      {
-        title: "Onboarding email sequence — 4 emails",
-        preview: "Day 0: thanks + one tip. Day 2: first activation prompt…",
-        model: "Sonnet 4.5",
-        time: "Mon 09:12",
-        tokens: "6.7k",
-      },
-    ],
-  },
-  {
-    dayKey: "history.days.earlier",
-    items: [
-      {
-        title: "Convert React component to plain HTML",
-        preview: "Stripped JSX and inlined the useState; here's the equivalent…",
-        model: "Sonnet 4.5",
-        time: "Apr 28",
-        tokens: "2.0k",
-      },
-    ],
-  },
-];
+const SECTION_FILTERS = ["all", "gpt", "design", "video", "audio"] as const;
+type SectionFilter = (typeof SECTION_FILTERS)[number];
+
+const MIN_SEARCH_LEN = 2;
+const SEARCH_DEBOUNCE_MS = 300;
+
+/**
+ * Группирует элементы истории по дням (отсчёт от текущего момента).
+ * Внутри группы порядок сохраняется (бэк отдаёт по `updatedAt desc`).
+ */
+function groupByDay(items: HistoryItemDto[]): Record<DayKey, HistoryItemDto[]> {
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(todayStart.getDate() - 1);
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(todayStart.getDate() - 6);
+
+  const out: Record<DayKey, HistoryItemDto[]> = {
+    today: [],
+    yesterday: [],
+    thisWeek: [],
+    earlier: [],
+  };
+  for (const it of items) {
+    const dt = new Date(it.updatedAt);
+    if (dt >= todayStart) out.today.push(it);
+    else if (dt >= yesterdayStart) out.yesterday.push(it);
+    else if (dt >= weekStart) out.thisWeek.push(it);
+    else out.earlier.push(it);
+  }
+  return out;
+}
+
+const DAY_ORDER: DayKey[] = ["today", "yesterday", "thisWeek", "earlier"];
+
+/**
+ * Куда вести при клике:
+ *  - dialog (gpt) → `/chat/${id}` (поддержка id-параметра в роуте).
+ *  - job (media)  → `/gallery/${jobId}` (GalleryPage умеет открывать конкретную job).
+ */
+function openHref(item: HistoryItemDto): string {
+  return item.kind === "job" ? `/gallery/${item.id}` : `/chat/${item.id}`;
+}
+
+/** Компактная подпись времени: HH:mm / weekday / DD MMM — выбор по дню. */
+function formatTimeForDay(iso: string, day: DayKey, locale: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  if (day === "today" || day === "yesterday") {
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  }
+  if (day === "thisWeek") {
+    return d.toLocaleDateString(locale, { weekday: "short" });
+  }
+  return d.toLocaleDateString(locale, { day: "numeric", month: "short" });
+}
 
 export default function History() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [q, setQ] = useState("");
+  const [section, setSection] = useState<SectionFilter>("all");
+  const [, startTransition] = useTransition();
 
-  const filtered = useMemo(
-    () =>
-      historyData
-        .map((g) => ({
-          ...g,
-          items: g.items.filter((i) =>
-            (i.title + " " + i.preview).toLowerCase().includes(q.toLowerCase()),
-          ),
-        }))
-        .filter((g) => g.items.length),
-    [q],
-  );
+  const debouncedQ = useDebouncedValue(q.trim(), SEARCH_DEBOUNCE_MS);
+  // q короче порога считаем «нет поиска» — UI отзывчив, сервер не дёргается.
+  const effectiveQ = debouncedQ.length >= MIN_SEARCH_LEN ? debouncedQ : "";
+
+  const serverSection = section === "all" ? undefined : section;
+
+  const query = useQuery({
+    queryKey: ["history", serverSection ?? "all", effectiveQ],
+    queryFn: ({ signal }) =>
+      listHistory({
+        section: serverSection,
+        q: effectiveQ || undefined,
+        signal,
+      }),
+    placeholderData: keepPreviousData,
+    // staleTime: 0 — каждый mount страницы /history и фокус вкладки рефетчат.
+    // Иначе после генерации (image/video/audio) или delete/rename на другой
+    // странице список будет показан устаревшим до 30с.
+    staleTime: 0,
+  });
+
+  const items = query.data ?? [];
+  const grouped = groupByDay(items);
+  const isEmpty = items.length === 0;
+  const isInitialLoading = query.isLoading && !query.data;
+  // Фоновое обновление поверх previousData: мягкий индикатор, без подмены.
+  const isBackgroundFetching = query.isFetching && !!query.data;
 
   return (
     <div className="page">
@@ -121,7 +114,7 @@ export default function History() {
           <p className="sub">{t("history.subtitle")}</p>
         </div>
         <div className="actions">
-          <button className="btn btn-secondary">
+          <button className="btn btn-secondary" disabled>
             <Download size={16} /> {t("history.exportAll")}
           </button>
           <button className="btn btn-primary" onClick={() => navigate("/chat")}>
@@ -130,41 +123,149 @@ export default function History() {
         </div>
       </div>
 
-      <div className="input-group rise d1" style={{ maxWidth: 480 }}>
-        <span className="leading-icon">
-          <Search size={16} />
-        </span>
-        <input
-          className="input"
-          placeholder={t("history.searchPlaceholder")}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      <div
+        className="rise d1"
+        style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}
+      >
+        <div className="input-group" style={{ maxWidth: 480, flex: "1 1 320px" }}>
+          <span className="leading-icon" aria-hidden>
+            {isBackgroundFetching ? (
+              <RefreshCw size={16} className="anim-spin" />
+            ) : (
+              <Search size={16} />
+            )}
+          </span>
+          <input
+            className="input"
+            placeholder={t("history.searchPlaceholder")}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-busy={isBackgroundFetching}
+          />
+        </div>
+        <div
+          role="tablist"
+          aria-label={t("history.filters.label")}
+          style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+        >
+          {SECTION_FILTERS.map((s) => (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={section === s}
+              className={clsx("btn", section === s ? "btn-primary" : "btn-secondary", "btn-sm")}
+              onClick={() => startTransition(() => setSection(s))}
+            >
+              {t(`history.filters.${s}`)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="history-list rise d2">
-        {filtered.length === 0 && (
-          <div className="empty-illu">{t("history.emptyMatch", { q })}</div>
+      <div
+        className="history-list rise d2"
+        aria-busy={isBackgroundFetching}
+        style={{
+          opacity: isBackgroundFetching ? 0.55 : 1,
+          transition: "opacity 150ms ease",
+        }}
+      >
+        {query.isError && (
+          <div className="empty-illu">
+            {(query.error as { message?: string } | null)?.message ?? t("history.errorLoad")}
+          </div>
         )}
-        {filtered.map((g) => (
-          <Fragment key={g.dayKey}>
-            <div className="history-day">{t(g.dayKey)}</div>
-            {g.items.map((it, i) => (
-              <div key={i} className="history-row" onClick={() => navigate("/chat")}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="h-title">{it.title}</div>
-                  <div className="h-preview">{it.preview}</div>
-                </div>
-                <div className="meta">
-                  <span className="h-model">{it.model}</span>
-                  {!isMobile && <span className="mono">{it.tokens}</span>}
-                  <span>{it.time}</span>
-                  <ChevronRight size={16} />
-                </div>
-              </div>
-            ))}
-          </Fragment>
-        ))}
+        {isInitialLoading && !query.isError && (
+          <div className="empty-illu">{t("history.loading")}</div>
+        )}
+        {!isInitialLoading && !query.isError && isEmpty && (
+          <div className="empty-illu">
+            {effectiveQ ? t("history.emptyMatch", { q: effectiveQ }) : t("history.emptyAll")}
+          </div>
+        )}
+        {!isInitialLoading &&
+          !query.isError &&
+          DAY_ORDER.map((day) => {
+            const dayItems = grouped[day];
+            if (dayItems.length === 0) return null;
+            return (
+              <Fragment key={day}>
+                <div className="history-day">{t(`history.days.${day}`)}</div>
+                {dayItems.map((it) => (
+                  <HistoryRow
+                    key={`${it.kind}:${it.id}`}
+                    item={it}
+                    day={day}
+                    locale={i18n.language}
+                    isMobile={isMobile}
+                    onOpen={() => navigate(openHref(it))}
+                    fallbackTitle={t("chat.newDialog")}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+function HistoryRow({
+  item,
+  day,
+  locale,
+  isMobile,
+  onOpen,
+  fallbackTitle,
+}: {
+  item: HistoryItemDto;
+  day: DayKey;
+  locale: string;
+  isMobile: boolean;
+  onOpen: () => void;
+  fallbackTitle: string;
+}) {
+  const { t } = useTranslation();
+  const isFailed = item.kind === "job" && item.status === "failed";
+  return (
+    <div className="history-row" onClick={onOpen}>
+      <div style={{ minWidth: 0 }}>
+        <div className="h-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {item.title ?? fallbackTitle}
+          </span>
+          {isFailed && (
+            <span
+              style={{
+                flexShrink: 0,
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: "rgba(220, 38, 38, 0.15)",
+                color: "#dc2626",
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                lineHeight: 1.4,
+              }}
+            >
+              {t("history.statusFailed")}
+            </span>
+          )}
+        </div>
+        {item.snippet ? (
+          <div className="h-preview">{item.snippet}</div>
+        ) : (
+          <div className="h-preview" style={{ color: "var(--text-tertiary, #999)" }}>
+            {item.section}
+          </div>
+        )}
+      </div>
+      <div className="meta">
+        <span className="h-model">{item.modelId}</span>
+        {!isMobile && <span className="mono">{formatTokensK(item.totalTokens)}</span>}
+        <span>{formatTimeForDay(item.updatedAt, day, locale)}</span>
+        <ChevronRight size={16} />
       </div>
     </div>
   );

@@ -8,6 +8,10 @@ interface GenerationInputData {
   mediaInputs?: Record<string, string[]>;
   modelSettings?: Record<string, unknown>;
   imageUrl?: string;
+  /** Scenario-masking overrides (Face Swap и пр.), персистятся в БД из generation.service.ts. */
+  displayNameOverride?: string;
+  hidePromptInCaption?: boolean;
+  hideRefineButton?: boolean;
 }
 
 export type GenerationJobRow = {
@@ -93,6 +97,14 @@ export async function requeueGenerationJob(job: GenerationJobRow, delayMs?: numb
         modelSettings: inputData.modelSettings,
         stage,
         ...(stage === "poll" ? { pollStartedAt } : {}),
+        // Restore scenario-masking overrides — без этого после Redis-wipe юзер
+        // получит результат с реальным именем модели, оригинальным промптом и
+        // активной кнопкой «Доработать».
+        ...(inputData.displayNameOverride
+          ? { displayNameOverride: inputData.displayNameOverride }
+          : {}),
+        ...(inputData.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
+        ...(inputData.hideRefineButton ? { hideRefineButton: true } : {}),
       },
       opts,
     );

@@ -53,12 +53,12 @@ const translations = {
     "account.generationModeInfoAria": "Generation mode info",
     "account.generationModeInfo":
       "Control how generation starts:\n\n🎯 With confirmation — see the final request and confirm the start manually. Protects from accidental runs and extra spend.\n\n⚡ No confirmation — generation starts automatically after you send a prompt. Handy when you're already an experienced user.",
-    "account.autoActivateModel": "MODEL AUTO-ACTIVATION",
+    "account.autoActivateModel": "AI ACTIVATION",
     "account.autoActivateModelOn": "Auto",
     "account.autoActivateModelOff": "Manual",
-    "account.autoActivateModelInfoAria": "Model auto-activation info",
+    "account.autoActivateModelInfoAria": "AI activation info",
     "account.autoActivateModelInfo":
-      "Control how model switching works in the mini-app:\n\n⚡ Auto — picking a model in settings instantly activates it in the bot. Faster, fewer taps.\n\n🎯 Manual — switching just selects the model; you have to tap «Activate» to apply. Lets you tweak settings before committing.",
+      "Controls how the selected AI starts in the mini-app of the bot:\n\n⚡ Auto — activates immediately after selection.\n\n🎯 Manual — activates only after you tap «Activate».",
     "account.notLinked": "Metabox account not linked",
     "account.status": "STATUS",
     "account.statusPartner": "Partner",
@@ -430,8 +430,9 @@ const translations = {
     "imageSettings.selectModel": "Select model",
     "imageSettings.activatedPopup": "Model activated. Return to the bot to start using it.",
     "imageSettings.autoActivatedToast":
-      "✅ {name} activated. Adjust settings, minimize the mini-app and start chatting in the bot.",
+      "✅ {name} activated.\nAdjust settings, minimize the mini-app and start chatting in the bot.",
     "imageSettings.autoActivatedToastDismiss": "Don’t show again",
+    "imageSettings.autoActivatedToastClose": "Close",
     "manage.dialogActivatedPopup": "Dialog activated. Return to the chat to work with it.",
     "manage.startChat": "Start chatting",
     "manage.settings": "Settings",
@@ -604,12 +605,12 @@ const translations = {
     "account.generationModeInfoAria": "Информация о режиме генерации",
     "account.generationModeInfo":
       "Управляйте тем, как запускается генерация:\n\n🎯 С подтверждением — увидите финальный запрос и подтвердите старт вручную. Защищает от случайных запусков и лишних трат.\n\n⚡ Без подтверждения — генерация начнётся автоматически после отправки промпта. Удобно, когда вы уже опытный пользователь.",
-    "account.autoActivateModel": "АКТИВАЦИЯ МОДЕЛЕЙ",
+    "account.autoActivateModel": "АКТИВАЦИЯ НЕЙРОСЕТИ",
     "account.autoActivateModelOn": "Авто",
     "account.autoActivateModelOff": "Вручную",
-    "account.autoActivateModelInfoAria": "Информация об активации моделей",
+    "account.autoActivateModelInfoAria": "Информация об активации нейросети",
     "account.autoActivateModelInfo":
-      "Управляйте тем, как переключаются модели в мини-аппе:\n\n⚡ Авто — выбор модели в настройках сразу активирует её в боте. Быстрее, меньше тапов.\n\n🎯 Вручную — переключение лишь выбирает модель; чтобы применить, нажмите «Активировать». Удобно, если хочется сначала настроить параметры.",
+      "Определяет, как запускается выбранная нейросеть в мини-аппе бота:\n\n⚡ Авто — активируется сразу после выбора.\n\n🎯 Вручную — активируется только после нажатия кнопки «Активировать».",
     "account.notLinked": "Аккаунт Metabox не привязан",
     "account.status": "СТАТУС",
     "account.statusPartner": "Партнёр",
@@ -975,8 +976,9 @@ const translations = {
     "imageSettings.selectModel": "Выберите модель",
     "imageSettings.activatedPopup": "Модель активирована. Вернитесь в бот для работы с ней.",
     "imageSettings.autoActivatedToast":
-      "✅ {name} активирована. Выставите настройки, сверните мини-апп и начинайте работу в чате.",
+      "✅ {name} активирована.\nВыставите настройки, сверните мини-апп и начинайте работу в чате.",
     "imageSettings.autoActivatedToastDismiss": "Больше не показывать",
+    "imageSettings.autoActivatedToastClose": "Закрыть",
     "manage.dialogActivatedPopup": "Диалог активирован. Вернитесь в чат для работы с ним.",
     "manage.startChat": "Начать общение",
     "manage.settings": "Настройки",
