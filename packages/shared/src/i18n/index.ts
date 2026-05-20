@@ -37,6 +37,8 @@ export interface Translations {
   };
   scenarios: {
     sectionTitle: string;
+    sectionTooltip: string;
+    chooseScenario: string;
     faceSwap: string;
     backToMain: string;
     faceSwapStep1: string;
@@ -46,6 +48,19 @@ export interface Translations {
     faceSwapPhotoTooLarge: string;
     faceSwapAlbumNotice: string;
     faceSwapWelcome: string;
+    photoUpscale: string;
+    videoUpscale: string;
+    photoUpscaleWelcome: string;
+    videoUpscaleWelcome: string;
+    photoUpscaleStep: string;
+    videoUpscaleStep: string;
+    upscaleChooseFactor: string;
+    upscaleNotPhoto: string;
+    upscaleNotVideo: string;
+    upscalePhotoTooLarge: string;
+    upscaleFileTooLarge: string;
+    upscaleVideoUnreadable: string;
+    upscaleGenerating: string;
   };
   gpt: {
     sectionTitle: string;

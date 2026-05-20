@@ -51,9 +51,10 @@ import {
 } from "@metabox/api/utils/rate-limit-error";
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
-import { notifyRateLimit, notifyFallback } from "./notify-error.js";
+import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
 import { RateLimitLongWindowError } from "./submit-with-throttle.js";
 
 /** На какой попытке (BullMQ attemptsMade) разрешён fallback по 5xx. */
@@ -91,7 +92,8 @@ export type FallbackReason =
   | "pool_exhausted"
   | "long_window_rate_limit"
   | "persistent_5xx"
-  | "provider_long_cooldown_marker";
+  | "provider_long_cooldown_marker"
+  | "kie_credits_exhausted";
 
 export interface FallbackCandidateAttempt {
   provider: string;
@@ -102,7 +104,8 @@ export interface FallbackCandidateAttempt {
     | "long_window"
     | "persistent_5xx"
     | "provider_unavailable"
-    | "incompatible_input";
+    | "incompatible_input"
+    | "credits_exhausted";
   error?: string;
 }
 
@@ -298,6 +301,31 @@ export async function submitWithFallback<T, D extends object>(
           "submitWithFallback: provider temporarily unavailable — trying next candidate",
         );
         // Не выставляем lastDeferDelay — если все unavailable, бросим ошибку наверх.
+        continue;
+      }
+
+      // KIE-аккаунт без кредитов (402) — provider-wide состояние, ни retry,
+      // ни смена ключа, ни cooldown не помогут. Пробуем следующего кандидата
+      // (fallback-провайдера). Параллельно — ops-алёрт в balance-канал (дедуп):
+      // KIE надо пополнить независимо от того, спас ли fallback этот запрос.
+      if (isKieCreditsExhausted(err)) {
+        // НЕ вызываем recordError на ключе: 402 — account-wide состояние
+        // (кончились кредиты), а не сбой конкретного ключа.
+        attempts.push({
+          provider: candidateProvider,
+          outcome: "credits_exhausted",
+          error: message.slice(0, 200),
+        });
+        void notifyTechErrorThrottled(
+          err instanceof Error ? err : new Error(message),
+          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+          "kie-credits-exhausted",
+          { channel: "balance" },
+        );
+        logger.warn(
+          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
+          "submitWithFallback: KIE credits exhausted — trying next candidate",
+        );
         continue;
       }
 
@@ -505,6 +533,7 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "pool_exhausted") return "pool_exhausted";
   if (primaryOutcome === "long_window") return "long_window_rate_limit";
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
+  if (primaryOutcome === "credits_exhausted") return "kie_credits_exhausted";
   return "pool_exhausted";
 }
 

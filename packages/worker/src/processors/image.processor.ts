@@ -4,6 +4,7 @@ import { delayJob } from "../utils/delay-job.js";
 import {
   resolveUserFacingMessage,
   shouldNotifyOps,
+  getOpsAlertDedupKey,
   resolveSubJobError,
   getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
@@ -48,7 +49,12 @@ import {
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
-import { notifyTechError, notifyRateLimit, notifyFallback } from "../utils/notify-error.js";
+import {
+  notifyTechError,
+  notifyTechErrorThrottled,
+  notifyRateLimit,
+  notifyFallback,
+} from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -1939,17 +1945,22 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         },
       });
       if (shouldNotifyOps(err)) {
-        await notifyTechError(
-          err,
-          {
-            jobId: dbJobId,
-            modelId,
-            section: "image",
-            userId: userIdStr,
-            attempt: job.attemptsMade,
-          },
-          getOpsAlertChannel(err),
-        );
+        const opsCtx = {
+          jobId: dbJobId,
+          modelId,
+          section: "image",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        };
+        // opsAlertDedupKey ("kie-credits-exhausted" и пр.) — burst-throttle,
+        // иначе при пустом KIE-аккаунте каждый job шлёт отдельный алёрт.
+        const dedupKey = getOpsAlertDedupKey(err);
+        const channel = getOpsAlertChannel(err);
+        if (dedupKey) {
+          await notifyTechErrorThrottled(err, opsCtx, dedupKey, { channel });
+        } else {
+          await notifyTechError(err, opsCtx, channel);
+        }
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);

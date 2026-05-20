@@ -4,7 +4,7 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
@@ -152,7 +152,18 @@ export class KieVideoAdapter implements VideoAdapter {
 
     let model: string;
 
-    if (klingMotionMode) {
+    if (this.modelId === "video-upscale") {
+      // ── KIE Topaz Video Upscaler ───────────────────────────────────────────
+      // Доступна только через готовый сценарий «Апскейл видео». Промпта нет —
+      // upscale_factor приходит из modelSettings (выбор юзера inline-кнопками).
+      model = "topaz/video-upscale";
+      const srcVideo = mi.motion_video?.[0] ?? input.imageUrl;
+      if (!srcVideo) throw new Error("KIE video-upscale: source video is required");
+      const uploaded = await uploadFileUrl(this.apiKey, srcVideo);
+      delete inputPayload.prompt;
+      inputPayload.video_url = uploaded;
+      inputPayload.upscale_factor = String(ms.upscale_factor ?? "2");
+    } else if (klingMotionMode) {
       // ── Kling 3.0 motion-control ──────────────────────────────────────────
       model = "kling-3.0/motion-control";
 
@@ -426,6 +437,24 @@ export class KieVideoAdapter implements VideoAdapter {
     const data = (await resp.json()) as KieSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
       const msg = data.msg ?? "";
+      // 402 «Credits insufficient» — KIE-аккаунт пуст. Provider-wide состояние,
+      // не вина юзера. Терминальная UserFacingError с ops-alert'ом (balance,
+      // дедуп). `submitWithFallback` распознаёт её через `isKieCreditsExhausted`
+      // и переключается на fallback-провайдера (если зарегистрирован) — иначе
+      // юзер упирался бы в «модель недоступна» пока KIE без денег.
+      if (data.code === 402 || /credits? insufficient|balance.*enough|out of credits/i.test(msg)) {
+        throw new UserFacingError(
+          `KIE credits exhausted (${this.modelId}): ${data.code} — ${msg}`,
+          {
+            key: "modelTemporarilyUnavailable",
+            section: "video",
+            params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+            notifyOps: true,
+            opsAlertDedupKey: "kie-credits-exhausted",
+            opsAlertChannel: "balance",
+          },
+        );
+      }
       const durationMatch = /video duration must be between (\d+) and (\d+)/i.exec(msg);
       if (durationMatch) {
         throw new UserFacingError(`KIE: ${msg}`, {

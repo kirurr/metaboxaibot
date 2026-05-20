@@ -1,7 +1,12 @@
 import { UnrecoverableError, DelayedError } from "bullmq";
 import type { Job } from "bullmq";
 import { delayJob } from "../utils/delay-job.js";
-import { resolveUserFacingMessage, shouldNotifyOps } from "../utils/user-facing-error.js";
+import {
+  resolveUserFacingMessage,
+  shouldNotifyOps,
+  getOpsAlertChannel,
+  getOpsAlertDedupKey,
+} from "../utils/user-facing-error.js";
 import { isHeyGenProviderUnavailable } from "@metabox/api/utils/heygen-error";
 import { getIntervalForElapsed } from "../utils/poll-schedule.js";
 import { Api } from "grammy";
@@ -47,7 +52,11 @@ import {
   pickGenerationFailedMessage,
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
-import { notifyTechError, notifyFallback } from "../utils/notify-error.js";
+import {
+  notifyTechError,
+  notifyTechErrorThrottled,
+  notifyFallback,
+} from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -1124,13 +1133,23 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         },
       });
       if (shouldNotifyOps(err)) {
-        await notifyTechError(err, {
+        const opsCtx = {
           jobId: dbJobId,
           modelId,
           section: "video",
           userId: userIdStr,
           attempt: job.attemptsMade,
-        });
+        };
+        // Honour opsAlertChannel ("balance" для KIE-кредитов) и opsAlertDedupKey
+        // (burst-throttle) — иначе при пустом KIE-аккаунте каждый job шлёт
+        // un-throttled алёрт не в ту тему. Зеркалит audio.processor.
+        const dedupKey = getOpsAlertDedupKey(err);
+        const channel = getOpsAlertChannel(err);
+        if (dedupKey) {
+          await notifyTechErrorThrottled(err, opsCtx, dedupKey, { channel });
+        } else {
+          await notifyTechError(err, opsCtx, channel);
+        }
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);

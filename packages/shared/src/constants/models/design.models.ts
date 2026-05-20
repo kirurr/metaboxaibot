@@ -328,6 +328,29 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 
 /** Kling / Kling Pro video settings. */
 
+/**
+ * Topaz фото-апскейл: цена по мегапикселям результата (`mp_tier`, вычисляется
+ * сценой из размера загруженного фото × фактор²). Значения — прайс-таблица
+ * Replicate Topaz; тиры >512 — линейная экстраполяция ~$0.0016/MP. Покрывает
+ * и Replicate-fallback, и KIE primary (сцена не опускает тир ниже KIE-floor
+ * фактора — см. `photoEffectiveMpTier`).
+ */
+const TOPAZ_IMAGE_MP_COST: Record<string, number> = {
+  "12": 0.05,
+  "24": 0.05,
+  "36": 0.1,
+  "48": 0.1,
+  "60": 0.15,
+  "96": 0.2,
+  "132": 0.24,
+  "168": 0.29,
+  "336": 0.53,
+  "512": 0.82,
+  "768": 1.25,
+  "1152": 1.85,
+  "1600": 2.6,
+};
+
 export const DESIGN_MODELS: Record<string, AIModel> = {
   // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
   // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
@@ -351,6 +374,47 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // KIE Topaz Image Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
+  // фото» — hiddenFromCarousel убирает её из карусели выбора моделей Дизайна.
+  // Цена — по мегапикселям результата (`mp_tier`, сцена вычисляет из размера
+  // фото × фактор²): юзер платит за фактический результат, цена видна на кнопке.
+  "image-upscale": {
+    id: "image-upscale",
+    name: "🔼 Апскейл фото",
+    description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
+    section: "design",
+    provider: "kie",
+    costUsdPerRequest: 0.05, // fallback-база, если mp_tier не передан
+    costVariants: {
+      settingKey: "mp_tier",
+      map: TOPAZ_IMAGE_MP_COST,
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+          { value: "8", label: "×8" },
+        ],
+        default: "2",
+      },
+    ],
   },
   "nano-banana-pro": {
     id: "nano-banana-pro",
@@ -2424,6 +2488,47 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
           { value: "auto", label: "Auto" },
         ],
         default: "medium",
+      },
+    ],
+  },
+  // ── Image upscale via Replicate Topaz (fallback к KIE primary) ───────────────
+  // KIE primary `image-upscale` (topaz/image-upscale) роутится на одноимённую
+  // Replicate-модель topazlabs/image-upscale. Биллинг — всегда по KIE-цене primary.
+  {
+    id: "image-upscale",
+    name: "Image upscale (Replicate fallback)",
+    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    section: "design",
+    provider: "replicate",
+    costUsdPerRequest: 0.05,
+    costVariants: {
+      settingKey: "mp_tier",
+      map: TOPAZ_IMAGE_MP_COST,
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+    // Prebuilt для plug-and-play promotion в primary (как у nano-banana fallback'ов).
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+          { value: "8", label: "×8" },
+        ],
+        default: "2",
       },
     ],
   },
