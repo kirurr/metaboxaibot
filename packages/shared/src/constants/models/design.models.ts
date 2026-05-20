@@ -329,6 +329,29 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 /** Kling / Kling Pro video settings. */
 
 export const DESIGN_MODELS: Record<string, AIModel> = {
+  // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
+  // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
+  // hiddenFromCarousel: модель не светится в карусели выбора моделей Дизайна.
+  // mediaInputs.edit: [0] = референс-фото (сцена), [1] = фото лица.
+  "face-swap-classic": {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица",
+    description: "Специализированная нейросеть для замены лица на фото.",
+    section: "design",
+    provider: "replicate",
+    costUsdPerRequest: 0.09,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
   "nano-banana-pro": {
     id: "nano-banana-pro",
     name: "🍌 Nano Banana PRO",

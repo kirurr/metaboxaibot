@@ -64,6 +64,9 @@ export function buildDesignModelKeyboard(savedModelId?: string | null): InlineKe
   const addedFamilies = new Set<string>();
 
   for (const m of allModels) {
+    // Скрытые сценарные модели (face-swap-classic и пр.) не показываем в карусели —
+    // они доступны только через свои готовые сценарии.
+    if (m.hiddenFromCarousel) continue;
     const familyId = MODEL_TO_FAMILY[m.id];
     if (familyId) {
       if (addedFamilies.has(familyId)) continue;
