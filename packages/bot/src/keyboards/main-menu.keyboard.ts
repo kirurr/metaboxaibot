@@ -11,7 +11,8 @@ export function buildMainMenuKeyboard(t: Translations, telegramId?: bigint | nul
   const webappUrl = config.bot.webappUrl;
   const kb = new Keyboard();
 
-  kb.text(t.menu.scenarios).row();
+  // Готовые сценарии временно скрыты — раздел недоступен.
+  // kb.text(t.menu.scenarios).row();
 
   kb.text(t.menu.gpt).text(t.menu.design).row().text(t.menu.audio).text(t.menu.video).row();
 
