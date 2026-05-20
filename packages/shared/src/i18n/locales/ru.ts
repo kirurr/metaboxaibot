@@ -40,7 +40,9 @@ export default {
     languageChanged: "✅ Язык изменён.",
   },
   scenarios: {
-    sectionTitle: "🎯 Готовые сценарии\nВыберите сценарий 👇",
+    sectionTitle: "🎯 Готовые сценарии",
+    sectionTooltip: "🎯 Готовые сценарии\nВыберите сценарий 👇",
+    chooseScenario: "🎯 Выбрать сценарий",
     faceSwap: "🔄 Замена лица",
     backToMain: "🏠 В главное меню",
     faceSwapStep1:

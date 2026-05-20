@@ -40,6 +40,14 @@ const KIE_TOPAZ_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const UPSCALE_SLOT = "src";
 
 /**
+ * Buffer slot key holding the source video duration (seconds, as string).
+ * Хранится рядом с файлом, а не в callback_data: иначе тап по «устаревшей»
+ * клавиатуре (юзер загрузил видео B поверх A) списал бы цену по длительности
+ * A, апскейля при этом B. Длительность всегда читается из текущего буфера.
+ */
+const UPSCALE_DUR_SLOT = "dur";
+
+/**
  * In-memory dedup of Telegram media groups (albums) — only the first item of
  * any group is consumed, the rest are silently dropped.
  */
@@ -79,8 +87,7 @@ function buildFactorKeyboard(
       );
       label = `×${f} · ${cost.toFixed(2)} ✦`;
     }
-    const data = kind === "video" ? `upscale:video:${f}:${durationSec ?? 0}` : `upscale:photo:${f}`;
-    kb.text(label, data).row();
+    kb.text(label, `upscale:${kind}:${f}`).row();
   }
   return kb;
 }
@@ -238,11 +245,19 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     return;
   }
 
+  const roundedDuration = Math.round(durationSec);
   await userStateService.addMediaInput(
     userId,
     VIDEO_UPSCALE_BUFFER_MODEL_ID,
     UPSCALE_SLOT,
     uploadedKey,
+    true,
+  );
+  await userStateService.addMediaInput(
+    userId,
+    VIDEO_UPSCALE_BUFFER_MODEL_ID,
+    UPSCALE_DUR_SLOT,
+    String(roundedDuration),
     true,
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
@@ -252,14 +267,14 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
       "video",
       VIDEO_UPSCALE_FACTORS,
       VIDEO_UPSCALE_MODEL_ID,
-      Math.round(durationSec),
+      roundedDuration,
     ),
   });
 }
 
 // ── Factor selection callback ────────────────────────────────────────────────
 
-/** Handles `upscale:photo:<factor>` / `upscale:video:<factor>:<durationSec>`. */
+/** Handles `upscale:photo:<factor>` / `upscale:video:<factor>`. */
 export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.callbackQuery?.data) return;
   const parts = ctx.callbackQuery.data.split(":");
@@ -289,6 +304,19 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
       parse_mode: "HTML",
     });
     return;
+  }
+
+  // Видео тарифицируется посекундно — без валидной длительности из буфера
+  // (повреждённый буфер / клавиатура от старой версии бота) цену не посчитать.
+  let videoDurationSec = 0;
+  if (!isPhoto) {
+    videoDurationSec = Number(slots[UPSCALE_DUR_SLOT]?.[0]);
+    if (!Number.isFinite(videoDurationSec) || videoDurationSec <= 0) {
+      await userStateService.clearMediaInputs(userId, bufferId);
+      await userStateService.setState(userId, awaitState, null);
+      await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
+      return;
+    }
   }
 
   const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);
@@ -335,14 +363,15 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
         hideRefineButton: true,
       });
     } else {
-      const durationSec = Number(parts[3]);
+      // `videoDurationSec` взята из буфера (рядом с файлом) и уже провалидирована
+      // выше — тап по устаревшей клавиатуре не тарифицирует по чужой длительности.
       await videoGenerationService.submitVideo({
         userId,
         modelId: VIDEO_UPSCALE_MODEL_ID,
         prompt: "",
         mediaInputs: { motion_video: [srcUrl] },
         extraModelSettings: { upscale_factor: factor },
-        duration: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : undefined,
+        duration: videoDurationSec,
         telegramChatId: chatId,
         sendOriginalLabel: ctx.t.common.sendOriginal,
       });

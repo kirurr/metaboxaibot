@@ -37,6 +37,8 @@ export interface Translations {
   };
   scenarios: {
     sectionTitle: string;
+    sectionTooltip: string;
+    chooseScenario: string;
     faceSwap: string;
     backToMain: string;
     faceSwapStep1: string;

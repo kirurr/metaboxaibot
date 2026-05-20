@@ -40,7 +40,9 @@ export default {
     languageChanged: "✅ Language changed.",
   },
   scenarios: {
-    sectionTitle: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    sectionTitle: "🎯 Ready-made scenarios",
+    sectionTooltip: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    chooseScenario: "🎯 Choose a scenario",
     faceSwap: "🔄 Face swap",
     backToMain: "🏠 Back to main menu",
     faceSwapStep1:

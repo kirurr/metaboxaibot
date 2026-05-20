@@ -10,10 +10,21 @@ import {
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
-import type { Section } from "@metabox/shared";
+import type { Section, Translations } from "@metabox/shared";
+import { InlineKeyboard } from "grammy";
 import { buildDesignModelKeyboard } from "../scenes/design.js";
 import { buildVideoModelKeyboard } from "../scenes/video.js";
 import { clearActiveSlot } from "../utils/media-input-state.js";
+
+/** Inline keyboard listing the ready-made scenarios (Face swap, upscale). */
+export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t.scenarios.faceSwap, "scenario:face_swap")
+    .row()
+    .text(t.scenarios.photoUpscale, "scenario:photo_upscale")
+    .row()
+    .text(t.scenarios.videoUpscale, "scenario:video_upscale");
+}
 
 /** Returns the active dialog label + modelId for a section, or undefined. */
 async function activeDialogInfo(
@@ -55,13 +66,15 @@ export async function handleScenarios(ctx: BotContext): Promise<void> {
   await ctx.reply(ctx.t.scenarios.sectionTitle, {
     reply_markup: {
       keyboard: [
-        [{ text: ctx.t.scenarios.faceSwap }],
-        [{ text: ctx.t.scenarios.photoUpscale }, { text: ctx.t.scenarios.videoUpscale }],
+        [{ text: ctx.t.scenarios.chooseScenario }],
         [{ text: ctx.t.scenarios.backToMain }],
       ],
       resize_keyboard: true,
       is_persistent: true,
     },
+  });
+  await ctx.reply(ctx.t.scenarios.sectionTooltip, {
+    reply_markup: buildScenariosKeyboard(ctx.t),
   });
 }
 

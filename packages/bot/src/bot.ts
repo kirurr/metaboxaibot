@@ -17,6 +17,7 @@ import {
   handleAudio,
   handleVideo,
   handleScenarios,
+  buildScenariosKeyboard,
 } from "./commands/menu.js";
 import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
 import {
@@ -321,9 +322,17 @@ export function createBot(token: string): Bot<BotContext> {
   // ── Send original file callback ───────────────────────────────────────────
   bot.callbackQuery(/^orig_/, handleSendOriginal);
 
-  // ── HeyGen avatar creation cancel ────────────────────────────────────────
+  // ── Ready-made scenarios (Готовые сценарии) ──────────────────────────────
+  bot.callbackQuery(/^scenario:/, async (ctx) => {
+    const which = ctx.callbackQuery.data.split(":")[1];
+    await ctx.answerCallbackQuery();
+    if (which === "face_swap") return handleFaceSwapEnter(ctx);
+    if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
+    if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
+  });
   bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
 
+  // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
 
   // ── Higgsfield Soul character creation ──────────────────────────────────
@@ -380,9 +389,11 @@ export function createBot(token: string): Bot<BotContext> {
       [t.menu.audio]: () => handleAudio(ctx),
       [t.menu.video]: () => handleVideo(ctx),
       [t.menu.scenarios]: () => handleScenarios(ctx),
-      [t.scenarios.faceSwap]: () => handleFaceSwapEnter(ctx),
-      [t.scenarios.photoUpscale]: () => handlePhotoUpscaleEnter(ctx),
-      [t.scenarios.videoUpscale]: () => handleVideoUpscaleEnter(ctx),
+      [t.scenarios.chooseScenario]: async () => {
+        await ctx.reply(t.scenarios.sectionTooltip, {
+          reply_markup: buildScenariosKeyboard(t),
+        });
+      },
       [t.scenarios.backToMain]: () => handleMenu(ctx),
       [t.common.backToMain]: () => handleMenu(ctx),
       [t.gpt.backToMain]: () => handleMenu(ctx),
