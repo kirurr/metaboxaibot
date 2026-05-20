@@ -289,6 +289,7 @@ export interface FallbackNotificationContext {
     | "long_window_rate_limit"
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
+    | "kie_credits_exhausted"
     | "all_candidates_failed"
     /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
     | "primary_failed";

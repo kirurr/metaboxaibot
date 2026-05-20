@@ -37,8 +37,9 @@ export class ReplicateVideoAdapter implements VideoAdapter {
     const ms = input.modelSettings ?? {};
 
     // ── Topaz video upscale — fallback для KIE primary `video-upscale` ────────
-    // Replicate-версия принимает абсолютное `target_resolution`, а не множитель.
-    // Маппим KIE `upscale_factor` (2/4) в разрешение: 2 → 1080p, 4 → 4k.
+    // Replicate-версия принимает абсолютное `target_resolution` + `target_fps`.
+    // Сцена кладёт их в modelSettings (тиры вычислены из исходника), цена
+    // учитывает оба — биллинг и стоимость Replicate согласованы.
     if (this.modelId === "video-upscale") {
       const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
       if (!videoUrl) throw new Error("Replicate video-upscale: source video is required");
@@ -52,19 +53,19 @@ export class ReplicateVideoAdapter implements VideoAdapter {
           type: vidRes.headers.get("content-type") ?? "video/mp4",
         });
       }
-      const targetResolution = String(ms.upscale_factor ?? "2") === "4" ? "4k" : "1080p";
-      // Жёстко фиксируем 30fps: цена Replicate Topaz растёт вдвое на 60fps
-      // (4K/60 ≈ $0.149/s против 4K/30 ≈ $0.075/s), а биллим мы по KIE-ставке
-      // primary ($0.08/s) — без пина 60fps-исходник на fallback ушёл бы в минус.
+      const targetResolution = ["720p", "1080p", "4k"].includes(String(ms.target_resolution))
+        ? String(ms.target_resolution)
+        : "1080p";
+      const targetFps = String(ms.fps) === "60" ? 60 : 30;
       const predInput = {
         video: videoParam,
         target_resolution: targetResolution,
-        target_fps: 30,
+        target_fps: targetFps,
       };
       logCall(String(this.model), "submit", {
         video: "<blob>",
         target_resolution: targetResolution,
-        target_fps: 30,
+        target_fps: targetFps,
       });
       const prediction = await this.client.predictions.create({
         model: this.model as `${string}/${string}`,

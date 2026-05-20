@@ -42,6 +42,7 @@ export interface VideoProbeInfo {
   durationSec: number | null;
   width: number | null;
   height: number | null;
+  fps: number | null;
   fileSizeBytes: number;
 }
 
@@ -59,6 +60,7 @@ export async function probeVideoMetadata(videoUrl: string): Promise<VideoProbeIn
     durationSec: info.duration,
     width: info.width,
     height: info.height,
+    fps: info.fps,
     fileSizeBytes: buf.byteLength,
   };
 }

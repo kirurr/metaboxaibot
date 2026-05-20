@@ -328,6 +328,29 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 
 /** Kling / Kling Pro video settings. */
 
+/**
+ * Topaz фото-апскейл: цена по мегапикселям результата (`mp_tier`, вычисляется
+ * сценой из размера загруженного фото × фактор²). Значения — прайс-таблица
+ * Replicate Topaz; тиры >512 — линейная экстраполяция ~$0.0016/MP. Покрывает
+ * и Replicate-fallback, и KIE primary (сцена не опускает тир ниже KIE-floor
+ * фактора — см. `photoEffectiveMpTier`).
+ */
+const TOPAZ_IMAGE_MP_COST: Record<string, number> = {
+  "12": 0.05,
+  "24": 0.05,
+  "36": 0.1,
+  "48": 0.1,
+  "60": 0.15,
+  "96": 0.2,
+  "132": 0.24,
+  "168": 0.29,
+  "336": 0.53,
+  "512": 0.82,
+  "768": 1.25,
+  "1152": 1.85,
+  "1600": 2.6,
+};
+
 export const DESIGN_MODELS: Record<string, AIModel> = {
   // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
   // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
@@ -354,17 +377,18 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   // KIE Topaz Image Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
   // фото» — hiddenFromCarousel убирает её из карусели выбора моделей Дизайна.
-  // Цена зависит от выбранной степени увеличения (`upscale_factor`).
+  // Цена — по мегапикселям результата (`mp_tier`, сцена вычисляет из размера
+  // фото × фактор²): юзер платит за фактический результат, цена видна на кнопке.
   "image-upscale": {
     id: "image-upscale",
     name: "🔼 Апскейл фото",
     description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
     section: "design",
     provider: "kie",
-    costUsdPerRequest: 0.05, // base = upscale_factor "2"
+    costUsdPerRequest: 0.05, // fallback-база, если mp_tier не передан
     costVariants: {
-      settingKey: "upscale_factor",
-      map: { "2": 0.05, "4": 0.15, "8": 0.35 },
+      settingKey: "mp_tier",
+      map: TOPAZ_IMAGE_MP_COST,
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
@@ -2478,8 +2502,8 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     provider: "replicate",
     costUsdPerRequest: 0.05,
     costVariants: {
-      settingKey: "upscale_factor",
-      map: { "2": 0.05, "4": 0.15, "8": 0.35 },
+      settingKey: "mp_tier",
+      map: TOPAZ_IMAGE_MP_COST,
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,

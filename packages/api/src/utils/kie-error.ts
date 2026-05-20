@@ -75,3 +75,24 @@ export function isKieTransientError(err: unknown): boolean {
     /\b422\b/.test(message) && /\b429\b|too many requests/i.test(message);
   return is422Transient || is400InternalRetry || is422TooManyRequests;
 }
+
+/**
+ * Возвращает true если ошибка — KIE 402 «Insufficient Credits»: наш
+ * KIE-аккаунт пуст. Это не вина юзера и не вина запроса — provider-wide
+ * состояние до пополнения. Ни retry, ни смена ключа не помогут.
+ *
+ * Используется в `submitWithFallback` как fallback-триггер: при пустом
+ * KIE-аккаунте сразу переключаемся на fallback-провайдера (если зарегистрирован),
+ * вместо того чтобы упирать юзера в «модель недоступна». Параллельно летит
+ * ops-алёрт в balance-канал — KIE надо пополнить независимо от того, спас ли
+ * fallback конкретный запрос.
+ *
+ * Матчит обе формы: обёрнутый UserFacingError из адаптера ("KIE credits
+ * exhausted (...)") и generic-ошибку ("KIE submit failed: 402 — ...").
+ */
+export function isKieCreditsExhausted(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (!/^KIE\b/i.test(message)) return false;
+  if (/credits?\s+exhausted/i.test(message)) return true;
+  return /\b402\b/.test(message) && /credits?\b|insufficient|balance.*enough/i.test(message);
+}

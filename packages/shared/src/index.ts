@@ -62,6 +62,10 @@ export {
   VIDEO_UPSCALE_MODEL_ID,
   PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
+  PHOTO_MP_TIERS,
+  videoResolutionTier,
+  videoFpsTier,
+  photoEffectiveMpTier,
 } from "./constants/upscale.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";

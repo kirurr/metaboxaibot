@@ -524,6 +524,28 @@ const KLING_SETTINGS: ModelSettingDef[] = [
   },
 ];
 
+/**
+ * Topaz видео-апскейл: per-second ставка по результату — `upscale_factor` ×
+ * `target_resolution` × `fps` (сцена вычисляет тиры из размера/fps исходника).
+ * Каждая ячейка = max(посекундная ставка KIE — фиксирована по фактору:
+ * ×2 $0.04/s, ×4 $0.07/s; посекундная цена Replicate за тир разрешения/fps) —
+ * покрывает обоих провайдеров, в минус на fallback не уходим.
+ */
+const TOPAZ_VIDEO_COST: Record<string, number> = {
+  "2__720p__30": 0.04,
+  "2__720p__60": 0.04,
+  "2__1080p__30": 0.04,
+  "2__1080p__60": 0.04,
+  "2__4k__30": 0.075,
+  "2__4k__60": 0.15,
+  "4__720p__30": 0.07,
+  "4__720p__60": 0.07,
+  "4__1080p__30": 0.07,
+  "4__1080p__60": 0.07,
+  "4__4k__30": 0.075,
+  "4__4k__60": 0.15,
+};
+
 export const VIDEO_MODELS: Record<string, AIModel> = {
   kling: {
     id: "kling",
@@ -633,7 +655,8 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   // KIE Topaz Video Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
   // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
-  // Цена — по секундам исходного видео, ставка зависит от `upscale_factor`.
+  // Цена — посекундная, ставка по результату (фактор × разрешение × fps):
+  // сцена вычисляет тиры из размера и fps исходника, цена видна на кнопке.
   "video-upscale": {
     id: "video-upscale",
     name: "🎬 Апскейл видео",
@@ -641,13 +664,10 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     section: "video",
     provider: "kie",
     costUsdPerRequest: 0,
-    costUsdPerSecond: 0.04, // base = upscale_factor "2"
-    costVariants: {
-      settingKey: "upscale_factor",
-      map: {
-        "2": { costUsdPerSecond: 0.04 },
-        "4": { costUsdPerSecond: 0.08 },
-      },
+    costUsdPerSecond: 0.07, // fallback-база, если costMatrix-тиры не переданы
+    costMatrix: {
+      dims: ["upscale_factor", "target_resolution", "fps"],
+      table: TOPAZ_VIDEO_COST,
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
@@ -2546,13 +2566,10 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     section: "video",
     provider: "replicate",
     costUsdPerRequest: 0,
-    costUsdPerSecond: 0.04,
-    costVariants: {
-      settingKey: "upscale_factor",
-      map: {
-        "2": { costUsdPerSecond: 0.04 },
-        "4": { costUsdPerSecond: 0.08 },
-      },
+    costUsdPerSecond: 0.07,
+    costMatrix: {
+      dims: ["upscale_factor", "target_resolution", "fps"],
+      table: TOPAZ_VIDEO_COST,
     },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,

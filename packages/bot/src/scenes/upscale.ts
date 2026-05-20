@@ -5,6 +5,7 @@ import {
   userStateService,
   s3Service,
   calculateCost,
+  measureImageMegapixels,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import {
@@ -19,6 +20,9 @@ import {
   VIDEO_UPSCALE_MODEL_ID,
   PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
+  videoResolutionTier,
+  videoFpsTier,
+  photoEffectiveMpTier,
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
@@ -36,16 +40,35 @@ const TG_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
  */
 const KIE_TOPAZ_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** Buffer slot key holding the single uploaded source file (S3 key). */
-const UPSCALE_SLOT = "src";
+/** Default source dimensions when a probe fails to read them. */
+const DEFAULT_VIDEO_HEIGHT = 1080;
+const DEFAULT_VIDEO_FPS = 30;
+const DEFAULT_PHOTO_MP = 2;
 
 /**
- * Buffer slot key holding the source video duration (seconds, as string).
- * Хранится рядом с файлом, а не в callback_data: иначе тап по «устаревшей»
- * клавиатуре (юзер загрузил видео B поверх A) списал бы цену по длительности
- * A, апскейля при этом B. Длительность всегда читается из текущего буфера.
+ * Buffer slot keys. Файл и метаданные исходника хранятся в `UserState`
+ * между загрузкой и тапом по кнопке выбора фактора. Метаданные нужны и
+ * для подписи цены на кнопке, и при сабмите — поэтому читаются из буфера
+ * (текущего файла), а не из callback_data: тап по устаревшей клавиатуре
+ * после повторной загрузки не должен тарифицировать по прошлому файлу.
  */
+const UPSCALE_SLOT = "src";
 const UPSCALE_DUR_SLOT = "dur";
+const UPSCALE_HEIGHT_SLOT = "h";
+const UPSCALE_FPS_SLOT = "fps";
+const UPSCALE_MP_SLOT = "mp";
+
+/** Probed source metadata used for dynamic, output-based pricing. */
+interface UpscaleMeta {
+  /** Video duration in seconds. */
+  durationSec?: number;
+  /** Source video height in px. */
+  heightPx?: number;
+  /** Source video fps. */
+  fps?: number;
+  /** Source image megapixels. */
+  inputMp?: number;
+}
 
 /**
  * In-memory dedup of Telegram media groups (albums) — only the first item of
@@ -64,12 +87,35 @@ function rememberMediaGroup(key: string): void {
   }
 }
 
+/**
+ * modelSettings для конкретного фактора — используются и для расчёта цены
+ * на кнопке, и при сабмите (`extraModelSettings`). Цена считается по
+ * результату: фото — тир мегапикселей, видео — фактор × разрешение × fps.
+ */
+function upscaleSettings(
+  kind: "photo" | "video",
+  factor: string,
+  meta: UpscaleMeta,
+): Record<string, string> {
+  if (kind === "photo") {
+    return {
+      upscale_factor: factor,
+      mp_tier: photoEffectiveMpTier(meta.inputMp ?? DEFAULT_PHOTO_MP, factor),
+    };
+  }
+  return {
+    upscale_factor: factor,
+    target_resolution: videoResolutionTier(meta.heightPx ?? DEFAULT_VIDEO_HEIGHT, Number(factor)),
+    fps: videoFpsTier(meta.fps ?? DEFAULT_VIDEO_FPS),
+  };
+}
+
 /** Builds the factor-selection inline keyboard with per-factor token cost. */
 function buildFactorKeyboard(
   kind: "photo" | "video",
   factors: readonly string[],
   modelId: string,
-  durationSec: number | undefined,
+  meta: UpscaleMeta,
 ): InlineKeyboard {
   const model = AI_MODELS[modelId];
   const kb = new InlineKeyboard();
@@ -82,8 +128,8 @@ function buildFactorKeyboard(
         0,
         undefined,
         undefined,
-        { upscale_factor: f },
-        durationSec,
+        upscaleSettings(kind, f, meta),
+        kind === "video" ? meta.durationSec : undefined,
       );
       label = `×${f} · ${cost.toFixed(2)} ✦`;
     }
@@ -118,10 +164,16 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   let fileId: string | undefined;
   let fileSize: number | undefined;
   let mimeHint: string | undefined;
+  // Сжатое фото отдаёт размеры прямо в сообщении — берём мегапиксели оттуда,
+  // без лишнего скачивания. Для image-документа измеряем после загрузки.
+  let inputMp: number | undefined;
   if (ctx.message?.photo) {
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
+    if (largest?.width && largest?.height) {
+      inputMp = (largest.width * largest.height) / 1_000_000;
+    }
   } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
@@ -148,6 +200,13 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     return;
   }
 
+  // Image-документ размеров в сообщении не несёт — измеряем сами. Сбой
+  // измерения → дефолтная оценка (цена посчитается консервативно).
+  if (inputMp === undefined) {
+    inputMp = await measureImageMegapixels(tgUrl).catch(() => undefined);
+  }
+  const meta: UpscaleMeta = { inputMp };
+
   await userStateService.addMediaInput(
     userId,
     PHOTO_UPSCALE_BUFFER_MODEL_ID,
@@ -155,15 +214,17 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     uploadedKey,
     true,
   );
+  await userStateService.addMediaInput(
+    userId,
+    PHOTO_UPSCALE_BUFFER_MODEL_ID,
+    UPSCALE_MP_SLOT,
+    String(inputMp ?? DEFAULT_PHOTO_MP),
+    true,
+  );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
   await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard(
-      "photo",
-      PHOTO_UPSCALE_FACTORS,
-      PHOTO_UPSCALE_MODEL_ID,
-      undefined,
-    ),
+    reply_markup: buildFactorKeyboard("photo", PHOTO_UPSCALE_FACTORS, PHOTO_UPSCALE_MODEL_ID, meta),
   });
 }
 
@@ -193,6 +254,7 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   let fileId: string | undefined;
   let fileSize: number | undefined;
   let durationSec: number | undefined;
+  let heightPx: number | undefined;
   // KIE Topaz принимает video/mp4, video/quicktime, video/x-matroska — для
   // video-документа сохраняем исходный mime/расширение, чтобы KIE-upload
   // и Topaz не отбраковали .mov/.mkv как невалидный mp4.
@@ -202,6 +264,7 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     fileId = ctx.message.video.file_id;
     fileSize = ctx.message.video.file_size;
     durationSec = ctx.message.video.duration;
+    heightPx = ctx.message.video.height;
   } else if (ctx.message?.document?.mime_type?.startsWith("video/")) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
@@ -225,14 +288,13 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
 
-  // Топаз тарифицируется посекундно — длительность нужна для расчёта цены.
-  // Для `video` Telegram отдаёт duration в сообщении; для video-документа
-  // парсим moov-атом сами.
-  if (durationSec === undefined) {
-    durationSec = await probeVideoMetadata(tgUrl)
-      .then((info) => info.durationSec ?? undefined)
-      .catch(() => undefined);
-  }
+  // Цена видео-апскейла зависит от длительности, разрешения и fps результата —
+  // парсим moov-атом исходника. `video` Telegram отдаёт duration/height в
+  // сообщении, но не fps; mp4-документ — всё из парсера.
+  const probe = await probeVideoMetadata(tgUrl).catch(() => null);
+  durationSec = durationSec ?? probe?.durationSec ?? undefined;
+  heightPx = heightPx ?? probe?.height ?? undefined;
+  const fps = probe?.fps ?? undefined;
   if (!durationSec || durationSec <= 0) {
     await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
@@ -245,7 +307,11 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     return;
   }
 
-  const roundedDuration = Math.round(durationSec);
+  // Округляем длительность ВВЕРХ: воркер списывает по фактической длительности
+  // результата (≈ длительность исходника, дробная), а на кнопке показываем
+  // целые секунды — ceil гарантирует «показанное ≥ списанного».
+  const billingDuration = Math.ceil(durationSec);
+  const meta: UpscaleMeta = { durationSec: billingDuration, heightPx, fps };
   await userStateService.addMediaInput(
     userId,
     VIDEO_UPSCALE_BUFFER_MODEL_ID,
@@ -257,18 +323,27 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     userId,
     VIDEO_UPSCALE_BUFFER_MODEL_ID,
     UPSCALE_DUR_SLOT,
-    String(roundedDuration),
+    String(billingDuration),
+    true,
+  );
+  await userStateService.addMediaInput(
+    userId,
+    VIDEO_UPSCALE_BUFFER_MODEL_ID,
+    UPSCALE_HEIGHT_SLOT,
+    String(heightPx ?? DEFAULT_VIDEO_HEIGHT),
+    true,
+  );
+  await userStateService.addMediaInput(
+    userId,
+    VIDEO_UPSCALE_BUFFER_MODEL_ID,
+    UPSCALE_FPS_SLOT,
+    String(fps ?? DEFAULT_VIDEO_FPS),
     true,
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
   await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard(
-      "video",
-      VIDEO_UPSCALE_FACTORS,
-      VIDEO_UPSCALE_MODEL_ID,
-      roundedDuration,
-    ),
+    reply_markup: buildFactorKeyboard("video", VIDEO_UPSCALE_FACTORS, VIDEO_UPSCALE_MODEL_ID, meta),
   });
 }
 
@@ -306,17 +381,26 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     return;
   }
 
-  // Видео тарифицируется посекундно — без валидной длительности из буфера
-  // (повреждённый буфер / клавиатура от старой версии бота) цену не посчитать.
-  let videoDurationSec = 0;
-  if (!isPhoto) {
-    videoDurationSec = Number(slots[UPSCALE_DUR_SLOT]?.[0]);
-    if (!Number.isFinite(videoDurationSec) || videoDurationSec <= 0) {
-      await userStateService.clearMediaInputs(userId, bufferId);
-      await userStateService.setState(userId, awaitState, null);
-      await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
-      return;
-    }
+  // Метаданные исходника берём из буфера (рядом с файлом) — тап по устаревшей
+  // клавиатуре тарифицирует ровно по текущему файлу, не по прошлому.
+  const meta: UpscaleMeta = isPhoto
+    ? { inputMp: Number(slots[UPSCALE_MP_SLOT]?.[0]) || DEFAULT_PHOTO_MP }
+    : {
+        durationSec: Number(slots[UPSCALE_DUR_SLOT]?.[0]),
+        heightPx: Number(slots[UPSCALE_HEIGHT_SLOT]?.[0]) || DEFAULT_VIDEO_HEIGHT,
+        fps: Number(slots[UPSCALE_FPS_SLOT]?.[0]) || DEFAULT_VIDEO_FPS,
+      };
+
+  if (
+    !isPhoto &&
+    (!meta.durationSec || !Number.isFinite(meta.durationSec) || meta.durationSec <= 0)
+  ) {
+    // Длительность не прочиталась (повреждённый буфер) — без неё посекундную
+    // цену не посчитать.
+    await userStateService.clearMediaInputs(userId, bufferId);
+    await userStateService.setState(userId, awaitState, null);
+    await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
+    return;
   }
 
   const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);
@@ -347,6 +431,9 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
 
   await ctx.reply(ctx.t.scenarios.upscaleGenerating);
 
+  // Настройки цены/адаптеров — одни и те же, что показаны на кнопке.
+  const settings = upscaleSettings(kind, factor, meta);
+
   let submitOk = false;
   try {
     if (isPhoto) {
@@ -355,7 +442,7 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
         modelId: PHOTO_UPSCALE_MODEL_ID,
         prompt: "",
         mediaInputs: { edit: [srcUrl] },
-        extraModelSettings: { upscale_factor: factor },
+        extraModelSettings: settings,
         telegramChatId: chatId,
         sendOriginalLabel: ctx.t.common.sendOriginal,
         displayNameOverride: scenarioLabel,
@@ -363,15 +450,13 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
         hideRefineButton: true,
       });
     } else {
-      // `videoDurationSec` взята из буфера (рядом с файлом) и уже провалидирована
-      // выше — тап по устаревшей клавиатуре не тарифицирует по чужой длительности.
       await videoGenerationService.submitVideo({
         userId,
         modelId: VIDEO_UPSCALE_MODEL_ID,
         prompt: "",
         mediaInputs: { motion_video: [srcUrl] },
-        extraModelSettings: { upscale_factor: factor },
-        duration: videoDurationSec,
+        extraModelSettings: settings,
+        duration: meta.durationSec,
         telegramChatId: chatId,
         sendOriginalLabel: ctx.t.common.sendOriginal,
       });

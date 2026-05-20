@@ -4,7 +4,7 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
@@ -437,6 +437,24 @@ export class KieVideoAdapter implements VideoAdapter {
     const data = (await resp.json()) as KieSubmitResponse;
     if (data.code !== 200 || !data.data?.taskId) {
       const msg = data.msg ?? "";
+      // 402 «Credits insufficient» — KIE-аккаунт пуст. Provider-wide состояние,
+      // не вина юзера. Терминальная UserFacingError с ops-alert'ом (balance,
+      // дедуп). `submitWithFallback` распознаёт её через `isKieCreditsExhausted`
+      // и переключается на fallback-провайдера (если зарегистрирован) — иначе
+      // юзер упирался бы в «модель недоступна» пока KIE без денег.
+      if (data.code === 402 || /credits? insufficient|balance.*enough|out of credits/i.test(msg)) {
+        throw new UserFacingError(
+          `KIE credits exhausted (${this.modelId}): ${data.code} — ${msg}`,
+          {
+            key: "modelTemporarilyUnavailable",
+            section: "video",
+            params: { modelName: AI_MODELS[this.modelId]?.name ?? this.modelId },
+            notifyOps: true,
+            opsAlertDedupKey: "kie-credits-exhausted",
+            opsAlertChannel: "balance",
+          },
+        );
+      }
       const durationMatch = /video duration must be between (\d+) and (\d+)/i.exec(msg);
       if (durationMatch) {
         throw new UserFacingError(`KIE: ${msg}`, {
