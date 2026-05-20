@@ -397,6 +397,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
               metaboxUserId,
               telegramId: ctx.user.telegramId!,
               telegramUsername: ctx.from?.username ?? null,
+              aiboxUserId: ctx.user.id,
             });
             metaboxMerged = !!linkResult.mergedFrom;
           } catch (linkErr) {
@@ -591,6 +592,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           username: freshUser?.username ?? ctx.user!.username,
           referrerTelegramId,
           referrerUserId: resolvedReferrerUserId ?? undefined,
+          aiboxUserId: ctx.user!.id,
         });
         if (result?.ok) {
           // Drift detection: если на metabox-стороне произошёл merge, наш
@@ -601,34 +603,33 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           const previousMetaboxUserId = ctx.user!.metaboxUserId;
           const driftDetected = !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
 
-          // Merge: если metabox вернул real-аккаунт и у нас уже есть web-only
-          // AI Box User с этим metaboxUserId (создан через ensureAibUserForMetabox
-          // при web-login до того как юзер впервые стартанул бота), сливаем
-          // его в текущий ctx.user. Иначе получим duplicate metaboxUserId.
-          // Для stub-аккаунтов merge не нужен — мы туда metaboxUserId не пишем.
-          if (!result.isStub) {
-            try {
-              await mergeWebUserIfExists(ctx.user!.id, result.userId);
-            } catch (mergeErr) {
-              logger.error(
-                { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
-                "[start registerBotUser] merge with web-only user failed",
-              );
-              // НЕ пишем metaboxUserId — иначе duplicate. Юзер увидит ошибку
-              // в следующих API-вызовах из веба; админ должен починить руками.
-              return;
-            }
+          // Merge: если metabox вернул userId (stub или real) и у нас уже есть
+          // другой AI Box User с этим metaboxUserId (web-only, созданный через
+          // ensureAibUserForMetabox при web-login), сливаем его в ctx.user.
+          // Раньше merge запускался только для real (`!result.isStub`), но
+          // теперь metaboxUserId пишется и для stub'ов (см. ниже) — поэтому
+          // merge нужен в обоих случаях.
+          try {
+            await mergeWebUserIfExists(ctx.user!.id, result.userId);
+          } catch (mergeErr) {
+            logger.error(
+              { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
+              "[start registerBotUser] merge with web-only user failed",
+            );
+            return;
           }
 
+          // metaboxUserId пишем БЕЗ оговорки на isStub. Stub — это валидный
+          // metabox-аккаунт (просто с auto-email `tg_<id>@aibox.meta-box.ru`),
+          // и двусторонняя связь (registerBotUser body содержит aiboxUserId,
+          // метабокс пишет назад на User.aiboxUserId) теперь работает уже для
+          // stub'ов. Это даёт админ-grant-flow возможность пушить токены
+          // даже до момента upgrade'а stub'а в real (через mini-app/web).
           await db.user.update({
             where: { id: ctx.user!.id },
             data: {
               metaboxReferralCode: result.referralCode,
-              // metaboxUserId пишем только для real-аккаунта (isStub=false),
-              // чтобы поле семантически означало «реально привязан к Metabox»,
-              // а не «есть stub». Если в кеше уже был userId, а сейчас вернулся
-              // stub — это inconsistency (frozen?), не перезаписываем, только лог.
-              ...(!result.isStub ? { metaboxUserId: result.userId } : {}),
+              metaboxUserId: result.userId,
             },
           });
 

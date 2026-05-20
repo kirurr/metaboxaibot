@@ -25,6 +25,7 @@ import {
   getSubscriptionStatusByMetabox,
   markOrderGrantedOnMetabox,
   markTokensGrantedOnMetabox,
+  setAiboxId,
 } from "./metabox-bridge.service.js";
 
 interface EnsureUserParams {
@@ -124,6 +125,19 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
     { userId: created.id.toString(), metaboxUserId: liveMetaboxUserId },
     "[ensureAibUser] created web-only AI Box User",
   );
+
+  // Двусторонняя связь: пушим наш id обратно на metabox, чтобы admin grants/
+  // subscriptions могли дойти к web-only юзеру (без telegramId).
+  // Errors swallowed by bridge — best-effort, ретрай произойдёт на следующем
+  // refresh/login.
+  try {
+    await setAiboxId({ metaboxUserId: liveMetaboxUserId, aiboxUserId: created.id });
+  } catch (err) {
+    logger.warn(
+      { err, userId: created.id.toString(), metaboxUserId: liveMetaboxUserId },
+      "[ensureAibUser] setAiboxId failed (will retry on next refresh)",
+    );
+  }
 
   // Sync — best effort. Любая ошибка тут не блокирует логин, юзер залогинится
   // и ребёнок UI; следующий рефреш/логин ретрайнет.

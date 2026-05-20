@@ -22,6 +22,7 @@ import {
   webConfirmPasswordReset,
   webChangePassword,
   webGetProfile,
+  webResendVerification,
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import {
@@ -317,10 +318,22 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           return reply.code(502).send({ error: "Не удалось создать аккаунт" });
         }
 
-        // Создаём AI Box User сразу при регистрации — иначе все защищённые
-        // /web/* endpoint'ы вернут 403 на первый запрос. Sync token-grants
-        // и subscription для нового metabox-юзера: ожидаемо пусто, но
-        // ensureAibUser идемпотентен.
+        // Если требуется подтверждение email (prod-режим, не STAGE_MODE) —
+        // НЕ создаём сессию и НЕ создаём AI Box User. Иначе фронт залогинит
+        // юзера, и при первом рефреше webValidateCredentials упадёт с 403
+        // EMAIL_NOT_VERIFIED → юзер увидит выкид из сессии без объяснений.
+        // AI Box User будет создан при первом успешном login (после клика
+        // по ссылке подтверждения в письме).
+        if (registered.requiresVerification) {
+          return reply.send({
+            requiresVerification: true,
+            email: registered.email,
+            firstName: registered.firstName,
+          });
+        }
+
+        // Stage / autoverify ветка — создаём AI Box User сразу. (Так же
+        // работает существующий путь, если фичу подтверждения отключают.)
         const ensured = await ensureAibUserForMetabox({
           metaboxUserId: registered.metaboxUserId,
           firstName: registered.firstName,
@@ -714,6 +727,41 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           createdAt: t.createdAt.toISOString(),
         })),
       });
+    },
+  );
+
+  // ── POST /auth/web-resend-verification ──────────────────────────────────
+  // Прокси к metabox `/api/internal/web-resend-verification`. Используется
+  // post-signup экраном «Проверьте почту» (юзер ещё не залогинен).
+  fastify.post<{ Body: { email?: string } }>(
+    "/auth/web-resend-verification",
+    {
+      schema: {
+        description: "Resend email verification link",
+        security: [],
+        body: {
+          type: "object",
+          properties: { email: { type: "string" } },
+          required: ["email"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const email = (request.body?.email ?? "").toLowerCase().trim();
+      if (!isValidEmail(email)) return reply.send({ ok: true });
+      try {
+        await webResendVerification(email);
+      } catch (err) {
+        logger.warn({ err, email }, "web-resend-verification: metabox call failed");
+      }
+      return reply.send({ ok: true });
     },
   );
 

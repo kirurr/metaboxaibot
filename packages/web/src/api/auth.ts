@@ -27,12 +27,46 @@ export function login(body: LoginBody) {
   });
 }
 
+/** В prod-режиме метабокс отправляет письмо подтверждения и НЕ выдаёт сессию,
+ *  поэтому signup может вернуть `{ requiresVerification, email }` вместо
+ *  `AuthSession`. */
+export type SignupResponse =
+  | AuthSession
+  | { requiresVerification: true; email: string; firstName: string | null };
+
 export function signup(body: SignupBody) {
-  return apiClient<AuthSession, SignupBody>("/auth/web-signup", {
+  return apiClient<SignupResponse, SignupBody>("/auth/web-signup", {
     method: "POST",
     body,
     skipAuth: true,
   });
+}
+
+export function resendVerification(email: string) {
+  return apiClient<{ ok: true }, { email: string }>("/auth/web-resend-verification", {
+    method: "POST",
+    body: { email },
+    skipAuth: true,
+  });
+}
+
+// Telegram link via deep-link flow ─────────────────────────────────────────
+//
+// `/auth/web-link-telegram/init`  — генерирует state в Redis, возвращает
+//   deep-link `t.me/<bot>?start=linkweb_<state>`.
+// `/auth/web-link-telegram/status` — фронт polls пока bot не закроет state.
+
+export function linkTelegramInit() {
+  return apiClient<{ deepLinkUrl: string; state: string }>("/auth/web-link-telegram/init", {
+    method: "POST",
+  });
+}
+
+export function linkTelegramStatus(state: string) {
+  return apiClient<{ linked: boolean; telegramUsername: string | null }>(
+    "/auth/web-link-telegram/status",
+    { method: "POST", body: { state } },
+  );
 }
 
 export function logout() {

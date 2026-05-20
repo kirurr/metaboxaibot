@@ -418,11 +418,14 @@ export async function linkTelegramFromWeb(params: {
   metaboxUserId: string;
   telegramId: bigint;
   telegramUsername?: string | null;
+  aiboxUserId?: bigint | string;
 }): Promise<LinkTelegramFromWebResult> {
   return post<LinkTelegramFromWebResult>("/link-telegram-from-web", {
     metaboxUserId: params.metaboxUserId,
     telegramId: params.telegramId.toString(),
     telegramUsername: params.telegramUsername ?? undefined,
+    aiboxUserId:
+      typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
   });
 }
 
@@ -436,6 +439,29 @@ export async function followMetaboxMergeChain(metaboxUserId: string): Promise<st
     `/internal/follow-merge?metaboxUserId=${encodeURIComponent(metaboxUserId)}`,
   );
   return res.metaboxUserId;
+}
+
+/**
+ * Пушит AI Box User.id на metabox-сторону, чтобы metabox мог напрямую слать
+ * к нам админ-гранты/subscriptions для web-only юзеров без telegramId.
+ * Best-effort: ошибки логируются, но не пробрасываются (linked-flow не должен
+ * падать только из-за этого call'а).
+ */
+export async function setAiboxId(params: {
+  metaboxUserId: string;
+  aiboxUserId: bigint | string;
+}): Promise<{ ok: true; alreadySet?: boolean } | null> {
+  try {
+    return await post<{ ok: true; alreadySet?: boolean }>("/set-aibox-id", {
+      metaboxUserId: params.metaboxUserId,
+      aiboxUserId:
+        typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
+    });
+  } catch {
+    // Логирование оставляем caller'у (он знает контекст: linkweb / register /
+    // ensureAibUser). Здесь молча возвращаем null, чтобы основной flow продолжился.
+    return null;
+  }
 }
 
 /** Mark a token-pack order as granted in the bot (sets tokensGrantedToBot = true on Metabox). */
@@ -516,6 +542,9 @@ export interface WebRegisterResult {
   firstName: string | null;
   lastName: string | null;
   referralCode: string;
+  /** true в prod-режиме (отправлено письмо подтверждения, юзер не может
+   * залогиниться пока не подтвердит email). false в STAGE_MODE (autoverify). */
+  requiresVerification?: boolean;
 }
 
 /** Регистрация нового юзера с ai.metabox.global. Создаёт MetaBox User.
@@ -532,6 +561,13 @@ export async function webRegister(params: {
   referralCode?: string;
 }): Promise<WebRegisterResult> {
   return post<WebRegisterResult>("/web-register", params);
+}
+
+/** Перевыпустить verification email по email-адресу (для post-signup экрана). */
+export async function webResendVerification(
+  email: string,
+): Promise<{ ok: true; alreadyVerified?: boolean }> {
+  return post<{ ok: true; alreadyVerified?: boolean }>("/web-resend-verification", { email });
 }
 
 /** Запрос на восстановление пароля — meta-box создаёт PasswordResetToken и шлёт email. */
@@ -655,6 +691,8 @@ export async function registerBotUser(params: {
   username?: string;
   referrerTelegramId?: bigint | null;
   referrerUserId?: string;
+  /** AI Box User.id для двусторонней связи (см. metabox.User.aiboxUserId). */
+  aiboxUserId?: bigint | string;
 }): Promise<{
   ok: boolean;
   userId: string;
@@ -670,5 +708,7 @@ export async function registerBotUser(params: {
     username: params.username,
     referrerTelegramId: params.referrerTelegramId?.toString(),
     referrerUserId: params.referrerUserId,
+    aiboxUserId:
+      typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
   });
 }

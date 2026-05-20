@@ -84,6 +84,7 @@ export {
   transferOnDeletion,
   linkTelegramFromWeb,
   followMetaboxMergeChain,
+  setAiboxId,
 } from "./metabox-bridge.service.js";
 export type {
   AiBotProduct,

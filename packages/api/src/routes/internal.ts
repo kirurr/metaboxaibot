@@ -83,6 +83,10 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
           type: "object",
           properties: {
             telegramId: { type: "string", description: "Telegram user ID" },
+            aiboxUserId: {
+              type: "string",
+              description: "AI Box User.id (fallback when user has no telegramId — web-only)",
+            },
             tokens: { type: "number", description: "Number of tokens to grant" },
             description: { type: "string", description: "Description for transaction" },
             grantType: {
@@ -98,7 +102,6 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
             },
             orderId: { type: "string", description: "Order ID for idempotency on token grants" },
           },
-          required: ["telegramId", "tokens"],
         },
         response: {
           200: {
@@ -118,6 +121,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const {
         telegramId,
+        aiboxUserId,
         tokens,
         description,
         grantType,
@@ -126,7 +130,10 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         subscriptionId,
         orderId,
       } = request.body as {
-        telegramId: string;
+        telegramId?: string;
+        /** Альтернативный id для web-only юзеров без telegramId. Один из
+         *  (telegramId, aiboxUserId) обязателен. */
+        aiboxUserId?: string;
         tokens: number;
         description?: string;
         grantType?: "subscription" | "tokens";
@@ -140,16 +147,22 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         orderId?: string;
       };
 
-      if (!telegramId || typeof tokens !== "number" || tokens === 0) {
-        return reply.code(400).send({ error: "telegramId and non-zero tokens are required" });
+      if ((!telegramId && !aiboxUserId) || typeof tokens !== "number" || tokens === 0) {
+        return reply
+          .code(400)
+          .send({ error: "telegramId or aiboxUserId and non-zero tokens are required" });
       }
 
-      const tgid = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { telegramId: tgid } });
+      // Резолвим юзера: aiboxUserId имеет приоритет (точная связь).
+      const user = aiboxUserId
+        ? await db.user.findUnique({ where: { id: BigInt(aiboxUserId) } })
+        : await db.user.findUnique({ where: { telegramId: BigInt(telegramId!) } });
       if (!user) {
         return reply.code(404).send({ error: "User not found" });
       }
       const userId = user.id;
+      // tgid для записи в GrantedMetaboxOrder (может быть null для web-only).
+      const tgid = user.telegramId ?? null;
 
       if (grantType === "subscription") {
         const resolvedEndDate = endDate ? new Date(endDate) : new Date();
@@ -207,6 +220,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
                 db.grantedMetaboxOrder.create({
                   data: {
                     orderId,
+                    // null для web-only юзеров (колонка nullable, дедуп по orderId).
                     telegramId: tgid,
                     tokens,
                     description: description || null,
@@ -236,6 +250,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
           type: "object",
           properties: {
             telegramId: { type: "string" },
+            aiboxUserId: { type: "string" },
             subscriptionTokenBalance: { type: "number" },
             tokenBalance: { type: "number" },
             orderGrants: {
@@ -257,7 +272,6 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
             tokensGranted: { type: "number" },
             metaboxSubscriptionId: { type: "string" },
           },
-          required: ["telegramId"],
         },
         response: {
           200: {
@@ -277,6 +291,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const {
         telegramId,
+        aiboxUserId,
         subscriptionTokenBalance,
         tokenBalance,
         orderGrants,
@@ -288,7 +303,12 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         tokensGranted,
         metaboxSubscriptionId,
       } = request.body as {
-        telegramId: string;
+        telegramId?: string;
+        /** Альтернативный идентификатор AI Box.User.id (для web-only юзеров
+         *  без telegramId). Metabox-сторона хранит его в `User.aiboxUserId`,
+         *  пушит сюда при админ-грантах. Один из (telegramId, aiboxUserId)
+         *  должен быть передан. */
+        aiboxUserId?: string;
         subscriptionTokenBalance?: number;
         tokenBalance?: number;
         /** Per-order разрез pendingBotTokens — каждая запись идёт через dedup
@@ -304,16 +324,22 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         metaboxSubscriptionId?: string;
       };
 
-      if (!telegramId) {
-        return reply.code(400).send({ error: "telegramId is required" });
+      if (!telegramId && !aiboxUserId) {
+        return reply.code(400).send({ error: "telegramId or aiboxUserId is required" });
       }
 
-      const tgid = BigInt(telegramId);
-      const user = await db.user.findUnique({ where: { telegramId: tgid } });
+      // Резолвим юзера: aiboxUserId имеет приоритет (точная связь). Иначе
+      // ищем по telegramId как раньше.
+      const user = aiboxUserId
+        ? await db.user.findUnique({ where: { id: BigInt(aiboxUserId) } })
+        : await db.user.findUnique({ where: { telegramId: BigInt(telegramId!) } });
       if (!user) {
         return reply.code(404).send({ error: "User not found" });
       }
       const userId = user.id;
+      // tgid используется ниже для записи в GrantedMetaboxOrder. Для web-only
+      // юзеров может быть null — таблица теперь допускает это.
+      const tgid = user.telegramId ?? null;
 
       // Idempotency check 1: subscriptionTokenBalance дедуплицируется по
       // metaboxSubscriptionId. Если LocalSubscription с этим metaboxSubscriptionId
@@ -341,7 +367,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       let effectiveTokenBalance = tokenBalance !== undefined && tokenBalance > 0 ? tokenBalance : 0;
       const newOrderInserts: Array<{
         orderId: string;
-        telegramId: bigint;
+        telegramId: bigint | null;
         tokens: number;
         description: string | null;
       }> = [];
@@ -359,6 +385,8 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
         for (const grant of newGrants) {
           newOrderInserts.push({
             orderId: grant.orderId,
+            // tgid может быть null для web-only юзеров; колонка теперь
+            // допускает NULL (см. миграцию granted_metabox_order_telegram_nullable).
             telegramId: tgid,
             tokens: grant.tokens,
             description: grant.description ?? null,
