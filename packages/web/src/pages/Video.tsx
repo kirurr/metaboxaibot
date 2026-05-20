@@ -25,6 +25,7 @@ export default function Video() {
       hideModelPicker={setup.hideModelPicker}
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
+      promptSection="video"
     />
   );
 }

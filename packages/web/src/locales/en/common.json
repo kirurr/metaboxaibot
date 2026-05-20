@@ -227,7 +227,8 @@
     "videoPromptPlaceholder": "Describe the scene for video generation",
     "audioTitle": "Create audio.",
     "audioSubtitle": "TTS, voice cloning, music — pick a model and describe the scene.",
-    "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…"
+    "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…",
+    "openPromptExamples": "Prompt examples"
   },
   "chat": {
     "newDialog": "New dialog",
