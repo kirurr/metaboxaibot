@@ -59,7 +59,33 @@ export const imagePresets: PresetMap = {
 
 export const videoPresets: PresetMap = {};
 
-export const audioPresets: PresetMap = {};
+export const audioPresets: PresetMap = {
+  tts: {
+    allowedModelIds: ["tts-openai", "tts-cartesia", "tts-el", "sounds-el"],
+    prompt: "",
+    modelId: "tts-openai",
+    // i18n-ключи, но просто текст тоже сработает
+    title: "presets.audio.tts.title",
+    subtitle: "presets.audio.tts.subtitle",
+  },
+  clone: {
+    allowedModelIds: ["voice-clone"],
+    prompt: "",
+    modelId: "voice-clone",
+    hideModelPicker: true,
+    // i18n-ключи, но просто текст тоже сработает
+    title: "presets.audio.clone.title",
+    subtitle: "presets.audio.clone.subtitle",
+  },
+  music: {
+    allowedModelIds: ["suno", "music-el"],
+    prompt: "",
+    modelId: "suno",
+    // i18n-ключи, но просто текст тоже сработает
+    title: "presets.audio.music.title",
+    subtitle: "presets.audio.music.subtitle",
+  },
+};
 
 /** Лукап по секции — для usePresetSetup. */
 export const presetsBySection: Record<GenerateSection, PresetMap> = {
