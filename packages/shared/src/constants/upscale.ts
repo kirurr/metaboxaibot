@@ -19,14 +19,18 @@ export const PHOTO_UPSCALE_FACTORS = ["2", "4", "8"] as const;
 export const VIDEO_UPSCALE_FACTORS = ["2", "4"] as const;
 
 /**
- * Эмпирический потолок размера результата фото-апскейла (мегапиксели).
- * KIE Topaz отбивает слишком крупный результат ошибкой «The image exceeds the
- * limit after scaling», но точное значение в доках не указано (запрос в KIE
- * support открыт). Пока — консервативная оценка: факторы, дающие результат
- * больше этого, не предлагаем на кнопках. Уточнить по ответу KIE — менять
- * только здесь.
+ * Жёсткий лимит KIE Topaz image-upscale: самая длинная сторона входного
+ * изображения × upscale_factor не должна превышать 20 000 px (правило из
+ * KIE playground; превышение → 422 «The image exceeds the limit after
+ * scaling»). Превентивно валидируем по нему — не предлагаем юзеру фактор,
+ * который заведомо упадёт.
  */
-export const UPSCALE_MAX_OUTPUT_MP = 48;
+export const UPSCALE_MAX_LONGEST_SIDE_PX = 20_000;
+
+/** True если результат `factor` укладывается в лимит Topaz по длинной стороне. */
+export function photoFactorFits(longestSidePx: number, factor: number): boolean {
+  return longestSidePx * factor <= UPSCALE_MAX_LONGEST_SIDE_PX;
+}
 
 /*
  * ── Dynamic output-based pricing ─────────────────────────────────────────────

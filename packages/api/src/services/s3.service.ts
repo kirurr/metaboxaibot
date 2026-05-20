@@ -292,6 +292,10 @@ export interface NormalizedImageUpload {
   key: string;
   /** Megapixels of the normalized image. */
   megapixels: number;
+  /** Width of the normalized image, px. */
+  width: number;
+  /** Height of the normalized image, px. */
+  height: number;
 }
 
 /**
@@ -326,6 +330,8 @@ export async function uploadNormalizedImage(
   return {
     key: uploaded,
     megapixels: (info.width * info.height) / 1_000_000,
+    width: info.width,
+    height: info.height,
   };
 }
 

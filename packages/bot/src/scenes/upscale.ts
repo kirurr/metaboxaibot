@@ -19,7 +19,7 @@ import {
   VIDEO_UPSCALE_MODEL_ID,
   PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
-  UPSCALE_MAX_OUTPUT_MP,
+  photoFactorFits,
   videoResolutionTier,
   videoFpsTier,
   photoEffectiveMpTier,
@@ -57,6 +57,7 @@ const UPSCALE_DUR_SLOT = "dur";
 const UPSCALE_HEIGHT_SLOT = "h";
 const UPSCALE_FPS_SLOT = "fps";
 const UPSCALE_MP_SLOT = "mp";
+const UPSCALE_LONGSIDE_SLOT = "ls";
 
 /** Probed source metadata used for dynamic, output-based pricing. */
 interface UpscaleMeta {
@@ -68,6 +69,8 @@ interface UpscaleMeta {
   fps?: number;
   /** Source image megapixels. */
   inputMp?: number;
+  /** Source image longest side in px (for the Topaz scaling-limit check). */
+  longestSidePx?: number;
 }
 
 /**
@@ -217,14 +220,16 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     return;
   }
   const uploadedKey = normalized.key;
-  const meta: UpscaleMeta = { inputMp: normalized.megapixels };
+  const longestSidePx = Math.max(normalized.width, normalized.height);
+  const meta: UpscaleMeta = { inputMp: normalized.megapixels, longestSidePx };
 
-  // Факторы, чей результат укладывается в потолок Topaz. Если даже минимальный
-  // фактor не влезает — фото слишком крупное; не показываем обречённую
-  // клавиатуру (юзер бы зациклился на единственной кнопке), сразу — понятная
-  // ошибка. Состояние не меняем — следующее (меньшее) фото обработается.
-  const allowedFactors = PHOTO_UPSCALE_FACTORS.filter(
-    (f) => normalized.megapixels * Number(f) ** 2 <= UPSCALE_MAX_OUTPUT_MP,
+  // Факторы, чей результат укладывается в лимит Topaz (длинная сторона ×
+  // фактор ≤ 20000 px). Если даже минимальный фактор не влезает — фото слишком
+  // крупное; не показываем обречённую клавиатуру (юзер бы зациклился на
+  // единственной кнопке), сразу — понятная ошибка. Состояние не меняем —
+  // следующее (меньшее) фото обработается.
+  const allowedFactors = PHOTO_UPSCALE_FACTORS.filter((f) =>
+    photoFactorFits(longestSidePx, Number(f)),
   );
   if (allowedFactors.length === 0) {
     await ctx.reply(ctx.t.errors.upscaleResultTooLarge);
@@ -243,6 +248,13 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     PHOTO_UPSCALE_BUFFER_MODEL_ID,
     UPSCALE_MP_SLOT,
     String(normalized.megapixels),
+    true,
+  );
+  await userStateService.addMediaInput(
+    userId,
+    PHOTO_UPSCALE_BUFFER_MODEL_ID,
+    UPSCALE_LONGSIDE_SLOT,
+    String(longestSidePx),
     true,
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
@@ -420,7 +432,10 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
   // Метаданные исходника берём из буфера (рядом с файлом) — тап по устаревшей
   // клавиатуре тарифицирует ровно по текущему файлу, не по прошлому.
   const meta: UpscaleMeta = isPhoto
-    ? { inputMp: Number(slots[UPSCALE_MP_SLOT]?.[0]) || DEFAULT_PHOTO_MP }
+    ? {
+        inputMp: Number(slots[UPSCALE_MP_SLOT]?.[0]) || DEFAULT_PHOTO_MP,
+        longestSidePx: Number(slots[UPSCALE_LONGSIDE_SLOT]?.[0]) || undefined,
+      }
     : {
         durationSec: Number(slots[UPSCALE_DUR_SLOT]?.[0]),
         heightPx: Number(slots[UPSCALE_HEIGHT_SLOT]?.[0]) || DEFAULT_VIDEO_HEIGHT,
@@ -443,11 +458,11 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
   // фактор, который для текущего файла превышает потолок Topaz. Перепроверяем
   // зажим и, если не проходит, показываем свежую клавиатуру с валидными
   // факторами вместо обречённого сабмита.
-  if (isPhoto) {
-    const inputMp = meta.inputMp ?? DEFAULT_PHOTO_MP;
-    if (inputMp * Number(factor) ** 2 > UPSCALE_MAX_OUTPUT_MP) {
-      const allowed = PHOTO_UPSCALE_FACTORS.filter(
-        (f) => inputMp * Number(f) ** 2 <= UPSCALE_MAX_OUTPUT_MP,
+  if (isPhoto && meta.longestSidePx) {
+    const longestSidePx = meta.longestSidePx;
+    if (!photoFactorFits(longestSidePx, Number(factor))) {
+      const allowed = PHOTO_UPSCALE_FACTORS.filter((f) =>
+        photoFactorFits(longestSidePx, Number(f)),
       );
       if (allowed.length === 0) {
         // Даже минимальный фактор не влезает — фото слишком крупное. НЕ
