@@ -1,11 +1,14 @@
 import clsx from "clsx";
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useListPromptExamples } from "@/hooks/useListPromptExamples";
 import type { PromptExample } from "@/api/promptExamples";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useUIStore } from "@/stores/uiStore";
+import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 
 export default function PromptsPage() {
   const { t } = useTranslation();
@@ -20,6 +23,8 @@ export default function PromptsPage() {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const pushToast = useUIStore((s) => s.pushToast);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -51,6 +56,25 @@ export default function PromptsPage() {
     if (!dialogRef.current) return;
     dialogRef.current.close();
     document.body.style.overflow = "";
+  };
+
+  const handleTry = (ex: PromptExample) => {
+    const section = ex.model ? normalizeSection(ex.section) : null;
+    if (!section || !ex.model) {
+      pushToast({ type: "info", message: "Модель примера недоступна" });
+      return;
+    }
+    const settings =
+      ex.modelSettings && typeof ex.modelSettings === "object"
+        ? (ex.modelSettings as Record<string, unknown>)
+        : undefined;
+    navigateToGenerate(navigate, {
+      section,
+      modelId: ex.model.id,
+      prompt: ex.prompt,
+      settings,
+    });
+    handleDialogClose();
   };
 
   return (
@@ -147,7 +171,13 @@ export default function PromptsPage() {
           >
             {currentPrompt && <MediaCard prompt={currentPrompt} />}
           </div>
-          {currentPrompt && <DialogCard isMobile={isMobile} prompt={currentPrompt} />}
+          {currentPrompt && (
+            <DialogCard
+              isMobile={isMobile}
+              prompt={currentPrompt}
+              onTry={() => handleTry(currentPrompt)}
+            />
+          )}
         </div>
       </dialog>
     </div>
@@ -280,7 +310,15 @@ function PromptCard({
   );
 }
 
-function DialogCard({ prompt, isMobile }: { prompt: PromptExample; isMobile: boolean }) {
+function DialogCard({
+  prompt,
+  isMobile,
+  onTry,
+}: {
+  prompt: PromptExample;
+  isMobile: boolean;
+  onTry: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="shrink-0 md:shrink w-full md:w-1/2 lg:w-1/3 card flex flex-col gap-4 text-white p-4 md:p-8 min-h-0 overflow-hidden">
@@ -292,7 +330,12 @@ function DialogCard({ prompt, isMobile }: { prompt: PromptExample; isMobile: boo
         </div>
       </div>
       <div className="mt-auto">
-        <Button className="mt-4 w-full" size={isMobile ? "md" : "lg"} rightIcon={<ArrowRight />}>
+        <Button
+          className="mt-4 w-full"
+          size={isMobile ? "md" : "lg"}
+          rightIcon={<ArrowRight />}
+          onClick={onTry}
+        >
           {t("prompts.tryPromptAndSettings")}
         </Button>
       </div>

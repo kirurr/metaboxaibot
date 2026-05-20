@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
@@ -38,6 +38,8 @@ import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { useUIStore } from "@/stores/uiStore";
+import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -670,6 +672,86 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     setSlotFiles({});
   }, [modelId]);
 
+  // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
+  // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
+  // на каждый navigate (страж — `location.key`, не булевый флаг — иначе
+  // самопереход /image → /image с новым префилом не сработает).
+  //
+  // Двухстадийное применение нужно из-за того, что reset-effect выше (на смену
+  // modelId) обнуляет settingValues, а defaults-effect ниже (на selectedModel)
+  // заполняет дефолты. Если бы мы сразу setSettingValues(prefill.settings) —
+  // оба effect'а затёрли бы префил. Решение: кладём payload в ref, второй
+  // effect ниже (зависит от selectedModel — выполнится ПОСЛЕ reset и defaults)
+  // применяет ref поверх дефолтов.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pushToast = useUIStore((s) => s.pushToast);
+  const lastConsumedPrefillKey = useRef<string | null>(null);
+  const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  useEffect(() => {
+    const prefill = (location.state as { prefill?: GeneratePrefill } | null)?.prefill;
+    if (!prefill) return;
+    if (lastConsumedPrefillKey.current === location.key) return;
+    if (models.length === 0) return; // ждём загрузку каталога
+
+    const modelExists = models.some((m) => m.id === prefill.modelId);
+    const targetId = modelExists ? prefill.modelId : (families[0]?.id ?? null);
+    if (!targetId) return; // ни запрошенной, ни дефолтной модели нет — выходим
+
+    lastConsumedPrefillKey.current = location.key;
+
+    // settings оставляем только если модель найдена — чужие ключи для дефолтной
+    // модели смысла не имеют (юзер увидит, что чипы не реагируют на префил).
+    const resolved: GeneratePrefill = {
+      section: prefill.section,
+      modelId: targetId,
+      prompt: prefill.prompt,
+      settings: modelExists ? prefill.settings : undefined,
+    };
+
+    if (modelId === targetId) {
+      // Модель уже выбрана — никаких reset/defaults effect'ов не будет.
+      // Применяем напрямую, без ref'а.
+      setPrompt(resolved.prompt ?? "");
+      if (resolved.settings) {
+        setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
+      }
+    } else {
+      // Отложенное применение — после reset и defaults effect'ов.
+      pendingPrefillRef.current = resolved;
+      setModelId(targetId);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("model", targetId);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+
+    if (!modelExists) {
+      pushToast({
+        type: "info",
+        message: "Модель из примера больше недоступна — открыли с дефолтной",
+      });
+    }
+
+    // Чистим location.state — чтобы F5 / back-navigation не повторили префил.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [
+    location.key,
+    location.state,
+    location.pathname,
+    location.search,
+    models,
+    families,
+    modelId,
+    navigate,
+    setSearchParams,
+    pushToast,
+  ]);
+
   const activeMode = useMemo(
     () => resolveActiveMode(selectedModel?.modes ?? null, modeId),
     [selectedModel, modeId],
@@ -699,6 +781,21 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       }
       return next;
     });
+  }, [selectedModel]);
+
+  // Stage 2 префила — выполняется ПОСЛЕ defaults-effect выше (порядок useEffect
+  // соответствует порядку объявления), поэтому накладываем prefill.settings
+  // поверх свежевыставленных дефолтов.
+  useEffect(() => {
+    const pending = pendingPrefillRef.current;
+    if (!pending) return;
+    if (!selectedModel || selectedModel.id !== pending.modelId) return;
+    pendingPrefillRef.current = null;
+    setPrompt(pending.prompt ?? "");
+    if (pending.settings) {
+      const pendingSettings = pending.settings;
+      setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
+    }
   }, [selectedModel]);
 
   // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
