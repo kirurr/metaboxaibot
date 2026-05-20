@@ -376,86 +376,101 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         // Линковка не удалась — не показываем welcome-пакет поверх ошибки.
         return;
       } else {
-        // Проверяем конфликт: если на AI Box юзере уже прописан ДРУГОЙ metaboxUserId
+        // Раньше здесь была проверка `ctx.user.metaboxUserId !== metaboxUserId`
+        // с сообщением «уже привязан к другому Metabox-аккаунту». После
+        // stub-fix (registerBotUser теперь пишет metaboxUserId даже для
+        // stub'ов tg_<id>@aibox.meta-box.ru) проверка стала false-positive:
+        // у юзера на ctx.user сидит stub.id, а в state приходит real R.id —
+        // штатный stub→real upgrade, который мы как раз и должны провести.
+        // Метабокс-сторона `linkTelegramFromWeb` уже корректно различает:
+        //   - stub с этим tgId  → merge stub в R
+        //   - real (другой) с этим tgId → 409 TELEGRAM_ALREADY_LINKED
+        //   - R уже имеет другой tgId   → 409 TELEGRAM_MISMATCH
+        // Если ctx.user.metaboxUserId был real (а не stub) и теперь приходит
+        // другой R — он у линковщика проявится как TELEGRAM_ALREADY_LINKED
+        // (т.к. tgId уже занят прежним real-аккаунтом).
         if (ctx.user.metaboxUserId && ctx.user.metaboxUserId !== metaboxUserId) {
-          await ctx.reply(
-            `⚠️ Этот Telegram уже привязан к другому аккаунту на Metabox.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`,
+          logger.info(
+            {
+              userId: ctx.user.id.toString(),
+              currentMetaboxUserId: ctx.user.metaboxUserId,
+              incomingMetaboxUserId: metaboxUserId,
+            },
+            "[start linkweb] metaboxUserId drift — likely stub→real upgrade, deferring to linkTelegramFromWeb",
           );
-          // Линковка не состоялась — не перекрываем уведомление welcome'ом.
-          return;
-        } else {
-          // Metabox-side merge: на metabox-стороне может уже существовать stub
-          // с этим telegramId (создан при первом `/start` через registerBotUser).
-          // Без этого вызова мы свяжем веб-аккаунт R с telegramId только на
-          // нашей стороне, но metabox-сторона будет жить с двумя User'ами
-          // (stub `tg_<id>@…` со старыми покупками и real R) — последующие
-          // bot-invoices пойдут на stub, новые подписки на R, всё развалится.
-          // Эндпоинт ставит R.telegramId, и если есть stub — мержит его в R.
-          let metaboxMerged = false;
-          try {
-            const linkResult = await linkTelegramFromWeb({
-              metaboxUserId,
-              telegramId: ctx.user.telegramId!,
-              telegramUsername: ctx.from?.username ?? null,
-              aiboxUserId: ctx.user.id,
-            });
-            metaboxMerged = !!linkResult.mergedFrom;
-          } catch (linkErr) {
-            if (linkErr instanceof MetaboxApiError && linkErr.status === 409) {
-              const code = linkErr.code;
-              let msg = `⚠️ Не удалось привязать Telegram к аккаунту Metabox.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
-              if (code === "TELEGRAM_MISMATCH") {
-                msg = `⚠️ Ваш Metabox-аккаунт уже привязан к другому Telegram.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
-              } else if (code === "TELEGRAM_ALREADY_LINKED") {
-                msg = `⚠️ Этот Telegram уже привязан к другому Metabox-аккаунту.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
-              }
-              await ctx.reply(msg);
-              return;
-            }
-            logger.error(
-              { err: linkErr, userId: ctx.user.id.toString(), metaboxUserId },
-              "[start linkweb] linkTelegramFromWeb failed",
-            );
-            await ctx.reply(
-              `❌ Не удалось привязать аккаунт. Попробуйте ещё раз через минуту, либо напишите в поддержку: @${config.supportTg}`,
-            );
-            return;
-          }
-
-          // AI Box-side merge: если ранее web-логин создал web-only AI Box
-          // User (через ensureAibUserForMetabox), сливаем его в ctx.user,
-          // чтобы не получить дубль metaboxUserId на нашей стороне.
-          try {
-            await mergeWebUserIfExists(ctx.user.id, metaboxUserId);
-          } catch (mergeErr) {
-            logger.error(
-              { err: mergeErr, userId: ctx.user.id.toString(), metaboxUserId },
-              "[start linkweb] merge with web-only user failed",
-            );
-            await ctx.reply(
-              `❌ Не удалось объединить веб-аккаунт с Telegram. Напишите в поддержку: @${config.supportTg}`,
-            );
-            return;
-          }
-          await db.user.update({
-            where: { id: ctx.user.id },
-            data: { metaboxUserId },
-          });
-          await markLinkTelegramLinked(
-            state,
-            ctx.user.telegramId!.toString(),
-            ctx.from?.username ?? null,
-          );
-          await ctx.reply(
-            metaboxMerged
-              ? "✅ Аккаунт привязан, старые покупки бота объединены с веб-аккаунтом. Возвращайтесь на ai.metabox.global — нейросети уже доступны."
-              : "✅ Аккаунт привязан. Возвращайтесь на ai.metabox.global — нейросети уже доступны.",
-          );
-          // Синхронизируем токены/подписки из metabox
-          void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
-            logger.error({ err }, "[start linkweb] grant sync failed");
-          });
         }
+
+        // Metabox-side merge: на metabox-стороне может уже существовать stub
+        // с этим telegramId (создан при первом `/start` через registerBotUser).
+        // Без этого вызова мы свяжем веб-аккаунт R с telegramId только на
+        // нашей стороне, но metabox-сторона будет жить с двумя User'ами
+        // (stub `tg_<id>@…` со старыми покупками и real R) — последующие
+        // bot-invoices пойдут на stub, новые подписки на R, всё развалится.
+        // Эндпоинт ставит R.telegramId, и если есть stub — мержит его в R.
+        let metaboxMerged = false;
+        try {
+          const linkResult = await linkTelegramFromWeb({
+            metaboxUserId,
+            telegramId: ctx.user.telegramId!,
+            telegramUsername: ctx.from?.username ?? null,
+            aiboxUserId: ctx.user.id,
+          });
+          metaboxMerged = !!linkResult.mergedFrom;
+        } catch (linkErr) {
+          if (linkErr instanceof MetaboxApiError && linkErr.status === 409) {
+            const code = linkErr.code;
+            let msg = `⚠️ Не удалось привязать Telegram к аккаунту Metabox.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
+            if (code === "TELEGRAM_MISMATCH") {
+              msg = `⚠️ Ваш Metabox-аккаунт уже привязан к другому Telegram.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
+            } else if (code === "TELEGRAM_ALREADY_LINKED") {
+              msg = `⚠️ Этот Telegram уже привязан к другому Metabox-аккаунту.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
+            }
+            await ctx.reply(msg);
+            return;
+          }
+          logger.error(
+            { err: linkErr, userId: ctx.user.id.toString(), metaboxUserId },
+            "[start linkweb] linkTelegramFromWeb failed",
+          );
+          await ctx.reply(
+            `❌ Не удалось привязать аккаунт. Попробуйте ещё раз через минуту, либо напишите в поддержку: @${config.supportTg}`,
+          );
+          return;
+        }
+
+        // AI Box-side merge: если ранее web-логин создал web-only AI Box
+        // User (через ensureAibUserForMetabox), сливаем его в ctx.user,
+        // чтобы не получить дубль metaboxUserId на нашей стороне.
+        try {
+          await mergeWebUserIfExists(ctx.user.id, metaboxUserId);
+        } catch (mergeErr) {
+          logger.error(
+            { err: mergeErr, userId: ctx.user.id.toString(), metaboxUserId },
+            "[start linkweb] merge with web-only user failed",
+          );
+          await ctx.reply(
+            `❌ Не удалось объединить веб-аккаунт с Telegram. Напишите в поддержку: @${config.supportTg}`,
+          );
+          return;
+        }
+        await db.user.update({
+          where: { id: ctx.user.id },
+          data: { metaboxUserId },
+        });
+        await markLinkTelegramLinked(
+          state,
+          ctx.user.telegramId!.toString(),
+          ctx.from?.username ?? null,
+        );
+        await ctx.reply(
+          metaboxMerged
+            ? "✅ Аккаунт привязан, старые покупки бота объединены с веб-аккаунтом. Возвращайтесь на ai.metabox.global — нейросети уже доступны."
+            : "✅ Аккаунт привязан. Возвращайтесь на ai.metabox.global — нейросети уже доступны.",
+        );
+        // Синхронизируем токены/подписки из metabox
+        void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
+          logger.error({ err }, "[start linkweb] grant sync failed");
+        });
       }
     } catch (err) {
       logger.error({ err, state }, "[start linkweb] failed");
