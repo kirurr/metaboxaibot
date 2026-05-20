@@ -56,16 +56,14 @@ export default {
       "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
     faceSwapWelcome:
       "Put your face onto any reference photo. Pose, framing, outfit and background stay from the reference — only the face changes. The aspect ratio of the result matches the reference.",
-    photoUpscale: "🔼 Photo upscale",
+    photoUpscale: "📷 Photo upscale",
     videoUpscale: "🎬 Video upscale",
     photoUpscaleWelcome:
       "Increase the resolution and sharpness of a photo with Topaz AI. Great for old, blurry or low-res shots.",
     videoUpscaleWelcome:
       "Increase the resolution and sharpness of a video with Topaz AI. Great for old, blurry or low-quality clips.",
-    photoUpscaleStep:
-      "🔼 <b>Photo upscale</b>\n\nSend the <b>photo</b> you want to enhance. Maximum is 10 MB.",
-    videoUpscaleStep:
-      "🎬 <b>Video upscale</b>\n\nSend the <b>video</b> you want to enhance. Maximum is 20 MB.",
+    photoUpscaleStep: "Send the <b>photo</b> you want to enhance. Maximum is 10 MB.",
+    videoUpscaleStep: "Send the <b>video</b> you want to enhance. Maximum is 20 MB.",
     upscaleChooseFactor: "Choose the upscale factor 👇",
     upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
     upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
@@ -399,6 +397,8 @@ export default {
       "🧠 {modelName} only had room to think — no space left for the actual answer. Reasoning is above ☝ Try turning off «Extended thinking», shortening the prompt, or picking another model. Tokens for this request were not charged.",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
+    upscaleResultTooLarge:
+      "📷 This photo's resolution is already too high to enlarge further — the result would exceed what the AI model can process. Please send a lower-resolution photo. Tokens for this request were not charged.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",
     soulMissingAvatar:
       "⚠️ To generate with Higgsfield Soul, select your character in the Management menu.",

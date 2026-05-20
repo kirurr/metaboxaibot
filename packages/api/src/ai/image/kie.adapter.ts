@@ -250,11 +250,24 @@ export class KieImageAdapter implements ImageAdapter {
       // понятный мессадж со списком поддерживаемых форматов вместо generic
       // «generationFailed». notifyOps + dedup: триггер означает, что
       // fileName-fix что-то пропустил — алёртим оператора, но не спамим.
-      if (/file type not supported|invalid image format|unsupported image format/i.test(msg)) {
+      if (
+        /file type not supported|invalid image format|unsupported image format|image format error/i.test(
+          msg,
+        )
+      ) {
         throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
           key: "chatInvalidImage",
           notifyOps: true,
           opsAlertDedupKey: `kie-image-unsupported-format-${this.modelId}`,
+        });
+      }
+      // Topaz upscale: результат после увеличения превышает лимит провайдера
+      // («The image exceeds the limit after scaling»). Только для image-upscale
+      // и только по точной фразе — submit-блок общий для всех KIE image-моделей,
+      // широкий `exceeds.*limit` ложно сматчил бы чужие лимиты (nano-banana и т.п.).
+      if (this.modelId === "image-upscale" && /exceeds the limit after scaling/i.test(msg)) {
+        throw new UserFacingError(`KIE image submit failed: ${data.code} — ${msg}`, {
+          key: "upscaleResultTooLarge",
         });
       }
       // 402 «Credits insufficient ... Your current balance isn't enough» — наш
@@ -313,6 +326,11 @@ export class KieImageAdapter implements ImageAdapter {
         return oneLine.length > 400 ? `${oneLine.slice(0, 400)}…` : oneLine;
       })();
       const technicalMessage = `KIE ${this.modelId} generation failed: ${failCode ?? ""} ${sanitizedFailMsg}`;
+      // Topaz upscale: результат превышает лимит провайдера. KIE отдаёт это
+      // и на submit, и (для async-задач) на poll — покрываем обе стадии.
+      if (this.modelId === "image-upscale" && /exceeds the limit after scaling/i.test(rawFailMsg)) {
+        throw new UserFacingError(technicalMessage, { key: "upscaleResultTooLarge" });
+      }
       // KIE-side инфра-ошибка: 422 + "playground failed"/"task id is blank" →
       // их backend в трауре, но мы передали валидный taskId. Бросаем plain Error
       // (НЕ UserFacingError) чтобы BullMQ ретрайнул и на последней попытке

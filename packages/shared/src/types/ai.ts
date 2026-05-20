@@ -334,6 +334,13 @@ export interface AIModel {
    */
   hiddenFromCarousel?: boolean;
   /**
+   * Отдавать результат пользователю файлом (`sendDocument`), а не фото.
+   * Нужно для апскейла: увеличенное изображение превышает лимиты Telegram
+   * `sendPhoto` по размерам (PHOTO_INVALID_DIMENSIONS), а документ сохраняет
+   * полное разрешение — что и требуется от апскейлера.
+   */
+  deliverAsDocument?: boolean;
+  /**
    * Сколько изображений модель отдаёт за один API-call (native batch). Если 1 (или
    * не задано) — модель — single-only и может получить virtual batch через
    * `maxVirtualBatch`. Если >1 — провайдер сам поддерживает batch (KIE

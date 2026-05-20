@@ -44,14 +44,20 @@ export class ReplicateVideoAdapter implements VideoAdapter {
       const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
       if (!videoUrl) throw new Error("Replicate video-upscale: source video is required");
       // Replicate не умеет фетчить S3/Telegram presigned URL напрямую — качаем
-      // видео сами и отдаём Blob (SDK v1.x грузит его в Replicate files API).
-      let videoParam: Blob | string = videoUrl;
+      // видео сами и отдаём File (SDK v1.x грузит его в Replicate files API).
+      // Именно File, а не Blob: Topaz определяет контейнер по расширению имени,
+      // голый Blob без имени → ошибка "`source.container` is required".
+      let videoParam: File | string = videoUrl;
       const vidRes = await fetch(videoUrl);
       if (vidRes.ok) {
-        const vidBuf = await vidRes.arrayBuffer();
-        videoParam = new Blob([vidBuf], {
-          type: vidRes.headers.get("content-type") ?? "video/mp4",
-        });
+        const vidBuf = Buffer.from(await vidRes.arrayBuffer());
+        const contentType = vidRes.headers.get("content-type") ?? "video/mp4";
+        const ext = contentType.includes("matroska")
+          ? "mkv"
+          : contentType.includes("quicktime")
+            ? "mov"
+            : "mp4";
+        videoParam = new File([vidBuf], `source.${ext}`, { type: contentType });
       }
       const targetResolution = ["720p", "1080p", "4k"].includes(String(ms.target_resolution))
         ? String(ms.target_resolution)
