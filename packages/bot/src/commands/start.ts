@@ -618,33 +618,47 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           const previousMetaboxUserId = ctx.user!.metaboxUserId;
           const driftDetected = !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
 
-          // Merge: если metabox вернул userId (stub или real) и у нас уже есть
-          // другой AI Box User с этим metaboxUserId (web-only, созданный через
-          // ensureAibUserForMetabox при web-login), сливаем его в ctx.user.
-          // Раньше merge запускался только для real (`!result.isStub`), но
-          // теперь metaboxUserId пишется и для stub'ов (см. ниже) — поэтому
-          // merge нужен в обоих случаях.
-          try {
-            await mergeWebUserIfExists(ctx.user!.id, result.userId);
-          } catch (mergeErr) {
-            logger.error(
-              { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
-              "[start registerBotUser] merge with web-only user failed",
-            );
-            return;
+          // Merge web-only AI Box User → ctx.user — только для REAL аккаунтов.
+          // Для stub'ов merge не нужен: web-flow привязывается ТОЛЬКО к
+          // real-юзерам metabox (`ensureAibUserForMetabox` зовётся после
+          // `webValidateCredentials`, который требует email-verified real),
+          // поэтому AI Box User'а с `metaboxUserId === stub.id` не существует
+          // и `mergeWebUserIfExists` всё равно сделал бы no-op.
+          if (!result.isStub) {
+            try {
+              await mergeWebUserIfExists(ctx.user!.id, result.userId);
+            } catch (mergeErr) {
+              logger.error(
+                { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
+                "[start registerBotUser] merge with web-only user failed",
+              );
+              return;
+            }
           }
 
-          // metaboxUserId пишем БЕЗ оговорки на isStub. Stub — это валидный
-          // metabox-аккаунт (просто с auto-email `tg_<id>@aibox.meta-box.ru`),
-          // и двусторонняя связь (registerBotUser body содержит aiboxUserId,
-          // метабокс пишет назад на User.aiboxUserId) теперь работает уже для
-          // stub'ов. Это даёт админ-grant-flow возможность пушить токены
-          // даже до момента upgrade'а stub'а в real (через mini-app/web).
+          // `metaboxUserId` пишем ТОЛЬКО для real-аккаунтов (`!isStub`).
+          //
+          // Семантика поля: «AI Box User привязан к РЕАЛЬНОМУ Metabox-аккаунту
+          // (real email, может покупать тарифы, делать вывод, smотреть обучение)».
+          // Stub'ы (auto-email `tg_<id>@aibox.meta-box.ru`) этому не отвечают —
+          // они technical placeholder'ы, юзер про них не знает и через
+          // mini-app/web их upgrad'ит до real (тогда мы тут запишем metaboxUserId).
+          //
+          // ВАЖНО: двусторонняя связь для admin-grants РАБОТАЕТ И ДЛЯ STUB'ОВ —
+          // независимо от того, пишем ли мы metaboxUserId локально. Связь
+          // материализуется на metabox-стороне: `registerBotUser` body содержит
+          // `aiboxUserId`, и метабокс кэширует его в `User.aiboxUserId` (в т.ч.
+          // на stub'е). Так `process-subscription-payment` находит identity
+          // через `aiboxUserId` и пушит токены сразу же.
+          //
+          // metaboxReferralCode тоже пишется для обоих — оно не семантический
+          // маркер «real», а просто кешированный код реферера, который у stub'ов
+          // тоже валиден (на случай если кто-то будет шарить /start ref_…).
           await db.user.update({
             where: { id: ctx.user!.id },
             data: {
               metaboxReferralCode: result.referralCode,
-              metaboxUserId: result.userId,
+              ...(!result.isStub ? { metaboxUserId: result.userId } : {}),
             },
           });
 
@@ -662,13 +676,21 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           }
 
           if (!result.isStub) {
-            // Notify user about auto-linking
-            const mentorInfo = result.mentor
-              ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
-              : "";
-            await ctx
-              .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
-              .catch(() => {});
+            // Notify user about auto-linking — но НЕ при linkweb_ flow:
+            // там мы уже отправили «✅ Аккаунт привязан, старые покупки бота
+            // объединены с веб-аккаунтом…», и второе сообщение «Мы нашли ваш
+            // аккаунт на Metabox» было бы дубликатом. linkweb_-flow всегда
+            // приходит к этому состоянию (registerBotUser возвращает real
+            // R.id, потому что linkTelegramFromWeb уже поставил R.telegramId).
+            const isLinkwebFlow = param?.startsWith("linkweb_") === true;
+            if (!isLinkwebFlow) {
+              const mentorInfo = result.mentor
+                ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
+                : "";
+              await ctx
+                .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
+                .catch(() => {});
+            }
 
             // Sync subscription + pending token grants from Metabox
             void syncMetaboxGrants(ctx.user!.id, telegramId).catch((err) => {
