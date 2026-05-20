@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import clsx from "clsx";
@@ -39,6 +39,9 @@ export default function Chat() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { id: routeId } = useParams<{ id: string }>();
+  const activeId = routeId ?? null;
   const prefill = (location.state as { prefill?: string } | null)?.prefill ?? "";
 
   // Стартовые промпты — массив из 4 ключей, чтобы локализовалось.
@@ -78,9 +81,8 @@ export default function Chat() {
   const setUser = useAuthStore((s) => s.setUser);
   const currentUser = useAuthStore((s) => s.user);
 
-  // null = «черновик», ещё не созданный на бэке. После первой отправки
-  // вызовется `createDialog` и activeId станет реальным.
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // activeId = `useParams().id` (см. выше). null = «черновик», ещё не созданный
+  // на бэке. После первой отправки send() сам делает navigate(`/chat/<id>`).
   const [messages, setMessages] = useState<Msg[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [draft, setDraft] = useState(prefill);
@@ -187,8 +189,8 @@ export default function Chat() {
         if (cancelled) return;
         // 404 — диалог удалён, сбрасываем активный.
         if (err.status === 404) {
-          setActiveId(null);
           removeFromStore(activeId);
+          navigate("/chat", { replace: true });
         }
       })
       .finally(() => {
@@ -197,7 +199,7 @@ export default function Chat() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, removeFromStore]);
+  }, [activeId, removeFromStore, navigate]);
 
   // При смене активного диалога / после reload — подтягиваем модель из самого
   // диалога. DialogDto.modelId — single source of truth (бэкенд берёт её при
@@ -330,14 +332,14 @@ export default function Chat() {
   // первой отправке (см. send()).
   const newChat = useCallback(() => {
     abortRef.current?.abort();
-    setActiveId(null);
+    navigate("/chat");
     setMessages([]);
     setDraft("");
     setSendError(null);
     setPendingAttachments([]);
     setSideOpen(false);
     setFocusKey((k) => k + 1);
-  }, []);
+  }, [navigate]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -380,7 +382,9 @@ export default function Chat() {
         // Помечаем как «уже прогретый», иначе message-loader-effect сбегает за
         // getMessages и затирает оптимистично-добавленные ниже messages.
         loadedRef.current = created.id;
-        setActiveId(created.id);
+        // replace: чёрновик и реальный диалог — одна логическая страница,
+        // back-button не должен возвращать на пустой draft.
+        navigate(`/chat/${created.id}`, { replace: true });
       } catch (err) {
         const e = err as ApiError;
         setSending(false);
@@ -505,6 +509,7 @@ export default function Chat() {
     prependDialog,
     bumpInStore,
     setUser,
+    navigate,
   ]);
 
   const handleRename = useCallback(
@@ -536,7 +541,7 @@ export default function Chat() {
         await dialogsApi.deleteDialog(id);
         removeFromStore(id);
         if (activeId === id) {
-          setActiveId(null);
+          navigate("/chat");
           setMessages([]);
         }
       } catch (err) {
@@ -546,13 +551,16 @@ export default function Chat() {
         setMenuForId(null);
       }
     },
-    [activeId, t, removeFromStore],
+    [activeId, t, removeFromStore, navigate],
   );
 
-  const onSelectDialog = useCallback((id: string) => {
-    setActiveId(id);
-    setSideOpen(false);
-  }, []);
+  const onSelectDialog = useCallback(
+    (id: string) => {
+      navigate(`/chat/${id}`);
+      setSideOpen(false);
+    },
+    [navigate],
+  );
 
   const onCloseMobileDrawer = useCallback(() => setSideOpen(false), []);
   const onCollapseDesktop = useCallback(() => setSideCollapsed(true), []);

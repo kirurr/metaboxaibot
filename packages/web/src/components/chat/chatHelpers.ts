@@ -57,6 +57,17 @@ export function messageDtoToMsg(m: MessageDto): Msg {
   };
 }
 
+/**
+ * Форматирует число токенов как `1.2K` / `128K` / `850`. Для значений ≥10K
+ * округляем до целого (`128K`, не `128.0K`); для 1K..10K оставляем 1 знак
+ * после запятой (`1.2K`); ниже — как есть.
+ */
+export function formatTokensK(n: number): string {
+  if (n < 1000) return String(n);
+  const v = n / 1000;
+  return v >= 10 ? `${Math.round(v)}K` : `${v.toFixed(1)}K`;
+}
+
 export function formatBytes(bytes: number | null | undefined, t: (k: string) => string): string {
   if (!bytes || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} ${t("chat.byteShort")}`;
