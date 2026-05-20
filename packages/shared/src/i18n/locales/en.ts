@@ -54,6 +54,23 @@ export default {
       "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
     faceSwapWelcome:
       "Put your face onto any reference photo. Pose, framing, outfit and background stay from the reference — only the face changes. The aspect ratio of the result matches the reference.",
+    photoUpscale: "🔼 Photo upscale",
+    videoUpscale: "🎬 Video upscale",
+    photoUpscaleWelcome:
+      "Increase the resolution and sharpness of a photo with Topaz AI. Great for old, blurry or low-res shots.",
+    videoUpscaleWelcome:
+      "Increase the resolution and sharpness of a video with Topaz AI. Great for old, blurry or low-quality clips.",
+    photoUpscaleStep:
+      "🔼 <b>Photo upscale</b>\n\nSend the <b>photo</b> you want to enhance. Maximum is 10 MB.",
+    videoUpscaleStep:
+      "🎬 <b>Video upscale</b>\n\nSend the <b>video</b> you want to enhance. Maximum is 20 MB.",
+    upscaleChooseFactor: "Choose the upscale factor 👇",
+    upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
+    upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
+    upscalePhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",
+    upscaleFileTooLarge: "📦 File is too large. Maximum is 20 MB.",
+    upscaleVideoUnreadable: "🎬 Couldn't read the video. Please send an MP4 file.",
+    upscaleGenerating: "✨ Starting upscale...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

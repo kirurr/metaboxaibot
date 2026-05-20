@@ -152,7 +152,18 @@ export class KieVideoAdapter implements VideoAdapter {
 
     let model: string;
 
-    if (klingMotionMode) {
+    if (this.modelId === "video-upscale") {
+      // ── KIE Topaz Video Upscaler ───────────────────────────────────────────
+      // Доступна только через готовый сценарий «Апскейл видео». Промпта нет —
+      // upscale_factor приходит из modelSettings (выбор юзера inline-кнопками).
+      model = "topaz/video-upscale";
+      const srcVideo = mi.motion_video?.[0] ?? input.imageUrl;
+      if (!srcVideo) throw new Error("KIE video-upscale: source video is required");
+      const uploaded = await uploadFileUrl(this.apiKey, srcVideo);
+      delete inputPayload.prompt;
+      inputPayload.video_url = uploaded;
+      inputPayload.upscale_factor = String(ms.upscale_factor ?? "2");
+    } else if (klingMotionMode) {
       // ── Kling 3.0 motion-control ──────────────────────────────────────────
       model = "kling-3.0/motion-control";
 

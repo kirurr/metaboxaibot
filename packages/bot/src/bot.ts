@@ -19,6 +19,13 @@ import {
   handleScenarios,
 } from "./commands/menu.js";
 import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
+import {
+  handlePhotoUpscaleEnter,
+  handlePhotoUpscalePhoto,
+  handleVideoUpscaleEnter,
+  handleVideoUpscaleVideo,
+  handleUpscaleFactorSelect,
+} from "./scenes/upscale.js";
 import { handleNoTool } from "./handlers/no-tool.handler.js";
 import {
   handleNewGptDialog,
@@ -315,6 +322,8 @@ export function createBot(token: string): Bot<BotContext> {
   bot.callbackQuery(/^orig_/, handleSendOriginal);
 
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
+  bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
+
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
 
   // ── Higgsfield Soul character creation ──────────────────────────────────
@@ -372,6 +381,8 @@ export function createBot(token: string): Bot<BotContext> {
       [t.menu.video]: () => handleVideo(ctx),
       [t.menu.scenarios]: () => handleScenarios(ctx),
       [t.scenarios.faceSwap]: () => handleFaceSwapEnter(ctx),
+      [t.scenarios.photoUpscale]: () => handlePhotoUpscaleEnter(ctx),
+      [t.scenarios.videoUpscale]: () => handleVideoUpscaleEnter(ctx),
       [t.scenarios.backToMain]: () => handleMenu(ctx),
       [t.common.backToMain]: () => handleMenu(ctx),
       [t.gpt.backToMain]: () => handleMenu(ctx),
@@ -479,6 +490,20 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
       if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
+      return;
+    }
+    if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handlePhotoUpscalePhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handlePhotoUpscalePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
+      return;
+    }
+    if (state?.state === "VIDEO_UPSCALE_AWAIT_VIDEO") {
+      if (ctx.message?.video) return handleVideoUpscaleVideo(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("video/"))
+        return handleVideoUpscaleVideo(ctx);
+      await ctx.reply(ctx.t.scenarios.upscaleNotVideo);
       return;
     }
     if (state?.state === "AUDIO_ACTIVE") {

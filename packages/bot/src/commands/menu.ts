@@ -7,6 +7,8 @@ import {
   AI_MODELS,
   buildDialogHint,
   FACE_SWAP_BUFFER_MODEL_ID,
+  PHOTO_UPSCALE_BUFFER_MODEL_ID,
+  VIDEO_UPSCALE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 import type { Section } from "@metabox/shared";
 import { buildDesignModelKeyboard } from "../scenes/design.js";
@@ -28,11 +30,17 @@ async function activeDialogInfo(
 export async function handleMenu(ctx: BotContext): Promise<void> {
   if (ctx.user) {
     await userStateService.setState(ctx.user.id, "MAIN_MENU", null);
-    // Гасим висящий face-swap буфер на случай, если юзер выпрыгнул из flow на
+    // Гасим висящие буферы сценариев на случай, если юзер выпрыгнул из flow на
     // середине шага: не оставляем S3-ключи мёртвыми в user-state.
-    await userStateService
-      .clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID)
-      .catch(() => void 0);
+    await Promise.all([
+      userStateService.clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID).catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, PHOTO_UPSCALE_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, VIDEO_UPSCALE_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+    ]);
     clearActiveSlot(ctx.user.id);
   }
   await ctx.reply(ctx.t.start.mainMenuTitle, {
@@ -46,7 +54,11 @@ export async function handleScenarios(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "SCENARIOS_SECTION", null);
   await ctx.reply(ctx.t.scenarios.sectionTitle, {
     reply_markup: {
-      keyboard: [[{ text: ctx.t.scenarios.faceSwap }], [{ text: ctx.t.scenarios.backToMain }]],
+      keyboard: [
+        [{ text: ctx.t.scenarios.faceSwap }],
+        [{ text: ctx.t.scenarios.photoUpscale }, { text: ctx.t.scenarios.videoUpscale }],
+        [{ text: ctx.t.scenarios.backToMain }],
+      ],
       resize_keyboard: true,
       is_persistent: true,
     },

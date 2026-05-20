@@ -631,6 +631,49 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     mediaInputs: KLING_MOTION_MEDIA_INPUTS,
     settings: [...KLING_MOTION_SETTINGS],
   },
+  // KIE Topaz Video Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
+  // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
+  // Цена — по секундам исходного видео, ставка зависит от `upscale_factor`.
+  "video-upscale": {
+    id: "video-upscale",
+    name: "🎬 Апскейл видео",
+    description: "Увеличивает разрешение и чёткость видео с помощью Topaz AI.",
+    section: "video",
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.04, // base = upscale_factor "2"
+    costVariants: {
+      settingKey: "upscale_factor",
+      map: {
+        "2": { costUsdPerSecond: 0.04 },
+        "4": { costUsdPerSecond: 0.07 },
+      },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: [{ slotKey: "motion_video", mode: "motion_video", labelKey: "motionVideo" }],
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту видео. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+        ],
+        default: "2",
+      },
+    ],
+  },
   seedance: {
     id: "seedance",
     name: "💃 Seedance 1.5 Pro (ByteDance)",

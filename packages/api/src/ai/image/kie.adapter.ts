@@ -156,6 +156,20 @@ export class KieImageAdapter implements ImageAdapter {
       }
 
       body = { model: nanoBananaModel, input: inputPayload };
+    } else if (this.modelId === "image-upscale") {
+      // ── KIE Topaz Image Upscaler ───────────────────────────────────────────
+      // Доступна только через готовый сценарий «Апскейл фото». Промпта нет —
+      // upscale_factor приходит из modelSettings (выбор юзера inline-кнопками).
+      const src = imageUrls[0];
+      if (!src) throw new Error("KIE image-upscale: source image is required");
+      const uploaded = await uploadFileUrl(this.apiKey, src, buildKieUploadName(src));
+      body = {
+        model: "topaz/image-upscale",
+        input: {
+          image_url: uploaded,
+          upscale_factor: String(ms.upscale_factor ?? "2"),
+        },
+      };
     } else if (this.modelId === "gpt-image-2") {
       // ── GPT Image 2 via KIE: t2i / i2i via separate endpoints ──────────────
       // Временно проксируем gpt-image-2 через KIE, чтобы не зависеть от прямого

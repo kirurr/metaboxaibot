@@ -352,6 +352,46 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
+  // KIE Topaz Image Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
+  // фото» — hiddenFromCarousel убирает её из карусели выбора моделей Дизайна.
+  // Цена зависит от выбранной степени увеличения (`upscale_factor`).
+  "image-upscale": {
+    id: "image-upscale",
+    name: "🔼 Апскейл фото",
+    description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
+    section: "design",
+    provider: "kie",
+    costUsdPerRequest: 0.05, // base = upscale_factor "2"
+    costVariants: {
+      settingKey: "upscale_factor",
+      map: { "2": 0.05, "4": 0.1, "8": 0.2 },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+    settings: [
+      {
+        key: "upscale_factor",
+        label: "Степень увеличения",
+        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2", label: "×2" },
+          { value: "4", label: "×4" },
+          { value: "8", label: "×8" },
+        ],
+        default: "2",
+      },
+    ],
+  },
   "nano-banana-pro": {
     id: "nano-banana-pro",
     name: "🍌 Nano Banana PRO",
