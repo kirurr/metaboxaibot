@@ -12,7 +12,10 @@ import {
   FACE_SWAP_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 
-const FACE_SWAP_MODEL_ID = "nano-banana-pro";
+// Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
+// Прошлый вариант — nano-banana-pro с текстовым промптом — закомментирован
+// ниже целиком на случай отката.
+const FACE_SWAP_MODEL_ID = "face-swap-classic";
 const FACE_SWAP_SLOT_REFERENCE = "reference";
 const FACE_SWAP_SLOT_FACE = "face";
 
@@ -27,12 +30,15 @@ const TG_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
  */
 const processedMediaGroups = new Set<string>();
 
-/**
+/*
+ * ── ОТКЛЮЧЕНО ──────────────────────────────────────────────────────────────
+ * Прошлый механизм: nano-banana-pro (KIE) + текстовый промпт. Заменён на
+ * специализированную нейросеть Replicate cdingram/face-swap (без промпта).
+ * Промпт сохранён в комментарии на случай отката к prompt-driven варианту.
+ *
  * Hardcoded prompt for face swap. IMAGE_1 = reference photo (scene / pose /
- * lighting), IMAGE_2 = user's face (identity only). The slot order matters:
- * `mediaInputs.edit[0]` is the reference, `edit[1]` is the face — see the
- * submit call below. Kept in English to match other hardcoded provider prompts.
- */
+ * lighting), IMAGE_2 = user's face (identity only).
+ *
 const FACE_SWAP_PROMPT = `TASK: Surgical face swap. Replace ONLY the facial features of the person in IMAGE_1 (scene) with the face identity from IMAGE_2 (reference). This is NOT a re-imagining — 95% of the output must be pixel-identical to IMAGE_1.
 
 KEEP 100% IDENTICAL FROM IMAGE_1:
@@ -107,6 +113,8 @@ STRICTLY AVOID:
 - Do not produce a "pasted face" look — the face must be fully integrated into the scene's light
 
 OUTPUT: The person from IMAGE_2 naturally placed into the exact scene of IMAGE_1, making the same expression and pose as the original person, photographed under the exact same lighting conditions. Identity from IMAGE_2, scene and light from IMAGE_1. Photorealistic, unedited-looking, indistinguishable from a real photograph — as if the reference person was actually present in the original scene.`;
+ * ──────────────────────────────────────────────────────────────────────────
+ */
 
 /** Entry — user tapped «🔄 Замена лица» in the Scenarios submenu. */
 export async function handleFaceSwapEnter(ctx: BotContext): Promise<void> {
@@ -115,9 +123,9 @@ export async function handleFaceSwapEnter(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "FACE_SWAP_AWAIT_REFERENCE", null);
 
   // Welcome — описание сценария + стоимость, как у моделей в Дизайне.
-  // Под капотом nano-banana-pro @ 2K, цена считается через стандартный buildCostLine.
+  // Цена считается через стандартный buildCostLine из costUsdPerRequest модели.
   const model = AI_MODELS[FACE_SWAP_MODEL_ID];
-  const costLine = model ? buildCostLine(model, { resolution: "2K" }, ctx.t) : "";
+  const costLine = model ? buildCostLine(model, {}, ctx.t) : "";
   const welcome = [`<b>${ctx.t.scenarios.faceSwap}</b>`, ctx.t.scenarios.faceSwapWelcome, costLine]
     .filter(Boolean)
     .join("\n\n");
@@ -249,21 +257,15 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
     await generationService.submitImage({
       userId,
       modelId: FACE_SWAP_MODEL_ID,
-      prompt: FACE_SWAP_PROMPT,
+      // cdingram/face-swap не принимает текстовый промпт — передаём пустую
+      // строку. mediaInputs.edit: [0] = референс (сцена), [1] = фото лица.
+      prompt: "",
       mediaInputs: resolved,
       telegramChatId: chatId,
       sendOriginalLabel: ctx.t.common.sendOriginal,
-      aspectRatio: "auto",
       promptMessageId: ctx.message?.message_id,
-      extraModelSettings: {
-        resolution: "2K",
-        aspect_ratio: "auto",
-        output_format: "jpeg",
-        num_images: 1,
-      },
-      // Сценарий маскирует реальную модель: в подписи показываем «Замена лица»,
-      // прячем захардкоженный английский промпт и кнопку «Доработать» (юзер
-      // не выбирал модель — её и не должно быть для редактирования).
+      // Сценарий маскирует реальную модель: в подписи показываем «Замена лица»
+      // и убираем кнопку «Доработать» (юзер не выбирал модель).
       displayNameOverride: ctx.t.scenarios.faceSwap,
       hidePromptInCaption: true,
       hideRefineButton: true,

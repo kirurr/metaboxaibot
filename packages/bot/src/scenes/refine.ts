@@ -75,6 +75,8 @@ function buildRefineFamilyOrModelKeyboard(
   // Standalone — модели без familyId с compatible-слотами.
   for (const model of allModels) {
     if (familyModelIds.has(model.id)) continue;
+    // Скрытые сценарные модели (face-swap-classic и пр.) не предлагаем для доработки.
+    if (model.hiddenFromCarousel) continue;
     if (getCompatibleSlots(model.mediaInputs, section).length === 0) continue;
     const { name } = resolveModelDisplay(model.id, lang, model);
     buttons.push([name, `ref_mdl:${model.id}:${jobId}`]);

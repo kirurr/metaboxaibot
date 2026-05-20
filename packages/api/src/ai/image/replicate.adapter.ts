@@ -34,10 +34,21 @@ const MODEL_IDS: Record<string, string> = {
   "imagen-4-fast": "google/imagen-4-fast",
   "imagen-4": "google/imagen-4",
   "imagen-4-ultra": "google/imagen-4-ultra",
+  // Специализированный face-swap (InsightFace). Deployment-endpoint без пина
+  // версии — всегда последняя опубликованная. Параметры: input_image (сцена) +
+  // swap_image (лицо). Без prompt.
+  "face-swap-classic": "cdingram/face-swap",
 };
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
 const IDEOGRAM_MODELS = new Set(["ideogram-quality", "ideogram-balanced", "ideogram-turbo"]);
+
+/**
+ * Dedicated face-swap models — принимают пару картинок (input_image + swap_image)
+ * и НЕ принимают prompt. Обрабатываются отдельной веткой в submit().
+ * mediaInputs.edit: [0] = input_image (сцена), [1] = swap_image (лицо).
+ */
+const FACE_SWAP_MODELS = new Set(["face-swap-classic"]);
 
 /**
  * Replicate adapter — async image generation.
@@ -76,8 +87,50 @@ export class ReplicateAdapter implements ImageAdapter {
     return { width: input.width ?? 1024, height: input.height ?? 1024 };
   }
 
+  /**
+   * Dedicated face-swap submit — пара картинок, без prompt. Отдельная ветка,
+   * т.к. cdingram/face-swap принимает input_image + swap_image и ничего больше.
+   */
+  private async submitFaceSwap(modelStr: string, input: ImageInput): Promise<string> {
+    const edit = input.mediaInputs?.edit ?? [];
+    const sceneUrl = edit[0];
+    const faceUrl = edit[1];
+    if (!sceneUrl || !faceUrl) {
+      throw new UserFacingError("Face swap needs two images (scene + face)", {
+        key: "mediaSlotExpired",
+      });
+    }
+    // Replicate не умеет фетчить Telegram/S3 presigned URL напрямую — качаем сами
+    // и отдаём Blob (SDK сериализует его в data-URL).
+    const toBlob = async (url: string): Promise<Blob | string> => {
+      const res = await fetch(url);
+      if (!res.ok) return url;
+      const buf = await res.arrayBuffer();
+      return new Blob([buf], { type: resolveImageMimeType(buf, res.headers.get("content-type")) });
+    };
+    const [sceneBlob, faceBlob] = await Promise.all([toBlob(sceneUrl), toBlob(faceUrl)]);
+    const predInput = { input_image: sceneBlob, swap_image: faceBlob };
+
+    logCall(modelStr, "submit", { input_image: "<blob>", swap_image: "<blob>" });
+    const colonIdx = modelStr.indexOf(":");
+    const prediction =
+      colonIdx !== -1
+        ? await this.client.predictions.create({
+            version: modelStr.slice(colonIdx + 1),
+            input: predInput,
+          })
+        : await this.client.predictions.create({
+            model: modelStr as `${string}/${string}`,
+            input: predInput,
+          });
+    return prediction.id;
+  }
+
   async submit(input: ImageInput): Promise<string> {
     const modelStr = MODEL_IDS[this.modelId] ?? this.modelId;
+    if (FACE_SWAP_MODELS.has(this.modelId)) {
+      return this.submitFaceSwap(modelStr, input);
+    }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
     if (ms.negative_prompt) msExtras.negative_prompt = ms.negative_prompt;
