@@ -26,6 +26,8 @@ import {
   handleVideoUpscaleEnter,
   handleVideoUpscaleVideo,
   handleUpscaleFactorSelect,
+  isVideoDocument,
+  isImageDocument,
 } from "./scenes/upscale.js";
 import { handleNoTool } from "./handlers/no-tool.handler.js";
 import {
@@ -505,14 +507,14 @@ export function createBot(token: string): Bot<BotContext> {
     }
     if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handlePhotoUpscalePhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handlePhotoUpscalePhoto(ctx);
       await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
       return;
     }
     if (state?.state === "VIDEO_UPSCALE_AWAIT_VIDEO") {
       if (ctx.message?.video) return handleVideoUpscaleVideo(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("video/"))
+      if (ctx.message?.document && isVideoDocument(ctx.message.document))
         return handleVideoUpscaleVideo(ctx);
       await ctx.reply(ctx.t.scenarios.upscaleNotVideo);
       return;

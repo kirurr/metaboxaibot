@@ -18,6 +18,16 @@ export const VIDEO_UPSCALE_MODEL_ID = "video-upscale";
 export const PHOTO_UPSCALE_FACTORS = ["2", "4", "8"] as const;
 export const VIDEO_UPSCALE_FACTORS = ["2", "4"] as const;
 
+/**
+ * Эмпирический потолок размера результата фото-апскейла (мегапиксели).
+ * KIE Topaz отбивает слишком крупный результат ошибкой «The image exceeds the
+ * limit after scaling», но точное значение в доках не указано (запрос в KIE
+ * support открыт). Пока — консервативная оценка: факторы, дающие результат
+ * больше этого, не предлагаем на кнопках. Уточнить по ответу KIE — менять
+ * только здесь.
+ */
+export const UPSCALE_MAX_OUTPUT_MP = 48;
+
 /*
  * ── Dynamic output-based pricing ─────────────────────────────────────────────
  * Цена апскейла считается по РЕЗУЛЬТАТУ, а не по фактору: размер исходника
