@@ -46,6 +46,7 @@ import {
 } from "../utils/acquire-for-processor.js";
 import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
+import { isFiveXxError } from "@metabox/api/utils/rate-limit-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
@@ -602,6 +603,14 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
               errorCode: POLL_TIMEOUT_CODE,
             }).catch(() => void 0);
           }
+          // 24h-таймаут — не UserFacingError: poll крутился сутки (провайдер
+          // завис / баг). Шлём tech-alert — иначе сбой тихо тонет у ops.
+          await notifyTechError(new Error(`Audio poll timeout (24h): ${dbJobId}`), {
+            jobId: dbJobId,
+            modelId,
+            section: "audio",
+            userId: userIdStr,
+          });
           throw new UnrecoverableError("poll timeout 24h");
         }
 
@@ -810,6 +819,11 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     logger.info({ dbJobId }, "Audio job completed");
   } catch (err) {
     if (err instanceof DelayedError) throw err;
+    // 24h poll-timeout уже полностью обработан in-place (DB + сообщение юзеру +
+    // tech-alert) — не прогоняем через общий error-handling повторно, иначе при
+    // isLastAttempt терминальный блок перезатёр бы errorCode/errorUserMessage
+    // generic-значениями и продублировал бы сообщение и алерт.
+    if (err instanceof UnrecoverableError && err.message === "poll timeout 24h") throw err;
     if (isRateLimitLongWindowError(err)) {
       const msg = pickGenerationFailedMessage(t, modelName, "audio");
       await db.generationJob.update({
@@ -1036,8 +1050,19 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       // записать его в `errorUserMessage` одним запросом вместе с `error`.
       const errMsg = err instanceof Error ? err.message : String(err);
 
+      // SENSITIVE_WORD_ERROR — контент-модерация: юзер ввёл запрещённый контент
+      // (копирайт / ограниченные слова) и получит понятное «измените описание».
+      // Это вина юзера, а не сбой системы — единственная терминальная ошибка,
+      // которую трактуем как user-facing и НЕ шлём в tech-канал.
+      const isUserContentRejection = errMsg.includes("SENSITIVE_WORD_ERROR");
+
       let userMessage: string | null = null;
-      if (errMsg.includes("SENSITIVE_WORD_ERROR")) {
+      if (isFiveXxError(err)) {
+        // 5xx от Suno-провайдера (kie или apipass — оба проставляют `status`
+        // через providerHttpError) — серверный сбой, не вина юзера и не
+        // content-фильтр. НЕ маппим в audioGenerateFailed («измените запрос»):
+        // оставляем userMessage=null → generic «временно недоступен».
+      } else if (isUserContentRejection) {
         userMessage = t.errors.audioSensitiveWord;
       } else if (errMsg.includes("GENERATE_AUDIO_FAILED")) {
         userMessage = t.errors.audioGenerateFailed;
@@ -1047,7 +1072,6 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         userMessage = t.errors.generationTimeout;
       }
 
-      const isKnownError = userMessage !== null;
       const finalMsg = userMessage ?? pickGenerationFailedMessage(t, modelName, "audio");
 
       await db.generationJob.update({
@@ -1068,7 +1092,12 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Audio failed after deduct: tokens refunded to user");
       }
 
-      if (!isKnownError) {
+      // Все НЕ-юзерфейсинг ошибки в терминале шлём в tech-канал — даже когда
+      // юзеру показано специфичное сообщение (audioGenerateFailed и т.п.),
+      // иначе провайдерские и системные сбои тихо тонут у ops. UserFacingError
+      // сюда не доходят (отработаны выше в resolveUserFacingMessage-ветке со
+      // своим ops-алертом). Контент-модерацию исключаем — это вина юзера.
+      if (!isUserContentRejection) {
         await notifyTechError(err, {
           jobId: dbJobId,
           modelId,
