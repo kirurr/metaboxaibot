@@ -158,6 +158,25 @@ export function isFiveXxError(err: unknown): boolean {
 }
 
 /**
+ * Конструктор-двойник `isFiveXxError`: plain `Error` с числовым `status`,
+ * проставленным ТОЛЬКО для 5xx. Адаптеры на голом `fetch` иначе кладут статус
+ * провайдера лишь в текст сообщения, а property-based классификаторы
+ * (`isFiveXxError`, `classifyError`) и `submitWithFallback` его не видят →
+ * fallback по 5xx не триггерится.
+ *
+ * Для не-5xx статус не проставляем — поведение 4xx/429 не меняем (их ловят
+ * `classifyRateLimit` / message-based ветки). `null`/`undefined` (напр.
+ * отсутствующий `errorCode` в provider-ответе) просто игнорируются.
+ */
+export function providerHttpError(message: string, status: number | null | undefined): Error {
+  const err: Error & { status?: number } = new Error(message);
+  if (typeof status === "number" && status >= 500 && status < 600) {
+    err.status = status;
+  }
+  return err;
+}
+
+/**
  * Распознаёт «битое/неподдерживаемое изображение в инпуте» — провайдер
  * 400'ит до начала генерации с конкретным текстом. Это perm-error: ретраить
  * и переключать fallback-провайдера бессмысленно, нужно сразу показать юзеру
