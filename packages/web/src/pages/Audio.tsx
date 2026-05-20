@@ -23,6 +23,8 @@ export default function Audio() {
       promptPlaceholder={setup.promptPlaceholder ?? t("generate.audioPromptPlaceholder")}
       models={setup.models}
       hideModelPicker={setup.hideModelPicker}
+      onReset={setup.resetPreset}
+      presetSettingsByModel={setup.presetSettingsByModel}
     />
   );
 }

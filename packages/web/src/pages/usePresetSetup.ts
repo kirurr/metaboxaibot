@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { WebModelDto } from "@/api/models";
@@ -25,6 +25,19 @@ export type PresetSetup = {
   hideModelPicker: boolean;
   /** True если URL содержит preset, которого нет в конфиге — page wrapper должен показать NotFound. */
   notFound: boolean;
+  /**
+   * Сброс к снимку пресета. undefined если у пресета нет `modelId` (нечего
+   * применять) или мы не на пресетной странице. Кнопка «Сбросить» в
+   * `GenerateScene` рендерится только когда callback задан И юзер что-то
+   * вручную поменял.
+   */
+  resetPreset?: () => void;
+  /**
+   * Полная мапа настроек пресета по `modelId`. Используется в `GenerateScene`
+   * для автоприменения при ручной смене модели. Undefined если не пресетная
+   * страница или у пресета нет `settings`.
+   */
+  presetSettingsByModel?: Record<string, Record<string, unknown>>;
 };
 
 export function usePresetSetup(
@@ -63,7 +76,8 @@ export function usePresetSetup(
           section,
           modelId: preset.modelId,
           prompt: preset.prompt,
-          settings: preset.settings,
+          // Settings конкретно для дефолтной модели пресета.
+          settings: preset.settings?.[preset.modelId],
         },
       },
     });
@@ -71,6 +85,23 @@ export function usePresetSetup(
     // повторный префил. Прочие зависимости (preset, location, navigate)
     // безопасны благодаря стражу `existing?.modelId === preset.modelId`.
   }, [presetKey]);
+
+  // Кнопка «Сбросить» — новый navigate с тем же prefill, но новым location.key.
+  // Префил-effect в GenerateScene видит новый key и реапплит prompt + model +
+  // settings. Слот-файлы не трогаем (см. комментарий в GenerateScene).
+  const resetPreset = useCallback(() => {
+    if (!preset || !preset.modelId) return;
+    navigate(location.pathname + location.search, {
+      state: {
+        prefill: {
+          section,
+          modelId: preset.modelId,
+          prompt: preset.prompt,
+          settings: preset.settings?.[preset.modelId],
+        },
+      },
+    });
+  }, [preset, navigate, location.pathname, location.search, section]);
 
   return {
     preset,
@@ -80,5 +111,7 @@ export function usePresetSetup(
     promptPlaceholder: preset?.promptPlaceholder ? t(preset.promptPlaceholder) : undefined,
     hideModelPicker: !!preset?.hideModelPicker,
     notFound,
+    resetPreset: preset?.modelId ? resetPreset : undefined,
+    presetSettingsByModel: preset?.settings,
   };
 }

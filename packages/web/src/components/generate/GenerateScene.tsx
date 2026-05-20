@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
@@ -63,6 +72,19 @@ export type GenerateSceneProps = {
    * пресетами с зафиксированной моделью (например, /image/swap).
    */
   hideModelPicker?: boolean;
+  /**
+   * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
+   * вручную изменил modelId / prompt / settings относительно пресет-снимка.
+   * Слот-файлы НЕ сбрасываются. Callback должен запустить повторное
+   * применение префила (обычно — `navigate(pathname, { state: { prefill } })`).
+   */
+  onReset?: () => void;
+  /**
+   * Мапа `modelId → { key: value }` из пресета. При ручной смене модели
+   * (когда у пресета `hideModelPicker: false` и есть `allowedModelIds`)
+   * автоматически применяются настройки соответствующей модели.
+   */
+  presetSettingsByModel?: Record<string, Record<string, unknown>>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -489,6 +511,8 @@ export function GenerateScene({
   promptPlaceholder,
   models,
   hideModelPicker = false,
+  onReset,
+  presetSettingsByModel,
 }: GenerateSceneProps) {
   const { t } = useTranslation();
 
@@ -699,6 +723,14 @@ export function GenerateScene({
   const pushToast = useUIStore((s) => s.pushToast);
   const lastConsumedPrefillKey = useRef<string | null>(null);
   const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  // Снимок последнего применённого префила — используется для определения
+  // «юзер что-то поменял» (isDirty) и показа кнопки «Сбросить» на пресетных
+  // страницах. Включает modelId / prompt / settings; slotFiles не трекаем.
+  const [presetSnapshot, setPresetSnapshot] = useState<{
+    modelId: string;
+    prompt: string;
+    settings: Record<string, unknown>;
+  } | null>(null);
   useEffect(() => {
     const prefill = (location.state as { prefill?: GeneratePrefill } | null)?.prefill;
     if (!prefill) return;
@@ -727,6 +759,12 @@ export function GenerateScene({
       if (resolved.settings) {
         setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
       }
+      // Снимок для isDirty-детекта.
+      setPresetSnapshot({
+        modelId: targetId,
+        prompt: resolved.prompt ?? "",
+        settings: resolved.settings ?? {},
+      });
     } else {
       // Отложенное применение — после reset и defaults effect'ов.
       pendingPrefillRef.current = resolved;
@@ -781,6 +819,20 @@ export function GenerateScene({
     );
   }, [selectedModel, settingValues]);
 
+  // Юзер расходится с применённым пресет-снимком? Показ кнопки «Сбросить»
+  // на пресетных страницах. Сравниваем только то, что снимок описывает —
+  // modelId / prompt / ключи из snapshot.settings. Дополнительные ручные
+  // настройки за пределами snapshot.settings не считаем «изменением пресета».
+  const isDirtyFromPreset = useMemo(() => {
+    if (!presetSnapshot) return false;
+    if (presetSnapshot.modelId !== modelId) return true;
+    if (presetSnapshot.prompt !== prompt) return true;
+    for (const [k, v] of Object.entries(presetSnapshot.settings)) {
+      if (settingValues[k] !== v) return true;
+    }
+    return false;
+  }, [presetSnapshot, modelId, prompt, settingValues]);
+
   // Инициализируем дефолтные значения настроек при смене модели/набора параметров.
   useEffect(() => {
     if (!selectedModel) return;
@@ -807,7 +859,34 @@ export function GenerateScene({
       const pendingSettings = pending.settings;
       setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
     }
+    setPresetSnapshot({
+      modelId: pending.modelId,
+      prompt: pending.prompt ?? "",
+      settings: pending.settings ?? {},
+    });
   }, [selectedModel]);
+
+  // Авто-применение per-model настроек пресета при ручной смене модели.
+  // Срабатывает только в пресет-режиме (есть snapshot) и только когда юзер
+  // сменил модель на ОТЛИЧНУЮ от той, что в snapshot'е — иначе после первичного
+  // префила (stage-2 выше) snapshot.modelId === selectedModel.id и мы no-op.
+  // prompt в snapshot оставляем прежним, чтобы dirty-индикатор по prompt
+  // продолжал работать корректно после смены модели.
+  useEffect(() => {
+    if (!presetSettingsByModel) return;
+    if (!selectedModel || !presetSnapshot) return;
+    if (presetSnapshot.modelId === selectedModel.id) return;
+
+    const next = presetSettingsByModel[selectedModel.id];
+    if (next) {
+      setSettingValues((prev) => ({ ...prev, ...next }));
+    }
+    setPresetSnapshot({
+      modelId: selectedModel.id,
+      prompt: presetSnapshot.prompt,
+      settings: next ?? {},
+    });
+  }, [selectedModel, presetSettingsByModel, presetSnapshot]);
 
   // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
   useEffect(() => {
@@ -1371,8 +1450,16 @@ export function GenerateScene({
       <div className="gen-bg" aria-hidden />
       <div className="gen-panel">
         <div className="gen-head">
-          <h1>{title}</h1>
-          <p className="gen-sub">{subtitle}</p>
+          <div>
+            <h1>{title}</h1>
+            <p className="gen-sub">{subtitle}</p>
+          </div>
+          {onReset && isDirtyFromPreset && (
+            <button type="button" className="gen-reset-btn" onClick={onReset}>
+              <RotateCcw size={14} />
+              <span>Сбросить</span>
+            </button>
+          )}
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}

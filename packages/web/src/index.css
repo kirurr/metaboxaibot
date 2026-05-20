@@ -65,8 +65,7 @@
 
   /* Шрифты */
   --font-heading: "Comfortaa", "SF Pro Display", sans-serif;
-  --font-body: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Inter", sans-serif;
+  --font-body: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
 }
 
 *,
@@ -80,7 +79,7 @@
 html,
 body,
 #root {
-	scrollbar-gutter: stable;
+  scrollbar-gutter: stable;
   height: 100%;
   min-height: 100%;
 }
@@ -125,8 +124,7 @@ select {
 .h1,
 .h2,
 .h3,
-.h4
-{
+.h4 {
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -161,7 +159,9 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+  transition:
+    transform 180ms var(--ease),
+    border-color 180ms var(--ease),
     box-shadow 180ms var(--ease);
 }
 .card.hoverable:hover {
@@ -182,8 +182,11 @@ select {
   font-weight: 600;
   font-size: 15px;
   white-space: nowrap;
-  transition: transform 150ms var(--ease), background 150ms var(--ease),
-    border-color 150ms var(--ease), box-shadow 150ms var(--ease),
+  transition:
+    transform 150ms var(--ease),
+    background 150ms var(--ease),
+    border-color 150ms var(--ease),
+    box-shadow 150ms var(--ease),
     color 150ms var(--ease);
   user-select: none;
 }
@@ -242,7 +245,9 @@ select {
   border-radius: var(--radius);
   color: var(--text);
   font-size: 16px; /* prevent iOS zoom */
-  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    background 150ms var(--ease);
   outline: none;
 }
 .input::placeholder {
@@ -300,12 +305,7 @@ select {
 
 /* ===== Skeleton ===== */
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-elevated) 0%,
-    #25252c 50%,
-    var(--bg-elevated) 100%
-  );
+  background: linear-gradient(90deg, var(--bg-elevated) 0%, #25252c 50%, var(--bg-elevated) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
   border-radius: var(--radius-sm);
@@ -360,7 +360,9 @@ select {
   font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.5px;
-  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 6px 18px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .topnav .brand-text {
   font-size: 18px;
@@ -552,7 +554,9 @@ select {
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 500;
-  transition: color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    color 150ms var(--ease),
+    background 150ms var(--ease);
   white-space: nowrap;
 }
 .cap-tabs .cap:hover {
@@ -572,7 +576,9 @@ select {
   height: 5px;
   border-radius: 50%;
   background: var(--text-hint);
-  transition: background 150ms var(--ease), box-shadow 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    box-shadow 150ms var(--ease);
 }
 .cap-tabs .cap.soon {
   opacity: 0.55;
@@ -617,7 +623,9 @@ select {
   height: 18px;
   border-radius: 50%;
   background: var(--accent-gradient);
-  box-shadow: 0 0 12px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 0 12px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .tn-balance .b-val {
   font-variant-numeric: tabular-nums;
@@ -652,7 +660,9 @@ select {
   color: var(--text-secondary);
   background: transparent;
   position: relative;
-  transition: background 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .tn-icon-btn:hover {
   background: var(--bg-elevated);
@@ -678,7 +688,9 @@ select {
   border-radius: 999px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    background 150ms var(--ease);
 }
 .account-btn:hover {
   border-color: var(--accent);
@@ -757,7 +769,9 @@ select {
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 500;
-  transition: background 120ms var(--ease), color 120ms var(--ease);
+  transition:
+    background 120ms var(--ease),
+    color 120ms var(--ease);
 }
 .menu-item:hover {
   background: var(--bg-elevated);
@@ -895,16 +909,22 @@ select {
   color: #fff;
   display: grid;
   place-items: center;
-  box-shadow: var(--shadow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow:
+    var(--shadow-accent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
   margin-top: -22px;
   border: 4px solid var(--bg);
-  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
+  transition:
+    transform 180ms var(--ease),
+    box-shadow 180ms var(--ease);
 }
 .bottom-nav .bn-center:active .bn-fab {
   transform: translateY(1px) scale(0.97);
 }
 .bottom-nav .bn-center.active .bn-fab {
-  box-shadow: 0 6px 28px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 6px 28px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .bottom-nav .bn-center span:last-child {
   font-weight: 600;
@@ -1144,7 +1164,9 @@ select {
 }
 .composer-inner:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 4px var(--accent-lighter);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 4px var(--accent-lighter);
 }
 .composer-row {
   display: flex;
@@ -1193,7 +1215,9 @@ select {
   color: var(--text-secondary);
   display: grid;
   place-items: center;
-  transition: background 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .composer .tool:hover {
   background: var(--bg-elevated);
@@ -1574,9 +1598,9 @@ select {
 .mp-pop {
   position: absolute;
 
-	/* Move the openned menu to the bottom insted of the top */
-	left: -50%;
-	top: calc(100% + 8px);
+  /* Move the openned menu to the bottom insted of the top */
+  left: -50%;
+  top: calc(100% + 8px);
   /* bottom: calc(100% + 8px); */
   /* left: 0; */
 
@@ -1997,11 +2021,15 @@ select {
   border: 1px solid var(--border-strong);
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
-  transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    box-shadow 180ms var(--ease);
 }
 .home-prompt:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(74, 141, 245, 0.12);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 4px rgba(74, 141, 245, 0.12);
 }
 .home-prompt input {
   flex: 1;
@@ -2142,7 +2170,9 @@ select {
   flex-direction: column;
   gap: 14px;
   min-height: 168px;
-  transition: transform 200ms var(--ease), border-color 200ms var(--ease),
+  transition:
+    transform 200ms var(--ease),
+    border-color 200ms var(--ease),
     box-shadow 200ms var(--ease);
   overflow: hidden;
 }
@@ -2194,7 +2224,9 @@ select {
   align-items: center;
   gap: 4px;
   color: var(--text-secondary);
-  transition: color 150ms var(--ease), transform 200ms var(--ease);
+  transition:
+    color 150ms var(--ease),
+    transform 200ms var(--ease);
 }
 .tool-tile:hover .ti-foot .arr {
   color: var(--accent-light);
@@ -2225,7 +2257,9 @@ select {
   border: 1px solid var(--border);
   border-radius: 18px;
   overflow: hidden;
-  transition: transform 220ms var(--ease), border-color 220ms var(--ease),
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   display: flex;
   flex-direction: column;
@@ -2423,7 +2457,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease);
 }
 .recent-card:hover {
   border-color: var(--accent);
@@ -2494,7 +2530,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease),
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease),
     background 180ms var(--ease);
   cursor: pointer;
 }
@@ -2550,7 +2588,9 @@ select {
   border-radius: var(--radius-xl);
   padding: 26px;
   box-shadow: var(--shadow-sm);
-  transition: transform 220ms var(--ease), border-color 220ms var(--ease),
+  transition:
+    transform 220ms var(--ease),
+    border-color 220ms var(--ease),
     box-shadow 220ms var(--ease);
   overflow: hidden;
   /* Flex column → нижняя CTA-кнопка с `margin-top: auto` прижимается к низу
@@ -2564,10 +2604,13 @@ select {
   box-shadow: var(--shadow-md);
 }
 .plan.featured {
-  background: radial-gradient(120% 90% at 0% 0%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 55%),
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 55%),
     var(--bg-card);
   border-color: rgba(74, 141, 245, 0.35);
-  box-shadow: var(--shadow-md), 0 0 0 1px rgba(74, 141, 245, 0.2);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px rgba(74, 141, 245, 0.2);
 }
 .plan .ribbon {
   position: absolute;
@@ -2627,7 +2670,9 @@ select {
   font-size: 12.5px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 120ms var(--ease), color 120ms var(--ease),
+  transition:
+    border-color 120ms var(--ease),
+    color 120ms var(--ease),
     background 120ms var(--ease);
 }
 .plan-period:hover {
@@ -2699,7 +2744,9 @@ select {
   border-radius: var(--radius-lg);
   padding: 22px;
   cursor: pointer;
-  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+  transition:
+    transform 180ms var(--ease),
+    border-color 180ms var(--ease),
     box-shadow 180ms var(--ease);
   position: relative;
 }
@@ -2710,7 +2757,10 @@ select {
 }
 .pack.selected {
   border-color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent), 0 0 0 6px var(--accent-lighter);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 1px var(--accent),
+    0 0 0 6px var(--accent-lighter);
 }
 .pack .pack-amount {
   font-family: var(--font-heading);
@@ -2865,7 +2915,11 @@ select {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(60% 80% at 80% 20%, rgba(74, 141, 245, 0.18) 0%, rgba(74, 141, 245, 0) 60%);
+  background: radial-gradient(
+    60% 80% at 80% 20%,
+    rgba(74, 141, 245, 0.18) 0%,
+    rgba(74, 141, 245, 0) 60%
+  );
 }
 .token-orb {
   position: relative;
@@ -2874,8 +2928,10 @@ select {
   margin-left: auto;
   border-radius: 50%;
   background: radial-gradient(circle at 30% 25%, #6ba3f7 0%, #3a7de5 40%, #1e3a7e 80%);
-  box-shadow: 0 30px 90px rgba(74, 141, 245, 0.35),
-    inset 0 -20px 50px rgba(0, 0, 0, 0.4), inset 0 20px 50px rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 30px 90px rgba(74, 141, 245, 0.35),
+    inset 0 -20px 50px rgba(0, 0, 0, 0.4),
+    inset 0 20px 50px rgba(255, 255, 255, 0.15);
   animation: float 6s ease-in-out infinite;
 }
 .token-orb::after {
@@ -2928,7 +2984,9 @@ select {
   border-radius: 999px;
   position: relative;
   cursor: pointer;
-  transition: background 150ms var(--ease), border-color 150ms var(--ease);
+  transition:
+    background 150ms var(--ease),
+    border-color 150ms var(--ease);
 }
 .toggle::after {
   content: "";
@@ -2939,7 +2997,9 @@ select {
   height: 16px;
   border-radius: 50%;
   background: var(--text-secondary);
-  transition: transform 150ms var(--ease), background 150ms var(--ease);
+  transition:
+    transform 150ms var(--ease),
+    background 150ms var(--ease);
 }
 .toggle.on {
   background: var(--accent);
@@ -3006,7 +3066,9 @@ select {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
+  transition:
+    border-color 180ms var(--ease),
+    transform 180ms var(--ease);
 }
 .tx-row:hover {
   transform: translateY(-1px);
@@ -3134,7 +3196,8 @@ select {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: radial-gradient(80% 60% at 20% 10%, rgba(74, 141, 245, 0.16) 0%, rgba(74, 141, 245, 0) 60%),
+  background:
+    radial-gradient(80% 60% at 20% 10%, rgba(74, 141, 245, 0.16) 0%, rgba(74, 141, 245, 0) 60%),
     radial-gradient(60% 50% at 90% 90%, rgba(74, 141, 245, 0.12) 0%, rgba(74, 141, 245, 0) 60%),
     var(--bg-card);
   border-right: 1px solid var(--border);
@@ -3146,7 +3209,8 @@ select {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(60% 60% at 30% 40%, #000 0%, transparent 70%);
@@ -3210,7 +3274,9 @@ select {
   font-weight: 700;
   font-size: 16px;
   letter-spacing: -0.5px;
-  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 6px 18px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .auth-form .h2 {
   margin: 0 0 6px;
@@ -4394,7 +4460,9 @@ select {
   color: var(--text-secondary);
   font-size: 12.5px;
   font-weight: 500;
-  transition: border-color 150ms var(--ease), color 150ms var(--ease);
+  transition:
+    border-color 150ms var(--ease),
+    color 150ms var(--ease);
 }
 .gen-chip:hover {
   color: var(--text);
@@ -4438,7 +4506,9 @@ select {
   font-weight: 600;
   font-size: 14px;
   box-shadow: var(--shadow-accent);
-  transition: transform 120ms var(--ease), box-shadow 150ms var(--ease);
+  transition:
+    transform 120ms var(--ease),
+    box-shadow 150ms var(--ease);
 }
 .gen-cta:hover {
   transform: translateY(-1px);
@@ -4586,6 +4656,10 @@ select {
 
 .gen-head {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 2rem;
 }
 .gen-head h1 {
   font-family: var(--font-heading);
@@ -4600,6 +4674,26 @@ select {
   line-height: 1.45;
   color: var(--text-secondary);
   margin: 0;
+}
+.gen-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.gen-reset-btn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
 }
 /* Mode tabs тоже фикс'нутые — над scroll-блоком. */
 .gen-scene .gen-mode-tabs {
@@ -6258,7 +6352,9 @@ select {
   background: var(--bg);
   border: 1px solid var(--border);
   position: relative;
-  transition: background 160ms var(--ease), border-color 160ms var(--ease);
+  transition:
+    background 160ms var(--ease),
+    border-color 160ms var(--ease);
 }
 .settings-panel-toggle-thumb {
   position: absolute;
@@ -6268,7 +6364,9 @@ select {
   height: 14px;
   border-radius: 50%;
   background: var(--text-secondary);
-  transition: transform 160ms var(--ease), background 160ms var(--ease);
+  transition:
+    transform 160ms var(--ease),
+    background 160ms var(--ease);
 }
 .settings-panel-toggle.on .settings-panel-toggle-track {
   background: var(--accent, #4a8df5);

@@ -13,7 +13,7 @@ export default function Image() {
   // familyId для дропдауна моделей и достаёт siblings (по version/variant) для
   // chip'ов в блоке настроек.
   const sectionModels = useMemo(() => modelsForCapability(allModels, "image"), [allModels]);
-	console.log(sectionModels);
+  console.log(sectionModels);
 
   const setup = usePresetSetup("image", sectionModels);
 
@@ -28,6 +28,8 @@ export default function Image() {
       promptPlaceholder={setup.promptPlaceholder ?? t("generate.imagePromptPlaceholder")}
       models={setup.models}
       hideModelPicker={setup.hideModelPicker}
+      onReset={setup.resetPreset}
+      presetSettingsByModel={setup.presetSettingsByModel}
     />
   );
 }

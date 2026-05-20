@@ -36,10 +36,7 @@ export function normalizeSection(raw: string): GenerateSection | null {
  * существующим URL→state синком в `GenerateScene` и shareable-навигацией из
  * navbar'а.
  */
-export function navigateToGenerate(
-  navigate: NavigateFunction,
-  prefill: GeneratePrefill,
-): void {
+export function navigateToGenerate(navigate: NavigateFunction, prefill: GeneratePrefill): void {
   navigate(`/${prefill.section}?model=${encodeURIComponent(prefill.modelId)}`, {
     state: { prefill },
   });
