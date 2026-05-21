@@ -2,25 +2,8 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { ChatUploadDto } from "@/api/uploads";
 
-/**
- * Per-family draft: настройки и uploaded media slot'ы, сохраняемые между
- * сменами модели (включая variant/version chip) и переживающие reload.
- *
- * Ключ записи — `model.familyId ?? model.id`. Все siblings одного семейства
- * (Variant/Version chip'ы — Banana 1 / Banana 2 / Nano Banana Pro) делят
- * один bag: загруженные референсы и shared-настройки переезжают между ними
- * с clamp по `slot.maxImages` целевого варианта. Unique-настройки одного
- * варианта будут отфильтрованы defaults-effect'ом при переключении.
- *
- * GenerateScene держит локальный state для рендеров, а этот store —
- * мирор-источник истины, из которого state восстанавливается при смене
- * `modelId`. Persistence — localStorage.
- *
- * В localStorage кладём только `ready`-файлы: сырой `File` не сериализуем,
- * хватает `dto.s3Key` для submit + `dto.url` для превью. Presigned `url`
- * может протухнуть — graceful: превью покажется битым, юзер удалит и
- * перезагрузит.
- */
+// Per-family draft (ключ — `familyId ?? modelId`), persist в localStorage.
+// `File` не сериализуем — для restore хватает `dto.s3Key` + `dto.url`.
 
 export type StoredSlotFile = {
   id: string;
@@ -34,7 +17,6 @@ export type GenerationDraftEntry = {
 };
 
 type GenerationDraftState = {
-  // Ключ — `model.familyId ?? model.id`. Имя поля `byKey` отражает это.
   byKey: Record<string, GenerationDraftEntry>;
   setSettings: (key: string, values: Record<string, unknown>) => void;
   setSlots: (key: string, slots: Record<string, StoredSlotFile[]>) => void;
@@ -48,26 +30,20 @@ export const useGenerationDraftStore = create<GenerationDraftState>()(
       byKey: {},
 
       setSettings: (key, values) =>
-        set((state) => {
-          const prev = state.byKey[key];
-          return {
-            byKey: {
-              ...state.byKey,
-              [key]: { settings: values, slots: prev?.slots ?? {} },
-            },
-          };
-        }),
+        set((state) => ({
+          byKey: {
+            ...state.byKey,
+            [key]: { settings: values, slots: state.byKey[key]?.slots ?? {} },
+          },
+        })),
 
       setSlots: (key, slots) =>
-        set((state) => {
-          const prev = state.byKey[key];
-          return {
-            byKey: {
-              ...state.byKey,
-              [key]: { settings: prev?.settings ?? {}, slots },
-            },
-          };
-        }),
+        set((state) => ({
+          byKey: {
+            ...state.byKey,
+            [key]: { settings: state.byKey[key]?.settings ?? {}, slots },
+          },
+        })),
 
       clearForKey: (key) =>
         set((state) => {
@@ -80,9 +56,7 @@ export const useGenerationDraftStore = create<GenerationDraftState>()(
       clearAll: () => set({ byKey: {} }),
     }),
     {
-      // v2: ключ — familyId (с fallback на modelId), v1 хранил по modelId.
-      // Bump имени → старые записи остаются в localStorage, но не используются.
-      name: "metabox.generation-draft.v2",
+      name: "metabox.generation-draft",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ byKey: state.byKey }),
     },
