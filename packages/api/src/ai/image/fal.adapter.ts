@@ -49,6 +49,9 @@ const NATIVE_BATCH_MAX: Record<string, number> = {
 /** Separator used to pack endpoint+requestId into a single opaque string. */
 const SEP = "||";
 
+/** Topaz image upscale endpoint — fallback для KIE primary `image-upscale`. */
+const FAL_TOPAZ_IMAGE_ENDPOINT = "fal-ai/topaz/upscale/image";
+
 /**
  * FAL.ai adapter — async generation (Flux, SD, Seedream, Nano Banana, GPT Image).
  * Uses FAL queue for async submission + polling.
@@ -79,6 +82,30 @@ export class FalAdapter implements ImageAdapter {
   }
 
   async submit(input: ImageInput): Promise<string> {
+    // ── Topaz image upscale (fal-ai/topaz/upscale/image) ─────────────────────
+    // Fallback для KIE primary `image-upscale`. `Standard V2` — не-генеративная
+    // модель (Redefine генеративит и дорисовывает детали — не берём).
+    // `upscale_factor` 1–4 множителем; KIE-фактор ×8 клампится до 4 (Fal max).
+    if (this.modelId === "image-upscale") {
+      const ms = input.modelSettings ?? {};
+      const srcUrl = input.mediaInputs?.edit?.[0] ?? input.imageUrl;
+      if (!srcUrl) {
+        throw new Error("FAL image-upscale: source image is required");
+      }
+      const rawFactor = Number(ms.upscale_factor ?? 2);
+      const upscaleFactor = Math.min(4, Math.max(1, Number.isFinite(rawFactor) ? rawFactor : 2));
+      const upscaleBody = {
+        image_url: srcUrl,
+        model: "Standard V2" as const,
+        upscale_factor: upscaleFactor,
+      };
+      logCall(FAL_TOPAZ_IMAGE_ENDPOINT, "submit", upscaleBody);
+      const { request_id } = await fal.queue.submit(FAL_TOPAZ_IMAGE_ENDPOINT, {
+        input: upscaleBody,
+      });
+      return `${FAL_TOPAZ_IMAGE_ENDPOINT}${SEP}${request_id}`;
+    }
+
     const editUrls = input.mediaInputs?.edit ?? (input.imageUrl ? [input.imageUrl] : []);
     const imageUrl = editUrls[0];
     const endpoint = this.selectEndpoint(input);
@@ -138,6 +165,22 @@ export class FalAdapter implements ImageAdapter {
     if (status.status !== "COMPLETED") return null;
 
     const result = await fal.queue.result(endpoint, { requestId });
+
+    // Topaz upscale endpoint возвращает один `image`, а не массив `images`.
+    if (endpoint === FAL_TOPAZ_IMAGE_ENDPOINT) {
+      const img = (
+        result.data as { image?: { url: string; content_type?: string; file_name?: string } }
+      ).image;
+      if (!img?.url) throw new Error("FAL image-upscale: no image URL in result");
+      const upContentType = img.content_type ?? "image/jpeg";
+      const upExt = upContentType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+      return {
+        url: img.url,
+        filename: img.file_name ?? `image-upscale.${upExt}`,
+        contentType: upContentType,
+      };
+    }
+
     const images = (
       result.data as {
         images?: Array<{

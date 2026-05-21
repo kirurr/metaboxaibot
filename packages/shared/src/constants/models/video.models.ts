@@ -527,23 +527,28 @@ const KLING_SETTINGS: ModelSettingDef[] = [
 /**
  * Topaz видео-апскейл: per-second ставка по результату — `upscale_factor` ×
  * `target_resolution` × `fps` (сцена вычисляет тиры из размера/fps исходника).
- * Каждая ячейка = max(посекундная ставка KIE — фиксирована по фактору:
- * ×2 $0.04/s, ×4 $0.07/s; посекундная цена Replicate за тир разрешения/fps) —
- * покрывает обоих провайдеров, в минус на fallback не уходим.
+ *
+ * Каждая ячейка = max(ставка KIE, ставка Fal) — биллим юзера по дороже из
+ * двух, чтобы не уйти в минус ни на одном провайдере (KIE primary часто лежит,
+ * фактически работаем на Fal-fallback). Ставки:
+ *   - KIE: фикс по фактору — ×1/×2 $0.04/s, ×4 $0.07/s.
+ *   - Fal: по разрешению результата — ≤720p $0.01, 720p–1080p $0.02,
+ *     >1080p $0.08 за 30fps; ×2 за 60fps.
+ * → ≤1080p выигрывает KIE-ставка фактора; >1080p выигрывает Fal.
  */
 const TOPAZ_VIDEO_COST: Record<string, number> = {
   "2__720p__30": 0.04,
   "2__720p__60": 0.04,
   "2__1080p__30": 0.04,
   "2__1080p__60": 0.04,
-  "2__4k__30": 0.075,
-  "2__4k__60": 0.15,
+  "2__4k__30": 0.08,
+  "2__4k__60": 0.16,
   "4__720p__30": 0.07,
   "4__720p__60": 0.07,
   "4__1080p__30": 0.07,
   "4__1080p__60": 0.07,
-  "4__4k__30": 0.075,
-  "4__4k__60": 0.15,
+  "4__4k__30": 0.08,
+  "4__4k__60": 0.16,
 };
 
 export const VIDEO_MODELS: Record<string, AIModel> = {
@@ -2554,17 +2559,17 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     supportedDurations: [8],
     settings: VEO_KIE_SETTINGS,
   },
-  // ── Video upscale via Replicate Topaz (fallback к KIE primary) ───────────────
-  // KIE primary `video-upscale` (topaz/video-upscale) роутится на Replicate
-  // topazlabs/video-upscale. Replicate принимает абсолютное `target_resolution`,
-  // а не множитель — адаптер маппит upscale_factor → разрешение. Биллинг —
-  // всегда по KIE-цене primary.
+  // ── Video upscale via Fal Topaz (fallback к KIE primary) ─────────────────────
+  // KIE primary `video-upscale` (topaz/video-upscale) роутится на Fal
+  // `fal-ai/topaz/upscale/video` (model "Proteus"). Fal принимает
+  // `upscale_factor` множителем 1–4 — ровно как KIE, без маппинга в разрешение.
+  // Биллинг — всегда по KIE-цене primary.
   {
     id: "video-upscale",
-    name: "Video upscale (Replicate fallback)",
-    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    name: "Video upscale (Fal fallback)",
+    description: "Fallback на Fal Topaz при недоступности KIE.",
     section: "video",
-    provider: "replicate",
+    provider: "fal",
     costUsdPerRequest: 0,
     costUsdPerSecond: 0.07,
     costMatrix: {

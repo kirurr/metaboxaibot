@@ -8,6 +8,7 @@ import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
+  buildKieVideoUploadName,
   uploadFileUrl,
   uploadFileUrlCroppedToAspect,
 } from "../../utils/kie-upload.js";
@@ -159,7 +160,13 @@ export class KieVideoAdapter implements VideoAdapter {
       model = "topaz/video-upscale";
       const srcVideo = mi.motion_video?.[0] ?? input.imageUrl;
       if (!srcVideo) throw new Error("KIE video-upscale: source video is required");
-      const uploaded = await uploadFileUrl(this.apiKey, srcVideo);
+      // fileName с видео-расширением обязателен: без него KIE сохраняет файл
+      // extensionless → Topaz не определяет контейнер → `failCode 500`.
+      const uploaded = await uploadFileUrl(
+        this.apiKey,
+        srcVideo,
+        buildKieVideoUploadName(srcVideo),
+      );
       delete inputPayload.prompt;
       inputPayload.video_url = uploaded;
       inputPayload.upscale_factor = String(ms.upscale_factor ?? "2");
