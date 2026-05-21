@@ -52,6 +52,10 @@ import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/stores/uiStore";
+import {
+  useGenerationDraftStore,
+  type StoredSlotFile,
+} from "@/stores/generationDraftStore";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
@@ -179,7 +183,9 @@ function parseMotionValue(v: unknown): MotionEntry[] {
 
 type SlotFile =
   | { id: string; status: "uploading"; file: File }
-  | { id: string; status: "ready"; file: File; dto: ChatUploadDto }
+  // `file` опционален: после rehydrate из generationDraftStore (localStorage)
+  // сырой File недоступен — превью берётся из dto.url, submit использует dto.s3Key.
+  | { id: string; status: "ready"; file?: File; dto: ChatUploadDto }
   | { id: string; status: "error"; file: File; error: string };
 
 function SlotCard({
@@ -258,9 +264,10 @@ function SlotCard({
 
 function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void }) {
   // ObjectURL для preview из локального File (быстрее чем ждать presigned URL).
+  // После rehydrate из draft-store File отсутствует → localUrl=null, превью идёт через dto.url.
   const [localUrl, setLocalUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!file.file.type.startsWith("image/")) {
+    if (!file.file || !file.file.type.startsWith("image/")) {
       setLocalUrl(null);
       return;
     }
@@ -270,6 +277,8 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
   }, [file.file]);
 
   const url = file.status === "ready" ? (file.dto.url ?? localUrl) : localUrl;
+  const altName =
+    file.file?.name ?? (file.status === "ready" ? file.dto.name : "");
   return (
     <div
       className={clsx(
@@ -279,7 +288,7 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
       )}
     >
       {url ? (
-        <img src={url} alt={file.file.name} />
+        <img src={url} alt={altName} />
       ) : (
         <div className="gen-slot-tile-icon">
           <ImageIcon size={16} />
@@ -563,7 +572,18 @@ export function GenerateScene({
   }, [models]);
 
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
+  // Lazy initializer учитывает `?model=<id>` в URL сразу на mount — иначе
+  // R0 целился бы в families[0] (banana-1), restore делался бы для wrong
+  // модели, sync затирал бы store[banana] обрезанными данными до того, как
+  // URL-sync effect успел бы переключить на nano-banana-pro. После F5 это
+  // приводило к "загружается дефолтный для семьи banana".
+  const [modelId, setModelId] = useState<string>(() => {
+    const urlModel =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("model")
+        : null;
+    return urlModel ?? families[0]?.id ?? "";
+  });
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
@@ -647,9 +667,33 @@ export function GenerateScene({
   const [searchParams, setSearchParams] = useSearchParams();
   const urlModelId = searchParams.get("model");
 
+  // pickModel обновляет state и URL атомарно через setModelId + setSearchParams.
+  // React Router синхронизирует useSearchParams() через свой механизм — есть
+  // один или несколько render'ов, на которых `modelId` уже новый, а `urlModelId`
+  // ещё старый. Без guard'а URL-sync ниже на этом окне делал бы setModelId(старый)
+  // → setModelId(новый) — наблюдаемый flicker "new → old → new". Ref помечает,
+  // что мы только что pickModel'нули; URL-sync ждёт, пока URL догонит state.
+  const lastPickedRef = useRef<string | null>(null);
+
+  // Помечает modelId, для которого state уже синхронизирован с draft-store
+  // (restore произошёл). Sync-эффекты пишут в store ТОЛЬКО когда restoredForRef
+  // совпадает с current selectedModel.id — иначе на mount, до загрузки каталога
+  // и swap-effect'а, sync напишет пустые settingValues/slotFiles и перетрёт
+  // сохранённые данные. pickModel ставит ref до setModelId (свой atomic swap
+  // = restore сделан); swap-effect ставит ref когда сам выполнит restore.
+  const restoredForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!urlModelId) return;
+    // URL догнал state после pickModel — снимаем флаг, дальнейшие изменения URL
+    // (например, navbar mega-menu) снова будут обрабатываться нормально.
+    if (urlModelId === modelId && lastPickedRef.current === modelId) {
+      lastPickedRef.current = null;
+      return;
+    }
     if (urlModelId === modelId) return;
+    // pickModel только что выставил state — URL ещё догоняет, игнорируем расхождение.
+    if (lastPickedRef.current === modelId) return;
     // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
     // (например юзер вручную набил кривой ?model=, не валим default-flow).
     if (models.some((m) => m.id === urlModelId)) {
@@ -660,7 +704,25 @@ export function GenerateScene({
   // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
   // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
   // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  //
+  // Atomic swap: synсhronно с setModelId восстанавливаем settings/slots/mode
+  // из draft-store. React 19 батчит вызовы setState внутри одного event
+  // handler'а в ОДИН render → UI никогда не покажет файлы предыдущей модели
+  // в slot'ах новой (без atomic'а был бы 1 frame со stale slotFiles между
+  // setModelId и swap-effect'ом). Swap-effect ниже остаётся safety net для
+  // путей init/URL-sync, где setModelId вызывается вне этого helper'а.
   function pickModel(id: string) {
+    if (id === modelId) return;
+    const { settings, slots } = restoreDraftForModel(id);
+    // Помечаем target до setModelId — URL-sync effect увидит флаг и не вернёт
+    // modelId на stale urlModelId, пока React Router не подтянет URL.
+    lastPickedRef.current = id;
+    // Atomic swap здесь = restore for id уже выполнен. swap-effect ниже
+    // пропустит повтор; sync-effects будут писать под этим id.
+    restoredForRef.current = id;
+    setModeId(null);
+    setSettingValues(settings);
+    setSlotFiles(slots);
     setModelId(id);
     setSearchParams(
       (prev) => {
@@ -670,6 +732,46 @@ export function GenerateScene({
       },
       { replace: true },
     );
+  }
+
+  // Storage key — familyId, чтобы все siblings (Variant/Version chip'ы одного
+  // семейства) делили один bag настроек и uploaded slot'ов. Fallback на id
+  // для моделей без familyId (одиночки или legacy). Без этой группировки
+  // переключение nano-banana-pro → banana-2 теряло бы референсы, хотя по
+  // mediaInputs они идентичны.
+  function storageKeyFor(id: string): string | null {
+    const target = models.find((m) => m.id === id);
+    if (!target) return null;
+    return target.familyId ?? target.id;
+  }
+
+  // Чистая функция: читает draft-store по storage key (familyId), фильтрует
+  // slot'ы по mediaInputs ТЕКУЩЕЙ модели и обрезает каждый список до
+  // slot.maxImages. Это устраняет случаи, когда в bag'е семьи сохранено
+  // больше файлов, чем поддерживает целевой variant (например, шарим из
+  // banana-2 в nano-banana-pro у которого лимит ниже).
+  function restoreDraftForModel(id: string): {
+    settings: Record<string, unknown>;
+    slots: Record<string, SlotFile[]>;
+  } {
+    const key = storageKeyFor(id);
+    if (!key) return { settings: {}, slots: {} };
+    const entry = useGenerationDraftStore.getState().byKey[key];
+    if (!entry) return { settings: {}, slots: {} };
+    const target = models.find((m) => m.id === id);
+    if (!target) return { settings: entry.settings, slots: {} };
+    const slots: Record<string, SlotFile[]> = {};
+    for (const slot of target.mediaInputs ?? []) {
+      const arr = entry.slots[slot.slotKey];
+      if (arr && arr.length > 0) {
+        slots[slot.slotKey] = arr.slice(0, slot.maxImages).map((f) => ({
+          id: f.id,
+          status: "ready" as const,
+          dto: f.dto,
+        }));
+      }
+    }
+    return { settings: entry.settings, slots };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -735,12 +837,68 @@ export function GenerateScene({
     if (target) pickModel(target.id);
   }
 
-  // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
+  // Swap state на смену модели: safety net для путей, где modelId меняется
+  // НЕ через pickModel — lazy initializer + URL-sync на mount, prefill effect
+  // ниже (`setModelId(targetId)` в 822-834), URL-sync при внешней навигации.
+  //
+  // Дополнительно зависит от `models`: на mount каталог может ещё не быть
+  // загружен (modelId уже выставлен из URL через lazy initializer, а models=[]).
+  // Когда models приедут — effect перезапускается и делает restore.
+  // restoredForRef защищает от лишних restore'ов: pickModel сам restored
+  // атомарно, и при следующем загрузе каталога мы не хотим перетереть state.
+  //
+  // Stage-2 prefill (на pendingPrefillRef) и preset-by-model effect идут ПОСЛЕ
+  // в порядке объявления, поэтому prefill из location.state и presetSettings
+  // перепишут восстановленное — это намеренно (preset wins).
   useEffect(() => {
+    if (!modelId) {
+      setModeId(null);
+      setSettingValues({});
+      setSlotFiles({});
+      restoredForRef.current = null;
+      return;
+    }
+    // Уже сделали restore для этой модели (pickModel или предыдущий прогон).
+    if (restoredForRef.current === modelId) return;
+    // Каталог ещё не загружен — ждём; этот же effect перезапустится с deps на models.
+    if (models.length === 0) return;
+    if (!models.some((m) => m.id === modelId)) return;
+
     setModeId(null);
-    setSettingValues({});
-    setSlotFiles({});
-  }, [modelId]);
+    restoredForRef.current = modelId;
+    const { settings, slots } = restoreDraftForModel(modelId);
+    setSettingValues(settings);
+    setSlotFiles(slots);
+  }, [modelId, models]);
+
+  // Sync settingValues → draft-store. Пишем под storage key (familyId
+  // c fallback на id) — все siblings одной семьи делят bag. Guard:
+  // restoredForRef.current === selectedModel.id — пишем только когда state
+  // уже синхронизирован с store через restore (иначе на mount, до загрузки
+  // каталога, sync написал бы пустые values и перетёр сохранённое).
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setSettings(key, settingValues);
+  }, [selectedModel, settingValues]);
+
+  // Sync slotFiles → draft-store. Сохраняем только ready-файлы в сериализуемой
+  // форме (без сырого `File`). uploading/error не персистим: после reload
+  // незавершённый upload «зависнет» и зря отъест место.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    const stored: Record<string, StoredSlotFile[]> = {};
+    for (const [k, arr] of Object.entries(slotFiles)) {
+      const ready = arr.flatMap((f) =>
+        f.status === "ready" ? [{ id: f.id, status: "ready" as const, dto: f.dto }] : [],
+      );
+      if (ready.length > 0) stored[k] = ready;
+    }
+    useGenerationDraftStore.getState().setSlots(key, stored);
+  }, [selectedModel, slotFiles]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1157,7 +1315,7 @@ export function GenerateScene({
     const toUpload = list.slice(0, room);
     if (toUpload.length === 0) return;
 
-    const initial: SlotFile[] = toUpload.map((file) => ({
+    const initial: Extract<SlotFile, { status: "uploading" }>[] = toUpload.map((file) => ({
       id: `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       status: "uploading",
       file,
