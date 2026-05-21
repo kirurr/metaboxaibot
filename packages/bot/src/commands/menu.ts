@@ -63,10 +63,19 @@ export async function handleScenarios(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
   clearActiveSlot(ctx.user.id);
   await userStateService.setState(ctx.user.id, "SCENARIOS_SECTION", null);
-  // Одно сообщение: заголовок + инлайн-пикер сценариев. Раньше слалось ещё
-  // отдельное сообщение `sectionTitle` ради reply-клавиатуры — оно дублировало
-  // заголовок. Reply-клавиатура главного меню остаётся (is_persistent), её
-  // кнопок достаточно для навигации.
+  // Первое сообщение ставит reply-клавиатуру раздела, второе — инлайн-пикер
+  // сценариев. Дубля заголовка нет: `sectionTitle` — заголовок, `sectionTooltip`
+  // — только «Выберите сценарий 👇» (без повтора заголовка).
+  await ctx.reply(ctx.t.scenarios.sectionTitle, {
+    reply_markup: {
+      keyboard: [
+        [{ text: ctx.t.scenarios.chooseScenario }],
+        [{ text: ctx.t.scenarios.backToMain }],
+      ],
+      resize_keyboard: true,
+      is_persistent: true,
+    },
+  });
   await ctx.reply(ctx.t.scenarios.sectionTooltip, {
     reply_markup: buildScenariosKeyboard(ctx.t),
   });
