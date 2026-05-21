@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  getAmbientMedia,
-  type AmbientMediaItem,
-  type AmbientSection,
-} from "@/api/ambientMedia";
+import { getAmbientMedia, type AmbientMediaItem, type AmbientSection } from "@/api/ambientMedia";
 
 /**
  * Фоновый ambient-эффект для пустого экрана генерации: красивые медиа
@@ -152,7 +148,15 @@ function buildSlots(vw: number): Slot[] {
   return slots;
 }
 
-function MediaTile({ item, section, slot }: { item: AmbientMediaItem; section: AmbientSection; slot: Slot }) {
+function MediaTile({
+  item,
+  section,
+  slot,
+}: {
+  item: AmbientMediaItem;
+  section: AmbientSection;
+  slot: Slot;
+}) {
   const height = Math.round(slot.width * TILE_RATIO);
   return (
     <motion.div
@@ -229,10 +233,7 @@ export function FloatingMediaBg({ section }: { section: AmbientSection }) {
 
   // Раскладка зависит от ширины вьюпорта (фикс. панель → меньше места справа на
   // узких экранах). Пересоздаётся при значимом ресайзе/смене ориентации.
-  const slots = useMemo(
-    () => buildSlots(widthBucket * 140),
-    [widthBucket],
-  );
+  const slots = useMemo(() => buildSlots(widthBucket * 140), [widthBucket]);
 
   // Назначаем по одному медиа на каждый слот (рандомно, с переиспользованием,
   // если медиа меньше, чем слотов).

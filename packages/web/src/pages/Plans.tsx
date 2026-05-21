@@ -344,7 +344,10 @@ function TokenPackCard({
       </div>
 
       <button
-        className={clsx(pack.badge ? "btn btn-primary" : "btn btn-secondary", isProfitable && "btn-heartbeat")}
+        className={clsx(
+          pack.badge ? "btn btn-primary" : "btn btn-secondary",
+          isProfitable && "btn-heartbeat",
+        )}
         style={{ width: "100%", marginTop: "auto" }}
         onClick={onBuy}
         disabled={busy || anyBusy}

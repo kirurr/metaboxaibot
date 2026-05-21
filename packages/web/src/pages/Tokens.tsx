@@ -237,7 +237,9 @@ export default function Tokens() {
                   <span className="pack-unit">{t("tokens.tokensUnit")}</span>
                 </div>
                 <div className="pack-rate">{p.name}</div>
-                <div className="pack-price mono">{Number(p.priceRub).toLocaleString("ru-RU")} ₽</div>
+                <div className="pack-price mono">
+                  {Number(p.priceRub).toLocaleString("ru-RU")} ₽
+                </div>
                 <button
                   className={clsx("btn btn-primary", isProfitable && "btn-heartbeat")}
                   style={{ width: "100%", marginTop: 16 }}
