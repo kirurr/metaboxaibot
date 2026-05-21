@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { db } from "../db.js";
 import { config, AI_MODELS } from "@metabox/shared";
 import { telegramAuthHook } from "../middlewares/telegram-auth.js";
@@ -14,24 +15,40 @@ import {
   type CreatePromptExampleBody,
   type UpdatePromptExampleBody,
 } from "@metabox/shared-browser/dto";
-import { s3Service } from "../services/s3.service.js";
+import { getFileUrl, s3Service, uploadBuffer } from "../services/s3.service.js";
+import { mimeToExtension } from "../utils/mime-detect.js";
+import { logger } from "../logger.js";
+
+// ── Upload constraints для админ-редактора prompt-examples ──────────────────
+const ADMIN_PROMPT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB — с запасом под видео
+const PROMPT_UPLOAD_IMAGE_MIMES = new Set<string>([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+const PROMPT_UPLOAD_VIDEO_MIMES = new Set<string>(["video/mp4", "video/webm", "video/quicktime"]);
+
+function isAllowedPromptUploadMime(
+  mime: string,
+  kind: "media" | "thumbnail",
+  section: "design" | "video",
+): boolean {
+  // thumbnail — всегда image (превью)
+  if (kind === "thumbnail") return PROMPT_UPLOAD_IMAGE_MIMES.has(mime);
+  if (PROMPT_UPLOAD_IMAGE_MIMES.has(mime)) return true;
+  if (section === "video" && PROMPT_UPLOAD_VIDEO_MIMES.has(mime)) return true;
+  return false;
+}
 
 async function serialize(
   example: PrismaPromptExample,
   options: { includeS3Keys?: boolean } = {},
 ): Promise<PromptExample> {
   let [thumbnailUrl, mediaUrl] = await Promise.all([
-    example.thumbnailS3Key
-      ? s3Service.getFileUrl(example.thumbnailS3Key)
-      : "https://picsum.photos/400",
-    example.mediaS3Key ? s3Service.getFileUrl(example.mediaS3Key) : "https://picsum.photos/400",
+    example.thumbnailS3Key ? s3Service.getFileUrl(example.thumbnailS3Key) : null,
+    example.mediaS3Key ? s3Service.getFileUrl(example.mediaS3Key) : null,
   ]);
-
-  // TODO: remove this hack when we ready to add generated images, its just for testing
-  if (example.section === "video") {
-    mediaUrl =
-      "https://d8j0ntlcm91z4.cloudfront.net/user_3CIjqzTsrKEUr8OzFBaYO4ux3nG/hf_20260413_121933_7dfa9582-a536-4a83-9041-ee5aa102ff8c.mp4";
-  }
 
   const aiModel = AI_MODELS[example.modelId];
   return {
@@ -340,6 +357,127 @@ export async function webPromptsRoutes(fastify: FastifyInstance): Promise<void> 
           return;
         }
         return await serialize(updated, { includeS3Keys: true });
+      },
+    );
+
+    /**
+     * POST /admin/prompts/uploads
+     *
+     * Multipart-загрузка медиа/превью для prompt-examples. Принимает `file` +
+     * form-поля `section` (design|video) и `kind` (media|thumbnail). Кладёт
+     * файл в S3 под `prompts/{section}/{uuid}.{ext}` и возвращает s3Key +
+     * presigned URL для мгновенного превью на фронте.
+     */
+    admin.post(
+      "/admin/prompts/uploads",
+      {
+        schema: {
+          description:
+            "Admin: upload media/thumbnail for prompt-examples to S3 under prompts/{section}/{uuid}.{ext}",
+          consumes: ["multipart/form-data"],
+          response: {
+            200: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                s3Key: { type: "string" },
+                url: { type: "string", nullable: true },
+                mimeType: { type: "string" },
+                size: { type: "number" },
+              },
+              required: ["s3Key", "mimeType", "size"],
+            },
+            400: badRequestResponse,
+            413: badRequestResponse,
+            415: badRequestResponse,
+            500: badRequestResponse,
+          },
+        },
+      },
+      async (request, reply) => {
+        let buffer: Buffer | undefined;
+        let mimeType: string | undefined;
+        let section: string | undefined;
+        let kind: string | undefined;
+
+        try {
+          const parts = request.parts({
+            limits: { fileSize: ADMIN_PROMPT_UPLOAD_MAX_BYTES },
+          });
+          for await (const part of parts) {
+            if (part.type === "file") {
+              try {
+                buffer = await part.toBuffer();
+              } catch (err) {
+                const code = (err as { code?: string })?.code;
+                if (code === "FST_REQ_FILE_TOO_LARGE") {
+                  return reply.code(413).send({
+                    error: `Файл больше ${Math.round(ADMIN_PROMPT_UPLOAD_MAX_BYTES / 1024 / 1024)} МБ`,
+                    code: "FILE_TOO_LARGE",
+                  });
+                }
+                logger.warn({ err }, "admin/prompts/uploads: toBuffer failed");
+                return reply.code(400).send({ error: "Не удалось прочитать файл" });
+              }
+              mimeType = part.mimetype;
+            } else if (part.fieldname === "section") {
+              section = typeof part.value === "string" ? part.value : undefined;
+            } else if (part.fieldname === "kind") {
+              kind = typeof part.value === "string" ? part.value : undefined;
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, "admin/prompts/uploads: failed to read multipart");
+          return reply.code(400).send({ error: "Не удалось прочитать форму" });
+        }
+
+        if (!buffer || !mimeType) {
+          return reply.code(400).send({ error: "Файл не передан" });
+        }
+        if (section !== "design" && section !== "video") {
+          return reply
+            .code(400)
+            .send({ error: "Поле section обязательно (design | video)", code: "BAD_SECTION" });
+        }
+        if (kind !== "media" && kind !== "thumbnail") {
+          return reply
+            .code(400)
+            .send({ error: "Поле kind обязательно (media | thumbnail)", code: "BAD_KIND" });
+        }
+
+        if (!isAllowedPromptUploadMime(mimeType, kind, section)) {
+          return reply.code(415).send({
+            error: `Тип файла не поддерживается для ${kind}/${section}: ${mimeType}`,
+            code: "UNSUPPORTED_MEDIA_TYPE",
+          });
+        }
+
+        const ext = mimeToExtension(mimeType);
+        if (!ext) {
+          // Тип прошёл whitelist, но в mime-detect нет mapping'а — защитная
+          // ветка на случай рассинхрона списков.
+          logger.error({ mimeType }, "admin/prompts/uploads: no extension mapping");
+          return reply
+            .code(500)
+            .send({ error: "Не удалось определить расширение файла", code: "NO_EXTENSION" });
+        }
+
+        const s3Key = `prompts/${section}/${randomUUID()}.${ext}`;
+        const uploaded = await uploadBuffer(s3Key, buffer, mimeType).catch((err) => {
+          logger.error({ err, s3Key }, "admin/prompts/uploads: S3 upload failed");
+          return null;
+        });
+        if (!uploaded) {
+          return reply.code(500).send({ error: "S3 недоступен" });
+        }
+
+        const url = await getFileUrl(s3Key).catch(() => null);
+        return {
+          s3Key,
+          url: url ?? null,
+          mimeType,
+          size: buffer.byteLength,
+        };
       },
     );
 

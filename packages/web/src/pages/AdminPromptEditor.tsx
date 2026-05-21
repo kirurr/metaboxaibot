@@ -4,6 +4,7 @@ import { useForm, Controller, type SubmitHandler } from "react-hook-form";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { ModelSettingsPanel } from "@/components/admin/ModelSettingsPanel";
+import { S3FileField } from "@/components/admin/S3FileField";
 import { useAdminPromptModels } from "@/hooks/useAdminPromptModels";
 import { useAdminPromptExample } from "@/hooks/useAdminPromptExample";
 import { useCreatePromptExample, useUpdatePromptExample } from "@/hooks/useAdminPromptMutations";
@@ -274,62 +275,38 @@ export default function AdminPromptEditor() {
           </div>
 
           {/* Thumbnail */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              S3 ключ превью (опционально)
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder="prompts/.../thumb.jpg"
-              {...register("thumbnailS3Key")}
-            />
-            {promptQuery.data?.thumbnailUrl && (
-              <div className="mt-1">
-                <img
-                  src={promptQuery.data.thumbnailUrl}
-                  alt="thumbnail"
-                  className="max-w-[180px] max-h-[120px] rounded border border-border object-cover"
-                />
-                <div className="text-[11px] text-text-hint mt-1">
-                  Текущее превью. После сохранения нового ключа картинка обновится.
-                </div>
-              </div>
+          <Controller
+            control={control}
+            name="thumbnailS3Key"
+            render={({ field }) => (
+              <S3FileField
+                label="Превью (опционально)"
+                kind="thumbnail"
+                section={section}
+                value={field.value}
+                currentPreviewUrl={promptQuery.data?.thumbnailUrl ?? null}
+                onChange={field.onChange}
+                disabled={saving}
+              />
             )}
-          </div>
+          />
 
           {/* Media */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-text-secondary">
-              S3 ключ медиа (опционально)
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder={section === "video" ? "prompts/.../media.mp4" : "prompts/.../media.jpg"}
-              {...register("mediaS3Key")}
-            />
-            {promptQuery.data?.mediaUrl && (
-              <div className="mt-1">
-                {section === "video" ? (
-                  <video
-                    src={promptQuery.data.mediaUrl}
-                    controls
-                    className="max-w-[360px] max-h-[240px] rounded border border-border bg-bg-elevated"
-                  />
-                ) : (
-                  <img
-                    src={promptQuery.data.mediaUrl}
-                    alt="media"
-                    className="max-w-[360px] max-h-[240px] rounded border border-border object-contain bg-bg-elevated"
-                  />
-                )}
-                <div className="text-[11px] text-text-hint mt-1">
-                  Текущий файл. После сохранения нового ключа обновится.
-                </div>
-              </div>
+          <Controller
+            control={control}
+            name="mediaS3Key"
+            render={({ field }) => (
+              <S3FileField
+                label="Медиа (опционально)"
+                kind="media"
+                section={section}
+                value={field.value}
+                currentPreviewUrl={promptQuery.data?.mediaUrl ?? null}
+                onChange={field.onChange}
+                disabled={saving}
+              />
             )}
-          </div>
+          />
         </div>
 
         {/* Settings */}

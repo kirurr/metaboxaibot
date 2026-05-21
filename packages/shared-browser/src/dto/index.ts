@@ -24,6 +24,12 @@ export {
 } from "./model-setting.js";
 export type { ModelSettingDef, ModelSettingOption, ModelSettingType } from "./model-setting.js";
 export {
+  adminUploadKindSchema,
+  adminUploadSectionSchema,
+  adminUploadResponseSchema,
+} from "./admin-upload.js";
+export type { AdminUploadKind, AdminUploadSection, AdminUploadResponse } from "./admin-upload.js";
+export {
   modelSettingsRootSchema,
   patchModelSettingsBodySchema,
   patchDialogModelSettingsBodySchema,
