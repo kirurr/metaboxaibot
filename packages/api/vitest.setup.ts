@@ -1,11 +1,31 @@
 /**
- * Vitest setup — устанавливает test-stub env-переменные ДО импорта config.ts.
+ * Integration test lifecycle — second setupFile after `tests/setup/env.ts`.
  *
- * Shared config бросает на import-time для отсутствующих req()-переменных.
- * Тесты не используют реальные секреты — это просто чтобы пройти проверку.
+ * env.ts MUST run first (it stubs DATABASE_URL / BOT_TOKEN / etc) because
+ * the imports below transitively load `@metabox/shared/config`, which throws
+ * on missing required vars at module-evaluation time.
  */
-process.env.BOT_TOKEN = process.env.BOT_TOKEN ?? "test:bot-token";
-process.env.DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://test/test";
-process.env.REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
-process.env.KEY_VAULT_MASTER =
-  process.env.KEY_VAULT_MASTER ?? "test-vault-master-key-32-bytes-base64===========";
+
+import { afterAll, afterEach, beforeAll } from "vitest";
+import { mswServer } from "./tests/msw/server.js";
+import { disconnectDb, truncateAll } from "./tests/helpers/db.js";
+import { disconnectRedis, flushRedis } from "./tests/helpers/redis.js";
+
+beforeAll(async () => {
+  mswServer.listen({ onUnhandledRequest: "error" });
+  // Previous run may have left rows around — start clean.
+  await truncateAll();
+  await flushRedis();
+});
+
+afterEach(async () => {
+  mswServer.resetHandlers();
+  await truncateAll();
+  await flushRedis();
+});
+
+afterAll(async () => {
+  mswServer.close();
+  await disconnectRedis();
+  await disconnectDb();
+});
