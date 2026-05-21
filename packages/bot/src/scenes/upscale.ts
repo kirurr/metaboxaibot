@@ -7,7 +7,6 @@ import {
   calculateCost,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
-import { buildDownloadUrl } from "@metabox/api/utils/download-token";
 import {
   AI_MODELS,
   config,
@@ -513,11 +512,13 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     });
     return;
   }
-  // Провайдерам отдаём стабильную `/download/<token>/файл.<ext>`-ссылку вместо
-  // протухающего presigned-S3 URL: чистое расширение → Topaz определяет
-  // контейнер, 24h TTL → не протухнет за время ретраев/фолбэка.
-  // `resolveMediaInputUrls` выше уже подтвердил, что файл в S3 жив.
-  const srcUrl = buildDownloadUrl(srcKey, userId) ?? resolvedUrl;
+  // Провайдерам (KIE / Fal Topaz) отдаём presigned-S3 URL напрямую. НЕ через
+  // `/download/<token>` — тот роут отвечает 302-редиректом на S3, а серверные
+  // downloader'ы KIE и Fal по редиректу не идут (Fal явно: "Failed to download
+  // the assets: Redirect response '302 Found'"). Presigned URL ведёт прямо на
+  // объект (200), путь оканчивается реальным расширением — Topaz определяет
+  // контейнер.
+  const srcUrl = resolvedUrl;
 
   await ctx.reply(ctx.t.scenarios.upscaleGenerating);
 
