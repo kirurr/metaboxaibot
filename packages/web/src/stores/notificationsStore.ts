@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { ws } from "@/utils/ws";
 import type { WebNotificationDTO } from "@metabox/shared-browser/ws";
-import { useQueryClient } from "@tanstack/react-query";
+import { queryClient } from "@/api/queryClient";
 import { galleryKeys } from "@/api/gallery";
 
 interface NotificationsState {
@@ -47,9 +47,10 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   },
 
   upsert: (row) => {
-    // invalidate gallery queries
-    const qc = useQueryClient();
-    qc.invalidateQueries({ queryKey: galleryKeys.all });
+    // Singleton-инстанс — тот же, что в <QueryClientProvider>. Через useQueryClient()
+    // нельзя: action дёргается из socket.io listener'а вне React render phase
+    // (см. ../api/queryClient.ts).
+    queryClient.invalidateQueries({ queryKey: galleryKeys.all });
 
     const next = new Map(get().byId);
     next.set(row.id, row);
