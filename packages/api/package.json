@@ -17,7 +17,9 @@
     "test:down": "docker compose -f ../../docker-compose.test-deps.yml down",
     "test:migrate": "cross-env DATABASE_URL=\"postgresql://test_user:test_pass@127.0.0.1:5666/test_db\" prisma migrate deploy --config=../../prisma.config.ts",
     "test:integration": "vitest run --config vitest.config.integration.ts",
-    "test:integration:full": "pnpm test:up && pnpm test:migrate && pnpm test:integration"
+    "test:integration:full": "pnpm test:up && pnpm test:migrate && pnpm test:integration",
+    "test:docker": "docker compose -f ../../docker-compose.test-deps.yml --profile runner run --rm --build api-tests",
+    "test:docker:down": "docker compose -f ../../docker-compose.test-deps.yml --profile runner down -v"
   },
   "exports": {
     ".": {

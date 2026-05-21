@@ -54,6 +54,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # In-Docker integration test runner. Активируется только с профилем `runner`:
+  #   docker compose -f docker-compose.test-deps.yml --profile runner run --rm --build api-tests
+  # См. `pnpm -F @metabox/api test:docker`. Без профиля сервис не стартует, так
+  # что `pnpm test:up` поднимает только postgres+redis (старое поведение).
+  api-tests:
+    profiles: ["runner"]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api.test
+    container_name: aibot_vitest_runner
+    environment:
+      NODE_ENV: test
+      # Service-names (не 127.0.0.1) — внутри docker-сети compose-проекта.
+      # tests/setup/env.ts использует `??` — эти значения перекрывают дефолты.
+      DATABASE_URL: postgresql://test_user:test_pass@postgres:5432/test_db
+      REDIS_URL: redis://:test_redis_pass@redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_vitest_data:
   redis_vitest_data:

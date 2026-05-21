@@ -1,0 +1,19 @@
+FROM node:20-alpine AS base
+RUN npm install -g pnpm
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/api/package.json            ./packages/api/
+COPY packages/shared/package.json         ./packages/shared/
+COPY packages/shared-browser/package.json ./packages/shared-browser/
+COPY prisma ./prisma
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+
+FROM deps AS test
+COPY . .
+RUN pnpm --filter @metabox/shared-browser build \
+ && pnpm --filter @metabox/shared build \
+ && pnpm exec prisma generate
+
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy --config=./prisma.config.ts && pnpm -F @metabox/api test:integration"]
