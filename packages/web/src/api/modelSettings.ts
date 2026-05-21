@@ -1,7 +1,17 @@
+import {
+  modelSettingsRootSchema,
+  type ModelSettingsRoot,
+  type ModelSettingsSuccessResponse,
+  type PatchDialogModelSettingsBody,
+  type PatchModelSettingsBody,
+} from "@metabox/shared-browser/dto";
 import { apiClient } from "./client";
 
 /**
- * Эндпоинты `/model-settings/*` — те же, что юзает мини-аппа и бот.
+ * Эндпоинты `/web/model-settings/*` — web-зеркало TG-роута `/model-settings`
+ * (тот используется только мини-аппой и ботом). Авторизация — JWT Bearer
+ * (`webTelegramLinkedPreHandler`): юзер без привязанного Telegram получает
+ * 403 `TELEGRAM_NOT_LINKED` — `apiClient` сам открывает модалку.
  *
  * Хранилище плоское: `{ [modelId]: { [key]: value } }`, а dialog-overrides
  * лежат под ключом `dialog:<dialogId>`. Эффективные настройки диалога =
@@ -12,32 +22,31 @@ import { apiClient } from "./client";
 
 import type { ModelSettingDto } from "./models";
 
-export type ModelSettingsRoot = Record<string, Record<string, unknown>>;
+// Реэкспорт типа для потребителей (Chat.tsx импортирует отсюда).
+export type { ModelSettingsRoot };
 
-/** GET /model-settings → весь корень (user-level + `dialog:<id>` overrides). */
-export function getAllModelSettings() {
-  return apiClient<ModelSettingsRoot>("/model-settings");
+/** GET /web/model-settings → весь корень (user-level + `dialog:<id>` overrides). */
+export async function getAllModelSettings(): Promise<ModelSettingsRoot> {
+  const data = await apiClient("/web/model-settings");
+  return modelSettingsRootSchema.parse(data);
 }
 
-/** PATCH /model-settings — мердж/replace для конкретного modelId или ключа `dialog:<id>`. */
+/** PATCH /web/model-settings — мердж/replace для конкретного modelId. */
 export function setUserModelSettings(
   modelId: string,
   settings: Record<string, unknown>,
   replace?: boolean,
 ) {
-  return apiClient<
-    { success: true },
-    { modelId: string; settings: Record<string, unknown>; replace?: boolean }
-  >("/model-settings", {
+  return apiClient<ModelSettingsSuccessResponse, PatchModelSettingsBody>("/web/model-settings", {
     method: "PATCH",
     body: { modelId, settings, ...(replace ? { replace: true } : {}) },
   });
 }
 
-/** PATCH /model-settings/dialog/:dialogId — мердж dialog-level override'ов. */
+/** PATCH /web/model-settings/dialog/:dialogId — мердж dialog-level override'ов. */
 export function setDialogModelSettings(dialogId: string, settings: Record<string, unknown>) {
-  return apiClient<{ success: true }, { settings: Record<string, unknown> }>(
-    `/model-settings/dialog/${encodeURIComponent(dialogId)}`,
+  return apiClient<ModelSettingsSuccessResponse, PatchDialogModelSettingsBody>(
+    `/web/model-settings/dialog/${encodeURIComponent(dialogId)}`,
     { method: "PATCH", body: { settings } },
   );
 }

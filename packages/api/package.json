@@ -12,7 +12,10 @@
     "start": "node dist/index.js",
     "seed:keys": "tsx scripts/seed-keys-from-env.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:migrate": "cross-env DATABASE_URL=\"postgresql://test_user:test_pass@127.0.0.1:5666/test_db\" prisma migrate deploy --config=../../prisma.config.ts",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "test:docker": "docker compose -f ../../docker-compose.test-deps.yml --profile runner run --rm --build api-tests",
+    "test:docker:down": "docker compose -f ../../docker-compose.test-deps.yml --profile runner down -v"
   },
   "exports": {
     ".": {
@@ -203,6 +206,7 @@
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/node": "^22.15.29",
     "@types/pg": "^8.18.0",
+    "msw": "^2.14.6",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
