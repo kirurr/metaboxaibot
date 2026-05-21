@@ -42,6 +42,25 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
 
+  api-integration-tests:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run API integration tests (docker-compose)
+        run: pnpm -F @metabox/api test:docker
+
+      - name: Tear down test deps
+        if: always()
+        run: pnpm -F @metabox/api test:docker:down
+
   # ── CD: only on push to develop ──────────────────────────────────────────────
   changes:
     name: Detect changes
