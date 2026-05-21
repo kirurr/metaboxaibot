@@ -21,6 +21,7 @@ import {
   VIDEO_UPSCALE_FACTORS,
   photoFactorFits,
   videoResolutionTier,
+  visibleVideoUpscaleFactors,
   videoFpsTier,
   photoEffectiveMpTier,
 } from "@metabox/shared";
@@ -390,8 +391,14 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
+  // ×4 прячем, когда его результат упирается в тот же тир разрешения, что и
+  // ×2 (Replicate Topaz режет выход на 4k) — кнопка не дала бы ничего сверх ×2.
+  const videoFactors = visibleVideoUpscaleFactors(
+    meta.heightPx ?? DEFAULT_VIDEO_HEIGHT,
+    VIDEO_UPSCALE_FACTORS,
+  );
   await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard("video", VIDEO_UPSCALE_FACTORS, VIDEO_UPSCALE_MODEL_ID, meta),
+    reply_markup: buildFactorKeyboard("video", videoFactors, VIDEO_UPSCALE_MODEL_ID, meta),
   });
 }
 

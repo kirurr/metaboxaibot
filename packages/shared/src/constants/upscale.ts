@@ -54,6 +54,29 @@ export function videoResolutionTier(srcHeightPx: number, factor: number): "720p"
   return "4k";
 }
 
+/**
+ * Факторы видео-апскейла, реально дающие разный результат для исходника
+ * высотой `srcHeightPx`. Topaz/Replicate режет выход по `videoResolutionTier`
+ * (потолок — 4k, выше провайдер не умеет). Если ×4 упирается в тот же тир, что
+ * и ×2 (типичный 1080p+ исходник: оба → 4k), ×4 не даёт ничего сверх ×2 — его
+ * кнопку прячем. Возвращает факторы по возрастанию, по одному на каждый
+ * достижимый тир.
+ */
+export function visibleVideoUpscaleFactors(
+  srcHeightPx: number,
+  factors: readonly string[],
+): string[] {
+  const seenTiers = new Set<string>();
+  const visible: string[] = [];
+  for (const f of factors) {
+    const tier = videoResolutionTier(srcHeightPx, Number(f));
+    if (seenTiers.has(tier)) continue;
+    seenTiers.add(tier);
+    visible.push(f);
+  }
+  return visible;
+}
+
 /** Source fps → render/billing tier (Replicate Topaz prices at 30 и 60 fps). */
 export function videoFpsTier(srcFps: number): "30" | "60" {
   return srcFps >= 45 ? "60" : "30";
