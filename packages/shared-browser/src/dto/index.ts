@@ -24,6 +24,18 @@ export {
 } from "./model-setting.js";
 export type { ModelSettingDef, ModelSettingOption, ModelSettingType } from "./model-setting.js";
 export {
+  modelSettingsRootSchema,
+  patchModelSettingsBodySchema,
+  patchDialogModelSettingsBodySchema,
+  modelSettingsSuccessResponseSchema,
+} from "./model-settings-state.js";
+export type {
+  ModelSettingsRoot,
+  PatchModelSettingsBody,
+  PatchDialogModelSettingsBody,
+  ModelSettingsSuccessResponse,
+} from "./model-settings-state.js";
+export {
   galleryOutputSchema,
   galleryJobSchema,
   galleryListResponseSchema,
