@@ -31,6 +31,7 @@ export default function Image() {
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
       ambientSection="image"
+      promptSection="design"
     />
   );
 }

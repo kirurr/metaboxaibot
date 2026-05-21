@@ -26,6 +26,7 @@ export default function Video() {
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
       ambientSection="video"
+      promptSection="video"
     />
   );
 }
