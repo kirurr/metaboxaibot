@@ -55,11 +55,10 @@ export class ReplicateVideoAdapter implements VideoAdapter {
       }
       const vidBuf = Buffer.from(await vidRes.arrayBuffer());
       const contentType = vidRes.headers.get("content-type") ?? "video/mp4";
-      const ext = contentType.includes("matroska")
-        ? "mkv"
-        : contentType.includes("quicktime")
-          ? "mov"
-          : "mp4";
+      // Контейнер Topaz определяет по расширению имени File. Берём его из ключа
+      // S3 (`.../{ts}.{mp4|mov|mkv}`) — надёжнее content-type, который S3 может
+      // вернуть как generic application/octet-stream.
+      const ext = /\.(mkv|mov)(?:$|\?)/i.exec(videoUrl)?.[1].toLowerCase() ?? "mp4";
       const videoParam = new File([vidBuf], `source.${ext}`, { type: contentType });
       const targetResolution = ["720p", "1080p", "4k"].includes(String(ms.target_resolution))
         ? String(ms.target_resolution)

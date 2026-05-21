@@ -486,6 +486,22 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     }
   }
 
+  // Аналогично для видео: тап по устаревшей клавиатуре мог принести ×4, который
+  // для текущего файла упирается в тот же тир разрешения, что и ×2 — показываем
+  // свежую клавиатуру только с валидными факторами вместо лишнего сабмита.
+  if (!isPhoto) {
+    const visible = visibleVideoUpscaleFactors(
+      meta.heightPx ?? DEFAULT_VIDEO_HEIGHT,
+      VIDEO_UPSCALE_FACTORS,
+    );
+    if (!visible.includes(factor)) {
+      await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
+        reply_markup: buildFactorKeyboard("video", visible, VIDEO_UPSCALE_MODEL_ID, meta),
+      });
+      return;
+    }
+  }
+
   const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);
   if (chatId === undefined) return;
 
