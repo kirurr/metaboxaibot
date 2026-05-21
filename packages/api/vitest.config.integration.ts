@@ -2,8 +2,7 @@ import { defineConfig } from "vitest/config";
 
 /**
  * Integration tests — hit a real Postgres + Redis and mock outgoing HTTP via
- * msw. Run with `pnpm test:integration`. Requires the test stack to be up
- * (`pnpm test:up`) and migrations to be applied (`pnpm test:migrate`).
+ * msw. Run the full pipeline (migrate + tests) via `pnpm -F @metabox/api test:docker`.
  *
  * Single-fork pool: integration tests share one DB schema and truncate after
  * every test — running them in parallel would race on row counts.

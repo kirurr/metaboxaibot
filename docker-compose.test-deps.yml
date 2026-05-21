@@ -1,4 +1,4 @@
-# Test dependencies for local vitest runs (packages/api integration tests).
+# Test dependencies for packages/api integration tests.
 #
 # Spins up an isolated Postgres + Redis on dedicated host ports so they don't
 # clash with the regular `docker-compose.local.yml` dev stack (5432 / 6379) or
@@ -9,10 +9,8 @@
 # file too.
 #
 # Usage:
-#   pnpm -F @metabox/api test:up      # docker compose -f docker-compose.test-deps.yml up -d
-#   pnpm -F @metabox/api test:migrate # prisma migrate deploy against the test DB
-#   pnpm -F @metabox/api test         # vitest run
-#   pnpm -F @metabox/api test:down
+#   pnpm -F @metabox/api test:docker      # full pipeline (migrate + integration) in Docker
+#   pnpm -F @metabox/api test:docker:down # tear down containers + volumes
 
 # Dedicated compose project — isolates these containers from the
 # docker-compose.local.yml dev stack (which lives in the same directory and
@@ -56,8 +54,8 @@ services:
 
   # In-Docker integration test runner. Активируется только с профилем `runner`:
   #   docker compose -f docker-compose.test-deps.yml --profile runner run --rm --build api-tests
-  # См. `pnpm -F @metabox/api test:docker`. Без профиля сервис не стартует, так
-  # что `pnpm test:up` поднимает только postgres+redis (старое поведение).
+  # См. `pnpm -F @metabox/api test:docker`. Без профиля сервис не стартует —
+  # поднимаются только postgres+redis.
   api-tests:
     profiles: ["runner"]
     build:
