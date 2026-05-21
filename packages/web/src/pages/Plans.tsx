@@ -328,6 +328,7 @@ function TokenPackCard({
       return t("plans.badgeProfitable");
     return pack.badge;
   }, [pack.badge, t]);
+  const isProfitable = pack.badge === "profitable" || pack.badge === "best_value";
 
   return (
     <div className={clsx("plan", pack.badge && "featured")}>
@@ -343,7 +344,10 @@ function TokenPackCard({
       </div>
 
       <button
-        className={pack.badge ? "btn btn-primary" : "btn btn-secondary"}
+        className={clsx(
+          pack.badge ? "btn btn-primary" : "btn btn-secondary",
+          isProfitable && "btn-heartbeat",
+        )}
         style={{ width: "100%", marginTop: "auto" }}
         onClick={onBuy}
         disabled={busy || anyBusy}
