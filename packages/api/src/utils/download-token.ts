@@ -97,3 +97,21 @@ export function buildDownloadButton(
   // return type honest so callers don't have to handle `null`.
   return { text, url: `/download/${token}` };
 }
+
+/**
+ * Прямая HTTP-ссылка на скачивание (`/download/<token>/<имя>` → 302 на signed
+ * S3 URL). В отличие от `buildDownloadButton`, всегда возвращает обычный `url`
+ * (без `web_app`).
+ *
+ * Имя файла в хвосте — чтобы URL оканчивался реальным расширением. Нужно и для
+ * гиперссылки в тексте (по тапу открывается в браузере, без мини-аппа), и
+ * провайдерам (Topaz и т.п.) — они определяют контейнер по extension'у URL.
+ *
+ * `null` только если `API_PUBLIC_URL` не задан (в проде он есть).
+ */
+export function buildDownloadUrl(s3Key: string, userId: bigint | string): string | null {
+  if (!config.api.publicUrl) return null;
+  const token = generateDownloadToken(s3Key, userId);
+  const name = s3Key.split("/").pop() || "file";
+  return `${config.api.publicUrl}/download/${token}/${name}`;
+}

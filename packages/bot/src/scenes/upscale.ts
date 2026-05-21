@@ -7,6 +7,7 @@ import {
   calculateCost,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
+import { buildDownloadUrl } from "@metabox/api/utils/download-token";
 import {
   AI_MODELS,
   config,
@@ -336,10 +337,19 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
 
-  // Цена видео-апскейла зависит от длительности, разрешения и fps результата —
-  // парсим moov-атом исходника. `video` Telegram отдаёт duration/height в
-  // сообщении, но не fps; mp4-документ — всё из парсера.
-  const probe = await probeVideoMetadata(tgUrl).catch(() => null);
+  const s3Key = `video_upscale/${userId.toString()}/${Date.now()}.${ext}`;
+  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
+  if (!uploadedKey) {
+    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.videoUpscale, "video"));
+    return;
+  }
+
+  // Метаданные (duration/height/fps) пробим с НАШЕЙ S3-копии, а не с
+  // Telegram-URL: Telegram-ссылки протухают и флапают → высота читалась
+  // нестабильно и цена на кнопке плавала. `video`-сообщение даёт
+  // duration/height сразу; mp4-документ — из парсера; fps Telegram не отдаёт.
+  const s3Url = await s3Service.getFileUrl(uploadedKey).catch(() => null);
+  const probe = s3Url ? await probeVideoMetadata(s3Url).catch(() => null) : null;
   durationSec = durationSec ?? probe?.durationSec ?? undefined;
   heightPx = heightPx ?? probe?.height ?? undefined;
   const fps = probe?.fps ?? undefined;
@@ -347,11 +357,10 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
     await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
   }
-
-  const s3Key = `video_upscale/${userId.toString()}/${Date.now()}.${ext}`;
-  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
-  if (!uploadedKey) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.videoUpscale, "video"));
+  // Высота не прочиталась — без неё цена считается по DEFAULT-высоте и врёт.
+  // Отклоняем, как и нечитаемую длительность, а не подставляем заглушку молча.
+  if (!heightPx || heightPx <= 0) {
+    await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
   }
 
@@ -496,14 +505,19 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     await userStateService.setState(userId, "SCENARIOS_SECTION", null);
     return;
   }
-  const srcUrl = resolved[UPSCALE_SLOT]?.[0];
-  if (!srcUrl) {
+  const resolvedUrl = resolved[UPSCALE_SLOT]?.[0];
+  if (!resolvedUrl) {
     await userStateService.setState(userId, awaitState, null);
     await ctx.reply(isPhoto ? ctx.t.scenarios.photoUpscaleStep : ctx.t.scenarios.videoUpscaleStep, {
       parse_mode: "HTML",
     });
     return;
   }
+  // Провайдерам отдаём стабильную `/download/<token>/файл.<ext>`-ссылку вместо
+  // протухающего presigned-S3 URL: чистое расширение → Topaz определяет
+  // контейнер, 24h TTL → не протухнет за время ретраев/фолбэка.
+  // `resolveMediaInputUrls` выше уже подтвердил, что файл в S3 жив.
+  const srcUrl = buildDownloadUrl(srcKey, userId) ?? resolvedUrl;
 
   await ctx.reply(ctx.t.scenarios.upscaleGenerating);
 

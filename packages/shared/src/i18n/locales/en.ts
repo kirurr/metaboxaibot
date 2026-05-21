@@ -41,7 +41,7 @@ export default {
   },
   scenarios: {
     sectionTitle: "🎯 Ready-made scenarios",
-    sectionTooltip: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    sectionTooltip: "Choose a scenario 👇",
     chooseScenario: "🎯 Choose a scenario",
     faceSwap: "🔄 Face swap",
     backToMain: "🏠 Back to main menu",
