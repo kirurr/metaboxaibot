@@ -56,12 +56,7 @@ export interface TestUser {
  * would produce after a successful Metabox call — but skips Metabox entirely.
  */
 export async function createTestUser(opts: CreateTestUserOptions = {}): Promise<TestUser> {
-  const {
-    role = "USER",
-    isBlocked = false,
-    withTelegram = true,
-    firstName = "Test",
-  } = opts;
+  const { role = "USER", isBlocked = false, withTelegram = true, firstName = "Test" } = opts;
 
   const metaboxUserId = randomUUID();
   const email = opts.email ?? `test-${metaboxUserId}@local.test`;

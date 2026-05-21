@@ -25,30 +25,30 @@ describe("smoke: /web/billing/catalog", () => {
     await app.close();
   });
 
-	describe('billing auth', () => {
-		it("returns 401 when no Authorization header is provided", async () => {
-			const res = await app.inject({
-				method: "GET",
-				url: "/web/billing/catalog",
-			});
+  describe("billing auth", () => {
+    it("returns 401 when no Authorization header is provided", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/web/billing/catalog",
+      });
 
-			expect(res.statusCode).toBe(401);
-			expect(res.json()).toEqual({ error: "Unauthorized" });
-		});
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({ error: "Unauthorized" });
+    });
 
-		it("returns 403 TELEGRAM_NOT_LINKED for a web-only user without Telegram", async () => {
-			const { accessToken } = await createTestUser({ withTelegram: false });
+    it("returns 403 TELEGRAM_NOT_LINKED for a web-only user without Telegram", async () => {
+      const { accessToken } = await createTestUser({ withTelegram: false });
 
-			const res = await app.inject({
-				method: "GET",
-				url: "/web/billing/catalog",
-				headers: bearer(accessToken),
-			});
+      const res = await app.inject({
+        method: "GET",
+        url: "/web/billing/catalog",
+        headers: bearer(accessToken),
+      });
 
-			expect(res.statusCode).toBe(403);
-			expect(res.json()).toMatchObject({ code: "TELEGRAM_NOT_LINKED" });
-		});
-	})
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ code: "TELEGRAM_NOT_LINKED" });
+    });
+  });
 
   it("returns 200 with catalog for an authenticated, Telegram-linked user", async () => {
     const { accessToken } = await createTestUser({ withTelegram: true });
@@ -66,5 +66,4 @@ describe("smoke: /web/billing/catalog", () => {
     expect(body.subscriptions.length).toBeGreaterThan(0);
     expect(body.tokenPackages.length).toBeGreaterThan(0);
   });
-
 });
