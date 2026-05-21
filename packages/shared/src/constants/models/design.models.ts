@@ -328,35 +328,6 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 
 /** Kling / Kling Pro video settings. */
 
-/**
- * Topaz фото-апскейл: цена по мегапикселям результата (`mp_tier`, вычисляется
- * сценой из размера загруженного фото × фактор²).
- *
- * Каждый тир = max(ставка KIE, ставка Fal) — биллим юзера по дороже из двух,
- * чтобы не уйти в минус ни на одном провайдере (KIE primary часто лежит,
- * фактически работаем на Fal-fallback). Ставки:
- *   - KIE: по выходному разрешению — 2K $0.05, 4K $0.10, 8K $0.20.
- *   - Fal: по мегапикселям результата — ≤24MP $0.08, ≤48MP $0.16,
- *     ≤96MP $0.32, выше — $1.36.
- * Тиры: ≤24 → max(KIE-4K, Fal) $0.10; ≤48 → max(KIE-8K, Fal) $0.20;
- * ≤96 → max(KIE-8K, Fal) $0.32; >96 → $1.36.
- */
-const TOPAZ_IMAGE_MP_COST: Record<string, number> = {
-  "12": 0.1,
-  "24": 0.1,
-  "36": 0.2,
-  "48": 0.2,
-  "60": 0.32,
-  "96": 0.32,
-  "132": 1.36,
-  "168": 1.36,
-  "336": 1.36,
-  "512": 1.36,
-  "768": 1.36,
-  "1152": 1.36,
-  "1600": 1.36,
-};
-
 export const DESIGN_MODELS: Record<string, AIModel> = {
   // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
   // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
@@ -381,21 +352,18 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
-  // KIE Topaz Image Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
-  // фото» — hiddenFromCarousel убирает её из карусели выбора моделей Дизайна.
-  // Цена — по мегапикселям результата (`mp_tier`, сцена вычисляет из размера
-  // фото × фактор²): юзер платит за фактический результат, цена видна на кнопке.
+  // Готовый сценарий «Апскейл фото». Под капотом — nano-banana-pro (KIE primary,
+  // evolink fallback): сцена `upscale.ts` зашивает resolution 4K, aspect_ratio
+  // auto и фикс-промт. hiddenFromCarousel убирает модель из карусели Дизайна —
+  // юзеру (и в карусели, и в подписях, и в биллинге) она видна только как
+  // «📷 Апскейл фото», nano-banana нигде не светится.
   "image-upscale": {
     id: "image-upscale",
     name: "📷 Апскейл фото",
-    description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
+    description: "Увеличивает разрешение и чёткость фотографии до 4K.",
     section: "design",
     provider: "kie",
-    costUsdPerRequest: 0.05, // fallback-база, если mp_tier не передан
-    costVariants: {
-      settingKey: "mp_tier",
-      map: TOPAZ_IMAGE_MP_COST,
-    },
+    costUsdPerRequest: 0.12, // nano-banana-pro @ 4K
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -408,20 +376,6 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
-    settings: [
-      {
-        key: "upscale_factor",
-        label: "Степень увеличения",
-        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
-        type: "select",
-        options: [
-          { value: "2", label: "×2" },
-          { value: "4", label: "×4" },
-          { value: "8", label: "×8" },
-        ],
-        default: "2",
-      },
-    ],
   },
   "nano-banana-pro": {
     id: "nano-banana-pro",
@@ -2498,22 +2452,21 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
       },
     ],
   },
-  // ── Image upscale via Fal Topaz (fallback к KIE primary) ─────────────────────
-  // KIE primary `image-upscale` (topaz/image-upscale) роутится на Fal
-  // `fal-ai/topaz/upscale/image` (model "Standard V2", не-генеративная). Fal
-  // принимает `upscale_factor` множителем 1–4 — как KIE; ×8 клампится до 4.
-  // Биллинг — всегда по KIE-цене primary.
+  // ── Image upscale fallback (evolink: gemini-3-pro-image-preview) ────────────
+  // Готовый сценарий «Апскейл фото» = nano-banana-pro под капотом. KIE primary
+  // `image-upscale` фолбэчится на evolink ровно как nano-banana-pro.
+  //
+  // Списание с ЮЗЕРА — всегда по primary (image processor при usedFallback
+  // считает цену primary-моделью). НО `costUsdPerRequest` отсюда идёт в
+  // audit-метаданные `actualCostUsd` (фактическая провайдерская стоимость) —
+  // поэтому держим реальную цену evolink на 4K, а не primary-шную $0.12.
   {
     id: "image-upscale",
-    name: "Image upscale (Fal fallback)",
-    description: "Fallback на Fal Topaz при недоступности KIE.",
+    name: "📷 Апскейл фото (evolink fallback)",
+    description: "Fallback на evolink при недоступности KIE.",
     section: "design",
-    provider: "fal",
-    costUsdPerRequest: 0.05,
-    costVariants: {
-      settingKey: "mp_tier",
-      map: TOPAZ_IMAGE_MP_COST,
-    },
+    provider: "evolink",
+    costUsdPerRequest: 0.224, // evolink gemini-3-pro-image @ 4K — для actualCostUsd-аудита
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -2526,20 +2479,5 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
-    // Prebuilt для plug-and-play promotion в primary (как у nano-banana fallback'ов).
-    settings: [
-      {
-        key: "upscale_factor",
-        label: "Степень увеличения",
-        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
-        type: "select",
-        options: [
-          { value: "2", label: "×2" },
-          { value: "4", label: "×4" },
-          { value: "8", label: "×8" },
-        ],
-        default: "2",
-      },
-    ],
   },
 ];

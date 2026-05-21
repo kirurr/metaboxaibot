@@ -59,12 +59,14 @@ export default {
     photoUpscale: "📷 Photo upscale",
     videoUpscale: "🎬 Video upscale",
     photoUpscaleWelcome:
-      "Increase the resolution and sharpness of a photo with Topaz AI. Great for old, blurry or low-res shots.",
+      "Increase the resolution and sharpness of a photo up to 4K. Great for old, blurry or low-res shots.",
     videoUpscaleWelcome:
       "Increase the resolution and sharpness of a video with Topaz AI. Great for old, blurry or low-quality clips.",
     photoUpscaleStep: "Send the <b>photo</b> you want to enhance. Maximum is 10 MB.",
     videoUpscaleStep: "Send the <b>video</b> you want to enhance. Maximum is 20 MB.",
     upscaleChooseFactor: "Choose the upscale factor 👇",
+    upscalePhotoReady: "📷 Photo received. Tap the button — I'll upscale it to 4K.",
+    upscaleStartButton: "✨ Upscale",
     upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
     upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
     upscalePhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",

@@ -202,14 +202,17 @@ export class EvolinkImageAdapter implements ImageAdapter {
   }
 
   async submit(input: ImageInput): Promise<string> {
-    const evolinkModel = EVOLINK_MODEL_NAMES[this.modelId];
+    // image-upscale (готовый сценарий «Апскейл фото») гоняется через evolink
+    // ровно как nano-banana-pro — алиасим modelId, дальше вся ветка общая.
+    const modelId = this.modelId === "image-upscale" ? "nano-banana-pro" : this.modelId;
+    const evolinkModel = EVOLINK_MODEL_NAMES[modelId];
     if (!evolinkModel) {
-      throw new Error(`Evolink: unknown model ${this.modelId}`);
+      throw new Error(`Evolink: unknown model ${modelId}`);
     }
     // Зеркалит up-front проверку у KIE-адаптера. Без prompt'а evolink/KIE
     // под капотом отвечает 500 «This field is required»; ловим заранее, чтобы
     // юзер получил адресный мессадж и мы не жгли quota на гарантированный fail.
-    const isNanoBanana = this.modelId.startsWith("nano-banana-");
+    const isNanoBanana = modelId.startsWith("nano-banana-");
     if (isNanoBanana && !input.prompt?.trim()) {
       throw new UserFacingError("Prompt is required for nano-banana models", {
         key: "promptRequired",
@@ -241,7 +244,7 @@ export class EvolinkImageAdapter implements ImageAdapter {
     // Поддерживаем оба входных формата:
     //   - KIE primary settings: aspect_ratio (ratio) + resolution (1K/2K/4K)
     //   - OpenAI primary settings: size (pixel format) + quality
-    if (this.modelId === "gpt-image-2") {
+    if (modelId === "gpt-image-2") {
       // size: explicit pixel format from OpenAI-style settings выигрывает; иначе
       // ratio из aspect_ratio, иначе input.aspectRatio, иначе "auto" (default).
       const explicitSize = ms.size as string | undefined;
@@ -264,7 +267,7 @@ export class EvolinkImageAdapter implements ImageAdapter {
       if (typeof n === "number" && n > 1) body.n = Math.max(1, Math.min(10, Math.round(n)));
 
       if (imageUrls.length > 0) {
-        const cap = MAX_REF_IMAGES[this.modelId] ?? 16;
+        const cap = MAX_REF_IMAGES[modelId] ?? 16;
         body.image_urls = imageUrls.slice(0, cap);
       }
     } else {
@@ -275,21 +278,21 @@ export class EvolinkImageAdapter implements ImageAdapter {
 
       // resolution → quality (только для nano-banana-2 и nano-banana-pro;
       // nano-banana-1 / nano-banana-beta параметра quality не имеет).
-      if (this.modelId === "nano-banana-2" || this.modelId === "nano-banana-pro") {
+      if (modelId === "nano-banana-2" || modelId === "nano-banana-pro") {
         const resolution = ms.resolution as string | undefined;
         if (resolution) body.quality = resolution;
       }
 
       if (imageUrls.length > 0) {
-        const cap = MAX_REF_IMAGES[this.modelId] ?? 5;
+        const cap = MAX_REF_IMAGES[modelId] ?? 5;
         body.image_urls = imageUrls.slice(0, cap);
       }
 
       // model_params для v2/pro (web_search, image_search, thinking_level).
-      if (this.modelId === "nano-banana-2" || this.modelId === "nano-banana-pro") {
+      if (modelId === "nano-banana-2" || modelId === "nano-banana-pro") {
         const modelParams: Record<string, unknown> = {};
         if (ms.enable_web_search != null) modelParams.web_search = !!ms.enable_web_search;
-        if (this.modelId === "nano-banana-2") {
+        if (modelId === "nano-banana-2") {
           if (ms.image_search != null) modelParams.image_search = !!ms.image_search;
           if (ms.thinking_level) modelParams.thinking_level = ms.thinking_level;
         }
