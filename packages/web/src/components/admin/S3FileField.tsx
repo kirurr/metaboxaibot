@@ -2,10 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { uploadAdminFile } from "@/api/admin-uploads";
 import { useUIStore } from "@/stores/uiStore";
-import type {
-  AdminUploadKind,
-  AdminUploadSection,
-} from "@metabox/shared-browser/dto";
+import type { AdminUploadKind, AdminUploadSection } from "@metabox/shared-browser/dto";
 
 type S3FileFieldProps = {
   label: string;

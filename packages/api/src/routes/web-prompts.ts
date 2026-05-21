@@ -27,11 +27,7 @@ const PROMPT_UPLOAD_IMAGE_MIMES = new Set<string>([
   "image/webp",
   "image/gif",
 ]);
-const PROMPT_UPLOAD_VIDEO_MIMES = new Set<string>([
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-]);
+const PROMPT_UPLOAD_VIDEO_MIMES = new Set<string>(["video/mp4", "video/webm", "video/quicktime"]);
 
 function isAllowedPromptUploadMime(
   mime: string,
@@ -50,8 +46,8 @@ async function serialize(
   options: { includeS3Keys?: boolean } = {},
 ): Promise<PromptExample> {
   let [thumbnailUrl, mediaUrl] = await Promise.all([
-    example.thumbnailS3Key ? s3Service.getFileUrl(example.thumbnailS3Key): null,
-    example.mediaS3Key ? s3Service.getFileUrl(example.mediaS3Key) : null
+    example.thumbnailS3Key ? s3Service.getFileUrl(example.thumbnailS3Key) : null,
+    example.mediaS3Key ? s3Service.getFileUrl(example.mediaS3Key) : null,
   ]);
 
   const aiModel = AI_MODELS[example.modelId];

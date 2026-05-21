@@ -28,11 +28,7 @@ export {
   adminUploadSectionSchema,
   adminUploadResponseSchema,
 } from "./admin-upload.js";
-export type {
-  AdminUploadKind,
-  AdminUploadSection,
-  AdminUploadResponse,
-} from "./admin-upload.js";
+export type { AdminUploadKind, AdminUploadSection, AdminUploadResponse } from "./admin-upload.js";
 export {
   galleryOutputSchema,
   galleryJobSchema,
