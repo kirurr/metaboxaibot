@@ -287,6 +287,54 @@ export async function measureImageMegapixels(imageUrl: string): Promise<number> 
   return (meta.width * meta.height) / 1_000_000;
 }
 
+export interface NormalizedImageUpload {
+  /** S3 key of the uploaded normalized JPEG. */
+  key: string;
+  /** Megapixels of the normalized image. */
+  megapixels: number;
+  /** Width of the normalized image, px. */
+  width: number;
+  /** Height of the normalized image, px. */
+  height: number;
+}
+
+/**
+ * Fetches an image, normalizes it to a provider-safe JPEG and uploads to S3.
+ *
+ * Re-encoding through sharp fixes inputs that AI upscale providers (Topaz)
+ * reject with "Image format error" — HEIC, CMYK, 16-bit, progressive JPEG,
+ * animated/odd WebP, broken ICC/EXIF. EXIF orientation is baked in (`.rotate()`)
+ * and alpha is flattened on white (JPEG has no alpha channel).
+ *
+ * Returns the S3 key and the normalized image's megapixels (single fetch +
+ * decode — caller doesn't need a separate `measureImageMegapixels` call).
+ * Throws on fetch/decode/upload failure so the caller can surface an error.
+ */
+export async function uploadNormalizedImage(
+  key: string,
+  sourceUrl: string,
+): Promise<NormalizedImageUpload> {
+  const res = await fetch(sourceUrl);
+  if (!res.ok) throw new Error(`Failed to fetch image for normalization: ${res.status}`);
+  const srcBuf = Buffer.from(await res.arrayBuffer());
+  const { data, info } = await sharp(srcBuf)
+    .rotate()
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 92 })
+    .toBuffer({ resolveWithObject: true });
+  const uploaded = await uploadBuffer(key, data, "image/jpeg");
+  // uploadBuffer возвращает null если S3 не сконфигурирован — НЕ выдаём
+  // фейковый success с несуществующим ключом, иначе вызывающий код пойдёт
+  // дальше с мёртвым S3-ключом. Бросаем — caller обработает как сбой.
+  if (!uploaded) throw new Error("uploadNormalizedImage: S3 upload failed (not configured?)");
+  return {
+    key: uploaded,
+    megapixels: (info.width * info.height) / 1_000_000,
+    width: info.width,
+    height: info.height,
+  };
+}
+
 export interface ImageProbeInfo {
   width: number;
   height: number;
@@ -599,6 +647,7 @@ export const s3Service = {
   sectionMeta,
   uploadBuffer,
   uploadFromUrl,
+  uploadNormalizedImage,
   getFileUrl,
   deleteFile,
   generateThumbnail,

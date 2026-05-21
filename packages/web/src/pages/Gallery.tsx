@@ -54,6 +54,7 @@ import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
+import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -480,6 +481,7 @@ function JobCardMenu({
   onOpenLightbox: () => void;
 }) {
   const pushToast = useUIStore((s) => s.pushToast);
+  const navigate = useNavigate();
   const addToFolder = useAddJobToGalleryFolder();
   const removeFromFolder = useRemoveJobFromGalleryFolder();
   const deleteJob = useDeleteGalleryJob();
@@ -557,6 +559,21 @@ function JobCardMenu({
     onClose();
   };
 
+  const handleRepeat = () => {
+    const section = normalizeSection(job.section);
+    if (!section) {
+      pushToast({ type: "error", message: "Неизвестная секция" });
+      return;
+    }
+    navigateToGenerate(navigate, {
+      section,
+      modelId: job.modelId,
+      prompt: job.prompt,
+      settings: job.modelSettings,
+    });
+    onClose();
+  };
+
   const nonDefault = folders.filter((f) => !f.isDefault);
 
   const style: CSSProperties = coords
@@ -591,6 +608,13 @@ function JobCardMenu({
           <div className="my-1 border-t border-[color:var(--border)]" />
         </>
       )}
+      <button
+        type="button"
+        onClick={handleRepeat}
+        className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-bg-secondary rounded text-text"
+      >
+        <RotateCcw size={14} /> Повторить
+      </button>
       <button
         type="button"
         onClick={handleDownload}
@@ -724,7 +748,22 @@ function LightboxMedia({ section, output }: { section: string; output: GalleryOu
 function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const pushToast = useUIStore((s) => s.pushToast);
+  const navigate = useNavigate();
   const active = job.outputs[activeIdx] ?? job.outputs[0];
+
+  const handleRepeat = () => {
+    const section = normalizeSection(job.section);
+    if (!section) {
+      pushToast({ type: "error", message: "Неизвестная секция" });
+      return;
+    }
+    navigateToGenerate(navigate, {
+      section,
+      modelId: job.modelId,
+      prompt: job.prompt,
+      settings: job.modelSettings,
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -811,7 +850,7 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
               variant="ghost"
               size="sm"
               leftIcon={<RotateCcw size={14} />}
-              onClick={() => pushToast({ type: "info", message: "Повтор генерации скоро будет" })}
+              onClick={handleRepeat}
             >
               Повторить
             </Button>

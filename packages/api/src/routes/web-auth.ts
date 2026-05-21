@@ -22,6 +22,7 @@ import {
   webConfirmPasswordReset,
   webChangePassword,
   webGetProfile,
+  webResendVerification,
   MetaboxApiError,
 } from "../services/metabox-bridge.service.js";
 import {
@@ -124,7 +125,11 @@ async function buildWebUserResponse(args: {
     language: (aib?.language as "ru" | "en" | undefined) ?? "ru",
     telegramId,
     telegramUsername,
-    isTelegramLinked: !!aib,
+    // Привязка TG = именно наличие telegramId на AI Box User (или fallback на
+    // metabox-side telegramId если AI Box User ещё не создан). Раньше было
+    // `!!aib` — web-only юзеры (создаются `ensureAibUser` без TG) видели в
+    // профиле «Linked» + «id null» и не могли кликнуть «Привязать Telegram».
+    isTelegramLinked: !!telegramId,
     tokenBalance: aib?.tokenBalance.toString() ?? "0",
     subscriptionTokenBalance: aib?.subscriptionTokenBalance.toString() ?? "0",
     role: aib?.role ?? "USER",
@@ -317,14 +322,27 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           return reply.code(502).send({ error: "Не удалось создать аккаунт" });
         }
 
-        // Создаём AI Box User сразу при регистрации — иначе все защищённые
-        // /web/* endpoint'ы вернут 403 на первый запрос. Sync token-grants
-        // и subscription для нового metabox-юзера: ожидаемо пусто, но
-        // ensureAibUser идемпотентен.
+        // Если требуется подтверждение email (prod-режим, не STAGE_MODE) —
+        // НЕ создаём сессию и НЕ создаём AI Box User. Иначе фронт залогинит
+        // юзера, и при первом рефреше webValidateCredentials упадёт с 403
+        // EMAIL_NOT_VERIFIED → юзер увидит выкид из сессии без объяснений.
+        // AI Box User будет создан при первом успешном login (после клика
+        // по ссылке подтверждения в письме).
+        if (registered.requiresVerification) {
+          return reply.send({
+            requiresVerification: true,
+            email: registered.email,
+            firstName: registered.firstName,
+          });
+        }
+
+        // Stage / autoverify ветка — создаём AI Box User сразу. (Так же
+        // работает существующий путь, если фичу подтверждения отключают.)
         const ensured = await ensureAibUserForMetabox({
           metaboxUserId: registered.metaboxUserId,
           firstName: registered.firstName,
           lastName: registered.lastName,
+          metaboxReferralCode: registered.referralCode,
         });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
@@ -423,8 +441,20 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           if (err instanceof MetaboxApiError) {
             if (err.status === 401)
               return reply.code(401).send({ error: "Неверный email или пароль" });
-            if (err.status === 403)
-              return reply.code(403).send({ error: err.message || "Вход запрещён" });
+            if (err.status === 403) {
+              // EMAIL_NOT_VERIFIED — клин-месседж + code, фронт покажет CTA
+              // «отправить письмо повторно». Без code (banned / другая 403) —
+              // возвращаем дефолт «Вход запрещён», БЕЗ технического
+              // `err.message` (он содержит `Metabox internal API … → 403: …`).
+              if (err.code === "EMAIL_NOT_VERIFIED") {
+                return reply.code(403).send({
+                  code: "EMAIL_NOT_VERIFIED",
+                  error: "Email не подтверждён. Перейдите по ссылке из письма или запросите новое.",
+                  email: emailNorm,
+                });
+              }
+              return reply.code(403).send({ error: "Вход запрещён" });
+            }
           }
           logger.error({ err }, "web-login: metabox validate failed");
           return reply.code(502).send({ error: "Временная ошибка. Попробуйте позже." });
@@ -437,6 +467,7 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           metaboxUserId: validated.metaboxUserId,
           firstName: validated.firstName,
           lastName: validated.lastName,
+          metaboxReferralCode: validated.referralCode,
         });
 
         const { accessToken, accessTokenExpiresAt, csrfToken } = await issueSession(reply, {
@@ -714,6 +745,41 @@ export const webAuthRoutes: FastifyPluginAsync = async (fastify) => {
           createdAt: t.createdAt.toISOString(),
         })),
       });
+    },
+  );
+
+  // ── POST /auth/web-resend-verification ──────────────────────────────────
+  // Прокси к metabox `/api/internal/web-resend-verification`. Используется
+  // post-signup экраном «Проверьте почту» (юзер ещё не залогинен).
+  fastify.post<{ Body: { email?: string } }>(
+    "/auth/web-resend-verification",
+    {
+      schema: {
+        description: "Resend email verification link",
+        security: [],
+        body: {
+          type: "object",
+          properties: { email: { type: "string" } },
+          required: ["email"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { ok: { type: "boolean" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const email = (request.body?.email ?? "").toLowerCase().trim();
+      if (!isValidEmail(email)) return reply.send({ ok: true });
+      try {
+        await webResendVerification(email);
+      } catch (err) {
+        logger.warn({ err, email }, "web-resend-verification: metabox call failed");
+      }
+      return reply.send({ ok: true });
     },
   );
 

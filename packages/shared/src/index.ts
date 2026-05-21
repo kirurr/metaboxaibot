@@ -55,6 +55,21 @@ export {
 } from "./constants/model-families.js";
 export { BOT_STATES, SECTION_BY_STATE, WELCOME_BONUS_TOKENS } from "./constants/states.js";
 export { FACE_SWAP_BUFFER_MODEL_ID } from "./constants/face-swap.js";
+export {
+  PHOTO_UPSCALE_BUFFER_MODEL_ID,
+  VIDEO_UPSCALE_BUFFER_MODEL_ID,
+  PHOTO_UPSCALE_MODEL_ID,
+  VIDEO_UPSCALE_MODEL_ID,
+  PHOTO_UPSCALE_FACTORS,
+  VIDEO_UPSCALE_FACTORS,
+  UPSCALE_MAX_LONGEST_SIDE_PX,
+  photoFactorFits,
+  PHOTO_MP_TIERS,
+  videoResolutionTier,
+  visibleVideoUpscaleFactors,
+  videoFpsTier,
+  photoEffectiveMpTier,
+} from "./constants/upscale.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";

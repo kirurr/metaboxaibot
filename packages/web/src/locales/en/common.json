@@ -105,6 +105,10 @@
     "termsHint": "By continuing you agree to our Terms & Privacy. Data never used for training.",
     "loginError": "Couldn't sign in. Check your email and password.",
     "signupError": "Couldn't create the account. Try again later.",
+    "checkEmail": "Check your email",
+    "checkEmailHint": "We sent a confirmation link to {{email}}. Click it to activate your account.",
+    "resendVerification": "Resend verification email",
+    "backToLogin": "Back to sign in",
     "heroTitle": "A calmer way to work with intelligence.",
     "heroSubtitle": "Pay for what you use. Eight frontier models. One quiet, focused workspace built for people who do real work."
   },
@@ -167,6 +171,16 @@
     "telegramNotLinked": "Not linked",
     "telegramLinked": "Linked",
     "telegramNotLinkedChip": "Not linked",
+    "telegramLink": {
+      "cta": "Link Telegram",
+      "hint": "Link the bot to use AI in Telegram and merge bot purchases with your web account.",
+      "modalTitle": "Connect the Telegram bot",
+      "modalIntro": "Click the button below — it opens the bot in Telegram. Press «Start» and your account will be linked automatically.",
+      "modalSteps": "Connecting takes a few seconds. The window will close on its own when done.",
+      "openBot": "Open Telegram bot",
+      "waiting": "Waiting for connection…",
+      "error": "Couldn't generate the link. Try again later."
+    },
     "balanceTotal": "Total tokens",
     "balanceTotalHint": "Purchased + subscription",
     "balancePurchased": "Purchased",
@@ -227,7 +241,8 @@
     "videoPromptPlaceholder": "Describe the scene for video generation",
     "audioTitle": "Create audio.",
     "audioSubtitle": "TTS, voice cloning, music — pick a model and describe the scene.",
-    "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…"
+    "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…",
+    "openPromptExamples": "Prompt examples"
   },
   "chat": {
     "newDialog": "New dialog",
@@ -341,14 +356,26 @@
     "subtitle": "Every conversation, organised by time. Search across all of them in one keystroke.",
     "exportAll": "Export all",
     "newChat": "New chat",
-    "searchPlaceholder": "Search dialogs…",
+    "searchPlaceholder": "Search dialogs and messages…",
     "emptyMatch": "No conversations match «{{q}}».",
+    "emptyAll": "No dialogs yet.",
+    "loading": "Loading dialogs…",
+    "errorLoad": "Failed to load dialogs.",
     "days": {
       "today": "Today",
       "yesterday": "Yesterday",
       "thisWeek": "This week",
       "earlier": "Earlier"
-    }
+    },
+    "filters": {
+      "label": "Filter by section",
+      "all": "All",
+      "gpt": "Chat",
+      "design": "Image",
+      "video": "Video",
+      "audio": "Audio"
+    },
+    "statusFailed": "Failed"
   },
   "tokens": {
     "title": "Top up.",

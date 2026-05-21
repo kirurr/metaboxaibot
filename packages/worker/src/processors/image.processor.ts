@@ -4,6 +4,7 @@ import { delayJob } from "../utils/delay-job.js";
 import {
   resolveUserFacingMessage,
   shouldNotifyOps,
+  getOpsAlertDedupKey,
   resolveSubJobError,
   getOpsAlertChannel,
 } from "../utils/user-facing-error.js";
@@ -48,7 +49,12 @@ import {
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
-import { notifyTechError, notifyRateLimit, notifyFallback } from "../utils/notify-error.js";
+import {
+  notifyTechError,
+  notifyTechErrorThrottled,
+  notifyRateLimit,
+  notifyFallback,
+} from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
@@ -1679,45 +1685,83 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     if (telegramChatId !== null) {
       const filename = finalImageResult.filename ?? "image.png";
       const info = await resolveTelegramSource(s3Key, finalImageResult.url);
-      const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
-        info,
-        finalImageResult.url,
-        filename,
-      );
-
+      const singleCaption = buildCaption();
       const refineRow: InlineKeyboardButton[] | null = job.data.hideRefineButton
         ? null
         : [{ text: t.design.refine, callback_data: `design_ref_${outputId}` }];
-      const actionRow: InlineKeyboardButton[] | null =
-        info.byteSize <= TELEGRAM_DOC_MAX_BYTES
-          ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
-          : s3Key
+
+      if (modelMeta?.deliverAsDocument === true) {
+        // Апскейл и т.п.: результат отдаём ФАЙЛОМ. Размеры увеличенного фото
+        // превышают лимиты Telegram sendPhoto (PHOTO_INVALID_DIMENSIONS); документ
+        // сохраняет полное разрешение — это и нужно от апскейлера.
+        if (info.byteSize > TELEGRAM_DOC_MAX_BYTES) {
+          // Не влезает даже в sendDocument — отдаём только ссылку на скачивание.
+          const dlRow = s3Key
             ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
             : null;
-      const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
-      const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
-
-      const singleCaption = buildCaption();
-      if (isSvg) {
-        // 2 попытки — multipart upload в Telegram'е иногда падает на network
-        // blip'ах. Single retry — безопасный второй шанс.
-        await withRetry("image.sendDocument", 2, () =>
-          telegram.sendDocument(telegramChatId, tgImageSource, {
-            caption: singleCaption,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-            ...replyToPrompt,
-          }),
-        );
+          await withRetry("image.sendMessage", 2, () =>
+            telegram.sendMessage(telegramChatId, singleCaption, {
+              parse_mode: "HTML",
+              reply_markup: dlRow ? { inline_keyboard: [dlRow] } : undefined,
+              ...replyToPrompt,
+            }),
+          );
+        } else {
+          // Грузим буфером (multipart): у sendDocument по URL лимит 20 МБ,
+          // апскейл-результат легко его превышает.
+          const docBuffer =
+            info.kind === "buffer"
+              ? info.buffer
+              : await withRetry("image.fetchDoc", 3, async () => {
+                  const r = await fetch(info.url);
+                  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                  return Buffer.from(await r.arrayBuffer());
+                });
+          await withRetry("image.sendDocument", 2, () =>
+            telegram.sendDocument(telegramChatId, new InputFile(docBuffer, filename), {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: refineRow ? { inline_keyboard: [refineRow] } : undefined,
+              ...replyToPrompt,
+            }),
+          );
+        }
       } else {
-        await withRetry("image.sendPhoto", 2, () =>
-          telegram.sendPhoto(telegramChatId, tgImageSource, {
-            caption: singleCaption,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-            ...replyToPrompt,
-          }),
+        const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
+          info,
+          finalImageResult.url,
+          filename,
         );
+        const actionRow: InlineKeyboardButton[] | null =
+          info.byteSize <= TELEGRAM_DOC_MAX_BYTES
+            ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
+            : s3Key
+              ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
+              : null;
+        const rows = [refineRow, actionRow].filter(Boolean) as InlineKeyboardButton[][];
+        const replyMarkup = rows.length ? { inline_keyboard: rows } : undefined;
+
+        if (isSvg) {
+          // 2 попытки — multipart upload в Telegram'е иногда падает на network
+          // blip'ах. Single retry — безопасный второй шанс.
+          await withRetry("image.sendDocument", 2, () =>
+            telegram.sendDocument(telegramChatId, tgImageSource, {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+              ...replyToPrompt,
+            }),
+          );
+        } else {
+          await withRetry("image.sendPhoto", 2, () =>
+            telegram.sendPhoto(telegramChatId, tgImageSource, {
+              caption: singleCaption,
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+              ...replyToPrompt,
+            }),
+          );
+        }
       }
 
       // Virtual-batch partial-success c K=1 (один success + 1..3 failures).
@@ -1939,17 +1983,22 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         },
       });
       if (shouldNotifyOps(err)) {
-        await notifyTechError(
-          err,
-          {
-            jobId: dbJobId,
-            modelId,
-            section: "image",
-            userId: userIdStr,
-            attempt: job.attemptsMade,
-          },
-          getOpsAlertChannel(err),
-        );
+        const opsCtx = {
+          jobId: dbJobId,
+          modelId,
+          section: "image",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        };
+        // opsAlertDedupKey ("kie-credits-exhausted" и пр.) — burst-throttle,
+        // иначе при пустом KIE-аккаунте каждый job шлёт отдельный алёрт.
+        const dedupKey = getOpsAlertDedupKey(err);
+        const channel = getOpsAlertChannel(err);
+        if (dedupKey) {
+          await notifyTechErrorThrottled(err, opsCtx, dedupKey, { channel });
+        } else {
+          await notifyTechError(err, opsCtx, channel);
+        }
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, userMsg).catch(() => void 0);

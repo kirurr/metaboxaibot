@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { randomUUID } from "node:crypto";
 import { webTelegramLinkedPreHandler } from "../middlewares/web-auth.js";
 import { dialogService, type StoredAttachment } from "../services/dialog.service.js";
+import { historyService } from "../services/history.service.js";
 import {
   chatService,
   ContextOverflowError,
@@ -211,15 +212,24 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // ── GET /web/dialogs ────────────────────────────────────────────────────
-  fastify.get<{ Querystring: { section?: string } }>(
+  // `q` и `withStats` опциональны; без них поведение прежнее (используется
+  // ChatSidebar / Chat.tsx, не платит за SUM(tokensUsed) и full-content поиск).
+  // С `q` ищет в title + содержимом сообщений, возвращает `snippet`;
+  // с `withStats=1` возвращает `totalTokens` per dialog.
+  fastify.get<{ Querystring: { section?: string; q?: string; withStats?: string } }>(
     "/web/dialogs",
     {
       schema: {
-        description: "List user dialogs optionally filtered by section",
+        description: "List user dialogs (optional search + stats)",
         querystring: {
           type: "object",
           properties: {
             section: { type: "string" },
+            q: { type: "string", description: "Search in title and message content" },
+            withStats: {
+              type: "string",
+              description: "When '1'/'true', include totalTokens per dialog",
+            },
           },
         },
         response: {
@@ -235,6 +245,9 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
                 title: { type: "string", nullable: true },
                 createdAt: { type: "string" },
                 updatedAt: { type: "string" },
+                totalTokens: { type: "number" },
+                snippet: { type: "string", nullable: true },
+                latestJobId: { type: "string", nullable: true },
               },
             },
           },
@@ -243,10 +256,25 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request) => {
       const { aibUserId } = request.webUser!;
-      const dialogs = await dialogService.listByUser(
-        aibUserId!,
-        request.query.section as Section | undefined,
-      );
+      const section = request.query.section as Section | undefined;
+      const q = request.query.q?.trim() || undefined;
+      const withStats = request.query.withStats === "1" || request.query.withStats === "true";
+
+      // Легаси-путь: без q/withStats не нагружаем БД лишним groupBy/ILIKE —
+      // важно для ChatSidebar, который дёргает этот же endpoint.
+      if (!q && !withStats) {
+        const dialogs = await dialogService.listByUser(aibUserId!, section);
+        return dialogs.map((d) => ({
+          id: d.id,
+          section: d.section,
+          modelId: d.modelId,
+          title: d.title ?? null,
+          createdAt: d.createdAt.toISOString(),
+          updatedAt: d.updatedAt.toISOString(),
+        }));
+      }
+
+      const dialogs = await dialogService.listForHistory(aibUserId!, { section, q, withStats });
       return dialogs.map((d) => ({
         id: d.id,
         section: d.section,
@@ -254,7 +282,60 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         title: d.title ?? null,
         createdAt: d.createdAt.toISOString(),
         updatedAt: d.updatedAt.toISOString(),
+        ...(withStats ? { totalTokens: d.totalTokens ?? 0 } : {}),
+        ...(q ? { snippet: d.snippet ?? null } : {}),
+        latestJobId: d.latestJobId ?? null,
       }));
+    },
+  );
+
+  // ── GET /web/history ────────────────────────────────────────────────────
+  // Unified list для страницы /history:
+  //  - kind="dialog": для gpt — Dialog с агрегированными tokensUsed по сообщениям.
+  //  - kind="job": для image/video/audio — GenerationJob (по userId, dialogId
+  //    игнорируется), потому что media-джобы часто создаются с пустым dialogId.
+  //
+  // Без q возвращает всю историю; с q фильтрует по title/контенту (gpt) и по
+  // prompt (media). Без пагинации, sort: updatedAt desc.
+  fastify.get<{ Querystring: { section?: string; q?: string } }>(
+    "/web/history",
+    {
+      schema: {
+        description: "Unified history (gpt dialogs + media generation jobs)",
+        querystring: {
+          type: "object",
+          properties: {
+            section: { type: "string", description: "gpt | image | design | video | audio" },
+            q: { type: "string", description: "Search in title/content (gpt) and prompt (media)" },
+          },
+        },
+        response: {
+          200: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+                section: { type: "string" },
+                modelId: { type: "string" },
+                title: { type: "string", nullable: true },
+                createdAt: { type: "string" },
+                updatedAt: { type: "string" },
+                totalTokens: { type: "number" },
+                snippet: { type: "string", nullable: true },
+                status: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { aibUserId } = request.webUser!;
+      const { section, q } = request.query;
+      return historyService.list(aibUserId!, { section, q });
     },
   );
 

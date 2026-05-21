@@ -25,6 +25,8 @@ import {
   getSubscriptionStatusByMetabox,
   markOrderGrantedOnMetabox,
   markTokensGrantedOnMetabox,
+  reconcileByAibox,
+  setAiboxId,
 } from "./metabox-bridge.service.js";
 
 interface EnsureUserParams {
@@ -32,6 +34,10 @@ interface EnsureUserParams {
   firstName?: string | null;
   lastName?: string | null;
   language?: string;
+  /** Metabox referralCode — пишется в `User.metaboxReferralCode` при первом
+   *  create. Если у existing User уже выставлен другой — не перетираем
+   *  (referralCode не меняется на metabox-стороне, drift'а ожидать не стоит). */
+  metaboxReferralCode?: string | null;
 }
 
 interface EnsuredUser {
@@ -73,7 +79,7 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   // Ищем по live id (после-merge primary).
   let existing = await db.user.findFirst({
     where: { metaboxUserId: liveMetaboxUserId },
-    select: { id: true, telegramId: true, metaboxUserId: true },
+    select: { id: true, telegramId: true, metaboxUserId: true, metaboxReferralCode: true },
   });
 
   // Stale-cache case: AI Box User существует, но привязан к старому (frozen
@@ -81,7 +87,7 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   if (!existing && liveMetaboxUserId !== params.metaboxUserId) {
     const stale = await db.user.findFirst({
       where: { metaboxUserId: params.metaboxUserId },
-      select: { id: true, telegramId: true, metaboxUserId: true },
+      select: { id: true, telegramId: true, metaboxUserId: true, metaboxReferralCode: true },
     });
     if (stale) {
       await db.user.update({
@@ -101,6 +107,26 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
   }
 
   if (existing) {
+    // Backfill metaboxReferralCode для legacy юзеров: до текущего фикса
+    // ensureAibUser не писал поле, и юзеры созданные ранее имеют null.
+    // Обновляем только если у нас сейчас есть свежее значение от
+    // webValidateCredentials и у юзера в БД пусто.
+    if (params.metaboxReferralCode && !existing.metaboxReferralCode) {
+      await db.user.update({
+        where: { id: existing.id },
+        data: { metaboxReferralCode: params.metaboxReferralCode },
+      });
+    }
+
+    // Existing User: всё равно дёргаем setAiboxId + reconcileByAibox.
+    // Это catch-up для legacy юзеров, которые создавались ДО фикса A1 и
+    // потому на metabox-стороне у них может ещё не быть aiboxUserId или в
+    // pendingBot* лежать админ-гранты, недоставленные из-за прежнего гейта
+    // на telegramId. Обе bridge-функции best-effort + идемпотентны
+    // (`setAiboxId` → `alreadySet:true`, `reconcileByAibox` → `case:'none'`),
+    // так что повторные вызовы не делают вреда.
+    await setAiboxId({ metaboxUserId: liveMetaboxUserId, aiboxUserId: existing.id });
+    await reconcileByAibox({ metaboxUserId: liveMetaboxUserId, aiboxUserId: existing.id });
     return { ...existing, created: false };
   }
 
@@ -114,6 +140,9 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
       lastName: params.lastName ?? null,
       language: params.language ?? "ru",
       metaboxUserId: liveMetaboxUserId,
+      // referralCode пишем сразу — иначе web-фронт после web-login видит
+      // null в `Profile.referralCode` и не может показать партнёрский код.
+      metaboxReferralCode: params.metaboxReferralCode ?? null,
       // isNew=true оставляем дефолтом — welcome-flow в боте триггерится через
       // первый /start (не наш случай); на вебе никаких welcome-сообщений нет.
     },
@@ -124,6 +153,29 @@ export async function ensureAibUserForMetabox(params: EnsureUserParams): Promise
     { userId: created.id.toString(), metaboxUserId: liveMetaboxUserId },
     "[ensureAibUser] created web-only AI Box User",
   );
+
+  // Двусторонняя связь: пушим наш id обратно на metabox, чтобы admin grants/
+  // subscriptions могли дойти к web-only юзеру (без telegramId).
+  // Errors swallowed by bridge — best-effort, ретрай произойдёт на следующем
+  // refresh/login.
+  try {
+    await setAiboxId({ metaboxUserId: liveMetaboxUserId, aiboxUserId: created.id });
+  } catch (err) {
+    logger.warn(
+      { err, userId: created.id.toString(), metaboxUserId: liveMetaboxUserId },
+      "[ensureAibUser] setAiboxId failed (will retry on next refresh)",
+    );
+  }
+
+  // Catch-up: если у этого metabox-юзера есть pendingBot* (накопились до
+  // фикса A1, когда admin grants не доставлялись web-only юзерам), просим
+  // metabox flush'нуть их в бот через reconcileSubscription по нашему
+  // aiboxUserId. Для свежих signup-юзеров pendingBot* пустые — endpoint
+  // отрабатывает мгновенно без эффектов. Bridge сам swallow'ит ошибки.
+  await reconcileByAibox({
+    metaboxUserId: liveMetaboxUserId,
+    aiboxUserId: created.id,
+  });
 
   // Sync — best effort. Любая ошибка тут не блокирует логин, юзер залогинится
   // и ребёнок UI; следующий рефреш/логин ретрайнет.

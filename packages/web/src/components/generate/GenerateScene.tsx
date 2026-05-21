@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Check, ChevronDown, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Check,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Wand2,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
@@ -38,6 +48,11 @@ import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { useUIStore } from "@/stores/uiStore";
+import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
+import type { GeneratePrefill } from "@/utils/navigateToGenerate";
+import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
+import type { PromptExample } from "@/api/promptExamples";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -56,6 +71,35 @@ export type GenerateSceneProps = {
   promptPlaceholder: string;
   /** Список моделей (дедуплированный по `familyId`). Первая по умолчанию. */
   models: readonly WebModelDto[];
+  /**
+   * Скрыть UI выбора модели (дропдаун + family-axis chips). Используется
+   * пресетами с зафиксированной моделью (например, /image/swap).
+   */
+  hideModelPicker?: boolean;
+  /**
+   * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
+   * вручную изменил modelId / prompt / settings относительно пресет-снимка.
+   * Слот-файлы НЕ сбрасываются. Callback должен запустить повторное
+   * применение префила (обычно — `navigate(pathname, { state: { prefill } })`).
+   */
+  onReset?: () => void;
+  /**
+   * Мапа `modelId → { key: value }` из пресета. При ручной смене модели
+   * (когда у пресета `hideModelPicker: false` и есть `allowedModelIds`)
+   * автоматически применяются настройки соответствующей модели.
+   */
+  presetSettingsByModel?: Record<string, Record<string, unknown>>;
+  /**
+   * Секция для модалки «Готовые промпты» в шапке. Если не задана — кнопка
+   * не рендерится (для пресетных страниц и аудио, где галереи нет).
+   */
+  promptSection?: "design" | "video";
+};
+
+type GenerateDraft = {
+  modelId: string;
+  prompt: string;
+  settings: Record<string, unknown>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -476,8 +520,18 @@ function FamilyAxisChip({
 
 // ── Main scene ───────────────────────────────────────────────────────────────
 
-export function GenerateScene({ title, subtitle, promptPlaceholder, models }: GenerateSceneProps) {
+export function GenerateScene({
+  title,
+  subtitle,
+  promptPlaceholder,
+  models,
+  hideModelPicker = false,
+  onReset,
+  presetSettingsByModel,
+  promptSection,
+}: GenerateSceneProps) {
   const { t } = useTranslation();
+  const promptsDialogRef = useRef<HTMLDialogElement>(null);
 
   // ── Family grouping ───────────────────────────────────────────────────────
   // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
@@ -670,6 +724,120 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     setSlotFiles({});
   }, [modelId]);
 
+  // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
+  // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
+  // на каждый navigate (страж — `location.key`, не булевый флаг — иначе
+  // самопереход /image → /image с новым префилом не сработает).
+  //
+  // Двухстадийное применение нужно из-за того, что reset-effect выше (на смену
+  // modelId) обнуляет settingValues, а defaults-effect ниже (на selectedModel)
+  // заполняет дефолты. Если бы мы сразу setSettingValues(prefill.settings) —
+  // оба effect'а затёрли бы префил. Решение: кладём payload в ref, второй
+  // effect ниже (зависит от selectedModel — выполнится ПОСЛЕ reset и defaults)
+  // применяет ref поверх дефолтов.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pushToast = useUIStore((s) => s.pushToast);
+  const lastConsumedPrefillKey = useRef<string | null>(null);
+  const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  // Параллельно с pendingPrefillRef помечаем «это восстановление черновика,
+  // не пресет» — чтобы stage-2 effect не ставил presetSnapshot и кнопка
+  // «Сбросить» не появилась после возврата назад.
+  const pendingPrefillIsDraftRef = useRef<boolean>(false);
+  // Снимок последнего применённого префила — используется для определения
+  // «юзер что-то поменял» (isDirty) и показа кнопки «Сбросить» на пресетных
+  // страницах. Включает modelId / prompt / settings; slotFiles не трекаем.
+  const [presetSnapshot, setPresetSnapshot] = useState<{
+    modelId: string;
+    prompt: string;
+    settings: Record<string, unknown>;
+  } | null>(null);
+  useEffect(() => {
+    const state = location.state as { prefill?: GeneratePrefill; draft?: GenerateDraft } | null;
+    // Draft восстанавливается при back-навигации с модалки «Готовые промпты»:
+    // тот же путь, что и для prefill, но без snapshot'а (это «возврат к
+    // черновику», а не пресет → кнопка «Сбросить» не должна появиться).
+    const prefill = state?.prefill;
+    const draft = !prefill && state?.draft ? state.draft : null;
+    if (!prefill && !draft) return;
+    if (lastConsumedPrefillKey.current === location.key) return;
+    if (models.length === 0) return; // ждём загрузку каталога
+
+    const requestedModelId = prefill?.modelId ?? draft?.modelId;
+    if (!requestedModelId) return;
+    const modelExists = models.some((m) => m.id === requestedModelId);
+    const targetId = modelExists ? requestedModelId : (families[0]?.id ?? null);
+    if (!targetId) return; // ни запрошенной, ни дефолтной модели нет — выходим
+
+    lastConsumedPrefillKey.current = location.key;
+
+    // settings оставляем только если модель найдена — чужие ключи для дефолтной
+    // модели смысла не имеют (юзер увидит, что чипы не реагируют на префил).
+    const sourcePrompt = prefill?.prompt ?? draft?.prompt ?? "";
+    const sourceSettings = prefill ? prefill.settings : draft?.settings;
+    // resolved.section используется только как ярлык для тоста — apply берёт
+    // modelId/prompt/settings. Для draft (без prefill) — фолбэк "image".
+    const resolved: GeneratePrefill = {
+      section: prefill?.section ?? "image",
+      modelId: targetId,
+      prompt: sourcePrompt,
+      settings: modelExists ? sourceSettings : undefined,
+    };
+
+    if (modelId === targetId) {
+      // Модель уже выбрана — никаких reset/defaults effect'ов не будет.
+      // Применяем напрямую, без ref'а.
+      setPrompt(resolved.prompt ?? "");
+      if (resolved.settings) {
+        setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
+      }
+      // Snapshot для isDirty — только для пресет-префила. Восстановление
+      // черновика (draft) snapshot НЕ устанавливает: это просто возврат
+      // к юзерскому состоянию, кнопка «Сбросить» не нужна.
+      if (prefill) {
+        setPresetSnapshot({
+          modelId: targetId,
+          prompt: resolved.prompt ?? "",
+          settings: resolved.settings ?? {},
+        });
+      }
+    } else {
+      // Отложенное применение — после reset и defaults effect'ов.
+      pendingPrefillRef.current = resolved;
+      pendingPrefillIsDraftRef.current = !prefill;
+      setModelId(targetId);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("model", targetId);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+
+    if (!modelExists) {
+      pushToast({
+        type: "info",
+        message: "Модель из примера больше недоступна — открыли с дефолтной",
+      });
+    }
+
+    // Чистим location.state — чтобы F5 / back-navigation не повторили префил.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [
+    location.key,
+    location.state,
+    location.pathname,
+    location.search,
+    models,
+    families,
+    modelId,
+    navigate,
+    setSearchParams,
+    pushToast,
+  ]);
+
   const activeMode = useMemo(
     () => resolveActiveMode(selectedModel?.modes ?? null, modeId),
     [selectedModel, modeId],
@@ -688,6 +856,20 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     );
   }, [selectedModel, settingValues]);
 
+  // Юзер расходится с применённым пресет-снимком? Показ кнопки «Сбросить»
+  // на пресетных страницах. Сравниваем только то, что снимок описывает —
+  // modelId / prompt / ключи из snapshot.settings. Дополнительные ручные
+  // настройки за пределами snapshot.settings не считаем «изменением пресета».
+  const isDirtyFromPreset = useMemo(() => {
+    if (!presetSnapshot) return false;
+    if (presetSnapshot.modelId !== modelId) return true;
+    if (presetSnapshot.prompt !== prompt) return true;
+    for (const [k, v] of Object.entries(presetSnapshot.settings)) {
+      if (settingValues[k] !== v) return true;
+    }
+    return false;
+  }, [presetSnapshot, modelId, prompt, settingValues]);
+
   // Инициализируем дефолтные значения настроек при смене модели/набора параметров.
   useEffect(() => {
     if (!selectedModel) return;
@@ -700,6 +882,52 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
       return next;
     });
   }, [selectedModel]);
+
+  // Stage 2 префила — выполняется ПОСЛЕ defaults-effect выше (порядок useEffect
+  // соответствует порядку объявления), поэтому накладываем prefill.settings
+  // поверх свежевыставленных дефолтов.
+  useEffect(() => {
+    const pending = pendingPrefillRef.current;
+    if (!pending) return;
+    if (!selectedModel || selectedModel.id !== pending.modelId) return;
+    const isDraft = pendingPrefillIsDraftRef.current;
+    pendingPrefillRef.current = null;
+    pendingPrefillIsDraftRef.current = false;
+    setPrompt(pending.prompt ?? "");
+    if (pending.settings) {
+      const pendingSettings = pending.settings;
+      setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
+    }
+    if (!isDraft) {
+      setPresetSnapshot({
+        modelId: pending.modelId,
+        prompt: pending.prompt ?? "",
+        settings: pending.settings ?? {},
+      });
+    }
+  }, [selectedModel]);
+
+  // Авто-применение per-model настроек пресета при ручной смене модели.
+  // Срабатывает только в пресет-режиме (есть snapshot) и только когда юзер
+  // сменил модель на ОТЛИЧНУЮ от той, что в snapshot'е — иначе после первичного
+  // префила (stage-2 выше) snapshot.modelId === selectedModel.id и мы no-op.
+  // prompt в snapshot оставляем прежним, чтобы dirty-индикатор по prompt
+  // продолжал работать корректно после смены модели.
+  useEffect(() => {
+    if (!presetSettingsByModel) return;
+    if (!selectedModel || !presetSnapshot) return;
+    if (presetSnapshot.modelId === selectedModel.id) return;
+
+    const next = presetSettingsByModel[selectedModel.id];
+    if (next) {
+      setSettingValues((prev) => ({ ...prev, ...next }));
+    }
+    setPresetSnapshot({
+      modelId: selectedModel.id,
+      prompt: presetSnapshot.prompt,
+      settings: next ?? {},
+    });
+  }, [selectedModel, presetSettingsByModel, presetSnapshot]);
 
   // Outside-click для popover'а моделей. Popup в portal'е → проверяем оба ref'а.
   useEffect(() => {
@@ -1258,13 +1486,80 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
     }
   }
 
+  // ── Prompts modal — открытие/закрытие через ref на <dialog>. ───────────────
+  function openPromptsDialog() {
+    const dlg = promptsDialogRef.current;
+    if (!dlg) return;
+    dlg.showModal();
+    document.body.style.overflow = "hidden";
+  }
+  function closePromptsDialog() {
+    const dlg = promptsDialogRef.current;
+    if (!dlg) return;
+    dlg.close();
+    document.body.style.overflow = "";
+  }
+
+  // Apply prompt example: 1) кладём текущий черновик в state ТЕКУЩЕЙ entry
+  // через replace, 2) пушим новый URL с prefill. При back-навигации браузер
+  // возвращается на entry с draft → effect выше восстанавливает prompt/model/
+  // settings. Файлы в слотах не сохраняются (объекты File не сериализуются).
+  function handleApplyPromptExample(ex: PromptExample) {
+    const targetSection = ex.model ? normalizeSection(ex.section) : null;
+    if (!targetSection || !ex.model) {
+      pushToast({ type: "info", message: "Модель примера недоступна" });
+      return;
+    }
+    const settings =
+      ex.modelSettings && typeof ex.modelSettings === "object"
+        ? (ex.modelSettings as Record<string, unknown>)
+        : undefined;
+
+    // Глушим prefill-effect на текущей entry — replace ниже изменит
+    // location.state и иначе бы effect среагировал и попытался применить
+    // draft до того, как мы успеем сделать push.
+    lastConsumedPrefillKey.current = location.key;
+
+    const draft: GenerateDraft = {
+      modelId,
+      prompt,
+      settings: settingValues,
+    };
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: { draft },
+    });
+    navigateToGenerate(navigate, {
+      section: targetSection,
+      modelId: ex.model.id,
+      prompt: ex.prompt,
+      settings,
+    });
+  }
+
   return (
     <div className={clsx("gen-scene", (voicePickerSetting || mediaPickerSetting) && "has-picker")}>
       <div className="gen-bg" aria-hidden />
       <div className="gen-panel">
         <div className="gen-head">
-          <h1>{title}</h1>
-          <p className="gen-sub">{subtitle}</p>
+          <div>
+            <h1>{title}</h1>
+            <p className="gen-sub">{subtitle}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap ml-auto">
+            {promptSection && (
+              <button type="button" className="gen-reset-btn" onClick={openPromptsDialog}>
+                <Wand2 size={14} />
+                <span>{t("generate.openPromptExamples")}</span>
+              </button>
+            )}
+            {onReset && isDirtyFromPreset && (
+              <button type="button" className="gen-reset-btn" onClick={onReset}>
+                <RotateCcw size={14} />
+                <span>Сбросить</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -1319,9 +1614,9 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
               «какую модель из семейства взять», логически выше per-model
               tuning settings. FamilyAxisChip сам прячется если выбора нет
               (1 версия/вариант). */}
-          {(familyAxis || visibleSettings.length > 0) && (
+          {((!hideModelPicker && familyAxis) || visibleSettings.length > 0) && (
             <div className="gen-settings-chips">
-              {familyAxis && familyAxis.currentVersion && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVersion && (
                 <FamilyAxisChip
                   label={t("generate.familyVersion")}
                   current={familyAxis.currentVersion}
@@ -1329,7 +1624,7 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
                   onSelect={selectFamilyVersion}
                 />
               )}
-              {familyAxis && familyAxis.currentVariant && (
+              {!hideModelPicker && familyAxis && familyAxis.currentVariant && (
                 <FamilyAxisChip
                   label={t("generate.familyVariant")}
                   current={familyAxis.currentVariant}
@@ -1355,57 +1650,59 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
 
         {/* Footer: model picker + CTA. Sticky, всегда видны. */}
         <div className="gen-panel-footer">
-          <div className="gen-model-row">
-            <button
-              ref={modelBtnRef}
-              className="gen-model-btn"
-              onClick={() => setModelOpen(!modelOpen)}
-            >
-              <div className="gen-model-glyph">
-                {selectedModel ? modelLetter(selectedModel) : "·"}
-              </div>
-              <div className="gen-model-text">
-                <span className="gen-model-meta">Model</span>
-                <span className="gen-model-name">
-                  {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
-                </span>
-              </div>
-              <ChevronDown size={16} />
-            </button>
-            {modelOpen && (
-              <ChipPopover
-                anchorRef={modelBtnRef}
-                popRef={modelPopRef}
-                className="gen-model-pop"
-                matchAnchorWidth
+          {!hideModelPicker && (
+            <div className="gen-model-row">
+              <button
+                ref={modelBtnRef}
+                className="gen-model-btn"
+                onClick={() => setModelOpen(!modelOpen)}
               >
-                {families.map((m) => {
-                  // Active = выбранная модель из этого семейства (даже если
-                  // юзер переключился на sibling-вариант через chip'ы).
-                  const isActive = selectedModel?.familyId
-                    ? m.familyId === selectedModel.familyId
-                    : m.id === modelId;
-                  return (
-                    <button
-                      key={m.id}
-                      className={clsx("gen-model-row-item", isActive && "on")}
-                      onClick={() => {
-                        pickModel(m.id);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <div className="gen-model-glyph">{modelLetter(m)}</div>
-                      <div className="gen-model-item-body">
-                        <div className="gen-model-item-name">{modelDisplayName(m)}</div>
-                        <div className="gen-model-item-desc">{modelDesc(m)}</div>
-                      </div>
-                      {isActive && <Check size={14} />}
-                    </button>
-                  );
-                })}
-              </ChipPopover>
-            )}
-          </div>
+                <div className="gen-model-glyph">
+                  {selectedModel ? modelLetter(selectedModel) : "·"}
+                </div>
+                <div className="gen-model-text">
+                  <span className="gen-model-meta">Model</span>
+                  <span className="gen-model-name">
+                    {selectedModel ? modelDisplayName(selectedModel) : "Загрузка…"}
+                  </span>
+                </div>
+                <ChevronDown size={16} />
+              </button>
+              {modelOpen && (
+                <ChipPopover
+                  anchorRef={modelBtnRef}
+                  popRef={modelPopRef}
+                  className="gen-model-pop"
+                  matchAnchorWidth
+                >
+                  {families.map((m) => {
+                    // Active = выбранная модель из этого семейства (даже если
+                    // юзер переключился на sibling-вариант через chip'ы).
+                    const isActive = selectedModel?.familyId
+                      ? m.familyId === selectedModel.familyId
+                      : m.id === modelId;
+                    return (
+                      <button
+                        key={m.id}
+                        className={clsx("gen-model-row-item", isActive && "on")}
+                        onClick={() => {
+                          pickModel(m.id);
+                          setModelOpen(false);
+                        }}
+                      >
+                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <div className="gen-model-item-body">
+                          <div className="gen-model-item-name">{modelDisplayName(m)}</div>
+                          <div className="gen-model-item-desc">{modelDesc(m)}</div>
+                        </div>
+                        {isActive && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </ChipPopover>
+              )}
+            </div>
+          )}
 
           <button className="gen-cta" disabled={!canGenerate} onClick={generate}>
             {busy || uploadInProgress ? (
@@ -1521,6 +1818,51 @@ export function GenerateScene({ title, subtitle, promptPlaceholder, models }: Ge
             }
           }}
         />
+      )}
+
+      {promptSection && (
+        <dialog
+          ref={promptsDialogRef}
+          onClose={() => {
+            document.body.style.overflow = "";
+          }}
+          onClick={(e) => {
+            // Закрыть по клику на бэкдроп — дочерний контент имеет
+            // `gen-prompts-modal-body` со своим stopPropagation.
+            if (e.target === promptsDialogRef.current) {
+              closePromptsDialog();
+            }
+          }}
+          className="
+            rise
+            p-4 md:p-8
+            backdrop:transition-all
+            fixed inset-0
+            w-screen h-screen
+            max-w-none max-h-none
+            m-0
+            overflow-y-auto
+            outline-none
+            bg-transparent
+            backdrop:backdrop-blur"
+        >
+          <div className="gen-prompts-modal-body relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="btn btn-ghost btn-icon absolute top-0 right-0 z-50"
+              onClick={closePromptsDialog}
+            >
+              <X />
+            </button>
+            <PromptExamplesGallery
+              section={promptSection}
+              hideTypeTabs
+              onApply={(ex) => {
+                closePromptsDialog();
+                handleApplyPromptExample(ex);
+              }}
+            />
+          </div>
+        </dialog>
       )}
     </div>
   );

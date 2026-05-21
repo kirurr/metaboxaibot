@@ -193,14 +193,21 @@ export class ApipassSunoAdapter implements AudioAdapter {
     // Not ready yet
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
-    // Suno возвращает 2 трека за один запрос. Собираем все валидные URL'ы;
-    // первый кладём в основной AudioResult, остальные — в `extras` (worker
-    // сохранит каждый как отдельный output и пришлёт юзеру отдельным
-    // сообщением).
+    // Suno возвращает 2 трека за один запрос. Собираем только финальные
+    // `audioUrl` (как kie-адаптер): `streamAudioUrl` — это HLS-эндпоинт,
+    // он не играется как mp3 в Telegram sendAudio, и он появляется рано —
+    // по нему нельзя судить о готовности трека. Первый URL кладём в основной
+    // AudioResult, остальные — в `extras` (worker сохранит каждый отдельным
+    // output'ом и пришлёт юзеру отдельным сообщением).
     const tracks = (taskData?.response?.sunoData ?? [])
-      .map((tr) => tr.streamAudioUrl ?? tr.audioUrl)
+      .map((tr) => tr.audioUrl)
       .filter((u): u is string => !!u);
     if (tracks.length === 0) return null;
+
+    // На FIRST_SUCCESS обычно готов только первый трек — не отдаём результат,
+    // пока готовы не оба, иначе юзер получит 1 трек за полную (2-трековую)
+    // цену запроса. На SUCCESS отдаём что есть (изредка Suno возвращает 1).
+    if (status === "FIRST_SUCCESS" && tracks.length < 2) return null;
 
     const [primaryUrl, ...restUrls] = tracks;
     return {

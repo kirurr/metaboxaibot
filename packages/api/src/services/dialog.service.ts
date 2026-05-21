@@ -57,6 +57,23 @@ export function readOpenAIFileIds(att: StoredAttachment): Record<string, string>
   return {};
 }
 
+/**
+ * Подрезает `content` вокруг первого матча `q` до ~140 символов с эллипсами
+ * по краям. Используется для history-снippet'а в UI поиска.
+ */
+function buildSnippet(content: string, q: string): string {
+  const MAX = 140;
+  if (!q) return content.length > MAX ? content.slice(0, MAX) + "…" : content;
+  const idx = content.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return content.length > MAX ? content.slice(0, MAX) + "…" : content;
+  const around = 60;
+  const start = Math.max(0, idx - around);
+  const end = Math.min(content.length, idx + q.length + around);
+  const left = start > 0 ? "…" : "";
+  const right = end < content.length ? "…" : "";
+  return left + content.slice(start, end) + right;
+}
+
 export interface CreateDialogParams {
   userId: bigint;
   section: Section;
@@ -109,6 +126,126 @@ export const dialogService = {
       where: { userId, ...(section ? { section } : {}), isDeleted: false },
       orderBy: { updatedAt: "desc" },
     });
+  },
+
+  /**
+   * История с опциональным поиском (title + содержимое сообщений) и
+   * агрегацией токенов. Используется страницей /history.
+   *
+   * - Без `q` и `withStats` поведение совпадает с listByUser (плюс возвращается
+   *   расширенный тип с `null` extras), регрессий для существующих вызовов нет.
+   * - С `q` ищем по `title ILIKE %q%` ИЛИ по содержимому non-failed сообщений,
+   *   плюс одним батчем достаём первый matching snippet на диалог.
+   * - С `withStats` одним groupBy суммируем `tokensUsed` всех сообщений.
+   *
+   * Возвращает плоский список — пагинация пока не нужна (см. AIBOX-22 plan).
+   */
+  async listForHistory(
+    userId: bigint,
+    opts: { section?: Section; q?: string; withStats?: boolean } = {},
+  ): Promise<
+    Array<
+      Dialog & {
+        totalTokens?: number;
+        snippet?: string | null;
+        latestJobId?: string | null;
+      }
+    >
+  > {
+    const q = opts.q?.trim() ?? "";
+    const where = {
+      userId,
+      isDeleted: false,
+      ...(opts.section ? { section: opts.section } : {}),
+      ...(q
+        ? {
+            OR: [
+              { title: { contains: q, mode: "insensitive" as const } },
+              {
+                messages: {
+                  some: {
+                    failed: false,
+                    content: { contains: q, mode: "insensitive" as const },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const dialogs = await db.dialog.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+    });
+    if (dialogs.length === 0) return [];
+
+    const ids = dialogs.map((d) => d.id);
+    // Параллельно: токены сообщений (gpt) + токены generation-job'ов
+    // (image/video/audio) + сниппеты по q + latest done-job per dialog для
+    // навигации /gallery/:jobId со страницы /history.
+    const [messageTotals, jobTotals, snippets, latestJobs] = await Promise.all([
+      opts.withStats
+        ? db.message.groupBy({
+            by: ["dialogId"],
+            where: { dialogId: { in: ids } },
+            _sum: { tokensUsed: true },
+          })
+        : Promise.resolve([] as Array<{ dialogId: string; _sum: { tokensUsed: unknown } }>),
+      opts.withStats
+        ? db.generationJob.groupBy({
+            by: ["dialogId"],
+            where: { dialogId: { in: ids } },
+            _sum: { tokensSpent: true },
+          })
+        : Promise.resolve([] as Array<{ dialogId: string; _sum: { tokensSpent: unknown } }>),
+      q
+        ? db.message.findMany({
+            where: {
+              dialogId: { in: ids },
+              failed: false,
+              content: { contains: q, mode: "insensitive" as const },
+            },
+            // `distinct` + `orderBy` дают по одному (последнему) сообщению per
+            // dialog — этого хватает для UI-сниппета.
+            orderBy: { createdAt: "desc" },
+            distinct: ["dialogId"],
+            select: { dialogId: true, content: true },
+          })
+        : Promise.resolve([] as Array<{ dialogId: string; content: string }>),
+      // latestJobId — последний завершённый job per dialog. Для gpt-диалогов
+      // вернётся пустой набор. Дёргаем всегда: дёшево (индекс по dialogId)
+      // и нужен для роутинга в UI.
+      db.generationJob.findMany({
+        where: { dialogId: { in: ids }, status: "done" },
+        orderBy: { createdAt: "desc" },
+        distinct: ["dialogId"],
+        select: { dialogId: true, id: true },
+      }),
+    ]);
+
+    const messageTotalsByDialog = new Map<string, number>(
+      messageTotals.map((t) => [t.dialogId, Number(t._sum.tokensUsed ?? 0)]),
+    );
+    const jobTotalsByDialog = new Map<string, number>(
+      jobTotals.map((t) => [t.dialogId, Number(t._sum.tokensSpent ?? 0)]),
+    );
+    const snippetsByDialog = new Map<string, string>(
+      snippets.map((s) => [s.dialogId, buildSnippet(s.content, q)]),
+    );
+    const latestJobByDialog = new Map<string, string>(latestJobs.map((j) => [j.dialogId, j.id]));
+
+    return dialogs.map((d) => ({
+      ...d,
+      ...(opts.withStats
+        ? {
+            totalTokens:
+              (messageTotalsByDialog.get(d.id) ?? 0) + (jobTotalsByDialog.get(d.id) ?? 0),
+          }
+        : {}),
+      ...(q ? { snippet: snippetsByDialog.get(d.id) ?? null } : {}),
+      latestJobId: latestJobByDialog.get(d.id) ?? null,
+    }));
   },
 
   async softDelete(dialogId: string, userId: bigint): Promise<void> {

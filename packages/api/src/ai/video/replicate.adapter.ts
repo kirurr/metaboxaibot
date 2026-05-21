@@ -11,6 +11,8 @@ import { resolveImageMimeType } from "../../utils/mime-detect.js";
  */
 const REPLICATE_MODELS: Record<string, `${string}/${string}:${string}` | `${string}/${string}`> = {
   sora: "openai/sora-2",
+  // Topaz video upscaler — fallback для KIE primary `video-upscale`.
+  "video-upscale": "topazlabs/video-upscale",
 };
 
 export class ReplicateVideoAdapter implements VideoAdapter {
@@ -33,6 +35,52 @@ export class ReplicateVideoAdapter implements VideoAdapter {
 
   async submit(input: VideoInput): Promise<string> {
     const ms = input.modelSettings ?? {};
+
+    // ── Topaz video upscale — fallback для KIE primary `video-upscale` ────────
+    // Replicate-версия принимает абсолютное `target_resolution` + `target_fps`.
+    // Сцена кладёт их в modelSettings (тиры вычислены из исходника), цена
+    // учитывает оба — биллинг и стоимость Replicate согласованы.
+    if (this.modelId === "video-upscale") {
+      const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
+      if (!videoUrl) throw new Error("Replicate video-upscale: source video is required");
+      // Replicate не умеет фетчить S3/Telegram presigned URL напрямую, а Topaz
+      // определяет контейнер по расширению имени File — поэтому ВСЕГДА качаем
+      // видео сами и оборачиваем в именованный File (SDK v1.x грузит его в
+      // Replicate files API). Передать Topaz сам URL = ошибка
+      // "`source.container` is required", поэтому на провале загрузки бросаем
+      // явную ошибку, а не молча отдаём URL-строку.
+      const vidRes = await fetch(videoUrl);
+      if (!vidRes.ok) {
+        throw new Error(`Replicate video-upscale: source download failed (HTTP ${vidRes.status})`);
+      }
+      const vidBuf = Buffer.from(await vidRes.arrayBuffer());
+      const contentType = vidRes.headers.get("content-type") ?? "video/mp4";
+      // Контейнер Topaz определяет по расширению имени File. Берём его из ключа
+      // S3 (`.../{ts}.{mp4|mov|mkv}`) — надёжнее content-type, который S3 может
+      // вернуть как generic application/octet-stream.
+      const ext = /\.(mkv|mov)(?:$|\?)/i.exec(videoUrl)?.[1].toLowerCase() ?? "mp4";
+      const videoParam = new File([vidBuf], `source.${ext}`, { type: contentType });
+      const targetResolution = ["720p", "1080p", "4k"].includes(String(ms.target_resolution))
+        ? String(ms.target_resolution)
+        : "1080p";
+      const targetFps = String(ms.fps) === "60" ? 60 : 30;
+      const predInput = {
+        video: videoParam,
+        target_resolution: targetResolution,
+        target_fps: targetFps,
+      };
+      logCall(String(this.model), "submit", {
+        video: "<blob>",
+        target_resolution: targetResolution,
+        target_fps: targetFps,
+      });
+      const prediction = await this.client.predictions.create({
+        model: this.model as `${string}/${string}`,
+        input: predInput,
+      });
+      return prediction.id;
+    }
+
     const referenceUrl = input.mediaInputs?.reference?.[0] ?? input.imageUrl;
 
     // Sora uses "seconds" (not "duration"), "input_reference" (not "image"),

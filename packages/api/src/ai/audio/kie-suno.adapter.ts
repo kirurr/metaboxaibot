@@ -239,9 +239,7 @@ export class KieSunoAdapter implements AudioAdapter {
     if (status !== "SUCCESS" && status !== "FIRST_SUCCESS") return null;
 
     // Берём только финальные audioUrl'ы — streamAudioUrl это HLS/chunked
-    // endpoint, его нельзя отдавать как mp3 в Telegram sendAudio. На
-    // FIRST_SUCCESS audioUrl первого трека уже готов; если ещё нет —
-    // продолжаем поллить до SUCCESS.
+    // endpoint, его нельзя отдавать как mp3 в Telegram sendAudio.
     //
     // Suno возвращает 2 трека за запрос. Все валидные кладём: первый в
     // основной result, остальные в `extras` (worker сохранит каждый как
@@ -250,6 +248,12 @@ export class KieSunoAdapter implements AudioAdapter {
       .map((tr) => tr.audioUrl)
       .filter((u): u is string => !!u);
     if (audioUrls.length === 0) return null;
+
+    // На FIRST_SUCCESS обычно готов только первый трек (audioUrl второго ещё
+    // null). Не отдаём результат, пока готовы не оба, — иначе юзер получает
+    // 1 трек за полную (2-трековую) цену запроса. На SUCCESS отдаём что есть:
+    // изредка Suno реально возвращает 1 трек, ждать второй бессмысленно.
+    if (status === "FIRST_SUCCESS" && audioUrls.length < 2) return null;
 
     const [primaryUrl, ...restUrls] = audioUrls;
     return {
