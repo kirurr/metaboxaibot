@@ -37,7 +37,13 @@ export async function downloadRoutes(fastify: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const token = request.params["*"];
+      // URL: `/download/<token>` либо `/download/<token>/<filename>` — имя в
+      // хвосте добавляется ради расширения (провайдерам для определения
+      // контейнера, и браузеру). Токен (base64url.hex) слешей не содержит —
+      // берём часть до первого `/`.
+      const star = request.params["*"];
+      const slash = star.indexOf("/");
+      const token = slash === -1 ? star : star.slice(0, slash);
 
       let payload: { k: string; u: string; e: number };
       try {

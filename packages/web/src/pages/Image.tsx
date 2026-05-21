@@ -30,6 +30,8 @@ export default function Image() {
       hideModelPicker={setup.hideModelPicker}
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
+      ambientSection="image"
+      promptSection="design"
     />
   );
 }

@@ -60,6 +60,12 @@ interface Props {
   onJobFailed: (jobId: string, errorMessage: string) => void;
   /** Колбэк когда pending получил success из WS — родитель апдейтит карточку. */
   onJobSucceeded: (jobId: string, outputs: TrackedJobOutput[]) => void;
+  /**
+   * Сообщает родителю, есть ли вообще контент в пэйне (генерации/pending'и).
+   * Используется, чтобы скрыть ambient-фон, как только появилась первая
+   * генерация (вместо пустого экрана показывается галерея).
+   */
+  onHasContentChange?: (hasContent: boolean) => void;
 }
 
 export function GenerationHistory({
@@ -69,6 +75,7 @@ export function GenerationHistory({
   onJobResolved,
   onJobFailed,
   onJobSucceeded,
+  onHasContentChange,
 }: Props) {
   const { t } = useTranslation();
   const [history, setHistory] = useState<GenerationJobDto[]>([]);
@@ -156,7 +163,13 @@ export function GenerationHistory({
   // audio проигрывается inline и в модалке не нуждается.
   const [preview, setPreview] = useState<{ url: string; section: string } | null>(null);
 
-  if (visiblePending.length === 0 && history.length === 0 && !loading) {
+  const hasContent = visiblePending.length > 0 || history.length > 0;
+  // Сообщаем родителю о наличии контента (для скрытия ambient-фона).
+  useEffect(() => {
+    onHasContentChange?.(hasContent);
+  }, [hasContent, onHasContentChange]);
+
+  if (!hasContent && !loading) {
     return null;
   }
 

@@ -1,7 +1,7 @@
 export default {
   start: {
     welcome:
-      '🔶 Ну наконец-то! Мы вас ждали. Это Metabox — место, где нейросети на расстоянии одного клика.\n\nПродолжая, вы соглашаетесь с <a href="{landingUrl}/documents/offer_ru.html">публичной офертой</a>, <a href="{landingUrl}/documents/terms_of_use_ru.html">пользовательским соглашением</a>, <a href="{landingUrl}/documents/privacy_ru.html">политикой конфиденциальности</a> и <a href="{landingUrl}/documents/risk_warning_ru.html">предупреждением о рисках</a>, а также даёте согласие на <a href="{landingUrl}/documents/consent_processing_ru.html">обработку персональных данных</a>, <a href="{landingUrl}/documents/consent_distribution_ru.html">распространение персональных данных</a> и на получение информационной рассылки. (Да, это много. Да, мы тоже устали их писать.)\n\nВыберите язык, чтобы начать:',
+      '🔶 Ну наконец-то! Мы вас ждали. Это Metabox — место, где нейросети на расстоянии одного клика.\n\nПродолжая, вы соглашаетесь с <a href="{landingUrl}/legal/offer">публичной офертой</a>, <a href="{landingUrl}/documents/terms_of_use_ru.html">пользовательским соглашением</a>, <a href="{landingUrl}/documents/privacy_ru.html">политикой конфиденциальности</a> и <a href="{landingUrl}/documents/risk_warning_ru.html">предупреждением о рисках</a>, а также даёте согласие на <a href="{landingUrl}/documents/consent_processing_ru.html">обработку персональных данных</a>, <a href="{landingUrl}/documents/consent_distribution_ru.html">распространение персональных данных</a> и на получение информационной рассылки. (Да, это много. Да, мы тоже устали их писать.)\n\nВыберите язык, чтобы начать:',
     tokensGranted:
       "🪄 На вашем счету появились 7.50 токенов. Откуда? Не спрашивайте. Это подарок. Потратьте их с умом. Или без ума - мы не осуждаем.\n\n👤 Нажмите «Профиль», чтобы узнать, сколько нейросетей можно попробовать, пока токены не закончатся (спойлер: много)",
     yourBalance:
@@ -41,7 +41,7 @@ export default {
   },
   scenarios: {
     sectionTitle: "🎯 Готовые сценарии",
-    sectionTooltip: "🎯 Готовые сценарии\nВыберите сценарий 👇",
+    sectionTooltip: "Выберите сценарий 👇",
     chooseScenario: "🎯 Выбрать сценарий",
     faceSwap: "🔄 Замена лица",
     backToMain: "🏠 В главное меню",
@@ -59,12 +59,14 @@ export default {
     photoUpscale: "📷 Апскейл фото",
     videoUpscale: "🎬 Апскейл видео",
     photoUpscaleWelcome:
-      "Увеличиваем разрешение и чёткость фотографии с помощью Topaz AI. Подходит для старых, размытых или мелких снимков.",
+      "Увеличиваю разрешение и чёткость фотографии до 4K. Подходит для старых, размытых или мелких снимков.",
     videoUpscaleWelcome:
       "Увеличиваем разрешение и чёткость видео с помощью Topaz AI. Подходит для старых, размытых или низкокачественных роликов.",
     photoUpscaleStep: "Пришлите <b>фотографию</b>, которую нужно улучшить. Максимум — 10 МБ.",
     videoUpscaleStep: "Пришлите <b>видео</b>, которое нужно улучшить. Максимум — 20 МБ.",
     upscaleChooseFactor: "Выберите степень увеличения 👇",
+    upscalePhotoReady: "📷 Фото получено. Нажмите кнопку — увеличу до 4K.",
+    upscaleStartButton: "✨ Сделать апскейл",
     upscaleNotPhoto: "📷 Это не фото. Пришлите изображение.",
     upscaleNotVideo: "🎬 Это не видео. Пришлите видеофайл.",
     upscalePhotoTooLarge: "📷 Фото слишком большое. Максимум — 10 МБ.",

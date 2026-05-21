@@ -328,29 +328,6 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 
 /** Kling / Kling Pro video settings. */
 
-/**
- * Topaz фото-апскейл: цена по мегапикселям результата (`mp_tier`, вычисляется
- * сценой из размера загруженного фото × фактор²). Значения — прайс-таблица
- * Replicate Topaz; тиры >512 — линейная экстраполяция ~$0.0016/MP. Покрывает
- * и Replicate-fallback, и KIE primary (сцена не опускает тир ниже KIE-floor
- * фактора — см. `photoEffectiveMpTier`).
- */
-const TOPAZ_IMAGE_MP_COST: Record<string, number> = {
-  "12": 0.05,
-  "24": 0.05,
-  "36": 0.1,
-  "48": 0.1,
-  "60": 0.15,
-  "96": 0.2,
-  "132": 0.24,
-  "168": 0.29,
-  "336": 0.53,
-  "512": 0.82,
-  "768": 1.25,
-  "1152": 1.85,
-  "1600": 2.6,
-};
-
 export const DESIGN_MODELS: Record<string, AIModel> = {
   // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
   // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
@@ -375,21 +352,18 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
-  // KIE Topaz Image Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
-  // фото» — hiddenFromCarousel убирает её из карусели выбора моделей Дизайна.
-  // Цена — по мегапикселям результата (`mp_tier`, сцена вычисляет из размера
-  // фото × фактор²): юзер платит за фактический результат, цена видна на кнопке.
+  // Готовый сценарий «Апскейл фото». Под капотом — nano-banana-pro (KIE primary,
+  // evolink fallback): сцена `upscale.ts` зашивает resolution 4K, aspect_ratio
+  // auto и фикс-промт. hiddenFromCarousel убирает модель из карусели Дизайна —
+  // юзеру (и в карусели, и в подписях, и в биллинге) она видна только как
+  // «📷 Апскейл фото», nano-banana нигде не светится.
   "image-upscale": {
     id: "image-upscale",
     name: "📷 Апскейл фото",
-    description: "Увеличивает разрешение и чёткость фотографии с помощью Topaz AI.",
+    description: "Увеличивает разрешение и чёткость фотографии до 4K.",
     section: "design",
     provider: "kie",
-    costUsdPerRequest: 0.05, // fallback-база, если mp_tier не передан
-    costVariants: {
-      settingKey: "mp_tier",
-      map: TOPAZ_IMAGE_MP_COST,
-    },
+    costUsdPerRequest: 0.12, // nano-banana-pro @ 4K
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -402,20 +376,6 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
-    settings: [
-      {
-        key: "upscale_factor",
-        label: "Степень увеличения",
-        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
-        type: "select",
-        options: [
-          { value: "2", label: "×2" },
-          { value: "4", label: "×4" },
-          { value: "8", label: "×8" },
-        ],
-        default: "2",
-      },
-    ],
   },
   "nano-banana-pro": {
     id: "nano-banana-pro",
@@ -2492,20 +2452,21 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
       },
     ],
   },
-  // ── Image upscale via Replicate Topaz (fallback к KIE primary) ───────────────
-  // KIE primary `image-upscale` (topaz/image-upscale) роутится на одноимённую
-  // Replicate-модель topazlabs/image-upscale. Биллинг — всегда по KIE-цене primary.
+  // ── Image upscale fallback (evolink: gemini-3-pro-image-preview) ────────────
+  // Готовый сценарий «Апскейл фото» = nano-banana-pro под капотом. KIE primary
+  // `image-upscale` фолбэчится на evolink ровно как nano-banana-pro.
+  //
+  // Списание с ЮЗЕРА — всегда по primary (image processor при usedFallback
+  // считает цену primary-моделью). НО `costUsdPerRequest` отсюда идёт в
+  // audit-метаданные `actualCostUsd` (фактическая провайдерская стоимость) —
+  // поэтому держим реальную цену evolink на 4K, а не primary-шную $0.12.
   {
     id: "image-upscale",
-    name: "Image upscale (Replicate fallback)",
-    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    name: "📷 Апскейл фото (evolink fallback)",
+    description: "Fallback на evolink при недоступности KIE.",
     section: "design",
-    provider: "replicate",
-    costUsdPerRequest: 0.05,
-    costVariants: {
-      settingKey: "mp_tier",
-      map: TOPAZ_IMAGE_MP_COST,
-    },
+    provider: "evolink",
+    costUsdPerRequest: 0.224, // evolink gemini-3-pro-image @ 4K — для actualCostUsd-аудита
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -2518,20 +2479,5 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
-    // Prebuilt для plug-and-play promotion в primary (как у nano-banana fallback'ов).
-    settings: [
-      {
-        key: "upscale_factor",
-        label: "Степень увеличения",
-        description: "Во сколько раз увеличить ширину и высоту фото. Влияет на цену.",
-        type: "select",
-        options: [
-          { value: "2", label: "×2" },
-          { value: "4", label: "×4" },
-          { value: "8", label: "×8" },
-        ],
-        default: "2",
-      },
-    ],
   },
 ];

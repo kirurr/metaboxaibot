@@ -1,0 +1,79 @@
+# Test dependencies for packages/api integration tests.
+#
+# Spins up an isolated Postgres + Redis on dedicated host ports so they don't
+# clash with the regular `docker-compose.local.yml` dev stack (5432 / 6379) or
+# the `docker-compose.test.yml` VPS-deployment stack.
+#
+# Credentials are non-secret test values — safe to commit. They are also baked
+# into packages/api/vitest.setup.ts; if you change them here, update the setup
+# file too.
+#
+# Usage:
+#   pnpm -F @metabox/api test:docker      # full pipeline (migrate + integration) in Docker
+#   pnpm -F @metabox/api test:docker:down # tear down containers + volumes
+
+# Dedicated compose project — isolates these containers from the
+# docker-compose.local.yml dev stack (which lives in the same directory and
+# would otherwise share the `metabox-fork` project name and recreate each
+# other's containers).
+name: metabox-fork-test-deps
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aibot_vitest_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_DB: test_db
+    ports:
+      - "127.0.0.1:5666:5432"
+    volumes:
+      - postgres_vitest_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aibot_vitest_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass test_redis_pass
+    ports:
+      - "127.0.0.1:6666:6379"
+    volumes:
+      - redis_vitest_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "test_redis_pass", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # In-Docker integration test runner. Активируется только с профилем `runner`:
+  #   docker compose -f docker-compose.test-deps.yml --profile runner run --rm --build api-tests
+  # См. `pnpm -F @metabox/api test:docker`. Без профиля сервис не стартует —
+  # поднимаются только postgres+redis.
+  api-tests:
+    profiles: ["runner"]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api.test
+    container_name: aibot_vitest_runner
+    environment:
+      NODE_ENV: test
+      # Service-names (не 127.0.0.1) — внутри docker-сети compose-проекта.
+      # tests/setup/env.ts использует `??` — эти значения перекрывают дефолты.
+      DATABASE_URL: postgresql://test_user:test_pass@postgres:5432/test_db
+      REDIS_URL: redis://:test_redis_pass@redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_vitest_data:
+  redis_vitest_data:

@@ -1,7 +1,7 @@
 export default {
   start: {
     welcome:
-      '🔶 Finally! We\'ve been waiting. This is Metabox — all the best AI tools, one click away.\n\nBy continuing, you agree to our <a href="{landingUrl}/documents/offer_en.html">public offer</a>, <a href="{landingUrl}/documents/terms_of_use_en.html">terms of use</a>, <a href="{landingUrl}/documents/privacy_en.html">privacy policy</a> and <a href="{landingUrl}/documents/risk_warning_en.html">risk warning</a>, and consent to <a href="{landingUrl}/documents/consent_processing_en.html">personal data processing</a>, <a href="{landingUrl}/documents/consent_distribution_en.html">personal data distribution</a> and newsletters. (Yes, it\'s a lot. Yes, we got tired writing them too.)\n\nPick your language to get started:',
+      '🔶 Finally! We\'ve been waiting. This is Metabox — all the best AI tools, one click away.\n\nBy continuing, you agree to our <a href="{landingUrl}/legal/offer">public offer</a>, <a href="{landingUrl}/documents/terms_of_use_en.html">terms of use</a>, <a href="{landingUrl}/documents/privacy_en.html">privacy policy</a> and <a href="{landingUrl}/documents/risk_warning_en.html">risk warning</a>, and consent to <a href="{landingUrl}/documents/consent_processing_en.html">personal data processing</a>, <a href="{landingUrl}/documents/consent_distribution_en.html">personal data distribution</a> and newsletters. (Yes, it\'s a lot. Yes, we got tired writing them too.)\n\nPick your language to get started:',
     tokensGranted:
       '⚡ 7.50 tokens have been credited for you to explore the bot. To learn more about your account and plans, click the "Profile" button below.',
     yourBalance:
@@ -41,7 +41,7 @@ export default {
   },
   scenarios: {
     sectionTitle: "🎯 Ready-made scenarios",
-    sectionTooltip: "🎯 Ready-made scenarios\nChoose a scenario 👇",
+    sectionTooltip: "Choose a scenario 👇",
     chooseScenario: "🎯 Choose a scenario",
     faceSwap: "🔄 Face swap",
     backToMain: "🏠 Back to main menu",
@@ -59,12 +59,14 @@ export default {
     photoUpscale: "📷 Photo upscale",
     videoUpscale: "🎬 Video upscale",
     photoUpscaleWelcome:
-      "Increase the resolution and sharpness of a photo with Topaz AI. Great for old, blurry or low-res shots.",
+      "Increase the resolution and sharpness of a photo up to 4K. Great for old, blurry or low-res shots.",
     videoUpscaleWelcome:
       "Increase the resolution and sharpness of a video with Topaz AI. Great for old, blurry or low-quality clips.",
     photoUpscaleStep: "Send the <b>photo</b> you want to enhance. Maximum is 10 MB.",
     videoUpscaleStep: "Send the <b>video</b> you want to enhance. Maximum is 20 MB.",
     upscaleChooseFactor: "Choose the upscale factor 👇",
+    upscalePhotoReady: "📷 Photo received. Tap the button — I'll upscale it to 4K.",
+    upscaleStartButton: "✨ Upscale",
     upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
     upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
     upscalePhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",

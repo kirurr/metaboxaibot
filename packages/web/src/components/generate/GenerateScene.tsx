@@ -8,10 +8,11 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
+  Wand2,
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
@@ -47,8 +48,14 @@ import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { FloatingMediaBg } from "./FloatingMediaBg";
+import type { AmbientSection } from "@/api/ambientMedia";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/stores/uiStore";
+import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
+import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
+import type { PromptExample } from "@/api/promptExamples";
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -85,6 +92,22 @@ export type GenerateSceneProps = {
    * автоматически применяются настройки соответствующей модели.
    */
   presetSettingsByModel?: Record<string, Record<string, unknown>>;
+  /**
+   * Секция для ambient-фона на пустом экране (картинки/видео «выпадают» и
+   * плавают, пока нет генераций). `undefined` — фон выключен (например, /audio).
+   */
+  ambientSection?: AmbientSection;
+  /**
+   * Секция для модалки «Готовые промпты» в шапке. Если не задана — кнопка
+   * не рендерится (для пресетных страниц и аудио, где галереи нет).
+   */
+  promptSection?: "design" | "video";
+};
+
+type GenerateDraft = {
+  modelId: string;
+  prompt: string;
+  settings: Record<string, unknown>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -513,8 +536,15 @@ export function GenerateScene({
   hideModelPicker = false,
   onReset,
   presetSettingsByModel,
+  ambientSection,
+  promptSection,
 }: GenerateSceneProps) {
   const { t } = useTranslation();
+  // Ambient-фон только на «десктопной» ширине (≥900px). На телефонах и iPad в
+  // портрете (<900) его нет — там панель и так full-width, медиа некуда класть.
+  // iPad в ландшафте (1024px) уже считается десктопом → фон показываем.
+  const isMobile = useIsMobile();
+  const promptsDialogRef = useRef<HTMLDialogElement>(null);
 
   // ── Family grouping ───────────────────────────────────────────────────────
   // `models` приходит ПОЛНЫМ списком секции (page-обёртки больше не дедупят) —
@@ -592,6 +622,11 @@ export function GenerateScene({
   // GenerationHistory сама подписывается на notification:new и зовёт
   // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
   const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
+
+  // Есть ли уже генерации в правой пэйне. Пока пусто и задан ambientSection —
+  // в фоне показываем «выпадающие» плавающие медиа; как только появилась первая
+  // генерация — фон скрывается (его место занимает галерея).
+  const [historyHasContent, setHistoryHasContent] = useState(false);
 
   // Когда модели приехали — выставляем дефолт (первый из дедуплированных
   // семейств, не из полного списка: иначе можно случайно стартовать с
@@ -723,6 +758,10 @@ export function GenerateScene({
   const pushToast = useUIStore((s) => s.pushToast);
   const lastConsumedPrefillKey = useRef<string | null>(null);
   const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
+  // Параллельно с pendingPrefillRef помечаем «это восстановление черновика,
+  // не пресет» — чтобы stage-2 effect не ставил presetSnapshot и кнопка
+  // «Сбросить» не появилась после возврата назад.
+  const pendingPrefillIsDraftRef = useRef<boolean>(false);
   // Снимок последнего применённого префила — используется для определения
   // «юзер что-то поменял» (isDirty) и показа кнопки «Сбросить» на пресетных
   // страницах. Включает modelId / prompt / settings; slotFiles не трекаем.
@@ -732,24 +771,35 @@ export function GenerateScene({
     settings: Record<string, unknown>;
   } | null>(null);
   useEffect(() => {
-    const prefill = (location.state as { prefill?: GeneratePrefill } | null)?.prefill;
-    if (!prefill) return;
+    const state = location.state as { prefill?: GeneratePrefill; draft?: GenerateDraft } | null;
+    // Draft восстанавливается при back-навигации с модалки «Готовые промпты»:
+    // тот же путь, что и для prefill, но без snapshot'а (это «возврат к
+    // черновику», а не пресет → кнопка «Сбросить» не должна появиться).
+    const prefill = state?.prefill;
+    const draft = !prefill && state?.draft ? state.draft : null;
+    if (!prefill && !draft) return;
     if (lastConsumedPrefillKey.current === location.key) return;
     if (models.length === 0) return; // ждём загрузку каталога
 
-    const modelExists = models.some((m) => m.id === prefill.modelId);
-    const targetId = modelExists ? prefill.modelId : (families[0]?.id ?? null);
+    const requestedModelId = prefill?.modelId ?? draft?.modelId;
+    if (!requestedModelId) return;
+    const modelExists = models.some((m) => m.id === requestedModelId);
+    const targetId = modelExists ? requestedModelId : (families[0]?.id ?? null);
     if (!targetId) return; // ни запрошенной, ни дефолтной модели нет — выходим
 
     lastConsumedPrefillKey.current = location.key;
 
     // settings оставляем только если модель найдена — чужие ключи для дефолтной
     // модели смысла не имеют (юзер увидит, что чипы не реагируют на префил).
+    const sourcePrompt = prefill?.prompt ?? draft?.prompt ?? "";
+    const sourceSettings = prefill ? prefill.settings : draft?.settings;
+    // resolved.section используется только как ярлык для тоста — apply берёт
+    // modelId/prompt/settings. Для draft (без prefill) — фолбэк "image".
     const resolved: GeneratePrefill = {
-      section: prefill.section,
+      section: prefill?.section ?? "image",
       modelId: targetId,
-      prompt: prefill.prompt,
-      settings: modelExists ? prefill.settings : undefined,
+      prompt: sourcePrompt,
+      settings: modelExists ? sourceSettings : undefined,
     };
 
     if (modelId === targetId) {
@@ -759,15 +809,20 @@ export function GenerateScene({
       if (resolved.settings) {
         setSettingValues((prev) => ({ ...prev, ...resolved.settings }));
       }
-      // Снимок для isDirty-детекта.
-      setPresetSnapshot({
-        modelId: targetId,
-        prompt: resolved.prompt ?? "",
-        settings: resolved.settings ?? {},
-      });
+      // Snapshot для isDirty — только для пресет-префила. Восстановление
+      // черновика (draft) snapshot НЕ устанавливает: это просто возврат
+      // к юзерскому состоянию, кнопка «Сбросить» не нужна.
+      if (prefill) {
+        setPresetSnapshot({
+          modelId: targetId,
+          prompt: resolved.prompt ?? "",
+          settings: resolved.settings ?? {},
+        });
+      }
     } else {
       // Отложенное применение — после reset и defaults effect'ов.
       pendingPrefillRef.current = resolved;
+      pendingPrefillIsDraftRef.current = !prefill;
       setModelId(targetId);
       setSearchParams(
         (prev) => {
@@ -853,17 +908,21 @@ export function GenerateScene({
     const pending = pendingPrefillRef.current;
     if (!pending) return;
     if (!selectedModel || selectedModel.id !== pending.modelId) return;
+    const isDraft = pendingPrefillIsDraftRef.current;
     pendingPrefillRef.current = null;
+    pendingPrefillIsDraftRef.current = false;
     setPrompt(pending.prompt ?? "");
     if (pending.settings) {
       const pendingSettings = pending.settings;
       setSettingValues((prev) => ({ ...prev, ...pendingSettings }));
     }
-    setPresetSnapshot({
-      modelId: pending.modelId,
-      prompt: pending.prompt ?? "",
-      settings: pending.settings ?? {},
-    });
+    if (!isDraft) {
+      setPresetSnapshot({
+        modelId: pending.modelId,
+        prompt: pending.prompt ?? "",
+        settings: pending.settings ?? {},
+      });
+    }
   }, [selectedModel]);
 
   // Авто-применение per-model настроек пресета при ручной смене модели.
@@ -1445,21 +1504,84 @@ export function GenerateScene({
     }
   }
 
+  // ── Prompts modal — открытие/закрытие через ref на <dialog>. ───────────────
+  function openPromptsDialog() {
+    const dlg = promptsDialogRef.current;
+    if (!dlg) return;
+    dlg.showModal();
+    document.body.style.overflow = "hidden";
+  }
+  function closePromptsDialog() {
+    const dlg = promptsDialogRef.current;
+    if (!dlg) return;
+    dlg.close();
+    document.body.style.overflow = "";
+  }
+
+  // Apply prompt example: 1) кладём текущий черновик в state ТЕКУЩЕЙ entry
+  // через replace, 2) пушим новый URL с prefill. При back-навигации браузер
+  // возвращается на entry с draft → effect выше восстанавливает prompt/model/
+  // settings. Файлы в слотах не сохраняются (объекты File не сериализуются).
+  function handleApplyPromptExample(ex: PromptExample) {
+    const targetSection = ex.model ? normalizeSection(ex.section) : null;
+    if (!targetSection || !ex.model) {
+      pushToast({ type: "info", message: "Модель примера недоступна" });
+      return;
+    }
+    const settings =
+      ex.modelSettings && typeof ex.modelSettings === "object"
+        ? (ex.modelSettings as Record<string, unknown>)
+        : undefined;
+
+    // Глушим prefill-effect на текущей entry — replace ниже изменит
+    // location.state и иначе бы effect среагировал и попытался применить
+    // draft до того, как мы успеем сделать push.
+    lastConsumedPrefillKey.current = location.key;
+
+    const draft: GenerateDraft = {
+      modelId,
+      prompt,
+      settings: settingValues,
+    };
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: { draft },
+    });
+    navigateToGenerate(navigate, {
+      section: targetSection,
+      modelId: ex.model.id,
+      prompt: ex.prompt,
+      settings,
+    });
+  }
+
   return (
     <div className={clsx("gen-scene", (voicePickerSetting || mediaPickerSetting) && "has-picker")}>
-      <div className="gen-bg" aria-hidden />
+      <div className="gen-bg" aria-hidden>
+        {ambientSection && !historyHasContent && !isMobile && (
+          <FloatingMediaBg section={ambientSection} />
+        )}
+      </div>
       <div className="gen-panel">
         <div className="gen-head">
           <div>
             <h1>{title}</h1>
             <p className="gen-sub">{subtitle}</p>
           </div>
-          {onReset && isDirtyFromPreset && (
-            <button type="button" className="gen-reset-btn" onClick={onReset}>
-              <RotateCcw size={14} />
-              <span>Сбросить</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap ml-auto">
+            {promptSection && (
+              <button type="button" className="gen-reset-btn" onClick={openPromptsDialog}>
+                <Wand2 size={14} />
+                <span>{t("generate.openPromptExamples")}</span>
+              </button>
+            )}
+            {onReset && isDirtyFromPreset && (
+              <button type="button" className="gen-reset-btn" onClick={onReset}>
+                <RotateCcw size={14} />
+                <span>Сбросить</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -1632,6 +1754,23 @@ export function GenerateScene({
           всё оставшееся пустое место экрана. На мобильных скрывается через
           CSS (там панель и так full-width). */}
       <div className="gen-history-pane">
+        {ambientSection && !historyHasContent && !isMobile && (
+          <div className="gen-ambient-headline" aria-hidden>
+            <h2>
+              <Trans
+                i18nKey="generate.ambientTitle"
+                components={{ hl: <span className="gen-hl" /> }}
+              />
+            </h2>
+            <p>
+              {t(
+                ambientSection === "video"
+                  ? "generate.ambientSubtitleVideo"
+                  : "generate.ambientSubtitleImage",
+              )}
+            </p>
+          </div>
+        )}
         <GenerationHistory
           selectedModel={selectedModel}
           allModels={models}
@@ -1647,6 +1786,7 @@ export function GenerateScene({
               prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
             )
           }
+          onHasContentChange={setHistoryHasContent}
         />
       </div>
 
@@ -1718,6 +1858,51 @@ export function GenerateScene({
             }
           }}
         />
+      )}
+
+      {promptSection && (
+        <dialog
+          ref={promptsDialogRef}
+          onClose={() => {
+            document.body.style.overflow = "";
+          }}
+          onClick={(e) => {
+            // Закрыть по клику на бэкдроп — дочерний контент имеет
+            // `gen-prompts-modal-body` со своим stopPropagation.
+            if (e.target === promptsDialogRef.current) {
+              closePromptsDialog();
+            }
+          }}
+          className="
+            rise
+            p-4 md:p-8
+            backdrop:transition-all
+            fixed inset-0
+            w-screen h-screen
+            max-w-none max-h-none
+            m-0
+            overflow-y-auto
+            outline-none
+            bg-transparent
+            backdrop:backdrop-blur"
+        >
+          <div className="gen-prompts-modal-body relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="btn btn-ghost btn-icon absolute top-0 right-0 z-50"
+              onClick={closePromptsDialog}
+            >
+              <X />
+            </button>
+            <PromptExamplesGallery
+              section={promptSection}
+              hideTypeTabs
+              onApply={(ex) => {
+                closePromptsDialog();
+                handleApplyPromptExample(ex);
+              }}
+            />
+          </div>
+        </dialog>
       )}
     </div>
   );

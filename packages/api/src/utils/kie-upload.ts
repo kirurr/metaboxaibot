@@ -71,6 +71,30 @@ export function buildKieUploadName(url: string): string {
   return `metabox-${randomUUID()}.${ext}`;
 }
 
+/** Видео-контейнеры, принимаемые KIE Topaz / Kling (mp4 / quicktime / matroska). */
+const KNOWN_VIDEO_EXTS: ReadonlyArray<string> = ["mp4", "mov", "mkv"];
+
+/**
+ * Имя для video-upload в KIE — аналог `buildKieUploadName`, но для видео.
+ * `parseImageMime` знает только картиночные расширения и для `.mp4`-ссылки
+ * дефолтит в `.jpg`, поэтому нужна отдельная функция. Без видео-расширения KIE
+ * кладёт файл под random-именем БЕЗ extension'а, и Topaz video-upscale не
+ * может определить контейнер → KIE `failCode 500` / Replicate
+ * `source.container is required`. Дефолт — `mp4`.
+ */
+export function buildKieVideoUploadName(url: string): string {
+  let ext = "mp4";
+  try {
+    const m = new URL(url).pathname.match(/\.([a-zA-Z0-9]+)$/);
+    if (m && KNOWN_VIDEO_EXTS.includes(m[1].toLowerCase())) {
+      ext = m[1].toLowerCase();
+    }
+  } catch {
+    /* not a parseable URL — default mp4 */
+  }
+  return `metabox-${randomUUID()}.${ext}`;
+}
+
 /**
  * Upload a file to KIE's temporary storage via URL.
  * KIE downloads the file from the given URL and returns a public download link.

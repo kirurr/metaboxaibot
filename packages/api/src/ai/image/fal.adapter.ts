@@ -138,6 +138,7 @@ export class FalAdapter implements ImageAdapter {
     if (status.status !== "COMPLETED") return null;
 
     const result = await fal.queue.result(endpoint, { requestId });
+
     const images = (
       result.data as {
         images?: Array<{

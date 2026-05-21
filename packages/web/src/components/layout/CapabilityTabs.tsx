@@ -38,6 +38,8 @@ type MenuItem = {
   glyph?: string;
   letter?: string;
   badge?: "TOP" | "NEW";
+  /** Индивидуальные ссылки */
+  link?: string;
 };
 
 // Сколько моделей показываем в mega-menu максимум — чтобы не утопить колонку.
@@ -145,17 +147,20 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       nameKey: "capabilities.features.audio.tts.name",
       descKey: "capabilities.features.audio.tts.desc",
       glyph: "◀",
+      link: "tts",
     },
     {
       nameKey: "capabilities.features.audio.clone.name",
       descKey: "capabilities.features.audio.clone.desc",
       glyph: "○",
       badge: "TOP",
+      link: "clone",
     },
     {
       nameKey: "capabilities.features.audio.music.name",
       descKey: "capabilities.features.audio.music.desc",
       glyph: "♫",
+      link: "music",
     },
     {
       nameKey: "capabilities.features.audio.dubbing.name",
@@ -251,12 +256,14 @@ export function CapabilityTabs() {
     if (shift) el.style.setProperty("--mm-shift", shift + "px");
   }, [hovered]);
 
-  function pick(cap: Capability, modelId?: string) {
+  function pick(cap: Capability, modelId?: string, link: string = "") {
     setHovered(null);
     // Передаём modelId как ?model=...: если юзер уже в этом разделе и кликает
     // другую модель в mega-menu, route не меняется и страница без query-param
     // не узнала бы о смене. GenerateScene читает `?model=` и синкает modelId.
-    const target = modelId ? `${cap.route}?model=${encodeURIComponent(modelId)}` : cap.route;
+    const target = modelId
+      ? `${cap.route}/${link}?model=${encodeURIComponent(modelId)}`
+      : `${cap.route}/${link}`;
     navigate(target);
   }
 
@@ -281,16 +288,30 @@ export function CapabilityTabs() {
               </button>
               {showMenu && (
                 <div
-                  className="mega-menu"
+                  className={clsx(
+                    "mega-menu",
+                    // Для аудио не показываем список моделей
+                    c.id === "audio" && "!w-[min(400px,_calc(100vw-24px))]",
+                  )}
                   ref={menuRef}
                   onMouseEnter={() => openMenu(c.id)}
                   onMouseLeave={scheduleClose}
                 >
-                  <div className="mega-col">
+                  <div
+                    className={clsx(
+                      "mega-col",
+                      // Для аудио не показываем список моделей
+                      c.id === "audio" && "!col-span-2",
+                    )}
+                  >
                     <div className="mega-col-head">{t("capabilities.columns.features")}</div>
                     <div className="mega-list">
                       {features.map((f, i) => (
-                        <button key={i} className="mega-item" onClick={() => pick(c)}>
+                        <button
+                          key={i}
+                          className="mega-item"
+                          onClick={() => pick(c, undefined, f.link)}
+                        >
                           <span className="mega-ico">{f.glyph}</span>
                           <span className="mega-body">
                             <span className="mega-name">
@@ -307,24 +328,27 @@ export function CapabilityTabs() {
                       ))}
                     </div>
                   </div>
-                  <div className="mega-col">
-                    <div className="mega-col-head">{t("capabilities.columns.models")}</div>
-                    <div className="mega-list">
-                      {models.length === 0 ? (
-                        <div className="mega-empty">{t("capabilities.columns.loading")}</div>
-                      ) : (
-                        models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
-                          <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
-                            <span className="mega-ico letter">{modelLetter(m)}</span>
-                            <span className="mega-body">
-                              <span className="mega-name">{displayModelName(m)}</span>
-                              <span className="mega-desc">{displayModelDesc(m)}</span>
-                            </span>
-                          </button>
-                        ))
-                      )}
+                  {/* Для аудио не показываем список моделей */}
+                  {c.id !== "audio" && (
+                    <div className="mega-col">
+                      <div className="mega-col-head">{t("capabilities.columns.models")}</div>
+                      <div className="mega-list">
+                        {models.length === 0 ? (
+                          <div className="mega-empty">{t("capabilities.columns.loading")}</div>
+                        ) : (
+                          models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                            <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
+                              <span className="mega-ico letter">{modelLetter(m)}</span>
+                              <span className="mega-body">
+                                <span className="mega-name">{displayModelName(m)}</span>
+                                <span className="mega-desc">{displayModelDesc(m)}</span>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>

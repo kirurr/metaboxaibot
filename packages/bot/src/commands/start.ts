@@ -478,30 +478,11 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       // Линковка не удалась — не активируем бота, чтобы юзер увидел ошибку.
       return;
     }
-  } else if (param?.startsWith("ref_") && ctx.user && ctx.user.referredById) {
-    // ── Referral deep link ─────────────────────────────────────────────────────
-    // User already has a referrer — notify with mentor name
-    let mentorName = "";
-    try {
-      const mentor = await db.user.findUnique({
-        where: { id: ctx.user.referredById },
-        select: { firstName: true, lastName: true, username: true },
-      });
-      if (mentor) {
-        const name = mentor.firstName
-          ? `${mentor.firstName}${mentor.lastName ? ` ${mentor.lastName}` : ""}`
-          : mentor.username || "";
-        const contact = mentor.username ? ` (@${mentor.username})` : "";
-        mentorName = name ? `: ${name}${contact}` : "";
-      }
-    } catch {
-      /* ignore */
-    }
-    await ctx
-      .reply(`ℹ️ У вас уже есть наставник${mentorName}. Реферальная ссылка не была применена.`)
-      .catch(() => {});
   }
-  // Store resolved referrer info for registerBotUser
+  // Store resolved referrer info for registerBotUser.
+  // Юзер с уже выставленным `referredById` сюда просто не попадает в ref-блок
+  // ниже (guard `!ctx.user.referredById` на line ~507) — silent skip, без
+  // отдельного сообщения «у вас уже есть наставник».
   let resolvedReferrerUserId: string | null = null;
 
   if (param?.startsWith("ref_") && ctx.user && !ctx.user.referredById) {
