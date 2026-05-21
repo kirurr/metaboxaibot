@@ -66,7 +66,6 @@ export {
   photoFactorFits,
   PHOTO_MP_TIERS,
   videoResolutionTier,
-  visibleVideoUpscaleFactors,
   videoFpsTier,
   photoEffectiveMpTier,
 } from "./constants/upscale.js";

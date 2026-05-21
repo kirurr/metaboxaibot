@@ -141,6 +141,9 @@ const FAL_GROK_IMAGINE_T2V_ENDPOINT = "xai/grok-imagine-video/text-to-video";
 const FAL_GROK_IMAGINE_R2V_ENDPOINT = "xai/grok-imagine-video/reference-to-video";
 const FAL_GROK_IMAGINE_EXTEND_ENDPOINT = "xai/grok-imagine-video/extend-video";
 
+/** Topaz video upscale endpoint — fallback для KIE primary `video-upscale`. */
+const FAL_TOPAZ_VIDEO_ENDPOINT = "fal-ai/topaz/upscale/video";
+
 /** Separator used to pack endpoint+requestId into a single opaque string. */
 const SEP = "||";
 
@@ -208,6 +211,32 @@ export class FalVideoAdapter implements VideoAdapter {
   private async _submitImpl(input: VideoInput): Promise<string> {
     const imageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
     const ms = input.modelSettings ?? {};
+
+    // ── Topaz video upscale (fal-ai/topaz/upscale/video) ─────────────────────
+    // Fallback для KIE primary `video-upscale`. Fal принимает `upscale_factor`
+    // множителем 1–4 — ровно как KIE, без маппинга в разрешение. `target_fps`
+    // НЕ шлём: он включает интерполяцию кадров (KIE этого не делает). H264 —
+    // ради совместимости плеера Telegram (дефолт Fal — H265/HEVC).
+    if (this.modelId === "video-upscale") {
+      const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
+      if (!videoUrl) {
+        throw new Error("FAL video-upscale: source video is required");
+      }
+      const rawFactor = Number(ms.upscale_factor ?? 2);
+      const upscaleFactor = Math.min(4, Math.max(1, Number.isFinite(rawFactor) ? rawFactor : 2));
+      const upscaleBody = {
+        video_url: videoUrl,
+        model: "Proteus" as const,
+        upscale_factor: upscaleFactor,
+        H264_output: true,
+      };
+      logCall(FAL_TOPAZ_VIDEO_ENDPOINT, "submit", upscaleBody);
+      const { request_id } = await fal.queue.submit(FAL_TOPAZ_VIDEO_ENDPOINT, {
+        input: upscaleBody,
+      });
+      return `${FAL_TOPAZ_VIDEO_ENDPOINT}${SEP}${request_id}`;
+    }
+
     const msExtras: Record<string, unknown> = {};
     if (ms.cfg_scale !== undefined) msExtras.cfg_scale = ms.cfg_scale;
     if (ms.negative_prompt) msExtras.negative_prompt = ms.negative_prompt;

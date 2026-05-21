@@ -330,25 +330,31 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 
 /**
  * Topaz фото-апскейл: цена по мегапикселям результата (`mp_tier`, вычисляется
- * сценой из размера загруженного фото × фактор²). Значения — прайс-таблица
- * Replicate Topaz; тиры >512 — линейная экстраполяция ~$0.0016/MP. Покрывает
- * и Replicate-fallback, и KIE primary (сцена не опускает тир ниже KIE-floor
- * фактора — см. `photoEffectiveMpTier`).
+ * сценой из размера загруженного фото × фактор²).
+ *
+ * Каждый тир = max(ставка KIE, ставка Fal) — биллим юзера по дороже из двух,
+ * чтобы не уйти в минус ни на одном провайдере (KIE primary часто лежит,
+ * фактически работаем на Fal-fallback). Ставки:
+ *   - KIE: по выходному разрешению — 2K $0.05, 4K $0.10, 8K $0.20.
+ *   - Fal: по мегапикселям результата — ≤24MP $0.08, ≤48MP $0.16,
+ *     ≤96MP $0.32, выше — $1.36.
+ * Тиры: ≤24 → max(KIE-4K, Fal) $0.10; ≤48 → max(KIE-8K, Fal) $0.20;
+ * ≤96 → max(KIE-8K, Fal) $0.32; >96 → $1.36.
  */
 const TOPAZ_IMAGE_MP_COST: Record<string, number> = {
-  "12": 0.05,
-  "24": 0.05,
-  "36": 0.1,
-  "48": 0.1,
-  "60": 0.15,
-  "96": 0.2,
-  "132": 0.24,
-  "168": 0.29,
-  "336": 0.53,
-  "512": 0.82,
-  "768": 1.25,
-  "1152": 1.85,
-  "1600": 2.6,
+  "12": 0.1,
+  "24": 0.1,
+  "36": 0.2,
+  "48": 0.2,
+  "60": 0.32,
+  "96": 0.32,
+  "132": 1.36,
+  "168": 1.36,
+  "336": 1.36,
+  "512": 1.36,
+  "768": 1.36,
+  "1152": 1.36,
+  "1600": 1.36,
 };
 
 export const DESIGN_MODELS: Record<string, AIModel> = {
@@ -2492,15 +2498,17 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
       },
     ],
   },
-  // ── Image upscale via Replicate Topaz (fallback к KIE primary) ───────────────
-  // KIE primary `image-upscale` (topaz/image-upscale) роутится на одноимённую
-  // Replicate-модель topazlabs/image-upscale. Биллинг — всегда по KIE-цене primary.
+  // ── Image upscale via Fal Topaz (fallback к KIE primary) ─────────────────────
+  // KIE primary `image-upscale` (topaz/image-upscale) роутится на Fal
+  // `fal-ai/topaz/upscale/image` (model "Standard V2", не-генеративная). Fal
+  // принимает `upscale_factor` множителем 1–4 — как KIE; ×8 клампится до 4.
+  // Биллинг — всегда по KIE-цене primary.
   {
     id: "image-upscale",
-    name: "Image upscale (Replicate fallback)",
-    description: "Fallback на Replicate Topaz при недоступности KIE.",
+    name: "Image upscale (Fal fallback)",
+    description: "Fallback на Fal Topaz при недоступности KIE.",
     section: "design",
-    provider: "replicate",
+    provider: "fal",
     costUsdPerRequest: 0.05,
     costVariants: {
       settingKey: "mp_tier",
