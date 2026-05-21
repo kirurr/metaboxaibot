@@ -1,5 +1,5 @@
 /**
- * Setup for unit tests in `src/**/*.test.ts` — adapter mocks, pure logic, etc.
+ * Setup for unit tests in `src/**\/*.test.ts` — adapter mocks, pure logic, etc.
  * Only stubs env so `@metabox/shared/config` import doesn't throw. No DB,
  * no Redis, no msw lifecycle (integration tests use `vitest.setup.ts`).
  */
