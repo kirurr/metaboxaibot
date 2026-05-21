@@ -7,7 +7,6 @@ import {
   calculateCost,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
-import { buildDownloadUrl } from "@metabox/api/utils/download-token";
 import {
   AI_MODELS,
   config,
@@ -18,12 +17,9 @@ import {
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
   PHOTO_UPSCALE_MODEL_ID,
   VIDEO_UPSCALE_MODEL_ID,
-  PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
-  photoFactorFits,
   videoResolutionTier,
   videoFpsTier,
-  photoEffectiveMpTier,
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
@@ -34,17 +30,16 @@ import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-err
 const TG_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 
 /**
- * KIE Topaz image upscaler rejects inputs over 10 MB. Telegram allows
- * image-documents up to 20 MB, so we cap photo upscale tighter than the
- * generic download limit — иначе 10–20 МБ файл уходит в KIE и падает там
+ * Nano Banana (через KIE / evolink) отбивает входные изображения больше 10 МБ.
+ * Telegram отдаёт image-документы до 20 МБ, поэтому фото-апскейл режем строже
+ * generic download-лимита — иначе 10–20 МБ файл уходит провайдеру и падает там
  * с generic-ошибкой вместо понятного «фото слишком большое».
  */
-const KIE_TOPAZ_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const UPSCALE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 /** Default source dimensions when a probe fails to read them. */
 const DEFAULT_VIDEO_HEIGHT = 1080;
 const DEFAULT_VIDEO_FPS = 30;
-const DEFAULT_PHOTO_MP = 2;
 
 /**
  * Buffer slot keys. Файл и метаданные исходника хранятся в `UserState`
@@ -57,10 +52,8 @@ const UPSCALE_SLOT = "src";
 const UPSCALE_DUR_SLOT = "dur";
 const UPSCALE_HEIGHT_SLOT = "h";
 const UPSCALE_FPS_SLOT = "fps";
-const UPSCALE_MP_SLOT = "mp";
-const UPSCALE_LONGSIDE_SLOT = "ls";
 
-/** Probed source metadata used for dynamic, output-based pricing. */
+/** Probed source video metadata used for dynamic, output-based pricing. */
 interface UpscaleMeta {
   /** Video duration in seconds. */
   durationSec?: number;
@@ -68,11 +61,20 @@ interface UpscaleMeta {
   heightPx?: number;
   /** Source video fps. */
   fps?: number;
-  /** Source image megapixels. */
-  inputMp?: number;
-  /** Source image longest side in px (for the Topaz scaling-limit check). */
-  longestSidePx?: number;
 }
+
+/**
+ * Фото-апскейл = модель `image-upscale` (nano-banana-pro под капотом). Юзер
+ * ничего не настраивает: разрешение 4K, формат повторяет вход (`auto`), промт
+ * и output_format зашиты тут. nano-banana как модель нигде не светится.
+ */
+const PHOTO_UPSCALE_PROMPT =
+  "High-resolution 4K enhancement, photorealistic, hyper-detailed, crystal clear texture, sharp focus, professionally restored, maintaining exact original features and composition, no distortion, cinematic lighting.";
+const PHOTO_UPSCALE_SETTINGS: Record<string, string> = {
+  resolution: "4K",
+  aspect_ratio: "auto",
+  output_format: "png",
+};
 
 /**
  * Видео-расширения, по которым принимаем документ, даже если Telegram прислал
@@ -115,21 +117,11 @@ function rememberMediaGroup(key: string): void {
 }
 
 /**
- * modelSettings для конкретного фактора — используются и для расчёта цены
- * на кнопке, и при сабмите (`extraModelSettings`). Цена считается по
- * результату: фото — тир мегапикселей, видео — фактор × разрешение × fps.
+ * modelSettings видео-апскейла на конкретном факторе — и для цены на кнопке,
+ * и для сабмита (`extraModelSettings`). Цена считается по результату:
+ * фактор × разрешение × fps.
  */
-function upscaleSettings(
-  kind: "photo" | "video",
-  factor: string,
-  meta: UpscaleMeta,
-): Record<string, string> {
-  if (kind === "photo") {
-    return {
-      upscale_factor: factor,
-      mp_tier: photoEffectiveMpTier(meta.inputMp ?? DEFAULT_PHOTO_MP, factor),
-    };
-  }
+function videoUpscaleSettings(factor: string, meta: UpscaleMeta): Record<string, string> {
   return {
     upscale_factor: factor,
     target_resolution: videoResolutionTier(meta.heightPx ?? DEFAULT_VIDEO_HEIGHT, Number(factor)),
@@ -137,9 +129,8 @@ function upscaleSettings(
   };
 }
 
-/** Builds the factor-selection inline keyboard with per-factor token cost. */
-function buildFactorKeyboard(
-  kind: "photo" | "video",
+/** Builds the video-upscale factor-selection inline keyboard with per-factor token cost. */
+function buildVideoFactorKeyboard(
   factors: readonly string[],
   modelId: string,
   meta: UpscaleMeta,
@@ -155,12 +146,12 @@ function buildFactorKeyboard(
         0,
         undefined,
         undefined,
-        upscaleSettings(kind, f, meta),
-        kind === "video" ? meta.durationSec : undefined,
+        videoUpscaleSettings(f, meta),
+        meta.durationSec,
       );
       label = `×${f} · ${cost.toFixed(2)} ✦`;
     }
-    kb.text(label, `upscale:${kind}:${f}`).row();
+    kb.text(label, `upscale:video:${f}`).row();
   }
   return kb;
 }
@@ -203,7 +194,7 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
     return;
   }
-  if (fileSize !== undefined && fileSize > KIE_TOPAZ_IMAGE_MAX_BYTES) {
+  if (fileSize !== undefined && fileSize > UPSCALE_IMAGE_MAX_BYTES) {
     await ctx.reply(ctx.t.scenarios.upscalePhotoTooLarge);
     return;
   }
@@ -211,29 +202,12 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   const userId = ctx.user.id;
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  // Перекодируем вход в JPEG: Topaz отбивает HEIC / CMYK / 16-bit /
-  // прогрессивный JPEG и т.п. («Image format error»). uploadNormalizedImage
-  // заодно отдаёт мегапиксели результата — отдельное измерение не нужно.
+  // Перекодируем вход в JPEG: nano-banana отбивает HEIC / CMYK / 16-bit /
+  // прогрессивный JPEG и т.п. uploadNormalizedImage заодно грузит файл в S3.
   const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.jpg`;
   const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
   if (!normalized) {
     await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
-    return;
-  }
-  const uploadedKey = normalized.key;
-  const longestSidePx = Math.max(normalized.width, normalized.height);
-  const meta: UpscaleMeta = { inputMp: normalized.megapixels, longestSidePx };
-
-  // Факторы, чей результат укладывается в лимит Topaz (длинная сторона ×
-  // фактор ≤ 20000 px). Если даже минимальный фактор не влезает — фото слишком
-  // крупное; не показываем обречённую клавиатуру (юзер бы зациклился на
-  // единственной кнопке), сразу — понятная ошибка. Состояние не меняем —
-  // следующее (меньшее) фото обработается.
-  const allowedFactors = PHOTO_UPSCALE_FACTORS.filter((f) =>
-    photoFactorFits(longestSidePx, Number(f)),
-  );
-  if (allowedFactors.length === 0) {
-    await ctx.reply(ctx.t.errors.upscaleResultTooLarge);
     return;
   }
 
@@ -241,27 +215,23 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     userId,
     PHOTO_UPSCALE_BUFFER_MODEL_ID,
     UPSCALE_SLOT,
-    uploadedKey,
-    true,
-  );
-  await userStateService.addMediaInput(
-    userId,
-    PHOTO_UPSCALE_BUFFER_MODEL_ID,
-    UPSCALE_MP_SLOT,
-    String(normalized.megapixels),
-    true,
-  );
-  await userStateService.addMediaInput(
-    userId,
-    PHOTO_UPSCALE_BUFFER_MODEL_ID,
-    UPSCALE_LONGSIDE_SLOT,
-    String(longestSidePx),
+    normalized.key,
     true,
   );
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
-  await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard("photo", allowedFactors, PHOTO_UPSCALE_MODEL_ID, meta),
+  // Фактор больше не выбирается — апскейл всегда на 4K. Одна кнопка с
+  // фиксированной ценой: тап → старт.
+  const model = AI_MODELS[PHOTO_UPSCALE_MODEL_ID];
+  const cost = model
+    ? calculateCost(model, 0, 0, undefined, undefined, PHOTO_UPSCALE_SETTINGS, undefined)
+    : 0;
+  const label =
+    cost > 0
+      ? `${ctx.t.scenarios.upscaleStartButton} · ${cost.toFixed(2)} ✦`
+      : ctx.t.scenarios.upscaleStartButton;
+  await ctx.reply(ctx.t.scenarios.upscalePhotoReady, {
+    reply_markup: new InlineKeyboard().text(label, "upscale:photo:go"),
   });
 }
 
@@ -400,7 +370,7 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
   await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-    reply_markup: buildFactorKeyboard("video", VIDEO_UPSCALE_FACTORS, VIDEO_UPSCALE_MODEL_ID, meta),
+    reply_markup: buildVideoFactorKeyboard(VIDEO_UPSCALE_FACTORS, VIDEO_UPSCALE_MODEL_ID, meta),
   });
 }
 
@@ -438,13 +408,10 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     return;
   }
 
-  // Метаданные исходника берём из буфера (рядом с файлом) — тап по устаревшей
-  // клавиатуре тарифицирует ровно по текущему файлу, не по прошлому.
+  // Видео тарифицируется по результату — метаданные берём из буфера (рядом с
+  // файлом). Фото-апскейл фиксированный (4K) — метаданные ему не нужны.
   const meta: UpscaleMeta = isPhoto
-    ? {
-        inputMp: Number(slots[UPSCALE_MP_SLOT]?.[0]) || DEFAULT_PHOTO_MP,
-        longestSidePx: Number(slots[UPSCALE_LONGSIDE_SLOT]?.[0]) || undefined,
-      }
+    ? {}
     : {
         durationSec: Number(slots[UPSCALE_DUR_SLOT]?.[0]),
         heightPx: Number(slots[UPSCALE_HEIGHT_SLOT]?.[0]) || DEFAULT_VIDEO_HEIGHT,
@@ -461,31 +428,6 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     await userStateService.setState(userId, awaitState, null);
     await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
-  }
-
-  // Тап по устаревшей клавиатуре (юзер загрузил фото поверх) мог принести
-  // фактор, который для текущего файла превышает потолок Topaz. Перепроверяем
-  // зажим и, если не проходит, показываем свежую клавиатуру с валидными
-  // факторами вместо обречённого сабмита.
-  if (isPhoto && meta.longestSidePx) {
-    const longestSidePx = meta.longestSidePx;
-    if (!photoFactorFits(longestSidePx, Number(factor))) {
-      const allowed = PHOTO_UPSCALE_FACTORS.filter((f) =>
-        photoFactorFits(longestSidePx, Number(f)),
-      );
-      if (allowed.length === 0) {
-        // Даже минимальный фактор не влезает — фото слишком крупное. НЕ
-        // перерисовываем клавиатуру (зациклили бы юзера на ×2), сразу ошибка.
-        await userStateService.clearMediaInputs(userId, bufferId);
-        await userStateService.setState(userId, awaitState, null);
-        await ctx.reply(ctx.t.errors.upscaleResultTooLarge);
-        return;
-      }
-      await ctx.reply(ctx.t.scenarios.upscaleChooseFactor, {
-        reply_markup: buildFactorKeyboard("photo", allowed, PHOTO_UPSCALE_MODEL_ID, meta),
-      });
-      return;
-    }
   }
 
   const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);
@@ -513,16 +455,13 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     });
     return;
   }
-  // Провайдерам отдаём стабильную `/download/<token>/файл.<ext>`-ссылку вместо
-  // протухающего presigned-S3 URL: чистое расширение → Topaz определяет
-  // контейнер, 24h TTL → не протухнет за время ретраев/фолбэка.
-  // `resolveMediaInputUrls` выше уже подтвердил, что файл в S3 жив.
-  const srcUrl = buildDownloadUrl(srcKey, userId) ?? resolvedUrl;
+  // Провайдеру отдаём presigned-S3 URL напрямую. НЕ через `/download/<token>` —
+  // тот роут отвечает 302-редиректом на S3, а серверные downloader'ы провайдеров
+  // по редиректу не идут (Fal явно: "Failed to download the assets: Redirect
+  // response '302 Found'"). Presigned URL ведёт прямо на объект (200).
+  const srcUrl = resolvedUrl;
 
   await ctx.reply(ctx.t.scenarios.upscaleGenerating);
-
-  // Настройки цены/адаптеров — одни и те же, что показаны на кнопке.
-  const settings = upscaleSettings(kind, factor, meta);
 
   let submitOk = false;
   try {
@@ -530,9 +469,9 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
       await generationService.submitImage({
         userId,
         modelId: PHOTO_UPSCALE_MODEL_ID,
-        prompt: "",
+        prompt: PHOTO_UPSCALE_PROMPT,
         mediaInputs: { edit: [srcUrl] },
-        extraModelSettings: settings,
+        extraModelSettings: PHOTO_UPSCALE_SETTINGS,
         telegramChatId: chatId,
         sendOriginalLabel: ctx.t.common.sendOriginal,
         displayNameOverride: scenarioLabel,
@@ -545,7 +484,7 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
         modelId: VIDEO_UPSCALE_MODEL_ID,
         prompt: "",
         mediaInputs: { motion_video: [srcUrl] },
-        extraModelSettings: settings,
+        extraModelSettings: videoUpscaleSettings(factor, meta),
         duration: meta.durationSec,
         telegramChatId: chatId,
         sendOriginalLabel: ctx.t.common.sendOriginal,

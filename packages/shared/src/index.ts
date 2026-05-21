@@ -60,14 +60,9 @@ export {
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
   PHOTO_UPSCALE_MODEL_ID,
   VIDEO_UPSCALE_MODEL_ID,
-  PHOTO_UPSCALE_FACTORS,
   VIDEO_UPSCALE_FACTORS,
-  UPSCALE_MAX_LONGEST_SIDE_PX,
-  photoFactorFits,
-  PHOTO_MP_TIERS,
   videoResolutionTier,
   videoFpsTier,
-  photoEffectiveMpTier,
 } from "./constants/upscale.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";

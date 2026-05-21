@@ -40,21 +40,7 @@ const MODEL_IDS: Record<string, string> = {
   // swap_image (лицо). Без prompt.
   "face-swap-classic":
     "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
-  // Topaz image upscaler — fallback для KIE primary `image-upscale`. Official
-  // Replicate model → deployment endpoint (owner/name, без пина версии).
-  "image-upscale": "topazlabs/image-upscale",
 };
-
-/**
- * KIE `upscale_factor` ("1"/"2"/"4"/"8") → Replicate Topaz формат ("2x"/"4x"/"6x").
- * Replicate Topaz масштабирует максимум до 6x, поэтому KIE-значение 8 клампится
- * до "6x" (на fallback теряем часть увеличения — допустимая деградация).
- */
-function kieFactorToReplicate(factor: string): string {
-  if (factor === "8") return "6x";
-  if (factor === "4") return "4x";
-  return "2x";
-}
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
 const IDEOGRAM_MODELS = new Set(["ideogram-quality", "ideogram-balanced", "ideogram-turbo"]);
@@ -142,42 +128,10 @@ export class ReplicateAdapter implements ImageAdapter {
     return prediction.id;
   }
 
-  /**
-   * Topaz image upscale submit — единственный вход `image`, без prompt.
-   * Fallback-ветка для KIE primary `image-upscale`.
-   */
-  private async submitUpscale(modelStr: string, input: ImageInput): Promise<string> {
-    const srcUrl = input.mediaInputs?.edit?.[0] ?? input.imageUrl;
-    if (!srcUrl) {
-      throw new UserFacingError("Upscale needs a source image", { key: "mediaSlotExpired" });
-    }
-    const res = await fetch(srcUrl);
-    let imageParam: Blob | string = srcUrl;
-    if (res.ok) {
-      const buf = await res.arrayBuffer();
-      imageParam = new Blob([buf], {
-        type: resolveImageMimeType(buf, res.headers.get("content-type")),
-      });
-    }
-    const ms = input.modelSettings ?? {};
-    const upscaleFactor = kieFactorToReplicate(String(ms.upscale_factor ?? "2"));
-    const predInput = { image: imageParam, upscale_factor: upscaleFactor };
-
-    logCall(modelStr, "submit", { image: "<blob>", upscale_factor: upscaleFactor });
-    const prediction = await this.client.predictions.create({
-      model: modelStr as `${string}/${string}`,
-      input: predInput,
-    });
-    return prediction.id;
-  }
-
   async submit(input: ImageInput): Promise<string> {
     const modelStr = MODEL_IDS[this.modelId] ?? this.modelId;
     if (FACE_SWAP_MODELS.has(this.modelId)) {
       return this.submitFaceSwap(modelStr, input);
-    }
-    if (this.modelId === "image-upscale") {
-      return this.submitUpscale(modelStr, input);
     }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};

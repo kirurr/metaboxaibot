@@ -55,6 +55,8 @@ export interface Translations {
     photoUpscaleStep: string;
     videoUpscaleStep: string;
     upscaleChooseFactor: string;
+    upscalePhotoReady: string;
+    upscaleStartButton: string;
     upscaleNotPhoto: string;
     upscaleNotVideo: string;
     upscalePhotoTooLarge: string;
