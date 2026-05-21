@@ -213,10 +213,12 @@ export class FalVideoAdapter implements VideoAdapter {
     const ms = input.modelSettings ?? {};
 
     // ── Topaz video upscale (fal-ai/topaz/upscale/video) ─────────────────────
-    // Fallback для KIE primary `video-upscale`. Fal принимает `upscale_factor`
-    // множителем 1–4 — ровно как KIE, без маппинга в разрешение. `target_fps`
-    // НЕ шлём: он включает интерполяцию кадров (KIE этого не делает). H264 —
-    // ради совместимости плеера Telegram (дефолт Fal — H265/HEVC).
+    // Fallback для KIE primary `video-upscale`. `Starlight HQ` — генеративная
+    // diffusion-модель Topaz: реконструирует детали (качественнее, но медленнее
+    // не-генеративных). Fal принимает `upscale_factor` множителем 1–4 — ровно
+    // как KIE, без маппинга в разрешение. `target_fps` НЕ шлём: он включает
+    // интерполяцию кадров (KIE этого не делает). H264 — ради совместимости
+    // плеера Telegram (дефолт Fal — H265/HEVC).
     if (this.modelId === "video-upscale") {
       const videoUrl = input.mediaInputs?.motion_video?.[0] ?? input.imageUrl;
       if (!videoUrl) {
@@ -226,7 +228,7 @@ export class FalVideoAdapter implements VideoAdapter {
       const upscaleFactor = Math.min(4, Math.max(1, Number.isFinite(rawFactor) ? rawFactor : 2));
       const upscaleBody = {
         video_url: videoUrl,
-        model: "Proteus" as const,
+        model: "Starlight HQ" as const,
         upscale_factor: upscaleFactor,
         H264_output: true,
       };

@@ -36,7 +36,7 @@ import {
   generateVideoJpegThumbnail,
   remuxToFaststart,
 } from "@metabox/api/services/s3";
-import { buildDownloadButton } from "@metabox/api/utils/download-token";
+import { buildDownloadUrl } from "@metabox/api/utils/download-token";
 import { isUniqueViolation } from "../utils/prisma-errors.js";
 import { InputFile } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
@@ -827,10 +827,11 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
     const tooLargeForTelegram = videoBuf.byteLength > VIDEO_MAX_BYTES;
 
+    // Слишком большое видео: ссылку на скачивание вставляем гиперссылкой в
+    // текст сообщения (ниже), а не кнопкой — прежняя `web_app`-кнопка
+    // открывала мини-апп, который закрывался раньше, чем юзер успевал тапнуть.
     const actionRow: InlineKeyboardButton[] | null = tooLargeForTelegram
-      ? s3Key
-        ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
-        : null
+      ? null
       : sendOriginalLabel
         ? [{ text: sendOriginalLabel, callback_data: `orig_${outputId}` }]
         : null;
@@ -873,11 +874,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
 
     if (telegramChatId !== null) {
       if (tooLargeForTelegram) {
-        // t.errors.fileTooLargeForTelegram — i18n-строка без HTML-спецсимволов,
-        // безопасно склеивать с HTML-caption'ом без экранирования.
+        // Ссылку на скачивание вшиваем гиперссылкой прямо в текст — по тапу
+        // открывается в браузере. URL (`/download/<token>`: base64url + hex) и
+        // текст ссылки (`downloadFile`) — без HTML-спецсимволов, экранирование
+        // не нужно. `fileTooLargeForTelegram` — тоже plain-текст.
+        const downloadUrl = s3Key ? buildDownloadUrl(s3Key, userIdStr) : null;
+        const downloadLine = downloadUrl
+          ? `\n\n<a href="${downloadUrl}">${t.common.downloadFile}</a>`
+          : "";
         await telegram.sendMessage(
           telegramChatId,
-          `${caption}\n\n${t.errors.fileTooLargeForTelegram}`,
+          `${caption}\n\n${t.errors.fileTooLargeForTelegram}${downloadLine}`,
           {
             parse_mode: "HTML",
             ...(replyMarkup ? { reply_markup: replyMarkup } : {}),

@@ -41,7 +41,7 @@ export default {
   },
   scenarios: {
     sectionTitle: "🎯 Готовые сценарии",
-    sectionTooltip: "🎯 Готовые сценарии\nВыберите сценарий 👇",
+    sectionTooltip: "Выберите сценарий 👇",
     chooseScenario: "🎯 Выбрать сценарий",
     faceSwap: "🔄 Замена лица",
     backToMain: "🏠 В главное меню",
