@@ -449,16 +449,30 @@ async function streamGptResponse(
       // (например, целый code-block залпом) — нужно вырезать столько кусков
       // подряд, сколько потребуется, иначе остаток уезжает в финал и там
       // уже не пролезает в 4096-лимит даже после finalize-сплита.
-      while (accumulated.length >= MSG_SPLIT_AT) {
+      while (true) {
+        // Режем по длине ВИДИМОГО ответа, а не сырого `accumulated`: reasoning
+        // (`<think>…</think>`) скрыт и уезжает отдельным сообщением в конце —
+        // в 4096-лимит он не идёт. `<think>`-блок (reasoning стримится первым)
+        // НИКОГДА не режем: срез внутри него оторвал бы `</think>` от `<think>`,
+        // `stripThinkingBlocks` не сматчил бы пару — и reasoning утёк бы в текст
+        // ответа (баг на «Макс.» глубине: reasoning длиннее одного сообщения).
+        const thinkOpen = accumulated.indexOf("<think>");
+        const thinkClose = accumulated.indexOf("</think>");
+        // `<think>` ещё открыт — весь хвост reasoning, видимого ответа нет.
+        if (thinkOpen !== -1 && thinkClose === -1) break;
+        const thinkEnd = thinkClose === -1 ? 0 : thinkClose + "</think>".length;
+        const thinkPrefix = accumulated.slice(0, thinkEnd);
+        const answerPart = accumulated.slice(thinkEnd);
+        if (answerPart.length < MSG_SPLIT_AT) break;
         // Prefer splitting at a newline; fall back to hard cut if none found in the latter half
-        const newlineIdx = accumulated.lastIndexOf("\n", MSG_SPLIT_AT);
+        const newlineIdx = answerPart.lastIndexOf("\n", MSG_SPLIT_AT);
         const splitAt = newlineIdx > MSG_SPLIT_AT / 2 ? newlineIdx + 1 : MSG_SPLIT_AT;
-        const firstPart = accumulated.slice(0, splitAt);
-        const remainder = accumulated.slice(splitAt);
+        const firstPart = answerPart.slice(0, splitAt);
+        const remainder = answerPart.slice(splitAt);
         const { closed, opener } = closeOpenMarkdownV2(stripThinkingBlocks(firstPart));
         await finalizeMessage(placeholder.message_id, closed);
         placeholder = await ctx.reply("⏳");
-        accumulated = opener + remainder;
+        accumulated = thinkPrefix + opener + remainder;
         lastEdit = Date.now();
       }
 

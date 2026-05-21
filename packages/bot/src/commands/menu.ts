@@ -16,14 +16,15 @@ import { buildDesignModelKeyboard } from "../scenes/design.js";
 import { buildVideoModelKeyboard } from "../scenes/video.js";
 import { clearActiveSlot } from "../utils/media-input-state.js";
 
-/** Inline keyboard listing the ready-made scenarios (Face swap, upscale). */
+/** Inline keyboard listing the ready-made scenarios (Face swap, photo upscale). */
 export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
+  // «🎬 Апскейл видео» временно убран из меню — сцена и модель `video-upscale`
+  // на месте; вернуть = дописать обратно `.row().text(t.scenarios.videoUpscale,
+  // "scenario:video_upscale")`.
   return new InlineKeyboard()
     .text(t.scenarios.faceSwap, "scenario:face_swap")
     .row()
-    .text(t.scenarios.photoUpscale, "scenario:photo_upscale")
-    .row()
-    .text(t.scenarios.videoUpscale, "scenario:video_upscale");
+    .text(t.scenarios.photoUpscale, "scenario:photo_upscale");
 }
 
 /** Returns the active dialog label + modelId for a section, or undefined. */
