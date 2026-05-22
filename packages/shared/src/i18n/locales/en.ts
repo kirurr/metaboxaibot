@@ -70,9 +70,9 @@ export default {
       "Try the clothing from the second photo onto the person from the first. Pose, body, face and background stay the same — only the clothing changes.",
     backgroundRemoval: "✂️ Remove background",
     backgroundRemovalWelcome:
-      "Remove the background from a photo — the subject is left on a transparent background. The result is delivered as a PNG file (that's where the transparency is kept).",
+      "Remove the background from a photo — the subject is left on a transparent background. Download the result as a PNG file via the button — that's where the transparency is kept. (the preview is not transparent)",
     backgroundRemovalStep:
-      "✂️ <b>Remove background</b>\n\nSend the <b>photo</b> you want the background removed from. Maximum is 10 MB.",
+      "Send the <b>photo</b> you want the background removed from. Maximum is 10 MB.",
     backgroundRemovalNotPhoto: "📷 That's not a photo. Please send an image.",
     backgroundRemovalPhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",
     backgroundRemovalGenerating: "✂️ Starting background removal...",
