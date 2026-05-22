@@ -52,6 +52,7 @@ import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/stores/uiStore";
+import { useGenerationDraftStore, type StoredSlotFile } from "@/stores/generationDraftStore";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
@@ -179,7 +180,8 @@ function parseMotionValue(v: unknown): MotionEntry[] {
 
 type SlotFile =
   | { id: string; status: "uploading"; file: File }
-  | { id: string; status: "ready"; file: File; dto: ChatUploadDto }
+  // `file` опционален: после rehydrate из draft-store сырой File недоступен.
+  | { id: string; status: "ready"; file?: File; dto: ChatUploadDto }
   | { id: string; status: "error"; file: File; error: string };
 
 function SlotCard({
@@ -260,7 +262,7 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
   // ObjectURL для preview из локального File (быстрее чем ждать presigned URL).
   const [localUrl, setLocalUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!file.file.type.startsWith("image/")) {
+    if (!file.file || !file.file.type.startsWith("image/")) {
       setLocalUrl(null);
       return;
     }
@@ -270,6 +272,7 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
   }, [file.file]);
 
   const url = file.status === "ready" ? (file.dto.url ?? localUrl) : localUrl;
+  const altName = file.file?.name ?? (file.status === "ready" ? file.dto.name : "");
   return (
     <div
       className={clsx(
@@ -279,7 +282,7 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
       )}
     >
       {url ? (
-        <img src={url} alt={file.file.name} />
+        <img src={url} alt={altName} />
       ) : (
         <div className="gen-slot-tile-icon">
           <ImageIcon size={16} />
@@ -563,7 +566,15 @@ export function GenerateScene({
   }, [models]);
 
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
+  // Lazy initializer берёт `?model=` из URL сразу на mount, чтобы R0 не целился
+  // в families[0] и не перетирал store сторонней моделью до URL-sync effect'а.
+  const [modelId, setModelId] = useState<string>(() => {
+    const urlModel =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("model")
+        : null;
+    return urlModel ?? families[0]?.id ?? "";
+  });
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
@@ -647,20 +658,39 @@ export function GenerateScene({
   const [searchParams, setSearchParams] = useSearchParams();
   const urlModelId = searchParams.get("model");
 
+  // URL подтягивается React Router'ом отдельно от setState — между pickModel
+  // и обновлением useSearchParams() есть кадр, где state опережает URL.
+  // lastPickedRef не даёт URL-sync вернуть modelId на stale urlModelId.
+  const lastPickedRef = useRef<string | null>(null);
+
+  // Помечает modelId, для которого state синхронизирован со store. Sync-эффекты
+  // пишут в store только при совпадении — иначе на mount, до загрузки каталога,
+  // sync написал бы пустые values и перетёр сохранённое.
+  const restoredForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!urlModelId) return;
+    if (urlModelId === modelId && lastPickedRef.current === modelId) {
+      lastPickedRef.current = null;
+      return;
+    }
     if (urlModelId === modelId) return;
-    // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
-    // (например юзер вручную набил кривой ?model=, не валим default-flow).
+    if (lastPickedRef.current === modelId) return;
     if (models.some((m) => m.id === urlModelId)) {
       setModelId(urlModelId);
     }
   }, [urlModelId, models, modelId]);
 
-  // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
-  // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
-  // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  // Atomic swap: settings/slots/mode + modelId + URL за один event handler
+  // (React батчит) → UI не показывает stale slot files предыдущей модели.
   function pickModel(id: string) {
+    if (id === modelId) return;
+    const { settings, slots } = restoreDraftForModel(id);
+    lastPickedRef.current = id;
+    restoredForRef.current = id;
+    setModeId(null);
+    setSettingValues(settings);
+    setSlotFiles(slots);
     setModelId(id);
     setSearchParams(
       (prev) => {
@@ -670,6 +700,31 @@ export function GenerateScene({
       },
       { replace: true },
     );
+  }
+
+  // Читает per-family bag из draft-store, фильтрует слоты по mediaInputs
+  // целевой модели и обрезает каждый до slot.maxImages.
+  function restoreDraftForModel(id: string): {
+    settings: Record<string, unknown>;
+    slots: Record<string, SlotFile[]>;
+  } {
+    const target = models.find((m) => m.id === id);
+    if (!target) return { settings: {}, slots: {} };
+    const key = target.familyId ?? target.id;
+    const entry = useGenerationDraftStore.getState().byKey[key];
+    if (!entry) return { settings: {}, slots: {} };
+    const slots: Record<string, SlotFile[]> = {};
+    for (const slot of target.mediaInputs ?? []) {
+      const arr = entry.slots[slot.slotKey];
+      if (arr && arr.length > 0) {
+        slots[slot.slotKey] = arr.slice(0, slot.maxImages).map((f) => ({
+          id: f.id,
+          status: "ready" as const,
+          dto: f.dto,
+        }));
+      }
+    }
+    return { settings: entry.settings, slots };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -735,12 +790,51 @@ export function GenerateScene({
     if (target) pickModel(target.id);
   }
 
-  // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
+  // Safety net: пути, где modelId меняется не через pickModel (lazy initializer
+  // на mount, URL-sync на внешнюю навигацию, prefill effect ниже). Зависит от
+  // `models`, чтобы перезапуститься после загрузки каталога. Stage-2 prefill и
+  // preset-by-model effect идут ПОСЛЕ в порядке объявления — preset wins.
   useEffect(() => {
+    if (!modelId) {
+      setModeId(null);
+      setSettingValues({});
+      setSlotFiles({});
+      restoredForRef.current = null;
+      return;
+    }
+    if (restoredForRef.current === modelId) return;
+    if (models.length === 0) return;
+    if (!models.some((m) => m.id === modelId)) return;
+
     setModeId(null);
-    setSettingValues({});
-    setSlotFiles({});
-  }, [modelId]);
+    restoredForRef.current = modelId;
+    const { settings, slots } = restoreDraftForModel(modelId);
+    setSettingValues(settings);
+    setSlotFiles(slots);
+  }, [modelId, models]);
+
+  // Sync settingValues → draft-store под per-family key.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setSettings(key, settingValues);
+  }, [selectedModel, settingValues]);
+
+  // Sync slotFiles → draft-store. Только `ready`-файлы; uploading/error не персистим.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    const stored: Record<string, StoredSlotFile[]> = {};
+    for (const [k, arr] of Object.entries(slotFiles)) {
+      const ready = arr.flatMap((f) =>
+        f.status === "ready" ? [{ id: f.id, status: "ready" as const, dto: f.dto }] : [],
+      );
+      if (ready.length > 0) stored[k] = ready;
+    }
+    useGenerationDraftStore.getState().setSlots(key, stored);
+  }, [selectedModel, slotFiles]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1157,7 +1251,7 @@ export function GenerateScene({
     const toUpload = list.slice(0, room);
     if (toUpload.length === 0) return;
 
-    const initial: SlotFile[] = toUpload.map((file) => ({
+    const initial: Extract<SlotFile, { status: "uploading" }>[] = toUpload.map((file) => ({
       id: `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       status: "uploading",
       file,
