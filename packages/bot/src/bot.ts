@@ -20,6 +20,7 @@ import {
   buildScenariosKeyboard,
 } from "./commands/menu.js";
 import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
+import { handleClothingTryonEnter, handleClothingTryonPhoto } from "./scenes/clothing-tryon.js";
 import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
@@ -329,6 +330,7 @@ export function createBot(token: string): Bot<BotContext> {
     const which = ctx.callbackQuery.data.split(":")[1];
     await ctx.answerCallbackQuery();
     if (which === "face_swap") return handleFaceSwapEnter(ctx);
+    if (which === "clothing_tryon") return handleClothingTryonEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
   });
@@ -503,6 +505,16 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
       if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
+      return;
+    }
+    if (
+      state?.state === "CLOTHING_TRYON_AWAIT_PERSON" ||
+      state?.state === "CLOTHING_TRYON_AWAIT_CLOTHING"
+    ) {
+      if (ctx.message?.photo) return handleClothingTryonPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handleClothingTryonPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.clothingTryonNotPhoto);
       return;
     }
     if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {

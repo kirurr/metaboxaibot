@@ -1,0 +1,270 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Queue OpenAPI for fal-ai/image-apps-v2/virtual-try-on",
+    "version": "1.0.0",
+    "description": "The OpenAPI schema for the fal-ai/image-apps-v2/virtual-try-on queue.",
+    "x-fal-metadata": {
+      "endpointId": "fal-ai/image-apps-v2/virtual-try-on",
+      "category": "image-to-image",
+      "thumbnailUrl": "https://v3.fal.media/files/tiger/dd5748sfMpq2uZzoUA_Y3_6377b3f9ee8e49afa174da674a80b9a6.jpg",
+      "playgroundUrl": "https://fal.ai/models/fal-ai/image-apps-v2/virtual-try-on",
+      "documentationUrl": "https://fal.ai/models/fal-ai/image-apps-v2/virtual-try-on/api",
+      "about": "Virtual Try On"
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Fal Key"
+      }
+    },
+    "schemas": {
+      "QueueStatus": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"] },
+          "request_id": { "type": "string", "description": "The request id." },
+          "response_url": { "type": "string", "description": "The response url." },
+          "status_url": { "type": "string", "description": "The status url." },
+          "cancel_url": { "type": "string", "description": "The cancel url." },
+          "logs": { "type": "object", "description": "The logs.", "additionalProperties": true },
+          "metrics": {
+            "type": "object",
+            "description": "The metrics.",
+            "additionalProperties": true
+          },
+          "queue_position": { "type": "integer", "description": "The queue position." }
+        },
+        "required": ["status", "request_id"]
+      },
+      "ImageAppsV2VirtualTryOnInput": {
+        "properties": {
+          "clothing_image_url": {
+            "type": "string",
+            "examples": [
+              "https://v3b.fal.media/files/b/monkey/5ZWXSKUuk9EilI1apFCeu_1ecd050187f24b9aa1d2defb88d8d8ae.png"
+            ],
+            "description": "Clothing photo URL",
+            "title": "Clothing Image Url"
+          },
+          "preserve_pose": { "type": "boolean", "default": true, "title": "Preserve Pose" },
+          "person_image_url": {
+            "type": "string",
+            "examples": ["https://v3.fal.media/files/tiger/4vxSHizex4UWR5fdnPs1A.jpeg"],
+            "description": "Person photo URL",
+            "title": "Person Image Url"
+          },
+          "aspect_ratio": {
+            "$ref": "#/components/schemas/AspectRatio",
+            "description": "Aspect ratio for 4K output (default: 3:4 for fashion)"
+          }
+        },
+        "required": ["person_image_url", "clothing_image_url"],
+        "type": "object",
+        "x-fal-order-properties": [
+          "person_image_url",
+          "clothing_image_url",
+          "preserve_pose",
+          "aspect_ratio"
+        ],
+        "title": "VirtualTryOnInput"
+      },
+      "ImageAppsV2VirtualTryOnOutput": {
+        "properties": {
+          "images": {
+            "items": { "$ref": "#/components/schemas/Image" },
+            "type": "array",
+            "examples": [
+              [
+                {
+                  "url": "https://v3b.fal.media/files/b/panda/9w6wt7vgxjfmiBIoo6bjF_cb0ba7a150c84f159e9d40af2d439401.png"
+                }
+              ]
+            ],
+            "description": "Person wearing the virtual clothing",
+            "title": "Images"
+          }
+        },
+        "required": ["images"],
+        "type": "object",
+        "x-fal-order-properties": ["images"],
+        "title": "VirtualTryOnOutput"
+      },
+      "AspectRatio": {
+        "properties": {
+          "ratio": {
+            "type": "string",
+            "enum": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+            "default": "1:1",
+            "description": "Aspect ratio for 4K resolution output",
+            "title": "Ratio"
+          }
+        },
+        "type": "object",
+        "x-fal-order-properties": ["ratio"],
+        "description": "Aspect ratio model that calculates 4K resolution dimensions",
+        "title": "AspectRatio"
+      },
+      "Image": {
+        "properties": {
+          "file_size": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "examples": [4404019],
+            "description": "The size of the file in bytes.",
+            "title": "File Size"
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL where the file can be downloaded from.",
+            "title": "Url"
+          },
+          "height": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "examples": [1024],
+            "description": "The height of the image in pixels.",
+            "title": "Height"
+          },
+          "file_name": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "examples": ["z9RV14K95DvU.png"],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "title": "File Name"
+          },
+          "width": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "examples": [1024],
+            "description": "The width of the image in pixels.",
+            "title": "Width"
+          },
+          "content_type": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "examples": ["image/png"],
+            "description": "The mime type of the file.",
+            "title": "Content Type"
+          }
+        },
+        "required": ["url"],
+        "type": "object",
+        "description": "Represents an image file.",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "title": "Image"
+      }
+    }
+  },
+  "paths": {
+    "/fal-ai/image-apps-v2/virtual-try-on/requests/{request_id}/status": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          },
+          {
+            "name": "logs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Whether to include logs (`1`) in the response or not (`0`)."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/QueueStatus" } }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/image-apps-v2/virtual-try-on/requests/{request_id}/cancel": {
+      "put": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request was cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the request was cancelled successfully."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/image-apps-v2/virtual-try-on": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ImageAppsV2VirtualTryOnInput" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/QueueStatus" } }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/image-apps-v2/virtual-try-on/requests/{request_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result of the request.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ImageAppsV2VirtualTryOnOutput" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [{ "url": "https://queue.fal.run" }],
+  "security": [{ "apiKeyAuth": [] }]
+}

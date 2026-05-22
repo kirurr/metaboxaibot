@@ -359,6 +359,36 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
+  // Готовый сценарий «Примерка одежды». Primary — Hy-Wu Edit (fal-ai/hy-wu-edit),
+  // fallback — fal virtual-try-on (см. FALLBACK_DESIGN_MODELS). Обе модели — fal,
+  // поэтому различаются через `providerModelId` (= прямой fal-endpoint).
+  // Доступна ТОЛЬКО через сценарий «Примерка одежды» — hiddenFromCarousel.
+  // mediaInputs.edit: [0] = фото человека, [1] = фото одежды.
+  // Биллинг per-MP: fal Hy-Wu берёт $0.15/MP (enable_thinking — дефолт fal).
+  "clothing-tryon": {
+    id: "clothing-tryon",
+    name: "👗 Примерка одежды",
+    description: "Виртуальная примерка одежды на фото.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/hy-wu-edit",
+    costUsdPerRequest: 0,
+    costUsdPerMPixel: 0.15,
+    // Апфронт-проверка баланса оценивает в 2 MP (реальные фото крупнее 1 MP),
+    // фактическое списание — по реальному размеру выхода.
+    estimatedMegapixels: 2,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
   // Готовый сценарий «Апскейл фото». Под капотом — nano-banana-pro (KIE primary,
   // evolink fallback): сцена `upscale.ts` зашивает resolution 4K, aspect_ratio
   // auto и фикс-промт. hiddenFromCarousel убирает модель из карусели Дизайна —
@@ -2529,6 +2559,34 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     providerModelId:
       "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
     costUsdPerRequest: 0.0026,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // ── Примерка одежды fallback (fal virtual-try-on) ───────────────────────────
+  // Сценарий «Примерка одежды» = Hy-Wu Edit (fal) под капотом. При недоступности
+  // Hy-Wu фолбэчимся на fal virtual-try-on. Обе модели — fal, различаются по
+  // `providerModelId`. У virtual-try-on свой формат входа (см. fal.adapter.ts).
+  //
+  // Списание с ЮЗЕРА — всегда по primary (per-MP Hy-Wu, $0.15/MP). НО
+  // `costUsdPerRequest` отсюда идёт в audit-метаданные `actualCostUsd` —
+  // держим реальную флэт-цену virtual-try-on ($0.04/изображение).
+  {
+    id: "clothing-tryon",
+    name: "👗 Примерка одежды (fal virtual-try-on fallback)",
+    description: "Fallback на fal virtual-try-on при недоступности Hy-Wu Edit.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/image-apps-v2/virtual-try-on",
+    costUsdPerRequest: 0.04,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,

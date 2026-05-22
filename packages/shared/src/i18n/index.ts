@@ -48,6 +48,14 @@ export interface Translations {
     faceSwapPhotoTooLarge: string;
     faceSwapAlbumNotice: string;
     faceSwapWelcome: string;
+    clothingTryon: string;
+    clothingTryonStep1: string;
+    clothingTryonStep2: string;
+    clothingTryonNotPhoto: string;
+    clothingTryonGenerating: string;
+    clothingTryonPhotoTooLarge: string;
+    clothingTryonAlbumNotice: string;
+    clothingTryonWelcome: string;
     photoUpscale: string;
     videoUpscale: string;
     photoUpscaleWelcome: string;
