@@ -27,6 +27,8 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
     .row()
     .text(t.scenarios.clothingTryon, "scenario:clothing_tryon")
     .row()
+    .text(t.scenarios.backgroundRemoval, "scenario:bg_removal")
+    .row()
     .text(t.scenarios.photoUpscale, "scenario:photo_upscale");
 }
 

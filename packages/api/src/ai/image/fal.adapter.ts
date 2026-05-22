@@ -12,6 +12,14 @@ import { logCall } from "../../utils/fetch.js";
 const VIRTUAL_TRYON_ENDPOINT = "fal-ai/image-apps-v2/virtual-try-on";
 
 /**
+ * Models routed through the fal Ideogram remove-background endpoint. Input is
+ * a single `image_url` (no prompt / image_size); output is a single `image`
+ * object (not an `images` array). Dispatched by modelId — the endpoint URL
+ * itself lives only in the model's `providerModelId` (single source of truth).
+ */
+const REMOVE_BG_MODELS = new Set(["bg-removal"]);
+
+/**
  * virtual-try-on `aspect_ratio` enum — у endpoint'а нет "auto", поэтому под
  * фото человека подбираем ближайший по значению ratio.
  */
@@ -170,6 +178,23 @@ export class FalAdapter implements ImageAdapter {
     return `${endpoint}${SEP}${request_id}`;
   }
 
+  /**
+   * Dedicated submit for fal Ideogram remove-background — input is only
+   * `image_url` (no prompt / image_size). mediaInputs.edit: [0] = source photo.
+   */
+  private async submitRemoveBackground(endpoint: string, editUrls: string[]): Promise<string> {
+    const imageUrl = editUrls[0];
+    if (!imageUrl) {
+      throw new UserFacingError("Background removal needs an input image", {
+        key: "mediaSlotExpired",
+      });
+    }
+    const falInput = { image_url: imageUrl };
+    logCall(endpoint, "submit", falInput);
+    const { request_id } = await fal.queue.submit(endpoint, { input: falInput });
+    return `${endpoint}${SEP}${request_id}`;
+  }
+
   async submit(input: ImageInput): Promise<string> {
     const editUrls = input.mediaInputs?.edit ?? (input.imageUrl ? [input.imageUrl] : []);
     const imageUrl = editUrls[0];
@@ -177,6 +202,9 @@ export class FalAdapter implements ImageAdapter {
 
     if (endpoint === VIRTUAL_TRYON_ENDPOINT) {
       return this.submitVirtualTryOn(endpoint, editUrls);
+    }
+    if (REMOVE_BG_MODELS.has(this.modelId)) {
+      return this.submitRemoveBackground(endpoint, editUrls);
     }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
@@ -237,18 +265,18 @@ export class FalAdapter implements ImageAdapter {
 
     const result = await fal.queue.result(endpoint, { requestId });
 
-    const images = (
-      result.data as {
-        images?: Array<{
-          url: string;
-          width?: number;
-          height?: number;
-          content_type?: string;
-          file_name?: string;
-        }>;
-      }
-    ).images;
-    if (!images?.length) throw new Error("FAL returned no image URL");
+    type FalImage = {
+      url: string;
+      width?: number;
+      height?: number;
+      content_type?: string;
+      file_name?: string;
+    };
+    // Большинство endpoint'ов отдают `images` (массив). remove-background —
+    // одиночный `image` (объект). Нормализуем к массиву.
+    const data = result.data as { images?: FalImage[]; image?: FalImage };
+    const images = data.images ?? (data.image ? [data.image] : []);
+    if (!images.length) throw new Error("FAL returned no image URL");
 
     const toResult = (
       img: {

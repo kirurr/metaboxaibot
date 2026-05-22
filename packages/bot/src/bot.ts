@@ -22,6 +22,10 @@ import {
 import { handleFaceSwapEnter, handleFaceSwapPhoto } from "./scenes/face-swap.js";
 import { handleClothingTryonEnter, handleClothingTryonPhoto } from "./scenes/clothing-tryon.js";
 import {
+  handleBackgroundRemovalEnter,
+  handleBackgroundRemovalPhoto,
+} from "./scenes/background-removal.js";
+import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
   handleVideoUpscaleEnter,
@@ -331,6 +335,7 @@ export function createBot(token: string): Bot<BotContext> {
     await ctx.answerCallbackQuery();
     if (which === "face_swap") return handleFaceSwapEnter(ctx);
     if (which === "clothing_tryon") return handleClothingTryonEnter(ctx);
+    if (which === "bg_removal") return handleBackgroundRemovalEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
   });
@@ -515,6 +520,13 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document?.mime_type?.startsWith("image/"))
         return handleClothingTryonPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.clothingTryonNotPhoto);
+      return;
+    }
+    if (state?.state === "BG_REMOVAL_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handleBackgroundRemovalPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handleBackgroundRemovalPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.backgroundRemovalNotPhoto);
       return;
     }
     if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {

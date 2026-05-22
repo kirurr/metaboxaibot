@@ -56,6 +56,14 @@ export interface Translations {
     clothingTryonPhotoTooLarge: string;
     clothingTryonAlbumNotice: string;
     clothingTryonWelcome: string;
+    backgroundRemoval: string;
+    backgroundRemovalWelcome: string;
+    backgroundRemovalStep: string;
+    backgroundRemovalNotPhoto: string;
+    backgroundRemovalPhotoTooLarge: string;
+    backgroundRemovalGenerating: string;
+    backgroundRemovalAlbumNotice: string;
+    backgroundRemovalFileButton: string;
     photoUpscale: string;
     videoUpscale: string;
     photoUpscaleWelcome: string;
