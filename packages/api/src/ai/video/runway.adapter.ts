@@ -165,6 +165,17 @@ export class RunwayAdapter implements VideoAdapter {
           params: { min: aspectMatch[1], got: aspectMatch[2] },
         });
       }
+      // 400 «Asset size exceeds 16.0MB» — promptImage тяжелее лимита Runway.
+      // Slot-валидация (maxFileSizeBytes) это уже отбивает, ловим и в адаптере
+      // defense-in-depth (как с aspect ratio) — иначе 3 пустых BullMQ-ретрая.
+      const sizeMatch = res.status === 400 && /Asset size exceeds ([\d.]+)\s*MB/i.exec(text);
+      if (sizeMatch) {
+        const sizeMb = sourceSizeBytes > 0 ? (sourceSizeBytes / (1024 * 1024)).toFixed(1) : "?";
+        throw new UserFacingError(`Runway rejected promptImage: asset too large ${text}`, {
+          key: "runwayImageTooLarge",
+          params: { size: sizeMb, limit: Math.floor(parseFloat(sizeMatch[1])) },
+        });
+      }
       throw new Error(`Runway submit failed: ${res.status} ${text}`);
     }
 
