@@ -394,6 +394,22 @@ export interface AIModel {
    */
   costUsdPerMPixelBase?: number;
   /**
+   * Megapixel estimate for the up-front balance check of per-MP models
+   * (cost-preview), before the real output size is known. Defaults to 1.0
+   * when unset. Set higher for models whose output is never that small
+   * (e.g. face swap on real photos) so a near-empty balance can't slip a
+   * generation through and then settle negative.
+   */
+  estimatedMegapixels?: number;
+  /**
+   * Provider-specific model identifier. Used when one logical model `id` maps
+   * to several distinct provider-side models — e.g. two Replicate face-swap
+   * fallbacks share `id: "face-swap-classic"` + `provider: "replicate"` but
+   * call different Replicate models. When set, the adapter uses this string
+   * instead of its internal modelId→provider-model map.
+   */
+  providerModelId?: string;
+  /**
    * USD per megapixel of the INPUT image for image-to-image models (e.g. FLUX).
    * Added to the cost only when an input image is present.
    *

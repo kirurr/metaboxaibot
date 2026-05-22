@@ -34,12 +34,9 @@ const MODEL_IDS: Record<string, string> = {
   "imagen-4-fast": "google/imagen-4-fast",
   "imagen-4": "google/imagen-4",
   "imagen-4-ultra": "google/imagen-4-ultra",
-  // Специализированный face-swap (InsightFace). Community-модель — у неё нет
-  // deployment-endpoint'а (POST /models/.../predictions → 404), поэтому пиним
-  // версию явно (POST /predictions с version). Параметры: input_image (сцена) +
-  // swap_image (лицо). Без prompt.
-  "face-swap-classic":
-    "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
+  // face-swap-classic намеренно НЕ здесь: у сценария несколько Replicate-фолбэков
+  // (cdingram, codeplugtech) с одним modelId — каждый несёт свой `providerModelId`
+  // в определении модели, который и резолвится в submit().
 };
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
@@ -51,6 +48,12 @@ const IDEOGRAM_MODELS = new Set(["ideogram-quality", "ideogram-balanced", "ideog
  * mediaInputs.edit: [0] = input_image (сцена), [1] = swap_image (лицо).
  */
 const FACE_SWAP_MODELS = new Set(["face-swap-classic"]);
+
+/**
+ * Dedicated remove-background models — принимают одно изображение (`image`)
+ * и НЕ принимают prompt. Отдельная ветка submit'а (bria/remove-background).
+ */
+const REMOVE_BG_MODELS = new Set(["bg-removal"]);
 
 /**
  * Replicate adapter — async image generation.
@@ -65,6 +68,8 @@ export class ReplicateAdapter implements ImageAdapter {
     readonly modelId: string,
     apiKey = config.ai.replicate,
     fetchFn?: typeof globalThis.fetch,
+    /** Provider-specific Replicate model string ("owner/name[:version]"). */
+    readonly providerModelId?: string,
   ) {
     this.client = new Replicate({
       auth: apiKey,
@@ -128,10 +133,50 @@ export class ReplicateAdapter implements ImageAdapter {
     return prediction.id;
   }
 
+  /**
+   * Dedicated remove-background submit — одно `image`, без prompt. Отдельная
+   * ветка, т.к. bria/remove-background принимает только изображение.
+   */
+  private async submitRemoveBackground(modelStr: string, input: ImageInput): Promise<string> {
+    const imageUrl = input.mediaInputs?.edit?.[0] ?? input.imageUrl;
+    if (!imageUrl) {
+      throw new UserFacingError("Background removal needs an input image", {
+        key: "mediaSlotExpired",
+      });
+    }
+    // Replicate не фетчит наши presigned-URL надёжно — качаем сами, отдаём Blob.
+    const res = await fetch(imageUrl);
+    let image: Blob | string = imageUrl;
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      image = new Blob([buf], { type: resolveImageMimeType(buf, res.headers.get("content-type")) });
+    }
+    // preserve_alpha: true — без него bria может вернуть полностью непрозрачный
+    // выход (дефолт в доке не указан), что ломает весь смысл удаления фона.
+    const predInput = { image, preserve_alpha: true };
+
+    logCall(modelStr, "submit", { image: "<blob>", preserve_alpha: true });
+    const colonIdx = modelStr.indexOf(":");
+    const prediction =
+      colonIdx !== -1
+        ? await this.client.predictions.create({
+            version: modelStr.slice(colonIdx + 1),
+            input: predInput,
+          })
+        : await this.client.predictions.create({
+            model: modelStr as `${string}/${string}`,
+            input: predInput,
+          });
+    return prediction.id;
+  }
+
   async submit(input: ImageInput): Promise<string> {
-    const modelStr = MODEL_IDS[this.modelId] ?? this.modelId;
+    const modelStr = this.providerModelId ?? MODEL_IDS[this.modelId] ?? this.modelId;
     if (FACE_SWAP_MODELS.has(this.modelId)) {
       return this.submitFaceSwap(modelStr, input);
+    }
+    if (REMOVE_BG_MODELS.has(this.modelId)) {
+      return this.submitRemoveBackground(modelStr, input);
     }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};

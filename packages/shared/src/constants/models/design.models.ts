@@ -329,17 +329,24 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 /** Kling / Kling Pro video settings. */
 
 export const DESIGN_MODELS: Record<string, AIModel> = {
-  // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
-  // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
-  // hiddenFromCarousel: модель не светится в карусели выбора моделей Дизайна.
+  // Готовый сценарий «Замена лица». Primary — Hy-Wu Edit (fal-ai/hy-wu-edit):
+  // instruction-based image edit. Fallback — Replicate cdingram/face-swap
+  // (см. FALLBACK_DESIGN_MODELS). Доступна ТОЛЬКО через сценарий «Замена лица»
+  // в боте — hiddenFromCarousel убирает её из карусели Дизайна.
   // mediaInputs.edit: [0] = референс-фото (сцена), [1] = фото лица.
+  // Биллинг per-MP: fal берёт $0.15/MP (enable_thinking включён дефолтом fal).
   "face-swap-classic": {
     id: "face-swap-classic",
     name: "🔄 Замена лица",
     description: "Специализированная нейросеть для замены лица на фото.",
     section: "design",
-    provider: "replicate",
-    costUsdPerRequest: 0.09,
+    provider: "fal",
+    costUsdPerRequest: 0,
+    costUsdPerMPixel: 0.15,
+    // Реальные фото юзеров крупнее 1 MP — апфронт-проверка баланса оценивает
+    // в 2 MP, чтобы с почти пустым балансом нельзя было «бесплатно» запустить
+    // генерацию (фактическое списание всё равно по реальному размеру выхода).
+    estimatedMegapixels: 2,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -351,6 +358,63 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // Готовый сценарий «Примерка одежды». Primary — Hy-Wu Edit (fal-ai/hy-wu-edit),
+  // fallback — fal virtual-try-on (см. FALLBACK_DESIGN_MODELS). Обе модели — fal,
+  // поэтому различаются через `providerModelId` (= прямой fal-endpoint).
+  // Доступна ТОЛЬКО через сценарий «Примерка одежды» — hiddenFromCarousel.
+  // mediaInputs.edit: [0] = фото человека, [1] = фото одежды.
+  // Биллинг per-MP: fal Hy-Wu берёт $0.15/MP (enable_thinking — дефолт fal).
+  "clothing-tryon": {
+    id: "clothing-tryon",
+    name: "👗 Примерка одежды",
+    description: "Виртуальная примерка одежды на фото.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/hy-wu-edit",
+    costUsdPerRequest: 0,
+    costUsdPerMPixel: 0.15,
+    // Апфронт-проверка баланса оценивает в 2 MP (реальные фото крупнее 1 MP),
+    // фактическое списание — по реальному размеру выхода.
+    estimatedMegapixels: 2,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // Готовый сценарий «Удаление фона». Primary — fal Ideogram remove-background
+  // (fal-ai/ideogram/remove-background), fallback — Replicate bria/remove-background
+  // (см. FALLBACK_DESIGN_MODELS). Провайдеры разные → обычный fallback по provider.
+  // Выход — прозрачный PNG; deliverAsDocument отдаёт полноразмерный файл (JPEG-
+  // превью теряет прозрачность — известный компромисс). mediaInputs.edit: [0] =
+  // исходное фото. hiddenFromCarousel — доступна только через сценарий.
+  "bg-removal": {
+    id: "bg-removal",
+    name: "✂️ Удаление фона",
+    description: "Удаляет фон с фотографии, оставляя объект на прозрачном фоне.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/ideogram/remove-background",
+    costUsdPerRequest: 0.01,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    deliverAsDocument: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
   // Готовый сценарий «Апскейл фото». Под капотом — nano-banana-pro (KIE primary,
   // evolink fallback): сцена `upscale.ts` зашивает resolution 4K, aspect_ratio
@@ -2475,6 +2539,113 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     isAsync: true,
     hiddenFromCarousel: true,
     deliverAsDocument: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
+  // ── Замена лица: цепочка фолбэков ───────────────────────────────────────────
+  // Сценарий «Замена лица» = Hy-Wu Edit (fal) под капотом. При недоступности
+  // fal фолбэчимся по очереди на Replicate-нейросети:
+  //   1. cdingram/face-swap
+  //   2. codeplugtech/face-swap  (последний — используется в крайнем случае)
+  // Оба провайдера — replicate, поэтому различаются через `providerModelId`.
+  // Порядок в массиве = порядок перебора в submitWithFallback.
+  //
+  // Списание с ЮЗЕРА — всегда по primary (per-MP Hy-Wu, $0.15/MP). НО
+  // `costUsdPerRequest` отсюда идёт в audit-метаданные `actualCostUsd` —
+  // держим реальную флэт-цену Replicate, а не primary-шную per-MP.
+  {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица (Replicate fallback)",
+    description: "Fallback на Replicate cdingram/face-swap при недоступности fal.",
+    section: "design",
+    provider: "replicate",
+    providerModelId:
+      "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
+    costUsdPerRequest: 0.09,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица (Replicate fallback 2)",
+    description:
+      "Последний fallback на Replicate codeplugtech/face-swap при недоступности fal и cdingram.",
+    section: "design",
+    provider: "replicate",
+    providerModelId:
+      "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+    costUsdPerRequest: 0.0026,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // ── Примерка одежды fallback (fal virtual-try-on) ───────────────────────────
+  // Сценарий «Примерка одежды» = Hy-Wu Edit (fal) под капотом. При недоступности
+  // Hy-Wu фолбэчимся на fal virtual-try-on. Обе модели — fal, различаются по
+  // `providerModelId`. У virtual-try-on свой формат входа (см. fal.adapter.ts).
+  //
+  // Списание с ЮЗЕРА — всегда по primary (per-MP Hy-Wu, $0.15/MP). НО
+  // `costUsdPerRequest` отсюда идёт в audit-метаданные `actualCostUsd` —
+  // держим реальную флэт-цену virtual-try-on ($0.04/изображение).
+  {
+    id: "clothing-tryon",
+    name: "👗 Примерка одежды (fal virtual-try-on fallback)",
+    description: "Fallback на fal virtual-try-on при недоступности Hy-Wu Edit.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/image-apps-v2/virtual-try-on",
+    costUsdPerRequest: 0.04,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // ── Удаление фона fallback (Replicate bria/remove-background) ────────────────
+  // Сценарий «Удаление фона» = fal Ideogram remove-background под капотом. При
+  // недоступности fal фолбэчимся на Replicate bria/remove-background.
+  // Списание с ЮЗЕРА — по primary ($0.01 флэт). `costUsdPerRequest` здесь —
+  // реальная цена bria ($0.018/изображение) для audit-метаданных `actualCostUsd`.
+  {
+    id: "bg-removal",
+    name: "✂️ Удаление фона (Replicate bria fallback)",
+    description: "Fallback на Replicate bria/remove-background при недоступности fal.",
+    section: "design",
+    provider: "replicate",
+    providerModelId: "bria/remove-background",
+    costUsdPerRequest: 0.018,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],

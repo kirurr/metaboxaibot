@@ -52,6 +52,7 @@ import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/stores/uiStore";
+import { useGenerationDraftStore, type StoredSlotFile } from "@/stores/generationDraftStore";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
@@ -177,9 +178,55 @@ function parseMotionValue(v: unknown): MotionEntry[] {
 
 // ── Sub: slot file picker ────────────────────────────────────────────────────
 
+type SlotMediaType = "image" | "video" | "audio";
+
+const ACCEPT_BY_TYPE: Record<SlotMediaType, string> = {
+  image: "image/png,image/jpeg,image/webp,image/gif",
+  video: "video/mp4,video/quicktime,video/webm",
+  audio: "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/webm,audio/ogg",
+};
+
+// Источник правды для маппинга `slot.mode` → тип медиа. Все 12 значений
+// MediaInputMode из shared/types/ai.ts покрыты: image-modes (first_frame,
+// last_frame, reference, edit, style_reference, reference_element,
+// reference_image) попадают в дефолт ниже; video/audio — явно.
+const MODE_TO_TYPE: Record<string, SlotMediaType> = {
+  motion_video: "video",
+  reference_video: "video",
+  first_clip: "video",
+  driving_audio: "audio",
+  reference_audio: "audio",
+};
+
+function slotTypeFor(slot: MediaInputSlotDto): SlotMediaType {
+  return MODE_TO_TYPE[slot.mode] ?? "image";
+}
+
+function slotAcceptFor(slot: MediaInputSlotDto): string {
+  return ACCEPT_BY_TYPE[slotTypeFor(slot)];
+}
+
+/** Совпадает ли MIME файла с разрешённым `accept`. Учитывает оба формата
+ *  записи: явный `image/png` и wildcard `image/*`. */
+function fileMatchesAccept(file: File, accept: string): boolean {
+  const fileType = (file.type || "").toLowerCase();
+  if (!fileType) return false;
+  const fileCategory = fileType.split("/")[0];
+  return accept
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .some((p) => {
+      if (!p) return false;
+      if (p === fileType) return true;
+      if (p.endsWith("/*")) return fileCategory === p.slice(0, -2);
+      return false;
+    });
+}
+
 type SlotFile =
   | { id: string; status: "uploading"; file: File }
-  | { id: string; status: "ready"; file: File; dto: ChatUploadDto }
+  // `file` опционален: после rehydrate из draft-store сырой File недоступен.
+  | { id: string; status: "ready"; file?: File; dto: ChatUploadDto }
   | { id: string; status: "error"; file: File; error: string };
 
 function SlotCard({
@@ -196,9 +243,7 @@ function SlotCard({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isMulti = slot.maxImages > 1;
   const canAddMore = files.length < slot.maxImages;
-  const accept = slot.imagesOnly
-    ? "image/png,image/jpeg,image/webp,image/gif"
-    : "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm";
+  const accept = slotAcceptFor(slot);
 
   return (
     <div className={clsx("gen-slot", isMulti && "gen-slot-multi")}>
@@ -258,18 +303,25 @@ function SlotCard({
 
 function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void }) {
   // ObjectURL для preview из локального File (быстрее чем ждать presigned URL).
+  // Для image — превью; для video — тоже превью (первый кадр через <video>).
+  // Audio не превьюим — там нечего показать, останется иконка.
   const [localUrl, setLocalUrl] = useState<string | null>(null);
+  const fileKind = file.file?.type?.split("/")[0] ?? null;
   useEffect(() => {
-    if (!file.file.type.startsWith("image/")) {
+    if (!file.file || (fileKind !== "image" && fileKind !== "video")) {
       setLocalUrl(null);
       return;
     }
     const u = URL.createObjectURL(file.file);
     setLocalUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [file.file]);
+  }, [file.file, fileKind]);
 
+  const dtoMime = file.status === "ready" ? file.dto.mimeType : null;
+  const dtoKind = dtoMime ? dtoMime.split("/")[0] : null;
+  const previewKind = fileKind ?? dtoKind;
   const url = file.status === "ready" ? (file.dto.url ?? localUrl) : localUrl;
+  const altName = file.file?.name ?? (file.status === "ready" ? file.dto.name : "");
   return (
     <div
       className={clsx(
@@ -278,8 +330,10 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
         file.status === "error" && "is-error",
       )}
     >
-      {url ? (
-        <img src={url} alt={file.file.name} />
+      {url && previewKind === "image" ? (
+        <img src={url} alt={altName} />
+      ) : url && previewKind === "video" ? (
+        <video src={url} muted playsInline preload="metadata" />
       ) : (
         <div className="gen-slot-tile-icon">
           <ImageIcon size={16} />
@@ -563,7 +617,15 @@ export function GenerateScene({
   }, [models]);
 
   // Выбранная модель / режим / промпт / настройки / файлы по слотам.
-  const [modelId, setModelId] = useState<string>(families[0]?.id ?? "");
+  // Lazy initializer берёт `?model=` из URL сразу на mount, чтобы R0 не целился
+  // в families[0] и не перетирал store сторонней моделью до URL-sync effect'а.
+  const [modelId, setModelId] = useState<string>(() => {
+    const urlModel =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("model")
+        : null;
+    return urlModel ?? families[0]?.id ?? "";
+  });
   const [modeId, setModeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
@@ -647,20 +709,39 @@ export function GenerateScene({
   const [searchParams, setSearchParams] = useSearchParams();
   const urlModelId = searchParams.get("model");
 
+  // URL подтягивается React Router'ом отдельно от setState — между pickModel
+  // и обновлением useSearchParams() есть кадр, где state опережает URL.
+  // lastPickedRef не даёт URL-sync вернуть modelId на stale urlModelId.
+  const lastPickedRef = useRef<string | null>(null);
+
+  // Помечает modelId, для которого state синхронизирован со store. Sync-эффекты
+  // пишут в store только при совпадении — иначе на mount, до загрузки каталога,
+  // sync написал бы пустые values и перетёр сохранённое.
+  const restoredForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!urlModelId) return;
+    if (urlModelId === modelId && lastPickedRef.current === modelId) {
+      lastPickedRef.current = null;
+      return;
+    }
     if (urlModelId === modelId) return;
-    // Проверяем что модель реально есть в каталоге секции — иначе игнорируем
-    // (например юзер вручную набил кривой ?model=, не валим default-flow).
+    if (lastPickedRef.current === modelId) return;
     if (models.some((m) => m.id === urlModelId)) {
       setModelId(urlModelId);
     }
   }, [urlModelId, models, modelId]);
 
-  // Используется во ВСЕХ user-initiated сменах модели: dropdown в footer'е,
-  // version/variant chip'ы. Обновляет state и URL одной операцией → URL→state
-  // effect видит equality (`urlModelId === modelId`) и тихо пропускает.
+  // Atomic swap: settings/slots/mode + modelId + URL за один event handler
+  // (React батчит) → UI не показывает stale slot files предыдущей модели.
   function pickModel(id: string) {
+    if (id === modelId) return;
+    const { settings, slots } = restoreDraftForModel(id);
+    lastPickedRef.current = id;
+    restoredForRef.current = id;
+    setModeId(null);
+    setSettingValues(settings);
+    setSlotFiles(slots);
     setModelId(id);
     setSearchParams(
       (prev) => {
@@ -670,6 +751,31 @@ export function GenerateScene({
       },
       { replace: true },
     );
+  }
+
+  // Читает per-family bag из draft-store, фильтрует слоты по mediaInputs
+  // целевой модели и обрезает каждый до slot.maxImages.
+  function restoreDraftForModel(id: string): {
+    settings: Record<string, unknown>;
+    slots: Record<string, SlotFile[]>;
+  } {
+    const target = models.find((m) => m.id === id);
+    if (!target) return { settings: {}, slots: {} };
+    const key = target.familyId ?? target.id;
+    const entry = useGenerationDraftStore.getState().byKey[key];
+    if (!entry) return { settings: {}, slots: {} };
+    const slots: Record<string, SlotFile[]> = {};
+    for (const slot of target.mediaInputs ?? []) {
+      const arr = entry.slots[slot.slotKey];
+      if (arr && arr.length > 0) {
+        slots[slot.slotKey] = arr.slice(0, slot.maxImages).map((f) => ({
+          id: f.id,
+          status: "ready" as const,
+          dto: f.dto,
+        }));
+      }
+    }
+    return { settings: entry.settings, slots };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -735,12 +841,51 @@ export function GenerateScene({
     if (target) pickModel(target.id);
   }
 
-  // Reset state на смену модели — слоты/настройки/режим разные у каждой модели.
+  // Safety net: пути, где modelId меняется не через pickModel (lazy initializer
+  // на mount, URL-sync на внешнюю навигацию, prefill effect ниже). Зависит от
+  // `models`, чтобы перезапуститься после загрузки каталога. Stage-2 prefill и
+  // preset-by-model effect идут ПОСЛЕ в порядке объявления — preset wins.
   useEffect(() => {
+    if (!modelId) {
+      setModeId(null);
+      setSettingValues({});
+      setSlotFiles({});
+      restoredForRef.current = null;
+      return;
+    }
+    if (restoredForRef.current === modelId) return;
+    if (models.length === 0) return;
+    if (!models.some((m) => m.id === modelId)) return;
+
     setModeId(null);
-    setSettingValues({});
-    setSlotFiles({});
-  }, [modelId]);
+    restoredForRef.current = modelId;
+    const { settings, slots } = restoreDraftForModel(modelId);
+    setSettingValues(settings);
+    setSlotFiles(slots);
+  }, [modelId, models]);
+
+  // Sync settingValues → draft-store под per-family key.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setSettings(key, settingValues);
+  }, [selectedModel, settingValues]);
+
+  // Sync slotFiles → draft-store. Только `ready`-файлы; uploading/error не персистим.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    const stored: Record<string, StoredSlotFile[]> = {};
+    for (const [k, arr] of Object.entries(slotFiles)) {
+      const ready = arr.flatMap((f) =>
+        f.status === "ready" ? [{ id: f.id, status: "ready" as const, dto: f.dto }] : [],
+      );
+      if (ready.length > 0) stored[k] = ready;
+    }
+    useGenerationDraftStore.getState().setSlots(key, stored);
+  }, [selectedModel, slotFiles]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1154,10 +1299,36 @@ export function GenerateScene({
     if (!slot) return;
     const currentCount = slotFiles[slotKey]?.length ?? 0;
     const room = Math.max(0, slot.maxImages - currentCount);
-    const toUpload = list.slice(0, room);
+    // Pre-flight type guard. Отрезаем файлы неподходящего типа ДО S3-аплоада,
+    // чтобы юзер сразу получил понятный тост вместо мутного 415 или
+    // «Could not process the attached image» с бэка KIE.
+    const accept = slotAcceptFor(slot);
+    const accepted: File[] = [];
+    let rejected = 0;
+    for (const file of list.slice(0, room)) {
+      if (fileMatchesAccept(file, accept)) {
+        accepted.push(file);
+      } else {
+        rejected++;
+      }
+    }
+    if (rejected > 0) {
+      const slotType = slotTypeFor(slot);
+      const typeKey =
+        slotType === "video"
+          ? "generate.typeVideo"
+          : slotType === "audio"
+            ? "generate.typeAudio"
+            : "generate.typeImage";
+      pushToast({
+        type: "info",
+        message: t("generate.errorWrongFileType", { type: t(typeKey) }),
+      });
+    }
+    const toUpload = accepted;
     if (toUpload.length === 0) return;
 
-    const initial: SlotFile[] = toUpload.map((file) => ({
+    const initial: Extract<SlotFile, { status: "uploading" }>[] = toUpload.map((file) => ({
       id: `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       status: "uploading",
       file,
@@ -1568,20 +1739,12 @@ export function GenerateScene({
             <h1>{title}</h1>
             <p className="gen-sub">{subtitle}</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap ml-auto">
-            {promptSection && (
-              <button type="button" className="gen-reset-btn" onClick={openPromptsDialog}>
-                <Wand2 size={14} />
-                <span>{t("generate.openPromptExamples")}</span>
-              </button>
-            )}
-            {onReset && isDirtyFromPreset && (
-              <button type="button" className="gen-reset-btn" onClick={onReset}>
-                <RotateCcw size={14} />
-                <span>Сбросить</span>
-              </button>
-            )}
-          </div>
+          {onReset && isDirtyFromPreset && (
+            <button type="button" className="gen-reset-btn ml-auto" onClick={onReset}>
+              <RotateCcw size={14} />
+              <span>Сбросить</span>
+            </button>
+          )}
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -1622,14 +1785,22 @@ export function GenerateScene({
             </div>
           )}
 
-          {/* Prompt. */}
-          <textarea
-            className="gen-prompt"
-            placeholder={promptPlaceholder}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={3}
-          />
+          {/* Prompt. Кнопка «Готовые промпты» — в левом нижнем углу инпута. */}
+          <div className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}>
+            <textarea
+              className="gen-prompt"
+              placeholder={promptPlaceholder}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={3}
+            />
+            {promptSection && (
+              <button type="button" className="gen-prompt-examples-btn" onClick={openPromptsDialog}>
+                <Wand2 size={14} />
+                <span>{t("generate.openPromptExamples")}</span>
+              </button>
+            )}
+          </div>
 
           {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
               Family axis chip'ы (version / variant) идут первыми — это про
@@ -1773,7 +1944,6 @@ export function GenerateScene({
         )}
         <GenerationHistory
           selectedModel={selectedModel}
-          allModels={models}
           pendingJobs={pendingJobs}
           onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
           onJobFailed={(jobId, errorMessage) =>

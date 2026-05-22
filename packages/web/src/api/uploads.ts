@@ -10,7 +10,7 @@ import { useAuthStore } from "@/stores/authStore";
  * запросом, на 401 один раз ретраит через tryRefresh.
  */
 
-export type ChatUploadKind = "image" | "document";
+export type ChatUploadKind = "image" | "document" | "video" | "audio";
 
 export type ChatUploadDto = {
   s3Key: string;

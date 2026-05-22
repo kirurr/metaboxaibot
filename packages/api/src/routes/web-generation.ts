@@ -134,6 +134,9 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
             section: true,
             modelId: true,
             prompt: true,
+            // Нужен для "Повторить" в lightbox'е (modelSettings лежит здесь под
+            // тем же ключом, что в gallery.service.serializeJob).
+            inputData: true,
             status: true,
             error: true,
             errorUserMessage: true,
@@ -194,11 +197,19 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
               job.errorUserMessage ??
               notifMessages.get(job.id) ??
               (isUserFacingErrorText(job.error) ? job.error : null);
+            // Дёргаем modelSettings из inputData тем же путём, что и gallery.service —
+            // bot/web-flow кладут юзерские настройки под inputData.modelSettings.
+            const inputData = (job.inputData ?? {}) as Record<string, unknown>;
+            const modelSettings =
+              (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
+            const modelName = AI_MODELS[job.modelId]?.name ?? job.modelId;
             return {
               id: job.id,
               section: job.section,
               modelId: job.modelId,
+              modelName,
               prompt: job.prompt,
+              modelSettings,
               status: job.status,
               error: localized,
               errorCode: job.errorCode,

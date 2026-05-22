@@ -1,0 +1,219 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Queue OpenAPI for fal-ai/ideogram/remove-background",
+    "version": "1.0.0",
+    "description": "The OpenAPI schema for the fal-ai/ideogram/remove-background queue.",
+    "x-fal-metadata": {
+      "endpointId": "fal-ai/ideogram/remove-background",
+      "category": "image-to-image",
+      "thumbnailUrl": "https://v3b.fal.media/files/b/0a994224/Ges-wKqQd-Ohg9pgyRnB1_4c638022267d44ec9ae6617d3664f676.jpg",
+      "playgroundUrl": "https://fal.ai/models/fal-ai/ideogram/remove-background",
+      "documentationUrl": "https://fal.ai/models/fal-ai/ideogram/remove-background/api",
+      "about": "Remove the background from an input image using Ideogram's remove-background API."
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Fal Key"
+      }
+    },
+    "schemas": {
+      "QueueStatus": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"] },
+          "request_id": { "type": "string", "description": "The request id." },
+          "response_url": { "type": "string", "description": "The response url." },
+          "status_url": { "type": "string", "description": "The status url." },
+          "cancel_url": { "type": "string", "description": "The cancel url." },
+          "logs": { "type": "object", "description": "The logs.", "additionalProperties": true },
+          "metrics": {
+            "type": "object",
+            "description": "The metrics.",
+            "additionalProperties": true
+          },
+          "queue_position": { "type": "integer", "description": "The queue position." }
+        },
+        "required": ["status", "request_id"]
+      },
+      "IdeogramRemoveBackgroundInput": {
+        "title": "RemoveBackgroundInput",
+        "properties": {
+          "image_url": {
+            "title": "Image URL",
+            "description": "The image URL whose background needs to be removed. The foreground subject is preserved against a transparent background. JPEG, PNG and WebP formats are supported (maximum file size 10MB).",
+            "examples": [
+              "https://v3.fal.media/files/rabbit/F6dvKPFL9VzKiM8asJOgm_MJj6yUB6rGjTsv_1YHIcA_image.webp"
+            ],
+            "type": "string"
+          },
+          "sync_mode": {
+            "default": false,
+            "title": "Sync Mode",
+            "description": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+            "type": "boolean"
+          }
+        },
+        "required": ["image_url"],
+        "x-fal-order-properties": ["image_url", "sync_mode"],
+        "type": "object"
+      },
+      "IdeogramRemoveBackgroundOutput": {
+        "title": "RemoveBackgroundOutput",
+        "properties": {
+          "image": {
+            "description": "The foreground image with the background removed (transparent).",
+            "examples": [
+              { "url": "https://v3b.fal.media/files/b/0a994215/rxdZME1tH4a2pmk0sKV-x_image.png" }
+            ],
+            "$ref": "#/components/schemas/File"
+          }
+        },
+        "required": ["image"],
+        "x-fal-order-properties": ["image"],
+        "type": "object"
+      },
+      "File": {
+        "title": "File",
+        "properties": {
+          "file_size": {
+            "title": "File Size",
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "examples": [4404019],
+            "description": "The size of the file in bytes."
+          },
+          "url": {
+            "title": "Url",
+            "description": "The URL where the file can be downloaded from.",
+            "type": "string"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "examples": ["image/png"],
+            "description": "The mime type of the file."
+          },
+          "file_name": {
+            "title": "File Name",
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "examples": ["z9RV14K95DvU.png"],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          }
+        },
+        "required": ["url"],
+        "x-fal-order-properties": ["url", "content_type", "file_name", "file_size"],
+        "type": "object"
+      }
+    }
+  },
+  "paths": {
+    "/fal-ai/ideogram/remove-background/requests/{request_id}/status": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          },
+          {
+            "name": "logs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Whether to include logs (`1`) in the response or not (`0`)."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/QueueStatus" } }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/ideogram/remove-background/requests/{request_id}/cancel": {
+      "put": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request was cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the request was cancelled successfully."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/ideogram/remove-background": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IdeogramRemoveBackgroundInput" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/QueueStatus" } }
+            }
+          }
+        }
+      }
+    },
+    "/fal-ai/ideogram/remove-background/requests/{request_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "description": "Request ID" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result of the request.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IdeogramRemoveBackgroundOutput" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [{ "url": "https://queue.fal.run" }],
+  "security": [{ "apiKeyAuth": [] }]
+}

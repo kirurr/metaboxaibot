@@ -21,6 +21,12 @@ export interface SubJobLike {
 /** Минимальная shape `inputData.fallback` для single-shot detect. */
 export interface FallbackStateLike {
   effectiveProvider?: string;
+  /**
+   * Provider-specific id успешной модели. Нужен, когда primary и fallback
+   * делят один `provider` (примерка одежды: оба `fal`) — `effectiveProvider`
+   * их не различает.
+   */
+  effectiveProviderModelId?: string;
 }
 
 /** Минимальная shape virtual-batch state'а. */
@@ -74,6 +80,9 @@ export function detectUsedFallback(opts: {
   batchState?: BatchStateLike;
   isVirtualBatch: boolean;
   primaryProvider: string;
+  /** `providerModelId` primary-модели — для случая, когда primary и fallback
+   *  делят `provider` и сравнения строк провайдера недостаточно. */
+  primaryProviderModelId?: string;
 }): { effectiveProviderForBilling: string | undefined; usedFallback: boolean } {
   let effectiveProviderForBilling = opts.fallbackState.effectiveProvider;
   if (!effectiveProviderForBilling && opts.isVirtualBatch && opts.batchState) {
@@ -81,8 +90,14 @@ export function detectUsedFallback(opts: {
       (s) => s.effectiveProvider,
     )?.effectiveProvider;
   }
+  // Fallback засчитываем, если отличается provider ЛИБО (при одинаковом
+  // provider'е) отличается providerModelId — иначе фолбэк на ту же платформу
+  // (примерка одежды: Hy-Wu → virtual-try-on, оба `fal`) считался бы primary.
+  const effModelId = opts.fallbackState.effectiveProviderModelId;
   const usedFallback =
-    !!effectiveProviderForBilling && effectiveProviderForBilling !== opts.primaryProvider;
+    !!effectiveProviderForBilling &&
+    (effectiveProviderForBilling !== opts.primaryProvider ||
+      (effModelId !== undefined && effModelId !== opts.primaryProviderModelId));
   return { effectiveProviderForBilling, usedFallback };
 }
 

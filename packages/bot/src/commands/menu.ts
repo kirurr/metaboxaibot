@@ -7,6 +7,7 @@ import {
   AI_MODELS,
   buildDialogHint,
   FACE_SWAP_BUFFER_MODEL_ID,
+  CLOTHING_TRYON_BUFFER_MODEL_ID,
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
@@ -23,6 +24,10 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
   // "scenario:video_upscale")`.
   return new InlineKeyboard()
     .text(t.scenarios.faceSwap, "scenario:face_swap")
+    .row()
+    .text(t.scenarios.clothingTryon, "scenario:clothing_tryon")
+    .row()
+    .text(t.scenarios.backgroundRemoval, "scenario:bg_removal")
     .row()
     .text(t.scenarios.photoUpscale, "scenario:photo_upscale");
 }
@@ -46,6 +51,9 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
     // середине шага: не оставляем S3-ключи мёртвыми в user-state.
     await Promise.all([
       userStateService.clearMediaInputs(ctx.user.id, FACE_SWAP_BUFFER_MODEL_ID).catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, CLOTHING_TRYON_BUFFER_MODEL_ID)
+        .catch(() => void 0),
       userStateService
         .clearMediaInputs(ctx.user.id, PHOTO_UPSCALE_BUFFER_MODEL_ID)
         .catch(() => void 0),
