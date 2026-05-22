@@ -9,11 +9,7 @@ import { Button } from "@/components/common/Button";
 import { useNotificationsStore } from "@/stores/notificationsStore";
 import { useUIStore } from "@/stores/uiStore";
 import { galleryKeys } from "@/api/gallery";
-import {
-  listGenerations,
-  type GenerationJobDto,
-  type GenerationOutputDto,
-} from "@/api/generation";
+import { listGenerations, type GenerationJobDto, type GenerationOutputDto } from "@/api/generation";
 import type { WebModelDto } from "@/api/models";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
@@ -123,7 +119,6 @@ export function GenerationHistory({
 
   useEffect(() => {
     void refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
 
   // Реакция на WS-нотификации: матчим по jobId с трекаемыми pending'ами.
@@ -151,7 +146,6 @@ export function GenerationHistory({
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications, pendingJobs, onJobSucceeded, onJobFailed]);
 
   // Pending'и фильтруем по секции — страховка от чужих pending'ов при перекрёстной
@@ -547,9 +541,7 @@ function MediaPreviewModal({ item, onClose }: { item: PreviewItem; onClose: () =
           <div className="shrink-0 md:shrink w-full md:w-1/2 lg:w-1/3 card flex flex-col gap-4 text-white p-4 md:p-8 min-h-0 overflow-hidden">
             <h2 className="h2 text-center shrink-0">{job.modelName}</h2>
             <div className="flex flex-col gap-4 flex-1 min-h-0">
-              <h3 className="hidden md:block h3 text-center shrink-0">
-                {t("prompts.promptUsed")}
-              </h3>
+              <h3 className="hidden md:block h3 text-center shrink-0">{t("prompts.promptUsed")}</h3>
               <div className="text-text-secondary text-lg bg-bg-elevated p-4 rounded-[var(--radius)] overflow-y-auto whitespace-pre-wrap break-words">
                 {job.prompt || "—"}
               </div>
