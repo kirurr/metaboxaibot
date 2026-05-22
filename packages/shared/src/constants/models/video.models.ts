@@ -55,7 +55,12 @@ const KLING_IMAGE_ASPECT = { minAspectRatio: 0.4, maxAspectRatio: 2.5 } as const
  * be at least 0.5. Got 0.462.» Валидируем на upload'е, иначе юзер ждёт
  * 3 пустых BullMQ-ретрая.
  */
-const RUNWAY_IMAGE_ASPECT = { minAspectRatio: 0.5 } as const;
+const RUNWAY_IMAGE_CONSTRAINTS = {
+  minAspectRatio: 0.5,
+  // Runway отбивает promptImage тяжелее 16 МБ (400 «Asset size exceeds 16.0MB»).
+  // Режем на upload'е с запасом — иначе 3 пустых BullMQ-ретрая на детерм. ошибке.
+  maxFileSizeBytes: 15 * 1024 * 1024,
+} as const;
 
 // KIE Kling принимает first/last frame одним массивом image_urls, поэтому
 // last_frame standalone не имеет смысла — кнопка появляется только после
@@ -1629,7 +1634,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     supportsImages: true,
     // first_frame опциональный: с ним → POST /v1/image_to_video; без него →
     // POST /v1/text_to_video (адаптер выбирает endpoint автоматически).
-    mediaInputs: [{ ...MI_FIRST_FRAME, constraints: RUNWAY_IMAGE_ASPECT }],
+    mediaInputs: [{ ...MI_FIRST_FRAME, constraints: RUNWAY_IMAGE_CONSTRAINTS }],
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,

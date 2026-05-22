@@ -1435,7 +1435,11 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
             logger.warn({ err }, "probeImageMetadata failed in caption+photo path");
           }
         }
-        const violation = validateMediaAgainstSlot(firstSlot, { widthPx, heightPx }, ctx.t);
+        const violation = validateMediaAgainstSlot(
+          firstSlot,
+          { widthPx, heightPx, fileSizeBytes: fileSize },
+          ctx.t,
+        );
         if (violation) {
           await ctx.reply(violation);
           return;
