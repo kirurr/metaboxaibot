@@ -42,7 +42,7 @@ export function createImageAdapter(
       }
       return new DalleAdapter(apiKey, fetchFn);
     case "fal":
-      return new FalAdapter(modelId, apiKey, fetchFn);
+      return new FalAdapter(modelId, apiKey, fetchFn, model.providerModelId);
     case "recraft":
       return new RecraftAdapter(modelId, apiKey, fetchFn);
     case "replicate":

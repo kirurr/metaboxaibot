@@ -56,6 +56,18 @@ export default {
       "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
     faceSwapWelcome:
       "Put your face onto any reference photo. Pose, framing, outfit and background stay from the reference — only the face changes. The aspect ratio of the result matches the reference.",
+    clothingTryon: "👗 Clothing try-on",
+    clothingTryonStep1:
+      "👗 <b>Clothing try-on — step 1/2</b>\n\nSend a <b>photo of the person</b> who will try the clothing on.",
+    clothingTryonStep2:
+      "👗 <b>Clothing try-on — step 2/2</b>\n\nSend a <b>photo of the clothing</b> you want to try on.",
+    clothingTryonNotPhoto: "📷 That's not a photo. Please send an image.",
+    clothingTryonGenerating: "🎨 Starting clothing try-on...",
+    clothingTryonPhotoTooLarge: "📷 File is too large. Maximum is 20 MB.",
+    clothingTryonAlbumNotice:
+      "📷 Only the first photo of the album was used. If you want a different one — send it as a separate message.",
+    clothingTryonWelcome:
+      "Try the clothing from the second photo onto the person from the first. Pose, body, face and background stay the same — only the clothing changes.",
     photoUpscale: "📷 Photo upscale",
     videoUpscale: "🎬 Video upscale",
     photoUpscaleWelcome:

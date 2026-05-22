@@ -1,7 +1,29 @@
 import { fal } from "@fal-ai/client";
+import sharp from "sharp";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config } from "@metabox/shared";
+import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+
+/**
+ * fal virtual-try-on endpoint. Unlike the generic `image_urls` + `prompt`
+ * edit endpoints, it takes named `person_image_url` / `clothing_image_url`
+ * and no prompt — handled by a dedicated submit branch.
+ */
+const VIRTUAL_TRYON_ENDPOINT = "fal-ai/image-apps-v2/virtual-try-on";
+
+/**
+ * virtual-try-on `aspect_ratio` enum — у endpoint'а нет "auto", поэтому под
+ * фото человека подбираем ближайший по значению ratio.
+ */
+const TRYON_RATIOS: Array<{ ratio: string; value: number }> = [
+  { ratio: "9:16", value: 9 / 16 },
+  { ratio: "3:4", value: 3 / 4 },
+  { ratio: "1:1", value: 1 },
+  { ratio: "4:3", value: 4 / 3 },
+  { ratio: "16:9", value: 16 / 9 },
+];
+/** Дефолт, когда фото человека не удалось скачать/декодировать. */
+const TRYON_RATIO_FALLBACK = "3:4";
 
 /** Text-to-image endpoint for each model. */
 const T2I_ENDPOINTS: Record<string, string> = {
@@ -35,7 +57,7 @@ const ASPECT_RATIO_MODELS = new Set<string>();
  * (FAL `image_size: "auto"`) — Hy-Wu face swap сохраняет размер базового
  * фото вместо того, чтобы быть приведённым к квадрату/пресету.
  */
-const AUTO_SIZE_MODELS = new Set(["face-swap-classic"]);
+const AUTO_SIZE_MODELS = new Set(["face-swap-classic", "clothing-tryon"]);
 
 /**
  * Edit endpoints for these models expect `image_urls` (array) instead of `image_url` (string).
@@ -46,6 +68,7 @@ const IMAGE_URLS_ARRAY_MODELS = new Set([
   "seedream-4.5",
   "seedream-5",
   "face-swap-classic",
+  "clothing-tryon",
 ]);
 
 /**
@@ -82,11 +105,19 @@ export class FalAdapter implements ImageAdapter {
     readonly modelId: string,
     apiKey = config.ai.fal,
     _fetchFn?: typeof globalThis.fetch,
+    /**
+     * Provider-specific fal endpoint. Used when one logical modelId maps to
+     * several fal endpoints (e.g. clothing try-on: primary `hy-wu-edit` +
+     * fallback `virtual-try-on`) — `EDIT_ENDPOINTS` keyed by modelId can't
+     * distinguish them. When set, it's used as the endpoint directly.
+     */
+    readonly providerModelId?: string,
   ) {
     fal.config({ credentials: apiKey });
   }
 
   private selectEndpoint(input: ImageInput): string {
+    if (this.providerModelId) return this.providerModelId;
     const hasEditMedia = !!(input.mediaInputs?.edit?.length || input.imageUrl);
     if (hasEditMedia && EDIT_ENDPOINTS[this.modelId]) {
       return EDIT_ENDPOINTS[this.modelId];
@@ -94,10 +125,59 @@ export class FalAdapter implements ImageAdapter {
     return T2I_ENDPOINTS[this.modelId] ?? `fal-ai/${this.modelId}`;
   }
 
+  /**
+   * Picks the virtual-try-on `aspect_ratio` closest to the person photo's own
+   * dimensions ("auto" isn't an option in the endpoint enum). On any fetch /
+   * decode failure falls back to 3:4 (fal's fashion default).
+   */
+  private async resolveTryOnRatio(personUrl: string): Promise<string> {
+    try {
+      const res = await fetch(personUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const meta = await sharp(Buffer.from(await res.arrayBuffer())).metadata();
+      if (!meta.width || !meta.height) throw new Error("no dimensions");
+      const target = meta.width / meta.height;
+      return TRYON_RATIOS.reduce((best, cur) =>
+        Math.abs(cur.value - target) < Math.abs(best.value - target) ? cur : best,
+      ).ratio;
+    } catch {
+      return TRYON_RATIO_FALLBACK;
+    }
+  }
+
+  /**
+   * Dedicated submit for fal virtual-try-on — named person/clothing params,
+   * no prompt. mediaInputs.edit: [0] = person photo, [1] = clothing photo.
+   */
+  private async submitVirtualTryOn(endpoint: string, editUrls: string[]): Promise<string> {
+    const personUrl = editUrls[0];
+    const clothingUrl = editUrls[1];
+    if (!personUrl || !clothingUrl) {
+      throw new UserFacingError("Virtual try-on needs two images (person + clothing)", {
+        key: "mediaSlotExpired",
+      });
+    }
+    // aspect_ratio подбираем под фото человека (editUrls[0]) — endpoint не
+    // имеет "auto", поэтому берём ближайший enum к реальному соотношению.
+    const ratio = await this.resolveTryOnRatio(personUrl);
+    const falInput = {
+      person_image_url: personUrl,
+      clothing_image_url: clothingUrl,
+      aspect_ratio: { ratio },
+    };
+    logCall(endpoint, "submit", falInput as Record<string, unknown>);
+    const { request_id } = await fal.queue.submit(endpoint, { input: falInput });
+    return `${endpoint}${SEP}${request_id}`;
+  }
+
   async submit(input: ImageInput): Promise<string> {
     const editUrls = input.mediaInputs?.edit ?? (input.imageUrl ? [input.imageUrl] : []);
     const imageUrl = editUrls[0];
     const endpoint = this.selectEndpoint(input);
+
+    if (endpoint === VIRTUAL_TRYON_ENDPOINT) {
+      return this.submitVirtualTryOn(endpoint, editUrls);
+    }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};
     if (ms.num_inference_steps !== undefined) msExtras.num_inference_steps = ms.num_inference_steps;
