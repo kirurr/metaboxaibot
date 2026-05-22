@@ -5056,6 +5056,43 @@ select {
   color: var(--text-hint);
 }
 
+/* Контейнер промпта с кнопкой «Готовые промпты» в левом нижнем углу инпута. */
+.gen-prompt-wrap {
+  position: relative;
+  display: flex;
+}
+.gen-prompt-wrap .gen-prompt {
+  width: 100%;
+}
+/* Резерв места снизу, чтобы текст не заезжал под кнопку. */
+.gen-prompt-wrap.has-examples-btn .gen-prompt {
+  padding-bottom: 44px;
+}
+.gen-prompt-examples-btn {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
+}
+.gen-prompt-examples-btn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+}
+
 /* Settings v2 — flex-row wrap из chip-pill'ов. Каждый chip отображает
    `Label : Value` и при клике открывает popover с фактическим контролом.
    Высота блока минимальная — chip'ы переносятся в новую строку. */
