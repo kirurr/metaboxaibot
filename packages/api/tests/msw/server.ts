@@ -6,5 +6,10 @@
 
 import { setupServer } from "msw/node";
 import { metaboxHandlers } from "./handlers/metabox.js";
+import { cartesiaHandlers, elevenLabsHandlers } from "./handlers/voices.js";
 
-export const mswServer = setupServer(...metaboxHandlers);
+export const mswServer = setupServer(
+  ...metaboxHandlers,
+  ...cartesiaHandlers,
+  ...elevenLabsHandlers,
+);
