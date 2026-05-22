@@ -118,7 +118,12 @@ export interface GenerationJobDto {
   id: string;
   section: string;
   modelId: string;
+  /** Display name из AI_MODELS[modelId].name, fallback на modelId. */
+  modelName: string;
   prompt: string;
+  /** inputData.modelSettings джобы — то же, что Gallery возвращает.
+   *  Используется для «Повторить» (передаётся в navigateToGenerate). */
+  modelSettings: Record<string, unknown>;
   /** "done" | "failed". Pending/processing трекается локально на фронте. */
   status: string;
   error: string | null;
