@@ -101,6 +101,10 @@ export function GenerationHistory({
   const qc = useQueryClient();
 
   const section = selectedModel?.section;
+  // Pending'ы трекаются нормализованной секцией ("design" → "image"), а
+  // selectedModel.section отдаёт сырое значение из каталога. Сравниваем по
+  // нормализованной, иначе свежие pending'ы на /image отсеиваются.
+  const trackedSection = section === "design" ? "image" : section;
 
   // Idempotent fetch. Без modelIds — фильтр только по секции. Бэк сам мапит
   // "design" → "image" в where-клозе.
@@ -152,8 +156,8 @@ export function GenerationHistory({
   // навигации между /image и /video.
   const historyIds = useMemo(() => new Set(history.map((h) => h.id)), [history]);
   const visiblePending = useMemo(
-    () => pendingJobs.filter((p) => p.section === section && !historyIds.has(p.id)),
-    [pendingJobs, section, historyIds],
+    () => pendingJobs.filter((p) => p.section === trackedSection && !historyIds.has(p.id)),
+    [pendingJobs, trackedSection, historyIds],
   );
 
   // Разворачиваем job'ы в плоский массив плиток. Pending — первыми, затем
@@ -199,7 +203,7 @@ export function GenerationHistory({
         <h3 className="m-0 text-xs font-semibold">{t("generate.historyTitle")}</h3>
         {loading && <Loader2 size={14} className="animate-spin" />}
       </div>
-      <ul className="grid grid-flow-dense grid-cols-2 md:grid-cols-3 lg:grid-cols-4 auto-rows-[260px] md:auto-rows-[300px] gap-3 list-none p-0 m-0">
+      <ul className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3 list-none p-0 m-0">
         {tiles.map((tile) => (
           <TileRenderer
             key={tile.key}
@@ -266,6 +270,7 @@ function PendingTile({ job, onDismiss }: { job: PendingJob; onDismiss: () => voi
 
   return (
     <li
+      style={{ gridRow: "span 4" }}
       className={clsx(
         "relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center",
         isError
@@ -308,7 +313,10 @@ function PendingTile({ job, onDismiss }: { job: PendingJob; onDismiss: () => voi
 function FailedTile({ job }: { job: GenerationJobDto }) {
   const { t } = useTranslation();
   return (
-    <li className="relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center bg-[rgba(220,50,50,0.08)] border border-[var(--danger,#d44)]">
+    <li
+      style={{ gridRow: "span 4" }}
+      className="relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center bg-[rgba(220,50,50,0.08)] border border-[var(--danger,#d44)]"
+    >
       <AlertCircle size={20} className="text-[var(--danger,#d44)] mb-2" />
       <div className="text-xs font-semibold text-[var(--danger,#d44)] mb-1">
         {t("generate.historyError")}
@@ -340,14 +348,18 @@ function OutputTile({
   tokensSpent: string | null;
   onPreview: (url: string, section: string) => void;
 }) {
-  // null = ещё не загружено, плитка квадратная placeholder.
-  // Аудио всегда квадрат (нет визуального aspect'а).
+  // Aspect-ratio картинки/видео определяется после загрузки → пересчитывается
+  // span. До загрузки рендерим квадратный плейсхолдер (span 3).
+  // Аудио всегда квадрат — нет визуального aspect'а.
   const [aspect, setAspect] = useState<number | null>(section === "audio" ? 1 : null);
-  const { tall, wide } = spanFromAspect(aspect);
+  const rowSpan = spanFromAspect(aspect);
 
   if (!url) {
     return (
-      <li className="relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated border border-dashed border-border" />
+      <li
+        style={{ gridRow: `span ${rowSpan}` }}
+        className="relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated border border-dashed border-border"
+      />
     );
   }
 
@@ -360,7 +372,10 @@ function OutputTile({
 
   if (section === "audio") {
     return (
-      <li className="relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated flex flex-col p-3">
+      <li
+        style={{ gridRow: `span ${rowSpan}` }}
+        className="relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated flex flex-col p-3"
+      >
         <div className="flex-1 flex items-center justify-center text-text-hint">
           <Music2 size={36} />
         </div>
@@ -374,11 +389,8 @@ function OutputTile({
 
   return (
     <li
-      className={clsx(
-        "group relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated",
-        tall && "row-span-2",
-        wide && "col-span-2",
-      )}
+      style={{ gridRow: `span ${rowSpan}` }}
+      className="group relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated"
     >
       <button
         type="button"
@@ -439,11 +451,19 @@ function OutputTile({
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function spanFromAspect(aspect: number | null): { tall: boolean; wide: boolean } {
-  if (aspect == null) return { tall: false, wide: false };
-  if (aspect < 0.85) return { tall: true, wide: false };
-  if (aspect > 1.4) return { tall: false, wide: true };
-  return { tall: false, wide: false };
+/**
+ * Masonry-span по aspect'у картинки. Базовый ряд auto-rows-[80px] (на mobile
+ * 100px, см. <ul>), gap 12px → span определяет высоту плитки:
+ *   span 3 → ~264 px (sm+) / ~324 px (mobile) — для wide картинок (16:9 и шире)
+ *   span 4 → ~356 px (sm+) / ~436 px (mobile) — квадрат-дефолт
+ *   span 5 → ~436 px (sm+) / ~548 px (mobile) — для tall картинок (9:16 и уже)
+ * grid-flow-dense на ul'е плотно укладывает плитки в дырки → пустот не будет.
+ */
+function spanFromAspect(aspect: number | null): number {
+  if (aspect == null) return 4;
+  if (aspect > 1.3) return 3;
+  if (aspect < 0.85) return 5;
+  return 4;
 }
 
 // ── Lightbox с /prompts-style info-панелью и кнопкой «Повторить» ────────────
