@@ -371,9 +371,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     description: "Виртуальная примерка одежды на фото.",
     section: "design",
     provider: "fal",
-    // TEMP: primary временно указывает на endpoint фолбэка (virtual-try-on) —
-    // тест fallback-модели. Вернуть на "fal-ai/hy-wu-edit" после проверки.
-    providerModelId: "fal-ai/image-apps-v2/virtual-try-on",
+    providerModelId: "fal-ai/hy-wu-edit",
     costUsdPerRequest: 0,
     costUsdPerMPixel: 0.15,
     // Апфронт-проверка баланса оценивает в 2 MP (реальные фото крупнее 1 MP),
