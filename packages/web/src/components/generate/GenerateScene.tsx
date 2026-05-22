@@ -178,6 +178,51 @@ function parseMotionValue(v: unknown): MotionEntry[] {
 
 // ── Sub: slot file picker ────────────────────────────────────────────────────
 
+type SlotMediaType = "image" | "video" | "audio";
+
+const ACCEPT_BY_TYPE: Record<SlotMediaType, string> = {
+  image: "image/png,image/jpeg,image/webp,image/gif",
+  video: "video/mp4,video/quicktime,video/webm",
+  audio: "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/webm,audio/ogg",
+};
+
+// Источник правды для маппинга `slot.mode` → тип медиа. Все 12 значений
+// MediaInputMode из shared/types/ai.ts покрыты: image-modes (first_frame,
+// last_frame, reference, edit, style_reference, reference_element,
+// reference_image) попадают в дефолт ниже; video/audio — явно.
+const MODE_TO_TYPE: Record<string, SlotMediaType> = {
+  motion_video: "video",
+  reference_video: "video",
+  first_clip: "video",
+  driving_audio: "audio",
+  reference_audio: "audio",
+};
+
+function slotTypeFor(slot: MediaInputSlotDto): SlotMediaType {
+  return MODE_TO_TYPE[slot.mode] ?? "image";
+}
+
+function slotAcceptFor(slot: MediaInputSlotDto): string {
+  return ACCEPT_BY_TYPE[slotTypeFor(slot)];
+}
+
+/** Совпадает ли MIME файла с разрешённым `accept`. Учитывает оба формата
+ *  записи: явный `image/png` и wildcard `image/*`. */
+function fileMatchesAccept(file: File, accept: string): boolean {
+  const fileType = (file.type || "").toLowerCase();
+  if (!fileType) return false;
+  const fileCategory = fileType.split("/")[0];
+  return accept
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .some((p) => {
+      if (!p) return false;
+      if (p === fileType) return true;
+      if (p.endsWith("/*")) return fileCategory === p.slice(0, -2);
+      return false;
+    });
+}
+
 type SlotFile =
   | { id: string; status: "uploading"; file: File }
   // `file` опционален: после rehydrate из draft-store сырой File недоступен.
@@ -198,9 +243,7 @@ function SlotCard({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isMulti = slot.maxImages > 1;
   const canAddMore = files.length < slot.maxImages;
-  const accept = slot.imagesOnly
-    ? "image/png,image/jpeg,image/webp,image/gif"
-    : "image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm";
+  const accept = slotAcceptFor(slot);
 
   return (
     <div className={clsx("gen-slot", isMulti && "gen-slot-multi")}>
@@ -260,17 +303,23 @@ function SlotCard({
 
 function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void }) {
   // ObjectURL для preview из локального File (быстрее чем ждать presigned URL).
+  // Для image — превью; для video — тоже превью (первый кадр через <video>).
+  // Audio не превьюим — там нечего показать, останется иконка.
   const [localUrl, setLocalUrl] = useState<string | null>(null);
+  const fileKind = file.file?.type?.split("/")[0] ?? null;
   useEffect(() => {
-    if (!file.file || !file.file.type.startsWith("image/")) {
+    if (!file.file || (fileKind !== "image" && fileKind !== "video")) {
       setLocalUrl(null);
       return;
     }
     const u = URL.createObjectURL(file.file);
     setLocalUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [file.file]);
+  }, [file.file, fileKind]);
 
+  const dtoMime = file.status === "ready" ? file.dto.mimeType : null;
+  const dtoKind = dtoMime ? dtoMime.split("/")[0] : null;
+  const previewKind = fileKind ?? dtoKind;
   const url = file.status === "ready" ? (file.dto.url ?? localUrl) : localUrl;
   const altName = file.file?.name ?? (file.status === "ready" ? file.dto.name : "");
   return (
@@ -281,8 +330,10 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
         file.status === "error" && "is-error",
       )}
     >
-      {url ? (
+      {url && previewKind === "image" ? (
         <img src={url} alt={altName} />
+      ) : url && previewKind === "video" ? (
+        <video src={url} muted playsInline preload="metadata" />
       ) : (
         <div className="gen-slot-tile-icon">
           <ImageIcon size={16} />
@@ -1248,7 +1299,33 @@ export function GenerateScene({
     if (!slot) return;
     const currentCount = slotFiles[slotKey]?.length ?? 0;
     const room = Math.max(0, slot.maxImages - currentCount);
-    const toUpload = list.slice(0, room);
+    // Pre-flight type guard. Отрезаем файлы неподходящего типа ДО S3-аплоада,
+    // чтобы юзер сразу получил понятный тост вместо мутного 415 или
+    // «Could not process the attached image» с бэка KIE.
+    const accept = slotAcceptFor(slot);
+    const accepted: File[] = [];
+    let rejected = 0;
+    for (const file of list.slice(0, room)) {
+      if (fileMatchesAccept(file, accept)) {
+        accepted.push(file);
+      } else {
+        rejected++;
+      }
+    }
+    if (rejected > 0) {
+      const slotType = slotTypeFor(slot);
+      const typeKey =
+        slotType === "video"
+          ? "generate.typeVideo"
+          : slotType === "audio"
+            ? "generate.typeAudio"
+            : "generate.typeImage";
+      pushToast({
+        type: "info",
+        message: t("generate.errorWrongFileType", { type: t(typeKey) }),
+      });
+    }
+    const toUpload = accepted;
     if (toUpload.length === 0) return;
 
     const initial: Extract<SlotFile, { status: "uploading" }>[] = toUpload.map((file) => ({

@@ -27,10 +27,14 @@ import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openap
 import type { OutgoingHttpHeaders } from "node:http";
 
 // ── Загрузка вложений для чата ───────────────────────────────────────────────
-// Принимаемые типы соответствуют пайплайну `chat.service`:
-//  - images: показываются модели как картинки (поддерживается через imageS3Keys).
+// Принимаемые типы:
+//  - images: показываются модели как картинки (через imageS3Keys в chat.service).
 //  - documents: PDF — native через `supportsDocuments`, остальные (txt/csv/json/
 //    docx/xlsx) — text-class через `documentTextExtractFallback` (inline extract).
+//  - video / audio: исключительно для media-input слотов на странице генерации
+//    (Kling Motion `motion_video`, Heygen `voice_audio`, Wan `driving_audio`
+//    и т.п.). В обычный чат-композер они не попадают — он сам ограничивает
+//    `accept` до image+document.
 const CHAT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — покрывает обычные PDF/изображения
 
 const IMAGE_MIMES = new Set<string>(["image/png", "image/jpeg", "image/webp", "image/gif"]);
@@ -41,9 +45,22 @@ const DOCUMENT_MIMES = new Set<string>([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "text/comma-separated-values",
 ]);
-function isAllowedUploadMime(mime: string): "image" | "document" | null {
+const VIDEO_MIMES = new Set<string>(["video/mp4", "video/quicktime", "video/webm"]);
+const AUDIO_MIMES = new Set<string>([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mp4",
+  "audio/x-m4a",
+  "audio/webm",
+  "audio/ogg",
+]);
+function isAllowedUploadMime(mime: string): "image" | "document" | "video" | "audio" | null {
   if (IMAGE_MIMES.has(mime)) return "image";
   if (DOCUMENT_MIMES.has(mime)) return "document";
+  if (VIDEO_MIMES.has(mime)) return "video";
+  if (AUDIO_MIMES.has(mime)) return "audio";
   // Прочие text/* (plain, csv, markdown, ...) — text-class, идут как document.
   if (mime.startsWith("text/")) return "document";
   return null;
@@ -74,6 +91,23 @@ function extFromMime(mime: string): string {
       return "md";
     case "text/plain":
       return "txt";
+    case "video/mp4":
+      return "mp4";
+    case "video/quicktime":
+      return "mov";
+    case "video/webm":
+      return "webm";
+    case "audio/mpeg":
+    case "audio/mp3":
+      return "mp3";
+    case "audio/wav":
+    case "audio/x-wav":
+      return "wav";
+    case "audio/mp4":
+    case "audio/x-m4a":
+      return "m4a";
+    case "audio/ogg":
+      return "ogg";
     default:
       return "bin";
   }
@@ -107,7 +141,7 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
               name: { type: "string" },
               mimeType: { type: "string" },
               size: { type: "number" },
-              kind: { type: "string", enum: ["image", "document"] },
+              kind: { type: "string", enum: ["image", "document", "video", "audio"] },
               url: { type: "string", nullable: true },
             },
           },
