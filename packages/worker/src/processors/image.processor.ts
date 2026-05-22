@@ -140,6 +140,10 @@ interface VirtualBatchState {
  *
  * - `effectiveProvider`: provider строка, на которой состоялся успешный submit.
  *   Poll-stage использует её для выбора адаптера.
+ * - `effectiveProviderModelId`: provider-specific id успешной модели. Нужен,
+ *   когда у одного провайдера несколько фолбэк-моделей с одним modelId
+ *   (два Replicate face-swap'а) — `effectiveProvider` их не различает, а
+ *   audit'у `actualCostUsd` нужна именно та модель, что отработала.
  *
  * Для virtual batch sticky-lock derived из `subJobs[*].effectiveProvider` —
  * не дублируется в FallbackState, чтобы избежать race'а между двумя записями
@@ -148,6 +152,7 @@ interface VirtualBatchState {
 interface FallbackState {
   primaryProvider: string;
   effectiveProvider?: string;
+  effectiveProviderModelId?: string;
   attemptedProviders?: string[];
 }
 
@@ -733,11 +738,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const activeProvider = usedFallback
         ? (fbState?.effectiveProvider ?? model.provider)
         : model.provider;
+      // Несколько фолбэков одного провайдера (два Replicate face-swap'а)
+      // различаем по providerModelId; для legacy-записей без него — по provider.
       const activeModel =
         activeProvider === model.provider
           ? model
-          : (getFallbackCandidates(modelId, "design").find((m) => m.provider === activeProvider) ??
-            model);
+          : (getFallbackCandidates(modelId, "design").find((m) =>
+              fbState?.effectiveProviderModelId
+                ? m.providerModelId === fbState.effectiveProviderModelId
+                : m.provider === activeProvider,
+            ) ?? model);
       const actualCostUsd =
         calculateProviderCostUsd(
           activeModel,
@@ -1164,6 +1174,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           await writeFallbackState({
             primaryProvider: modelMeta.provider,
             effectiveProvider: fbResult.effectiveProvider,
+            effectiveProviderModelId: fbResult.effectiveModel.providerModelId,
             attemptedProviders: Array.from(accumulatedSync),
           });
 
@@ -1230,6 +1241,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             await writeFallbackState({
               primaryProvider: modelMeta.provider,
               effectiveProvider: fbResult.effectiveProvider,
+              effectiveProviderModelId: fbResult.effectiveModel.providerModelId,
               attemptedProviders: Array.from(accumulatedAsync),
             });
             await db.generationJob.update({
