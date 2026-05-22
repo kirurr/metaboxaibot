@@ -156,6 +156,13 @@ const INITIAL_POLL_INTERVAL_MS = 5000;
 /** Telegram multipart upload limit for sendDocument (used by `orig_` callback). */
 const TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024;
 
+/**
+ * Последний ненулевой пол для per-MP биллинга: если адаптер не отдал размеры
+ * И замер вышел из строя И у модели нет `estimatedMegapixels` — всё равно
+ * списываем минимум 1 MP, а не 0. Защита от халявной генерации.
+ */
+const MIN_BILLABLE_MEGAPIXELS = 1;
+
 const telegram = new Api(config.bot.token);
 
 /**
@@ -663,14 +670,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       // Per-MP биллинг: берём размеры из результата адаптера, а если он их не
       // отдал (Replicate-фолбэк face-swap'а возвращает только URL) — докачиваем
       // и меряем сами. Иначе megapixels=undefined обнулил бы цену → халявная
-      // генерация. На сбое замера падаем на estimatedMegapixels, не на 0.
+      // генерация. На сбое замера: estimatedMegapixels, иначе MIN_BILLABLE_MEGAPIXELS.
       let megapixels: number | undefined;
       if (model.costUsdPerMPixel) {
         megapixels =
           firstResult.width && firstResult.height
             ? (firstResult.width * firstResult.height) / 1_000_000
             : ((await measureImageMegapixels(firstResult.url).catch(() => undefined)) ??
-              model.estimatedMegapixels);
+              model.estimatedMegapixels ??
+              MIN_BILLABLE_MEGAPIXELS);
       }
 
       const editUrls: string[] =

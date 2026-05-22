@@ -402,6 +402,14 @@ export interface AIModel {
    */
   estimatedMegapixels?: number;
   /**
+   * Provider-specific model identifier. Used when one logical model `id` maps
+   * to several distinct provider-side models — e.g. two Replicate face-swap
+   * fallbacks share `id: "face-swap-classic"` + `provider: "replicate"` but
+   * call different Replicate models. When set, the adapter uses this string
+   * instead of its internal modelId→provider-model map.
+   */
+  providerModelId?: string;
+  /**
    * USD per megapixel of the INPUT image for image-to-image models (e.g. FLUX).
    * Added to the cost only when an input image is present.
    *

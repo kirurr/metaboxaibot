@@ -2487,9 +2487,13 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
-  // ── Замена лица fallback (Replicate cdingram/face-swap) ─────────────────────
+  // ── Замена лица: цепочка фолбэков ───────────────────────────────────────────
   // Сценарий «Замена лица» = Hy-Wu Edit (fal) под капотом. При недоступности
-  // fal фолбэчимся на специализированную Replicate-нейросеть cdingram/face-swap.
+  // fal фолбэчимся по очереди на Replicate-нейросети:
+  //   1. cdingram/face-swap
+  //   2. codeplugtech/face-swap  (последний — используется в крайнем случае)
+  // Оба провайдера — replicate, поэтому различаются через `providerModelId`.
+  // Порядок в массиве = порядок перебора в submitWithFallback.
   //
   // Списание с ЮЗЕРА — всегда по primary (per-MP Hy-Wu, $0.15/MP). НО
   // `costUsdPerRequest` отсюда идёт в audit-метаданные `actualCostUsd` —
@@ -2500,7 +2504,31 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     description: "Fallback на Replicate cdingram/face-swap при недоступности fal.",
     section: "design",
     provider: "replicate",
+    providerModelId:
+      "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
     costUsdPerRequest: 0.09,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица (Replicate fallback 2)",
+    description:
+      "Последний fallback на Replicate codeplugtech/face-swap при недоступности fal и cdingram.",
+    section: "design",
+    provider: "replicate",
+    providerModelId:
+      "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+    costUsdPerRequest: 0.0026,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
