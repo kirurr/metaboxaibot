@@ -1739,20 +1739,12 @@ export function GenerateScene({
             <h1>{title}</h1>
             <p className="gen-sub">{subtitle}</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap ml-auto">
-            {promptSection && (
-              <button type="button" className="gen-reset-btn" onClick={openPromptsDialog}>
-                <Wand2 size={14} />
-                <span>{t("generate.openPromptExamples")}</span>
-              </button>
-            )}
-            {onReset && isDirtyFromPreset && (
-              <button type="button" className="gen-reset-btn" onClick={onReset}>
-                <RotateCcw size={14} />
-                <span>Сбросить</span>
-              </button>
-            )}
-          </div>
+          {onReset && isDirtyFromPreset && (
+            <button type="button" className="gen-reset-btn ml-auto" onClick={onReset}>
+              <RotateCcw size={14} />
+              <span>Сбросить</span>
+            </button>
+          )}
         </div>
 
         {/* Mode tabs — только если у модели несколько режимов. */}
@@ -1793,14 +1785,22 @@ export function GenerateScene({
             </div>
           )}
 
-          {/* Prompt. */}
-          <textarea
-            className="gen-prompt"
-            placeholder={promptPlaceholder}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={3}
-          />
+          {/* Prompt. Кнопка «Готовые промпты» — в левом нижнем углу инпута. */}
+          <div className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}>
+            <textarea
+              className="gen-prompt"
+              placeholder={promptPlaceholder}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={3}
+            />
+            {promptSection && (
+              <button type="button" className="gen-prompt-examples-btn" onClick={openPromptsDialog}>
+                <Wand2 size={14} />
+                <span>{t("generate.openPromptExamples")}</span>
+              </button>
+            )}
+          </div>
 
           {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
               Family axis chip'ы (version / variant) идут первыми — это про
