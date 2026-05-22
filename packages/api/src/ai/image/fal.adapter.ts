@@ -1,4 +1,5 @@
 import { fal } from "@fal-ai/client";
+import sharp from "sharp";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
@@ -9,6 +10,20 @@ import { logCall } from "../../utils/fetch.js";
  * and no prompt — handled by a dedicated submit branch.
  */
 const VIRTUAL_TRYON_ENDPOINT = "fal-ai/image-apps-v2/virtual-try-on";
+
+/**
+ * virtual-try-on `aspect_ratio` enum — у endpoint'а нет "auto", поэтому под
+ * фото человека подбираем ближайший по значению ratio.
+ */
+const TRYON_RATIOS: Array<{ ratio: string; value: number }> = [
+  { ratio: "9:16", value: 9 / 16 },
+  { ratio: "3:4", value: 3 / 4 },
+  { ratio: "1:1", value: 1 },
+  { ratio: "4:3", value: 4 / 3 },
+  { ratio: "16:9", value: 16 / 9 },
+];
+/** Дефолт, когда фото человека не удалось скачать/декодировать. */
+const TRYON_RATIO_FALLBACK = "3:4";
 
 /** Text-to-image endpoint for each model. */
 const T2I_ENDPOINTS: Record<string, string> = {
@@ -111,6 +126,26 @@ export class FalAdapter implements ImageAdapter {
   }
 
   /**
+   * Picks the virtual-try-on `aspect_ratio` closest to the person photo's own
+   * dimensions ("auto" isn't an option in the endpoint enum). On any fetch /
+   * decode failure falls back to 3:4 (fal's fashion default).
+   */
+  private async resolveTryOnRatio(personUrl: string): Promise<string> {
+    try {
+      const res = await fetch(personUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const meta = await sharp(Buffer.from(await res.arrayBuffer())).metadata();
+      if (!meta.width || !meta.height) throw new Error("no dimensions");
+      const target = meta.width / meta.height;
+      return TRYON_RATIOS.reduce((best, cur) =>
+        Math.abs(cur.value - target) < Math.abs(best.value - target) ? cur : best,
+      ).ratio;
+    } catch {
+      return TRYON_RATIO_FALLBACK;
+    }
+  }
+
+  /**
    * Dedicated submit for fal virtual-try-on — named person/clothing params,
    * no prompt. mediaInputs.edit: [0] = person photo, [1] = clothing photo.
    */
@@ -122,12 +157,13 @@ export class FalAdapter implements ImageAdapter {
         key: "mediaSlotExpired",
       });
     }
-    // aspect_ratio 3:4 — рекомендованный fal'ом дефолт для fashion (иначе
-    // схема даёт 1:1, что криво кадрирует портретное фото человека).
+    // aspect_ratio подбираем под фото человека (editUrls[0]) — endpoint не
+    // имеет "auto", поэтому берём ближайший enum к реальному соотношению.
+    const ratio = await this.resolveTryOnRatio(personUrl);
     const falInput = {
       person_image_url: personUrl,
       clothing_image_url: clothingUrl,
-      aspect_ratio: { ratio: "3:4" },
+      aspect_ratio: { ratio },
     };
     logCall(endpoint, "submit", falInput as Record<string, unknown>);
     const { request_id } = await fal.queue.submit(endpoint, { input: falInput });

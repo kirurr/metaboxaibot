@@ -717,6 +717,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         batchState: isVirtualBatch ? readBatchState() : undefined,
         isVirtualBatch,
         primaryProvider: model.provider,
+        primaryProviderModelId: model.providerModelId,
       });
       const adapterUsdCost = usedFallback ? undefined : firstResult.providerUsdCost;
       const perImageInternalCost =
@@ -738,16 +739,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const activeProvider = usedFallback
         ? (fbState?.effectiveProvider ?? model.provider)
         : model.provider;
-      // Несколько фолбэков одного провайдера (два Replicate face-swap'а)
-      // различаем по providerModelId; для legacy-записей без него — по provider.
-      const activeModel =
-        activeProvider === model.provider
-          ? model
-          : (getFallbackCandidates(modelId, "design").find((m) =>
-              fbState?.effectiveProviderModelId
-                ? m.providerModelId === fbState.effectiveProviderModelId
-                : m.provider === activeProvider,
-            ) ?? model);
+      // Дискриминатор — `usedFallback`, а НЕ совпадение provider'а: у примерки
+      // одежды primary и fallback оба `fal`, и сравнение по provider ошибочно
+      // считало бы фолбэк за primary. При фолбэке ищем фактическую модель среди
+      // кандидатов: по `providerModelId` (несколько фолбэков одного провайдера),
+      // для legacy-записей без него — по provider.
+      const activeModel = !usedFallback
+        ? model
+        : (getFallbackCandidates(modelId, "design").find((m) =>
+            fbState?.effectiveProviderModelId
+              ? m.providerModelId === fbState.effectiveProviderModelId
+              : m.provider === activeProvider,
+          ) ?? model);
       const actualCostUsd =
         calculateProviderCostUsd(
           activeModel,
