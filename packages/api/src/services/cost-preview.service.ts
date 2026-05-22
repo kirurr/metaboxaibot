@@ -74,7 +74,9 @@ export const costPreviewService = {
     const modelSettings = { ...(allModelSettings[modelId] ?? {}), ...extraModelSettings };
     const effectiveAspectRatio = (modelSettings.aspect_ratio as string | undefined) ?? aspectRatio;
 
-    const estimatedMegapixels = model.costUsdPerMPixel ? 1.0 : undefined;
+    const estimatedMegapixels = model.costUsdPerMPixel
+      ? (model.estimatedMegapixels ?? 1.0)
+      : undefined;
     const perImageCost = calculateCost(model, 0, 0, estimatedMegapixels, undefined, modelSettings);
 
     const maxBatch = model.maxVirtualBatch ?? 1;

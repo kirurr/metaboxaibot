@@ -660,10 +660,18 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const model = AI_MODELS[modelId];
       if (!model) return true;
 
-      const megapixels =
-        model.costUsdPerMPixel && firstResult.width && firstResult.height
-          ? (firstResult.width * firstResult.height) / 1_000_000
-          : undefined;
+      // Per-MP биллинг: берём размеры из результата адаптера, а если он их не
+      // отдал (Replicate-фолбэк face-swap'а возвращает только URL) — докачиваем
+      // и меряем сами. Иначе megapixels=undefined обнулил бы цену → халявная
+      // генерация. На сбое замера падаем на estimatedMegapixels, не на 0.
+      let megapixels: number | undefined;
+      if (model.costUsdPerMPixel) {
+        megapixels =
+          firstResult.width && firstResult.height
+            ? (firstResult.width * firstResult.height) / 1_000_000
+            : ((await measureImageMegapixels(firstResult.url).catch(() => undefined)) ??
+              model.estimatedMegapixels);
+      }
 
       const editUrls: string[] =
         (job.data.mediaInputs as Record<string, string[]> | undefined)?.edit ?? [];
