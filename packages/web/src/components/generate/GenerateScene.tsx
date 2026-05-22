@@ -1944,7 +1944,6 @@ export function GenerateScene({
         )}
         <GenerationHistory
           selectedModel={selectedModel}
-          allModels={models}
           pendingJobs={pendingJobs}
           onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
           onJobFailed={(jobId, errorMessage) =>
