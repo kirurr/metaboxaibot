@@ -34,12 +34,9 @@ const MODEL_IDS: Record<string, string> = {
   "imagen-4-fast": "google/imagen-4-fast",
   "imagen-4": "google/imagen-4",
   "imagen-4-ultra": "google/imagen-4-ultra",
-  // Специализированный face-swap (InsightFace). Community-модель — у неё нет
-  // deployment-endpoint'а (POST /models/.../predictions → 404), поэтому пиним
-  // версию явно (POST /predictions с version). Параметры: input_image (сцена) +
-  // swap_image (лицо). Без prompt.
-  "face-swap-classic":
-    "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
+  // face-swap-classic намеренно НЕ здесь: у сценария несколько Replicate-фолбэков
+  // (cdingram, codeplugtech) с одним modelId — каждый несёт свой `providerModelId`
+  // в определении модели, который и резолвится в submit().
 };
 
 /** Ideogram model IDs — accept `style_reference_images` array instead of `image`. */
@@ -65,6 +62,8 @@ export class ReplicateAdapter implements ImageAdapter {
     readonly modelId: string,
     apiKey = config.ai.replicate,
     fetchFn?: typeof globalThis.fetch,
+    /** Provider-specific Replicate model string ("owner/name[:version]"). */
+    readonly providerModelId?: string,
   ) {
     this.client = new Replicate({
       auth: apiKey,
@@ -129,7 +128,7 @@ export class ReplicateAdapter implements ImageAdapter {
   }
 
   async submit(input: ImageInput): Promise<string> {
-    const modelStr = MODEL_IDS[this.modelId] ?? this.modelId;
+    const modelStr = this.providerModelId ?? MODEL_IDS[this.modelId] ?? this.modelId;
     if (FACE_SWAP_MODELS.has(this.modelId)) {
       return this.submitFaceSwap(modelStr, input);
     }

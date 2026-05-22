@@ -12,12 +12,21 @@ import {
   FACE_SWAP_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 
-// Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
-// Прошлый вариант — nano-banana-pro с текстовым промптом — закомментирован
-// ниже целиком на случай отката.
+// Сценарий «Замена лица»: primary — Hy-Wu Edit (fal-ai/hy-wu-edit),
+// fallback — Replicate cdingram/face-swap. Прошлый вариант (nano-banana-pro
+// с текстовым промптом) закомментирован ниже целиком на случай отката.
 const FACE_SWAP_MODEL_ID = "face-swap-classic";
 const FACE_SWAP_SLOT_REFERENCE = "reference";
 const FACE_SWAP_SLOT_FACE = "face";
+
+/**
+ * Instruction-промпт для Hy-Wu Edit (primary). image 1 = базовое фото (сцена,
+ * поза, свет), image 2 = фото-источник лица. Replicate-fallback промпт
+ * игнорирует — submitFaceSwap не передаёт его провайдеру.
+ */
+const FACE_SWAP_PROMPT =
+  "Take image 1 as a reference and transfer the face from image 2 to image 1, " +
+  "maintaining the proportions, emotion, and light in image 1.";
 
 /** Telegram Bot API hard cap on `getFile` downloads. */
 const TG_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -257,9 +266,9 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
     await generationService.submitImage({
       userId,
       modelId: FACE_SWAP_MODEL_ID,
-      // cdingram/face-swap не принимает текстовый промпт — передаём пустую
-      // строку. mediaInputs.edit: [0] = референс (сцена), [1] = фото лица.
-      prompt: "",
+      // Hy-Wu Edit (primary) требует instruction-промпт; Replicate-fallback
+      // его игнорирует. mediaInputs.edit: [0] = референс (сцена), [1] = лицо.
+      prompt: FACE_SWAP_PROMPT,
       mediaInputs: resolved,
       telegramChatId: chatId,
       sendOriginalLabel: ctx.t.common.sendOriginal,

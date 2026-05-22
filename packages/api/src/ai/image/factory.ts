@@ -46,10 +46,10 @@ export function createImageAdapter(
     case "recraft":
       return new RecraftAdapter(modelId, apiKey, fetchFn);
     case "replicate":
-      return new ReplicateAdapter(modelId, apiKey, fetchFn);
+      return new ReplicateAdapter(modelId, apiKey, fetchFn, model.providerModelId);
     case "google":
       // Imagen 4 — use Replicate mirror until direct API is available
-      return new ReplicateAdapter(modelId, apiKey, fetchFn);
+      return new ReplicateAdapter(modelId, apiKey, fetchFn, model.providerModelId);
     case "higgsfield":
       // higgsfield использует пару apiKey + apiSecret. Из пула приходит один
       // apiKey — apiSecret берётся из env (отдельный секрет, не часть пула).

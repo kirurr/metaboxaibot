@@ -19,6 +19,9 @@ const EDIT_ENDPOINTS: Record<string, string> = {
   "stable-diffusion": "fal-ai/stable-diffusion-v3-medium/image-to-image",
   flux: "fal-ai/flux-2/edit",
   "flux-pro": "fal-ai/flux-2-pro/edit",
+  // Замена лица (сценарий «Замена лица», primary). enable_thinking не передаём —
+  // fal-дефолт уже true, что и нужно (режим с мышлением, $0.15/MP).
+  "face-swap-classic": "fal-ai/hy-wu-edit",
 };
 
 /**
@@ -28,9 +31,22 @@ const EDIT_ENDPOINTS: Record<string, string> = {
 const ASPECT_RATIO_MODELS = new Set<string>();
 
 /**
+ * Models that should let the endpoint pick the output size itself
+ * (FAL `image_size: "auto"`) — Hy-Wu face swap сохраняет размер базового
+ * фото вместо того, чтобы быть приведённым к квадрату/пресету.
+ */
+const AUTO_SIZE_MODELS = new Set(["face-swap-classic"]);
+
+/**
  * Edit endpoints for these models expect `image_urls` (array) instead of `image_url` (string).
  */
-const IMAGE_URLS_ARRAY_MODELS = new Set(["flux", "flux-pro", "seedream-4.5", "seedream-5"]);
+const IMAGE_URLS_ARRAY_MODELS = new Set([
+  "flux",
+  "flux-pro",
+  "seedream-4.5",
+  "seedream-5",
+  "face-swap-classic",
+]);
 
 /**
  * Map: modelId → max количество изображений за один call (FAL `num_images`).
@@ -109,9 +125,11 @@ export class FalAdapter implements ImageAdapter {
     const falInput = {
       prompt: input.prompt,
       negative_prompt: (ms.negative_prompt as string | undefined) || input.negativePrompt,
-      ...(useAspectRatio
-        ? { aspect_ratio: input.aspectRatio ?? "1:1" }
-        : { image_size: this.resolveSize(input) }),
+      ...(AUTO_SIZE_MODELS.has(this.modelId)
+        ? { image_size: "auto" }
+        : useAspectRatio
+          ? { aspect_ratio: input.aspectRatio ?? "1:1" }
+          : { image_size: this.resolveSize(input) }),
       ...(imageUrl
         ? IMAGE_URLS_ARRAY_MODELS.has(this.modelId)
           ? { image_urls: editUrls }

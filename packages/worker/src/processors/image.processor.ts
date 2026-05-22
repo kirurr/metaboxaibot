@@ -140,6 +140,10 @@ interface VirtualBatchState {
  *
  * - `effectiveProvider`: provider строка, на которой состоялся успешный submit.
  *   Poll-stage использует её для выбора адаптера.
+ * - `effectiveProviderModelId`: provider-specific id успешной модели. Нужен,
+ *   когда у одного провайдера несколько фолбэк-моделей с одним modelId
+ *   (два Replicate face-swap'а) — `effectiveProvider` их не различает, а
+ *   audit'у `actualCostUsd` нужна именно та модель, что отработала.
  *
  * Для virtual batch sticky-lock derived из `subJobs[*].effectiveProvider` —
  * не дублируется в FallbackState, чтобы избежать race'а между двумя записями
@@ -148,6 +152,7 @@ interface VirtualBatchState {
 interface FallbackState {
   primaryProvider: string;
   effectiveProvider?: string;
+  effectiveProviderModelId?: string;
   attemptedProviders?: string[];
 }
 
@@ -155,6 +160,13 @@ const INITIAL_POLL_INTERVAL_MS = 5000;
 
 /** Telegram multipart upload limit for sendDocument (used by `orig_` callback). */
 const TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Последний ненулевой пол для per-MP биллинга: если адаптер не отдал размеры
+ * И замер вышел из строя И у модели нет `estimatedMegapixels` — всё равно
+ * списываем минимум 1 MP, а не 0. Защита от халявной генерации.
+ */
+const MIN_BILLABLE_MEGAPIXELS = 1;
 
 const telegram = new Api(config.bot.token);
 
@@ -660,10 +672,19 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const model = AI_MODELS[modelId];
       if (!model) return true;
 
-      const megapixels =
-        model.costUsdPerMPixel && firstResult.width && firstResult.height
-          ? (firstResult.width * firstResult.height) / 1_000_000
-          : undefined;
+      // Per-MP биллинг: берём размеры из результата адаптера, а если он их не
+      // отдал (Replicate-фолбэк face-swap'а возвращает только URL) — докачиваем
+      // и меряем сами. Иначе megapixels=undefined обнулил бы цену → халявная
+      // генерация. На сбое замера: estimatedMegapixels, иначе MIN_BILLABLE_MEGAPIXELS.
+      let megapixels: number | undefined;
+      if (model.costUsdPerMPixel) {
+        megapixels =
+          firstResult.width && firstResult.height
+            ? (firstResult.width * firstResult.height) / 1_000_000
+            : ((await measureImageMegapixels(firstResult.url).catch(() => undefined)) ??
+              model.estimatedMegapixels ??
+              MIN_BILLABLE_MEGAPIXELS);
+      }
 
       const editUrls: string[] =
         (job.data.mediaInputs as Record<string, string[]> | undefined)?.edit ?? [];
@@ -717,11 +738,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
       const activeProvider = usedFallback
         ? (fbState?.effectiveProvider ?? model.provider)
         : model.provider;
+      // Несколько фолбэков одного провайдера (два Replicate face-swap'а)
+      // различаем по providerModelId; для legacy-записей без него — по provider.
       const activeModel =
         activeProvider === model.provider
           ? model
-          : (getFallbackCandidates(modelId, "design").find((m) => m.provider === activeProvider) ??
-            model);
+          : (getFallbackCandidates(modelId, "design").find((m) =>
+              fbState?.effectiveProviderModelId
+                ? m.providerModelId === fbState.effectiveProviderModelId
+                : m.provider === activeProvider,
+            ) ?? model);
       const actualCostUsd =
         calculateProviderCostUsd(
           activeModel,
@@ -1148,6 +1174,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           await writeFallbackState({
             primaryProvider: modelMeta.provider,
             effectiveProvider: fbResult.effectiveProvider,
+            effectiveProviderModelId: fbResult.effectiveModel.providerModelId,
             attemptedProviders: Array.from(accumulatedSync),
           });
 
@@ -1214,6 +1241,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             await writeFallbackState({
               primaryProvider: modelMeta.provider,
               effectiveProvider: fbResult.effectiveProvider,
+              effectiveProviderModelId: fbResult.effectiveModel.providerModelId,
               attemptedProviders: Array.from(accumulatedAsync),
             });
             await db.generationJob.update({
@@ -1691,41 +1719,29 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         : [{ text: t.design.refine, callback_data: `design_ref_${outputId}` }];
 
       if (modelMeta?.deliverAsDocument === true) {
-        // Апскейл и т.п.: результат отдаём ФАЙЛОМ. Размеры увеличенного фото
-        // превышают лимиты Telegram sendPhoto (PHOTO_INVALID_DIMENSIONS); документ
-        // сохраняет полное разрешение — это и нужно от апскейлера.
-        if (info.byteSize > TELEGRAM_DOC_MAX_BYTES) {
-          // Не влезает даже в sendDocument — отдаём только ссылку на скачивание.
-          const dlRow = s3Key
-            ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
-            : null;
-          await withRetry("image.sendMessage", 2, () =>
-            telegram.sendMessage(telegramChatId, singleCaption, {
-              parse_mode: "HTML",
-              reply_markup: dlRow ? { inline_keyboard: [dlRow] } : undefined,
-              ...replyToPrompt,
-            }),
-          );
-        } else {
-          // Грузим буфером (multipart): у sendDocument по URL лимит 20 МБ,
-          // апскейл-результат легко его превышает.
-          const docBuffer =
-            info.kind === "buffer"
-              ? info.buffer
-              : await withRetry("image.fetchDoc", 3, async () => {
-                  const r = await fetch(info.url);
-                  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                  return Buffer.from(await r.arrayBuffer());
-                });
-          await withRetry("image.sendDocument", 2, () =>
-            telegram.sendDocument(telegramChatId, new InputFile(docBuffer, filename), {
-              caption: singleCaption,
-              parse_mode: "HTML",
-              reply_markup: refineRow ? { inline_keyboard: [refineRow] } : undefined,
-              ...replyToPrompt,
-            }),
-          );
-        }
+        // Апскейл: картинку, подпись и доступ к файлу нужно уместить в одно
+        // сообщение, а Telegram не даёт объединить фото и документ в один
+        // альбом. Поэтому шлём сжатое превью фоткой с подписью, а полное
+        // разрешение прячем за кнопкой «Оригинал файлом» (orig_<outputId>).
+        const { source: tgImageSource } = await prepareTelegramPhoto(
+          info,
+          finalImageResult.url,
+          filename,
+        );
+        const actionRow: InlineKeyboardButton[] | null =
+          info.byteSize <= TELEGRAM_DOC_MAX_BYTES
+            ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
+            : s3Key
+              ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
+              : null;
+        await withRetry("image.sendPhoto", 2, () =>
+          telegram.sendPhoto(telegramChatId, tgImageSource, {
+            caption: singleCaption,
+            parse_mode: "HTML",
+            reply_markup: actionRow ? { inline_keyboard: [actionRow] } : undefined,
+            ...replyToPrompt,
+          }),
+        );
       } else {
         const { source: tgImageSource, isSvg } = await prepareTelegramPhoto(
           info,

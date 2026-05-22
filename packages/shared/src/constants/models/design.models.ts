@@ -329,17 +329,24 @@ const SEEDREAM_SETTINGS: ModelSettingDef[] = [
 /** Kling / Kling Pro video settings. */
 
 export const DESIGN_MODELS: Record<string, AIModel> = {
-  // Специализированная face-swap нейросеть (Replicate cdingram/face-swap).
-  // Доступна ТОЛЬКО через готовый сценарий «Замена лица» в боте — поэтому
-  // hiddenFromCarousel: модель не светится в карусели выбора моделей Дизайна.
+  // Готовый сценарий «Замена лица». Primary — Hy-Wu Edit (fal-ai/hy-wu-edit):
+  // instruction-based image edit. Fallback — Replicate cdingram/face-swap
+  // (см. FALLBACK_DESIGN_MODELS). Доступна ТОЛЬКО через сценарий «Замена лица»
+  // в боте — hiddenFromCarousel убирает её из карусели Дизайна.
   // mediaInputs.edit: [0] = референс-фото (сцена), [1] = фото лица.
+  // Биллинг per-MP: fal берёт $0.15/MP (enable_thinking включён дефолтом fal).
   "face-swap-classic": {
     id: "face-swap-classic",
     name: "🔄 Замена лица",
     description: "Специализированная нейросеть для замены лица на фото.",
     section: "design",
-    provider: "replicate",
-    costUsdPerRequest: 0.09,
+    provider: "fal",
+    costUsdPerRequest: 0,
+    costUsdPerMPixel: 0.15,
+    // Реальные фото юзеров крупнее 1 MP — апфронт-проверка баланса оценивает
+    // в 2 MP, чтобы с почти пустым балансом нельзя было «бесплатно» запустить
+    // генерацию (фактическое списание всё равно по реальному размеру выхода).
+    estimatedMegapixels: 2,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -2479,5 +2486,59 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
+  // ── Замена лица: цепочка фолбэков ───────────────────────────────────────────
+  // Сценарий «Замена лица» = Hy-Wu Edit (fal) под капотом. При недоступности
+  // fal фолбэчимся по очереди на Replicate-нейросети:
+  //   1. cdingram/face-swap
+  //   2. codeplugtech/face-swap  (последний — используется в крайнем случае)
+  // Оба провайдера — replicate, поэтому различаются через `providerModelId`.
+  // Порядок в массиве = порядок перебора в submitWithFallback.
+  //
+  // Списание с ЮЗЕРА — всегда по primary (per-MP Hy-Wu, $0.15/MP). НО
+  // `costUsdPerRequest` отсюда идёт в audit-метаданные `actualCostUsd` —
+  // держим реальную флэт-цену Replicate, а не primary-шную per-MP.
+  {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица (Replicate fallback)",
+    description: "Fallback на Replicate cdingram/face-swap при недоступности fal.",
+    section: "design",
+    provider: "replicate",
+    providerModelId:
+      "cdingram/face-swap:d1d6ea8c8be89d664a07a457526f7128109dee7030fdac424788d762c71ed111",
+    costUsdPerRequest: 0.09,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  {
+    id: "face-swap-classic",
+    name: "🔄 Замена лица (Replicate fallback 2)",
+    description:
+      "Последний fallback на Replicate codeplugtech/face-swap при недоступности fal и cdingram.",
+    section: "design",
+    provider: "replicate",
+    providerModelId:
+      "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+    costUsdPerRequest: 0.0026,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
 ];
