@@ -12,11 +12,12 @@ import { logCall } from "../../utils/fetch.js";
 const VIRTUAL_TRYON_ENDPOINT = "fal-ai/image-apps-v2/virtual-try-on";
 
 /**
- * fal Ideogram remove-background endpoint. Input is a single `image_url`
- * (no prompt / image_size); output is a single `image` object (not an
- * `images` array). Handled by a dedicated submit branch + poll handles both.
+ * Models routed through the fal Ideogram remove-background endpoint. Input is
+ * a single `image_url` (no prompt / image_size); output is a single `image`
+ * object (not an `images` array). Dispatched by modelId — the endpoint URL
+ * itself lives only in the model's `providerModelId` (single source of truth).
  */
-const REMOVE_BG_ENDPOINT = "fal-ai/ideogram/remove-background";
+const REMOVE_BG_MODELS = new Set(["bg-removal"]);
 
 /**
  * virtual-try-on `aspect_ratio` enum — у endpoint'а нет "auto", поэтому под
@@ -202,7 +203,7 @@ export class FalAdapter implements ImageAdapter {
     if (endpoint === VIRTUAL_TRYON_ENDPOINT) {
       return this.submitVirtualTryOn(endpoint, editUrls);
     }
-    if (endpoint === REMOVE_BG_ENDPOINT) {
+    if (REMOVE_BG_MODELS.has(this.modelId)) {
       return this.submitRemoveBackground(endpoint, editUrls);
     }
     const ms = input.modelSettings ?? {};

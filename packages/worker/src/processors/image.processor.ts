@@ -1760,7 +1760,12 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         );
         const actionRow: InlineKeyboardButton[] | null =
           info.byteSize <= TELEGRAM_DOC_MAX_BYTES
-            ? [{ text: t.common.sendOriginal, callback_data: `orig_${outputId}` }]
+            ? [
+                {
+                  text: job.data.sendOriginalLabel ?? t.common.sendOriginal,
+                  callback_data: `orig_${outputId}`,
+                },
+              ]
             : s3Key
               ? [buildDownloadButton(t.common.downloadFile, s3Key, userIdStr)]
               : null;
