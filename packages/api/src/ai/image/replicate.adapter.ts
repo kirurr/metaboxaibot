@@ -50,6 +50,12 @@ const IDEOGRAM_MODELS = new Set(["ideogram-quality", "ideogram-balanced", "ideog
 const FACE_SWAP_MODELS = new Set(["face-swap-classic"]);
 
 /**
+ * Dedicated remove-background models — принимают одно изображение (`image`)
+ * и НЕ принимают prompt. Отдельная ветка submit'а (bria/remove-background).
+ */
+const REMOVE_BG_MODELS = new Set(["bg-removal"]);
+
+/**
  * Replicate adapter — async image generation.
  * Covers Stable Diffusion (SDXL), Ideogram, and Midjourney-style models.
  */
@@ -127,10 +133,50 @@ export class ReplicateAdapter implements ImageAdapter {
     return prediction.id;
   }
 
+  /**
+   * Dedicated remove-background submit — одно `image`, без prompt. Отдельная
+   * ветка, т.к. bria/remove-background принимает только изображение.
+   */
+  private async submitRemoveBackground(modelStr: string, input: ImageInput): Promise<string> {
+    const imageUrl = input.mediaInputs?.edit?.[0] ?? input.imageUrl;
+    if (!imageUrl) {
+      throw new UserFacingError("Background removal needs an input image", {
+        key: "mediaSlotExpired",
+      });
+    }
+    // Replicate не фетчит наши presigned-URL надёжно — качаем сами, отдаём Blob.
+    const res = await fetch(imageUrl);
+    let image: Blob | string = imageUrl;
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      image = new Blob([buf], { type: resolveImageMimeType(buf, res.headers.get("content-type")) });
+    }
+    // preserve_alpha: true — без него bria может вернуть полностью непрозрачный
+    // выход (дефолт в доке не указан), что ломает весь смысл удаления фона.
+    const predInput = { image, preserve_alpha: true };
+
+    logCall(modelStr, "submit", { image: "<blob>", preserve_alpha: true });
+    const colonIdx = modelStr.indexOf(":");
+    const prediction =
+      colonIdx !== -1
+        ? await this.client.predictions.create({
+            version: modelStr.slice(colonIdx + 1),
+            input: predInput,
+          })
+        : await this.client.predictions.create({
+            model: modelStr as `${string}/${string}`,
+            input: predInput,
+          });
+    return prediction.id;
+  }
+
   async submit(input: ImageInput): Promise<string> {
     const modelStr = this.providerModelId ?? MODEL_IDS[this.modelId] ?? this.modelId;
     if (FACE_SWAP_MODELS.has(this.modelId)) {
       return this.submitFaceSwap(modelStr, input);
+    }
+    if (REMOVE_BG_MODELS.has(this.modelId)) {
+      return this.submitRemoveBackground(modelStr, input);
     }
     const ms = input.modelSettings ?? {};
     const msExtras: Record<string, unknown> = {};

@@ -389,6 +389,33 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
   },
+  // Готовый сценарий «Удаление фона». Primary — fal Ideogram remove-background
+  // (fal-ai/ideogram/remove-background), fallback — Replicate bria/remove-background
+  // (см. FALLBACK_DESIGN_MODELS). Провайдеры разные → обычный fallback по provider.
+  // Выход — прозрачный PNG; deliverAsDocument отдаёт полноразмерный файл (JPEG-
+  // превью теряет прозрачность — известный компромисс). mediaInputs.edit: [0] =
+  // исходное фото. hiddenFromCarousel — доступна только через сценарий.
+  "bg-removal": {
+    id: "bg-removal",
+    name: "✂️ Удаление фона",
+    description: "Удаляет фон с фотографии, оставляя объект на прозрачном фоне.",
+    section: "design",
+    provider: "fal",
+    providerModelId: "fal-ai/ideogram/remove-background",
+    costUsdPerRequest: 0.01,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    deliverAsDocument: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
   // Готовый сценарий «Апскейл фото». Под капотом — nano-banana-pro (KIE primary,
   // evolink fallback): сцена `upscale.ts` зашивает resolution 4K, aspect_ratio
   // auto и фикс-промт. hiddenFromCarousel убирает модель из карусели Дизайна —
@@ -2598,5 +2625,30 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 2 }],
+  },
+  // ── Удаление фона fallback (Replicate bria/remove-background) ────────────────
+  // Сценарий «Удаление фона» = fal Ideogram remove-background под капотом. При
+  // недоступности fal фолбэчимся на Replicate bria/remove-background.
+  // Списание с ЮЗЕРА — по primary ($0.01 флэт). `costUsdPerRequest` здесь —
+  // реальная цена bria ($0.018/изображение) для audit-метаданных `actualCostUsd`.
+  {
+    id: "bg-removal",
+    name: "✂️ Удаление фона (Replicate bria fallback)",
+    description: "Fallback на Replicate bria/remove-background при недоступности fal.",
+    section: "design",
+    provider: "replicate",
+    providerModelId: "bria/remove-background",
+    costUsdPerRequest: 0.018,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
 ];
