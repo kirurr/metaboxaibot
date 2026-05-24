@@ -336,7 +336,7 @@ describe("admin API surface", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as {
         configDefault: number;
-        global: number | null;
+        global: { multiplier: number; note: string | null } | null;
         models: Array<{ id: string; multiplier: number }>;
       };
       expect(typeof body.configDefault).toBe("number");
@@ -392,22 +392,29 @@ describe("admin API surface", () => {
       expect(after).toBeNull();
     });
 
-    it("DELETE /admin/pricing/global removes a seeded global override", async () => {
-      // NOTE: PUT /admin/pricing/global is NOT covered — there is a
-      // pre-existing schema mismatch (route returns an OverrideEntry object
-      // for `global` while the response schema declares `number | null`,
-      // causing fastify to 500 on serialization). Seeding via DB and
-      // hitting DELETE bypasses the mismatch and still verifies the
-      // delete path's correctness.
-      await db.pricingOverride.create({
-        data: {
-          scope: "global",
-          key: "targetMargin",
-          multiplier: "2.0",
-        },
-      });
-
+    it("upserts and deletes the global multiplier override", async () => {
       const { accessToken } = await createTestUser({ role: "ADMIN" });
+
+      const put = await app.inject({
+        method: "PUT",
+        url: "/admin/pricing/global",
+        payload: { multiplier: 2.0, note: "test global" },
+        headers: bearer(accessToken),
+      });
+      expect(put.statusCode).toBe(200);
+      const putBody = put.json() as {
+        global: { multiplier: number; note: string | null; updatedAt: string } | null;
+        configDefault: number;
+      };
+      expect(putBody.global?.multiplier).toBe(2);
+      expect(putBody.global?.note).toBe("test global");
+      expect(typeof putBody.configDefault).toBe("number");
+
+      const persisted = await db.pricingOverride.findUnique({
+        where: { scope_key: { scope: "global", key: "targetMargin" } },
+      });
+      expect(persisted?.multiplier.toString()).toBe("2");
+
       const del = await app.inject({
         method: "DELETE",
         url: "/admin/pricing/global",

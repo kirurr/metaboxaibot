@@ -144,7 +144,15 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
             additionalProperties: true,
             properties: {
               configDefault: { type: "number", description: "Default target margin" },
-              global: { type: "number", nullable: true, description: "Global multiplier override" },
+              // OverrideEntry object ({multiplier, note, updatedBy, updatedAt})
+              // or null when no override is set. Matches `PricingEntryDto`
+              // in `packages/web/src/api/admin.ts`.
+              global: {
+                type: "object",
+                nullable: true,
+                additionalProperties: true,
+                description: "Global multiplier override (OverrideEntry) or null",
+              },
               models: { type: "array", items: { type: "object", additionalProperties: true } },
             },
             required: ["configDefault", "global", "models"],
@@ -278,7 +286,12 @@ export async function adminPricingRoutes(fastify: FastifyInstance): Promise<void
             type: "object",
             additionalProperties: true,
             properties: {
-              global: { type: "number", nullable: true },
+              // OverrideEntry object (same shape as in GET /admin/pricing).
+              global: {
+                type: "object",
+                nullable: true,
+                additionalProperties: true,
+              },
               configDefault: { type: "number" },
             },
           },
