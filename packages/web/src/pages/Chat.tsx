@@ -463,9 +463,12 @@ export default function Chat() {
               const last = next[next.length - 1];
               if (last && last.role === "ai") {
                 const modelName = selectedModel ? modelDisplayName(selectedModel) : "AI";
+                // toFixed(4) → parseFloat: режем плавающий хвост 0.11643000000000002
+                // до 0.1164, заодно убираем trailing zeros у целых/коротких значений.
+                const usedFormatted = parseFloat(used.toFixed(4));
                 next[next.length - 1] = {
                   ...last,
-                  meta: `${modelName} · ${used} tokens`,
+                  meta: `${modelName} · ${usedFormatted} ${t("chat.tokensSpent")}`,
                   inputTokens,
                   outputTokens,
                 };

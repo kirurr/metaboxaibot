@@ -270,6 +270,7 @@
     "waitUploads": "Wait for file uploads to finish",
     "send": "Send",
     "tokensEst": "tokens",
+    "tokensSpent": "tokens spent on generation",
     "renamePrompt": "New name",
     "deletePrompt": "Delete this dialog? History can't be recovered.",
     "errorCreateDialog": "Couldn't create dialog",
