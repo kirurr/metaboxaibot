@@ -96,6 +96,21 @@ export default {
     upscaleFileTooLarge: "📦 Файл слишком большой. Максимум — 20 МБ.",
     upscaleVideoUnreadable: "🎬 Не удалось прочитать видео. Пришлите файл в формате MP4.",
     upscaleGenerating: "✨ Запускаю апскейл...",
+    objectRemoval: "🪄 Убрать объект",
+    objectRemovalWelcome:
+      "Уберу с фотографии указанный объект и аккуратно дорисую фон на его месте. Подойдёт, чтобы убрать прохожего, надпись, провода и подобное.",
+    objectRemovalStepPhoto: "Шаг 1 из 2. Пришлите <b>фотографию</b>. Максимум — 20 МБ.",
+    objectRemovalStepPrompt:
+      "Шаг 2 из 2. Напишите <b>одной фразой</b>, что нужно убрать. Например: «человека слева», «надпись на стене», «провода на фоне». До 400 символов.",
+    objectRemovalNotPhoto: "📷 Это не фото. Пришлите изображение.",
+    objectRemovalPhotoTooLarge: "📷 Фото слишком большое. Максимум — 20 МБ.",
+    objectRemovalAlbumNotice:
+      "📷 Из альбома взято только первое фото. Если хотите другое — пришлите его отдельным сообщением.",
+    objectRemovalPromptEmpty: "✍️ Опишите одной фразой, что нужно убрать с фото.",
+    objectRemovalPromptTooLong:
+      "✍️ Слишком длинное описание ({current} символов). Максимум — {max}. Сократите и пришлите снова.",
+    objectRemovalBufferLost: "📷 Не нашёл загруженное фото — пришлите его ещё раз.",
+    objectRemovalGenerating: "🪄 Убираю объект...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

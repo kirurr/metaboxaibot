@@ -79,6 +79,17 @@ export interface Translations {
     upscaleFileTooLarge: string;
     upscaleVideoUnreadable: string;
     upscaleGenerating: string;
+    objectRemoval: string;
+    objectRemovalWelcome: string;
+    objectRemovalStepPhoto: string;
+    objectRemovalStepPrompt: string;
+    objectRemovalNotPhoto: string;
+    objectRemovalPhotoTooLarge: string;
+    objectRemovalAlbumNotice: string;
+    objectRemovalPromptEmpty: string;
+    objectRemovalPromptTooLong: string;
+    objectRemovalBufferLost: string;
+    objectRemovalGenerating: string;
   };
   gpt: {
     sectionTitle: string;

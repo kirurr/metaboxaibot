@@ -26,6 +26,11 @@ import {
   handleBackgroundRemovalPhoto,
 } from "./scenes/background-removal.js";
 import {
+  handleObjectRemovalEnter,
+  handleObjectRemovalPhoto,
+  handleObjectRemovalPrompt,
+} from "./scenes/object-removal.js";
+import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
   handleVideoUpscaleEnter,
@@ -336,6 +341,7 @@ export function createBot(token: string): Bot<BotContext> {
     if (which === "face_swap") return handleFaceSwapEnter(ctx);
     if (which === "clothing_tryon") return handleClothingTryonEnter(ctx);
     if (which === "bg_removal") return handleBackgroundRemovalEnter(ctx);
+    if (which === "object_removal") return handleObjectRemovalEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
   });
@@ -527,6 +533,25 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document?.mime_type?.startsWith("image/"))
         return handleBackgroundRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.backgroundRemovalNotPhoto);
+      return;
+    }
+    if (state?.state === "OBJECT_REMOVAL_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handleObjectRemovalPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.objectRemovalNotPhoto);
+      return;
+    }
+    if (state?.state === "OBJECT_REMOVAL_AWAIT_PROMPT") {
+      // На шаге описания принимаем text — это основной ввод; фото — как
+      // «передумал, заменю фото» (handleObjectRemovalPhoto перезаписывает
+      // buffer и возвращает state в AWAIT_PROMPT). Всё остальное (видео,
+      // голосовое и т.п.) — мягкая подсказка «опишите фразой».
+      if (ctx.message?.text) return handleObjectRemovalPrompt(ctx);
+      if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handleObjectRemovalPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.objectRemovalPromptEmpty);
       return;
     }
     if (state?.state === "PHOTO_UPSCALE_AWAIT_PHOTO") {

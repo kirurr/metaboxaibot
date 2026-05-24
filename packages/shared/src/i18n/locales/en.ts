@@ -96,6 +96,21 @@ export default {
     upscaleFileTooLarge: "📦 File is too large. Maximum is 20 MB.",
     upscaleVideoUnreadable: "🎬 Couldn't read the video. Please send an MP4 file.",
     upscaleGenerating: "✨ Starting upscale...",
+    objectRemoval: "🪄 Remove object",
+    objectRemovalWelcome:
+      "I'll remove the object you describe and inpaint the background in its place. Good for removing passers-by, captions, wires, and the like.",
+    objectRemovalStepPhoto: "Step 1 of 2. Send a <b>photo</b>. Max 20 MB.",
+    objectRemovalStepPrompt:
+      'Step 2 of 2. Describe in <b>one phrase</b> what to remove. For example: "person on the left", "text on the wall", "wires in the background". Up to 400 characters.',
+    objectRemovalNotPhoto: "📷 That's not a photo. Please send an image.",
+    objectRemovalPhotoTooLarge: "📷 Photo is too large. Max 20 MB.",
+    objectRemovalAlbumNotice:
+      "📷 Only the first photo of the album was used. If you wanted a different one, send it as a separate message.",
+    objectRemovalPromptEmpty: "✍️ Describe in one phrase what to remove from the photo.",
+    objectRemovalPromptTooLong:
+      "✍️ Description is too long ({current} characters). The maximum is {max}. Shorten it and try again.",
+    objectRemovalBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
+    objectRemovalGenerating: "🪄 Removing the object...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

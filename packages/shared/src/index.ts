@@ -65,6 +65,11 @@ export {
   videoResolutionTier,
   videoFpsTier,
 } from "./constants/upscale.js";
+export {
+  OBJECT_REMOVAL_MODEL_ID,
+  OBJECT_REMOVAL_BUFFER_MODEL_ID,
+  OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+} from "./constants/object-removal.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";

@@ -10,6 +10,7 @@ import {
   CLOTHING_TRYON_BUFFER_MODEL_ID,
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
+  OBJECT_REMOVAL_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 import type { Section, Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
@@ -28,6 +29,8 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
     .text(t.scenarios.clothingTryon, "scenario:clothing_tryon")
     .row()
     .text(t.scenarios.backgroundRemoval, "scenario:bg_removal")
+    .row()
+    .text(t.scenarios.objectRemoval, "scenario:object_removal")
     .row()
     .text(t.scenarios.photoUpscale, "scenario:photo_upscale");
 }
@@ -59,6 +62,9 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
         .catch(() => void 0),
       userStateService
         .clearMediaInputs(ctx.user.id, VIDEO_UPSCALE_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, OBJECT_REMOVAL_BUFFER_MODEL_ID)
         .catch(() => void 0),
     ]);
     clearActiveSlot(ctx.user.id);

@@ -159,12 +159,16 @@ export class KieImageAdapter implements ImageAdapter {
       }
 
       body = { model: nanoBananaModel, input: inputPayload };
-    } else if (this.modelId === "gpt-image-2") {
+    } else if (this.modelId === "gpt-image-2" || this.modelId === "object-removal") {
       // ── GPT Image 2 via KIE: t2i / i2i via separate endpoints ──────────────
       // Временно проксируем gpt-image-2 через KIE, чтобы не зависеть от прямого
       // OpenAI Images API. Реализация на OpenAI сохранена закомментированной в
       // packages/shared/.../design.models.ts — для отката достаточно вернуть
       // provider:"openai" и снять комменты.
+      //
+      // `object-removal` — preset-сценарий, под капотом тот же gpt-image-2-i2i;
+      // сцена зашивает разрешение 2K и шлёт обёрнутый/переведённый промпт. Здесь
+      // ветка одна: i2i (без фото сценарий не сабмитит).
       const isI2I = imageUrls.length > 0;
       const aspectRatio = (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? "auto";
       // KIE-схема: aspect_ratio "auto" поддерживает только 1K; aspect_ratio "1:1"
