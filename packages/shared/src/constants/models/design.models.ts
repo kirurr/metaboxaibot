@@ -441,6 +441,33 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
+  // Готовый сценарий «Убрать объект». Под капотом — GPT Image 2 i2i (KIE) @ 1K
+  // c aspect_ratio:"auto" (единственная комбинация у KIE, при которой формат
+  // выхода совпадает с форматом входа — 2K/4K требуют явный aspect_ratio из
+  // enum и режут/искажают фото). Сцена `object-removal.ts` зашивает фикс-
+  // промпт-обёртку «Remove the following from the image…» и переводит юзерский
+  // ввод на английский через prompt-translate.service. hiddenFromCarousel
+  // убирает модель из карусели — юзер видит её только как «🪄 Убрать объект»,
+  // gpt-image-2 нигде не светится.
+  "object-removal": {
+    id: "object-removal",
+    name: "🪄 Убрать объект",
+    description: "Удаляет указанный объект с фотографии, дорисовывая фон на его месте.",
+    section: "design",
+    provider: "kie",
+    costUsdPerRequest: 0.03, // gpt-image-2 @ 1K
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
   "nano-banana-pro": {
     id: "nano-banana-pro",
     name: "🍌 Nano Banana PRO",
