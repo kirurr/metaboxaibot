@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { Copy, File as FileIcon, MoreHorizontal, Sparkles } from "lucide-react";
 import type { MessageAttachmentDto } from "@/api/dialogs";
 import { markdownComponents } from "./MarkdownElements";
+import { ReasoningBlock } from "./ReasoningBlock";
+import { splitReasoning } from "./reasoning";
 import { formatBytes } from "./chatHelpers";
 import type { Msg } from "./chatTypes";
 
@@ -48,6 +50,8 @@ export const ChatThread = memo(function ChatThread({
 });
 
 function AiChatMessage({ message }: { message: Msg }) {
+  const { reasoning, answer } = splitReasoning(message.text);
+  const hasAnswer = answer.trim().length > 0;
   return (
     <div className="msg ai rise">
       <div className="msg-block">
@@ -59,6 +63,8 @@ function AiChatMessage({ message }: { message: Msg }) {
           </div>
         )}
 
+        {reasoning && <ReasoningBlock reasoning={reasoning} hasAnswer={hasAnswer} />}
+
         {message.text.length === 0 && <div className="msg-typing">...</div>}
 
         <Markdown
@@ -66,14 +72,14 @@ function AiChatMessage({ message }: { message: Msg }) {
           rehypePlugins={[rehypeSanitize]}
           remarkPlugins={[remarkGfm]}
         >
-          {message.text}
+          {answer}
         </Markdown>
 
         {message.meta && (
           <div className="msg-meta">
             <span>{message.meta}</span>
             <div className="msg-actions">
-              <button title="Copy" onClick={() => navigator.clipboard?.writeText(message.text)}>
+              <button title="Copy" onClick={() => navigator.clipboard?.writeText(answer)}>
                 <Copy size={14} />
               </button>
               <button title="More">
