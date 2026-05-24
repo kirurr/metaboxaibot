@@ -15,8 +15,21 @@ import { isPoolExhaustedError } from "../../utils/pool-exhausted-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
-/** Max input length for all ElevenLabs models on kie.ai (TTS text / sound-effect prompt). */
-const MAX_TEXT_CHARS = 5000;
+/**
+ * Per-modelId text limits for kie.ai ElevenLabs endpoints.
+ *
+ * - `tts-el` (multilingual-v2 / turbo-2-5): 5000 matches declared OpenAPI maxLength.
+ * - `sounds-el` / `music-el` (sound-effect-v2): KIE OpenAPI declares 5000 but their
+ *   backend rejects >450 with `body.code:500 msg:"text exceeds maximum length"`
+ *   (verified 2026-05-24). Real cap matches direct ElevenLabs `/v1/sound-generation`.
+ *
+ * Record (not ternary) so TypeScript flags exhaustiveness if a new KieAudioModelId is added.
+ */
+const MAX_TEXT_CHARS: Record<KieAudioModelId, number> = {
+  "tts-el": 5000,
+  "sounds-el": 450,
+  "music-el": 450,
+};
 
 /** kie.ai sound-effect-v2 duration bounds. */
 const SFX_MIN_DURATION = 0.5;
@@ -122,10 +135,11 @@ export class KieElevenLabsAdapter implements AudioAdapter {
   }
 
   private guardTextLength(text: string): void {
-    if (text.length > MAX_TEXT_CHARS) {
-      throw new UserFacingError(`KIE ElevenLabs: text ${text.length} > ${MAX_TEXT_CHARS} chars`, {
+    const max = MAX_TEXT_CHARS[this.modelId];
+    if (text.length > max) {
+      throw new UserFacingError(`KIE ElevenLabs: text ${text.length} > ${max} chars`, {
         key: "elevenlabsPromptTooLong",
-        params: { max: MAX_TEXT_CHARS, current: text.length },
+        params: { max, current: text.length },
       });
     }
   }
@@ -289,6 +303,34 @@ export class KieElevenLabsAdapter implements AudioAdapter {
       const data = (await resp.json()) as KieSubmitResponse;
       if (data.code !== 200 || !data.data?.taskId) {
         const msg = data.msg ?? "no taskId in response";
+        // KIE врёт в OpenAPI: declared maxLength 5000, реальный backend режет
+        // sound-effect-v2 на 450 и возвращает HTTP 200 + body.code:500 + msg
+        // "text exceeds maximum length". guardTextLength уже отсёк превышение
+        // нашего MAX_TEXT_CHARS — этот код срабатывает если KIE ужесточит лимит
+        // ниже нашего гарда ИЛИ изменит формулировку msg. В таком случае это
+        // user-input ошибка, не сбой провайдера: бросаем UserFacingError ДО
+        // EL-фолбэка (у прямого EL тот же 450, фолбэк всё равно упал бы и
+        // спамил on-call false-positive).
+        //
+        // Regex шире наблюдаемого "text exceeds maximum length" — покрывает
+        // вариации "text exceeds limit", "text too long", "text length exceeds",
+        // на случай рефраза. Жёстко привязан к слову "text" + (exceed|too long),
+        // чтобы не съесть смежные ошибки.
+        //
+        // `input.prompt` к моменту submit'а уже мог быть переведён переводчиком
+        // (если `auto_translate_prompt`), так что `current` — это длина того
+        // что реально ушло в KIE, не оригинала юзера. Для UX-сообщения
+        // достаточно: юзеру важно понять "сократи", а не сколько символов был
+        // оригинал.
+        if (data.code === 500 && /text\s+(exceed|too\s+long|length\s+exceed)/i.test(msg)) {
+          throw new UserFacingError(
+            `KIE ElevenLabs: text ${input.prompt.length} chars exceeds backend limit`,
+            {
+              key: "elevenlabsPromptTooLong",
+              params: { max: MAX_TEXT_CHARS[this.modelId], current: input.prompt.length },
+            },
+          );
+        }
         // 402 = Insufficient Credits. Раньше бросали UserFacingError(notifyOps);
         // теперь EL-фолбэк сам это покрывает — просто warn. Suno (KieSunoAdapter)
         // по-прежнему алертит ops на свой 402, так что исчерпание кредитов kie
