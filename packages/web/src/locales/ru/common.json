@@ -273,6 +273,8 @@
     "send": "Отправить",
     "tokensEst": "токенов",
     "tokensSpent": "токенов потрачено на генерацию",
+    "reasoning": "Размышления",
+    "reasoningThinking": "Размышляет…",
     "per1kSymbols": "1k символов",
     "renamePrompt": "Новое название",
     "deletePrompt": "Удалить диалог? Историю восстановить нельзя.",

@@ -1174,6 +1174,42 @@ select {
   color: var(--text);
 }
 
+/* Сворачиваемый блок «Размышления» (chain-of-thought) над AI-ответом. */
+.msg-reasoning {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.msg-reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.msg-reasoning-toggle:hover {
+  color: var(--text);
+}
+.msg-reasoning-arrow {
+  transition: transform 160ms var(--ease);
+}
+.msg-reasoning-toggle.open .msg-reasoning-arrow {
+  transform: rotate(180deg);
+}
+.msg-reasoning-body {
+  padding: 4px 12px 12px;
+  font-size: 13px;
+  color: var(--text-hint);
+  border-top: 1px solid var(--border);
+}
+
 .composer {
   position: sticky;
   bottom: 0;
