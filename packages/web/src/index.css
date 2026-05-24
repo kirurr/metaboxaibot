@@ -6263,10 +6263,10 @@ select {
   padding: 14px;
 }
 
-/* Cap the panel height so ChipPopover's measured scrollHeight stays bounded —
-   otherwise expanding "Advanced" makes the popup taller and ChipPopover re-anchors
-   the popover further up the viewport. Inner scroll keeps the gear popup
-   anchored predictably near the composer. */
+/* Высота попапа растягивается по контенту до min(60vh, 480px). Чтобы при
+   раскрытии "Дополнительных" попап не вылезал за экран с отложенным
+   "прыжком" на scroll, ChipPopover отслеживает изменение размера popover'а
+   через ResizeObserver и сразу перепозиционируется. */
 .chat-settings-pop .settings-panel {
   max-height: min(60vh, 480px);
   overflow-y: auto;

@@ -78,12 +78,23 @@ export function ChipPopover({
     const onScrollOrResize = () => update();
     window.addEventListener("scroll", onScrollOrResize, true);
     window.addEventListener("resize", onScrollOrResize);
+    // ResizeObserver на сам popover — ловит изменение высоты контента (например
+    // раскрытие "Дополнительных" в settings-панели), чтобы перепозиционировать
+    // сразу, а не дожидаться следующего scroll/resize (иначе попап вылезает за
+    // экран и со скачком прыгает вверх при ближайшем событии).
+    let observer: ResizeObserver | null = null;
+    const pop = popRef.current;
+    if (pop && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => update());
+      observer.observe(pop);
+    }
     // Второй tick — после того как popover реально отрендерился с правильным размером.
     const raf = requestAnimationFrame(update);
     return () => {
       window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
       cancelAnimationFrame(raf);
+      observer?.disconnect();
     };
   }, [anchorRef, popRef, matchAnchorWidth]);
 
