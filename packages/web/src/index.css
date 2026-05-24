@@ -1592,47 +1592,68 @@ select {
   padding: 8px 6px 2px;
   flex-wrap: wrap;
 }
-.model-pick {
+/* Карточка-триггер выбора модели в ChatEmpty: верхняя строка (точка-индикатор
+   + название + шеврон) и опциональное описание под ней. Раскрывается в
+   .mp-pop ниже. Растягивается на всю ширину .chat-empty (≈ 512px). */
+.ce-model-card {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  width: 100%;
+  padding: 12px 14px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
+  border-radius: 14px;
   cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   transition:
     border-color 120ms var(--ease),
-    color 120ms var(--ease);
+    background 120ms var(--ease);
 }
-.model-pick:hover {
-  color: var(--text);
+.ce-model-card:hover,
+.ce-model-card.is-open {
   border-color: var(--border-strong);
+  background: var(--bg-secondary);
 }
-.mp-dot {
-  width: 7px;
-  height: 7px;
+.ce-mc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ce-mc-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #5fd29a;
   box-shadow: 0 0 8px rgba(95, 210, 154, 0.6);
+  flex-shrink: 0;
 }
-.mp-name {
-  font-weight: 500;
+.ce-mc-name {
+  flex: 1;
+  font-size: 14.5px;
+  font-weight: 600;
   color: var(--text);
+}
+.ce-mc-chevron {
+  color: var(--text-hint);
+  transition: transform 120ms var(--ease);
+}
+.ce-model-card.is-open .ce-mc-chevron {
+  transform: rotate(180deg);
+}
+.ce-mc-desc {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 .mp-pop {
   position: absolute;
-
-  /* Move the openned menu to the bottom insted of the top */
-  left: -50%;
+  /* Растягиваем popover на ширину карточки-anchor'а (.ce-model-card шириной 100%
+     внутри .chat-empty), вешая на сам popover left/right границы. */
+  left: 0;
+  right: 0;
   top: calc(100% + 8px);
-  /* bottom: calc(100% + 8px); */
-  /* left: 0; */
-
-  width: 320px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 14px;
