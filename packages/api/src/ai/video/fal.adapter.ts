@@ -258,8 +258,13 @@ export class FalVideoAdapter implements VideoAdapter {
     //     legacy-state у юзеров, которые до разделения сохранили ref_images
     //     под этим modelId; UI слот больше не показывает).
     //   - `grok-imagine-r2v` → всегда r2v.
-    if (this.modelId === "grok-imagine" || this.modelId === "grok-imagine-r2v") {
-      const isR2V = this.modelId === "grok-imagine-r2v";
+    //   - `photo-animate`    → alias r2v (сценарий «Оживить фото»).
+    if (
+      this.modelId === "grok-imagine" ||
+      this.modelId === "grok-imagine-r2v" ||
+      this.modelId === "photo-animate"
+    ) {
+      const isR2V = this.modelId === "grok-imagine-r2v" || this.modelId === "photo-animate";
       const endpoint = isR2V ? FAL_GROK_IMAGINE_R2V_ENDPOINT : FAL_GROK_IMAGINE_T2V_ENDPOINT;
 
       const grokBody: Record<string, unknown> = {

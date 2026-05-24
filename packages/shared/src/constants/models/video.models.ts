@@ -667,6 +667,46 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
   // Цена — посекундная, ставка по результату (фактор × разрешение × fps):
   // сцена вычисляет тиры из размера и fps исходника, цена видна на кнопке.
+  // Готовый сценарий «Оживить фото». Под капотом — KIE Grok Imagine r2v
+  // (`grok-imagine/image-to-video`) c фикс-параметрами: resolution 720p,
+  // duration 6s, aspect_ratio = ближайший supported к AR исходника
+  // (детектится в сцене). FAL fallback ниже под id "photo-animate" — те же
+  // limits (720p, 10s max, supported AR), которые мы режем в сцене.
+  // hiddenFromCarousel убирает модель из карусели — юзеру (и в карусели, и в
+  // подписях, и в биллинге) она видна только как «🎞️ Оживить фото», Grok
+  // нигде не светится. Pricing: $0.0425/s ($0.255 за 6s gen) — среднее между
+  // KIE Grok 720p ($0.015/s) и FAL Grok r2v 720p ($0.07/s).
+  "photo-animate": {
+    id: "photo-animate",
+    name: "🎞️ Оживить фото",
+    description: "Создаёт короткое видео-оживление из одной фотографии.",
+    section: "video",
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.0425,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    mediaInputs: [
+      {
+        slotKey: "ref_images",
+        mode: "reference_image",
+        labelKey: "referenceImages",
+        maxImages: 1,
+        required: true,
+      },
+    ],
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9", "9:16"],
+    durationRange: { min: 6, max: 6 },
+    // xAI (Grok) hardcap — но сами фикс-промптом не приближаемся.
+    maxPromptLength: 4096,
+  },
   "video-upscale": {
     id: "video-upscale",
     name: "🎬 Апскейл видео",
@@ -2432,6 +2472,38 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
         default: "480p",
       },
     ],
+  },
+  // ── photo-animate via FAL — fallback тот же endpoint что у grok-imagine-r2v,
+  // но привязанный к primary id `photo-animate`. Сцена фиксит duration 6s /
+  // resolution 720p / aspect_ratio из supported set — fallback ничего не
+  // перебивает, просто наследует те же параметры через extraModelSettings.
+  {
+    id: "photo-animate",
+    name: "Photo animate (fal fallback)",
+    description: "Fallback на FAL reference-to-video при недоступности KIE.",
+    section: "video",
+    provider: "fal",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.0425,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    mediaInputs: [
+      {
+        slotKey: "ref_images",
+        mode: "reference_image",
+        labelKey: "referenceImages",
+        maxImages: 1,
+        required: true,
+      },
+    ],
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9", "9:16"],
+    durationRange: { min: 6, max: 6 },
   },
   // ── Veo 3.1 (Quality) via Google Gemini API — fallback при недоступности KIE.
   // Те же media-input slot keys (first_frame/last_frame/reference) что у primary,

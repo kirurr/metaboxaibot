@@ -90,6 +90,18 @@ export interface Translations {
     objectRemovalPromptTooLong: string;
     objectRemovalBufferLost: string;
     objectRemovalGenerating: string;
+    photoAnimate: string;
+    photoAnimateWelcome: string;
+    photoAnimateStepPhoto: string;
+    photoAnimateNotPhoto: string;
+    photoAnimatePhotoTooLarge: string;
+    photoAnimateAlbumNotice: string;
+    photoAnimateReady: string;
+    photoAnimateStartButton: string;
+    photoAnimateCancelButton: string;
+    photoAnimateCancelled: string;
+    photoAnimateBufferLost: string;
+    photoAnimateGenerating: string;
   };
   gpt: {
     sectionTitle: string;

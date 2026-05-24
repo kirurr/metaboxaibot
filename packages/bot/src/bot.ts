@@ -31,6 +31,11 @@ import {
   handleObjectRemovalPrompt,
 } from "./scenes/object-removal.js";
 import {
+  handlePhotoAnimateEnter,
+  handlePhotoAnimatePhoto,
+  handlePhotoAnimateCallback,
+} from "./scenes/photo-animate.js";
+import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
   handleVideoUpscaleEnter,
@@ -342,10 +347,12 @@ export function createBot(token: string): Bot<BotContext> {
     if (which === "clothing_tryon") return handleClothingTryonEnter(ctx);
     if (which === "bg_removal") return handleBackgroundRemovalEnter(ctx);
     if (which === "object_removal") return handleObjectRemovalEnter(ctx);
+    if (which === "photo_animate") return handlePhotoAnimateEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
   });
   bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
+  bot.callbackQuery(/^photo_animate:/, handlePhotoAnimateCallback);
 
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
@@ -540,6 +547,18 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document?.mime_type?.startsWith("image/"))
         return handleObjectRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.objectRemovalNotPhoto);
+      return;
+    }
+    if (
+      state?.state === "PHOTO_ANIMATE_AWAIT_PHOTO" ||
+      state?.state === "PHOTO_ANIMATE_AWAIT_CONFIRM"
+    ) {
+      // На AWAIT_CONFIRM новое фото = «передумал, заменю» — handler перезапишет
+      // buffer и снова покажет confirm-кнопку.
+      if (ctx.message?.photo) return handlePhotoAnimatePhoto(ctx);
+      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+        return handlePhotoAnimatePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.photoAnimateNotPhoto);
       return;
     }
     if (state?.state === "OBJECT_REMOVAL_AWAIT_PROMPT") {

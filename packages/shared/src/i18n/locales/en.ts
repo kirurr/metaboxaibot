@@ -111,6 +111,20 @@ export default {
       "✍️ Description is too long ({current} characters). The maximum is {max}. Shorten it and try again.",
     objectRemovalBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     objectRemovalGenerating: "🪄 Removing the object...",
+    photoAnimate: "🎞️ Animate photo",
+    photoAnimateWelcome:
+      "Turns a photo into a short animated clip (6 seconds, 720p). Aspect ratio is matched to the source image.",
+    photoAnimateStepPhoto: "Send the <b>photo</b> you want to animate. Max — 20 MB.",
+    photoAnimateNotPhoto: "📷 That's not a photo. Please send an image.",
+    photoAnimatePhotoTooLarge: "📷 The photo is too large. Max — 20 MB.",
+    photoAnimateAlbumNotice:
+      "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
+    photoAnimateReady: "🎞️ Got the photo. Tap the button — I'll animate it for 6 seconds.",
+    photoAnimateStartButton: "✨ Animate",
+    photoAnimateCancelButton: "✖ Cancel",
+    photoAnimateCancelled: "❌ Cancelled. If you change your mind — send the photo again.",
+    photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
+    photoAnimateGenerating: "🎞️ Starting animation...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
