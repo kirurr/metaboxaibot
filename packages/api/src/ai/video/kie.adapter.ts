@@ -4,7 +4,7 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError, PHOTO_ANIMATE_PROMPT } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
@@ -157,8 +157,12 @@ export class KieVideoAdapter implements VideoAdapter {
     const seedanceModel = SEEDANCE_MODEL_MAP[this.modelId];
     const klingMode = KLING_MODEL_MAP[this.modelId];
     const klingMotionMode = KLING_MOTION_MODEL_MAP[this.modelId];
+    // Сценарий «🎞️ Оживить фото» хранит prompt в БД как пустой (чтобы не
+    // светить технический английский в gallery/caption/transactions) — реальный
+    // фикс-промпт инжектится здесь, прямо в провайдер.
+    const effectivePrompt = this.modelId === "photo-animate" ? PHOTO_ANIMATE_PROMPT : input.prompt;
     const inputPayload: Record<string, unknown> = {
-      prompt: input.prompt,
+      prompt: effectivePrompt,
     };
 
     let model: string;

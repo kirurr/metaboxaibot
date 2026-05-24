@@ -12,7 +12,6 @@ import {
   PHOTO_ANIMATE_BUFFER_MODEL_ID,
   PHOTO_ANIMATE_DURATION_SEC,
   PHOTO_ANIMATE_RESOLUTION,
-  PHOTO_ANIMATE_PROMPT,
   PHOTO_ANIMATE_SUPPORTED_ASPECT_RATIOS,
 } from "@metabox/shared";
 import { logger } from "../logger.js";
@@ -224,12 +223,17 @@ export async function handlePhotoAnimateCallback(ctx: BotContext): Promise<void>
   const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
   if (chatId === undefined) return;
 
+  // Race-guard: до сабмита очищаем буфер и сбрасываем state. Второй tap по
+  // «Animate» (если первый колбек ещё не успел потушить keyboard) увидит
+  // пустой буфер и уйдёт в branch «buffer lost» — без второго submitVideo
+  // и без двойного списания токенов. AR/srcKey уже зафиксированы в локальных
+  // переменных, генерация ничего не теряет.
+  await userStateService.clearMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
+  await userStateService.setState(userId, "PHOTO_ANIMATE_AWAIT_PHOTO", null);
+
   let resolved: Record<string, string[]>;
   try {
-    resolved = await resolveMediaInputUrls(
-      { [PHOTO_ANIMATE_SRC_SLOT]: [srcKey] },
-      { userId, modelId: PHOTO_ANIMATE_BUFFER_MODEL_ID },
-    );
+    resolved = await resolveMediaInputUrls({ [PHOTO_ANIMATE_SRC_SLOT]: [srcKey] }, undefined);
   } catch (err) {
     if (err instanceof UserFacingError) {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
@@ -237,15 +241,13 @@ export async function handlePhotoAnimateCallback(ctx: BotContext): Promise<void>
       logger.error(err, "Photo animate: failed to resolve media URL");
       await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
     }
-    await userStateService.clearMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
     await userStateService.setState(userId, "SCENARIOS_SECTION", null);
     return;
   }
 
-  // AR из буфера сохранён в момент upload'а (до возможного S3-fetch'а в
-  // resolveMediaInputUrls) — поэтому даже если presigned-URL переподписался
-  // под другим именем, AR актуален и снапнут корректно. Defensive fallback
-  // на 1:1 — лучше квадрат чем ошибка в адаптере.
+  // AR детектится при upload'е и кладётся в буфер до confirm-callback'а —
+  // здесь только читаем. Defensive fallback на 1:1 — лучше квадрат, чем
+  // ошибка в адаптере на неизвестном AR.
   const aspectRatio =
     storedAr && PHOTO_ANIMATE_SUPPORTED_ASPECT_RATIOS.includes(storedAr) ? storedAr : "1:1";
 
@@ -256,17 +258,23 @@ export async function handlePhotoAnimateCallback(ctx: BotContext): Promise<void>
     await videoGenerationService.submitVideo({
       userId,
       modelId: PHOTO_ANIMATE_MODEL_ID,
-      prompt: PHOTO_ANIMATE_PROMPT,
+      // prompt пустой по дизайну: реальный фикс-промпт инжектится в адаптере
+      // (kie.adapter / fal.adapter) при modelId === "photo-animate". Так
+      // англоязычная instruction не попадает в БД, web/webapp gallery, TG
+      // caption и историю транзакций — нигде не светится.
+      prompt: "",
       mediaInputs: resolved,
       aspectRatio,
       duration: PHOTO_ANIMATE_DURATION_SEC,
       extraModelSettings: {
         resolution: PHOTO_ANIMATE_RESOLUTION,
-        duration: PHOTO_ANIMATE_DURATION_SEC,
         aspect_ratio: aspectRatio,
       },
       telegramChatId: chatId,
       sendOriginalLabel: ctx.t.common.sendOriginal,
+      // Defense-in-depth: даже при empty prompt, флаг гарантирует что worker
+      // не покажет blockquote — на случай если кто-то перепутает payloads.
+      hidePromptInCaption: true,
     });
     submitOk = true;
   } catch (err: unknown) {
@@ -282,13 +290,10 @@ export async function handlePhotoAnimateCallback(ctx: BotContext): Promise<void>
     }
   }
 
-  // На успехе чистим буфер и оставляем юзера в ожидании НОВОГО фото —
-  // следующий присланный кадр стартует новый flow. На ошибке возвращаемся
-  // в Сценарии.
-  await userStateService.clearMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
-  await userStateService.setState(
-    userId,
-    submitOk ? "PHOTO_ANIMATE_AWAIT_PHOTO" : "SCENARIOS_SECTION",
-    null,
-  );
+  // Буфер уже очищен до сабмита (race-guard) и state стоит в AWAIT_PHOTO —
+  // на успехе ничего больше делать не нужно, следующий присланный кадр
+  // стартует новый flow. На ошибке возвращаемся в Сценарии.
+  if (!submitOk) {
+    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
+  }
 }

@@ -682,8 +682,10 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     description: "Создаёт короткое видео-оживление из одной фотографии.",
     section: "video",
     provider: "kie",
-    costUsdPerRequest: 0,
-    costUsdPerSecond: 0.0425,
+    // Фикс-длительность 6s → биллим как per-request, чтобы cost-line показывал
+    // итог за ролик (0.255 ✦), а не «0.04 ✦ за секунду». $0.255 = среднее
+    // KIE 720p ($0.015/s × 6) и FAL 720p ($0.07/s × 6).
+    costUsdPerRequest: 0.255,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -2483,8 +2485,9 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
     description: "Fallback на FAL reference-to-video при недоступности KIE.",
     section: "video",
     provider: "fal",
-    costUsdPerRequest: 0,
-    costUsdPerSecond: 0.0425,
+    // Та же per-request цена что у primary — биллинг при fallback'е остаётся
+    // по primary, но cost-preview не должен расходиться при пересчёте.
+    costUsdPerRequest: 0.255,
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
