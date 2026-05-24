@@ -190,7 +190,7 @@ export default {
     voiceCloneProviderUnavailable:
       "❌ Voice cloning service is temporarily unavailable. Please try again in 1-2 minutes.",
     musicActivated:
-      "🎵 Music generation (Suno) activated.\nDescribe the music you want (genre, mood, style) and I will create it.",
+      '🎵 Describe the music (genre, mood, style). Suno will write the lyrics for you. Description up to 500 characters.\n\n📝 Want a song with your own lyrics? Tap "⚙ Management" and paste the song text into the "Song lyrics" field. Then in chat just describe the style and sound (up to 1000 characters); your lyrics will be used in the song as-is (up to 5000 characters).',
     musicElActivated:
       "🎶 ElevenLabs music activated.\nDescribe the sound atmosphere or melody and I will generate it.",
     soundsActivated:
@@ -569,6 +569,8 @@ export default {
     // Suno
     sunoPromptTooLong:
       "❌ Your description is too long ({current} characters). The maximum for Suno is {max} characters. Please shorten it and try again.",
+    sunoPromptTooLongNoLyrics:
+      '❌ Description is too long ({current} characters out of 500).\n\nTwo options:\n\n1. Shorten the description to 500 characters and send again.\n\n2. Want a song with your own lyrics? Open "⚙ Management" and paste your lyrics into the "Song lyrics" field. Then in chat you only need a style description (up to 1000 characters), and your lyrics will be used in the song as-is (up to 5000).',
     // Higgsfield
     higgsfieldTooManyMotions:
       "❌ Too many motion presets selected. The maximum is {max}. Remove extras in settings and try again.",

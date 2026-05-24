@@ -124,8 +124,12 @@ export class ApipassSunoAdapter implements AudioAdapter {
       if (/cannot exceed \d+ characters/i.test(msg)) {
         const match = msg.match(/exceed\s+(\d+)\s+characters/i);
         const max = match ? Number(match[1]) : 500;
+        // 500 = non-custom prompt limit. Подсказываем юзеру обход через свои
+        // lyrics в Управлении; в custom-mode (3000/5000/200/1000) ничего такого
+        // не подсунешь — там просто «сократите».
+        const key = max === 500 ? "sunoPromptTooLongNoLyrics" : "sunoPromptTooLong";
         throw new UserFacingError(`Suno API: ${msg}`, {
-          key: "sunoPromptTooLong",
+          key,
           params: { max, current: input.prompt.length },
         });
       }

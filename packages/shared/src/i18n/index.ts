@@ -382,6 +382,7 @@ export interface Translations {
     elevenlabsPromptTooLong: string;
     // Suno
     sunoPromptTooLong: string;
+    sunoPromptTooLongNoLyrics: string;
     // Higgsfield
     higgsfieldTooManyMotions: string;
     alreadyGenerating: string;

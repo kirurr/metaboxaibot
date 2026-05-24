@@ -121,13 +121,85 @@ describe("KieElevenLabsAdapter — submit()", () => {
     expect(await adapter.submit(baseInput())).toBe("el-fallback:error");
   });
 
-  test("промпт > 5000 символов → UserFacingError, kie не дёргается (не фолбэк)", async () => {
+  test("tts-el промпт > 5000 → UserFacingError с max=5000, current=5001, kie не дёргается", async () => {
     const { fn, calls } = createMockFetch({});
     const adapter = new KieElevenLabsAdapter("tts-el", "test-kie-key", fn);
-    await expect(adapter.submit(baseInput({ prompt: "x".repeat(5001) }))).rejects.toBeInstanceOf(
-      UserFacingError,
+    const err = await adapter.submit(baseInput({ prompt: "x".repeat(5001) })).then(
+      () => null,
+      (e) => e,
     );
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).key).toBe("elevenlabsPromptTooLong");
+    expect((err as UserFacingError).params).toEqual({ max: 5000, current: 5001 });
     expect(calls.kieSubmit).toBe(0);
+  });
+
+  test("sounds-el промпт > 450 → UserFacingError с max=450, current=451, kie не дёргается", async () => {
+    const { fn, calls } = createMockFetch({});
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn);
+    const err = await adapter.submit(baseInput({ prompt: "x".repeat(451) })).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).key).toBe("elevenlabsPromptTooLong");
+    expect((err as UserFacingError).params).toEqual({ max: 450, current: 451 });
+    expect(calls.kieSubmit).toBe(0);
+  });
+
+  test("music-el промпт > 450 → UserFacingError с max=450, current=451, kie не дёргается", async () => {
+    const { fn, calls } = createMockFetch({});
+    const adapter = new KieElevenLabsAdapter("music-el", "test-kie-key", fn);
+    const err = await adapter.submit(baseInput({ prompt: "x".repeat(451) })).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).key).toBe("elevenlabsPromptTooLong");
+    expect((err as UserFacingError).params).toEqual({ max: 450, current: 451 });
+    expect(calls.kieSubmit).toBe(0);
+  });
+
+  test("kie code:500 'text exceeds maximum length' → UserFacingError с params, EL не дёргается", async () => {
+    // Симулируем кейс когда юзер прошёл наш guardTextLength (prompt <= MAX) но
+    // KIE всё равно режет (например, поменяли лимит ниже у себя). Адаптер должен
+    // классифицировать как user-input ошибку, НЕ запускать EL-fallback (у прямого
+    // EL такой же лимит 450 — фолбэк всё равно упал бы и спамил on-call).
+    const shortPrompt = "short prompt that passes guard";
+    const { fn, calls } = createMockFetch({
+      kieSubmit: () => jsonResponse({ code: 500, msg: "text exceeds maximum length", data: null }),
+    });
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn);
+    const err = await adapter.submit(baseInput({ prompt: shortPrompt })).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(UserFacingError);
+    expect((err as UserFacingError).key).toBe("elevenlabsPromptTooLong");
+    expect((err as UserFacingError).params).toEqual({ max: 450, current: shortPrompt.length });
+    expect(calls.kieSubmit).toBe(1);
+    expect(calls.elSound).toBe(0);
+  });
+
+  test("kie code:500 'text too long' (вариация формулировки) → UserFacingError, EL не дёргается", async () => {
+    // Regex шире наблюдаемого "text exceeds maximum length" — покрывает
+    // потенциальные рефразы типа "text too long" / "text length exceeds limit".
+    const { fn, calls } = createMockFetch({
+      kieSubmit: () => jsonResponse({ code: 500, msg: "text too long", data: null }),
+    });
+    const adapter = new KieElevenLabsAdapter("music-el", "test-kie-key", fn);
+    await expect(adapter.submit(baseInput())).rejects.toBeInstanceOf(UserFacingError);
+    expect(calls.elSound).toBe(0);
+  });
+
+  test("kie code:500 НЕ про длину → sentinel taskId (EL-fallback запускается)", async () => {
+    // Защита от over-match: code:500 с msg НЕ про длину — обычный 5xx, должен
+    // вернуть sentinel и пойти в EL-fallback как раньше.
+    const { fn } = createMockFetch({
+      kieSubmit: () => jsonResponse({ code: 500, msg: "internal server error", data: null }),
+    });
+    const adapter = new KieElevenLabsAdapter("sounds-el", "test-kie-key", fn);
+    expect(await adapter.submit(baseInput())).toBe("el-fallback:code-500");
   });
 });
 

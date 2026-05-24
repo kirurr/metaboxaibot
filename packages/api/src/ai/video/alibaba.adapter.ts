@@ -1,8 +1,31 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { probeVideoMetadata } from "../../utils/mp4-duration.js";
 import { logger } from "../../logger.js";
+
+/**
+ * Бросает UserFacingError "model temporarily unavailable" с роутингом ops-алёрта
+ * в balance-тему, если DashScope ответил `code: "Arrearage"` — наш аккаунт в
+ * просрочке. Юзер видит нейтральное «модель отдыхает» (без слова "баланс"),
+ * processor превращает throw в UnrecoverableError → BullMQ не ретраит.
+ */
+function throwIfArrearage(modelId: string, code: string | undefined, body: string): void {
+  const isArrearage =
+    code === "Arrearage" || /\bArrearage\b/i.test(body) || /account.*good\s+standing/i.test(body);
+  if (!isArrearage) return;
+  throw new UserFacingError(
+    `Alibaba DashScope account in arrears (${modelId}): ${body.slice(0, 200)}`,
+    {
+      key: "modelTemporarilyUnavailable",
+      section: "video",
+      params: { modelName: AI_MODELS[modelId]?.name ?? modelId },
+      notifyOps: true,
+      opsAlertDedupKey: "alibaba-arrearage",
+      opsAlertChannel: "balance",
+    },
+  );
+}
 
 const DASHSCOPE_BASE = "https://dashscope-intl.aliyuncs.com/api/v1";
 const SUBMIT_PATH = "/services/aigc/video-generation/video-synthesis";
@@ -194,11 +217,17 @@ export class AlibabaVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
+      // Account-in-arrears (400 + code:"Arrearage") — provider-wide billing,
+      // не ретраим, алёртим в balance-тему с дедупом.
+      throwIfArrearage(this.modelId, undefined, txt);
       throw new Error(`Alibaba DashScope error ${resp.status}: ${txt}`);
     }
 
     const data = (await resp.json()) as DashScopeSubmitResponse;
-    if (data.code) throw new Error(`Alibaba DashScope error: ${data.code} — ${data.message}`);
+    if (data.code) {
+      throwIfArrearage(this.modelId, data.code, `${data.code} — ${data.message ?? ""}`);
+      throw new Error(`Alibaba DashScope error: ${data.code} — ${data.message}`);
+    }
     return data.output.task_id;
   }
 
@@ -211,7 +240,14 @@ export class AlibabaVideoAdapter implements VideoAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`Alibaba poll error ${resp.status}`);
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      // Аккаунт может уйти в Arrearage между submit'ом и poll'ом — wan async,
+      // поллим часами. Без этой проверки 400+Arrearage летел бы как generic
+      // 5xx-эквивалент: BullMQ ретраит, alert в общий канал, юзер ждёт.
+      throwIfArrearage(this.modelId, undefined, txt);
+      throw new Error(`Alibaba poll error ${resp.status}${txt ? `: ${txt.slice(0, 200)}` : ""}`);
+    }
 
     const data = (await resp.json()) as DashScopePollResponse;
     const { task_status, video_url, message } = data.output;

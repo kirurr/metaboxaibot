@@ -84,6 +84,7 @@ const USER_FACING_KEY_TO_CODE: Record<string, GenerationErrorCode> = {
   promptTooLong: "INPUT_VALIDATION",
   elevenlabsPromptTooLong: "INPUT_VALIDATION",
   sunoPromptTooLong: "INPUT_VALIDATION",
+  sunoPromptTooLongNoLyrics: "INPUT_VALIDATION",
   promptNotEnglish: "INPUT_VALIDATION",
   kieImageAspectRatioOutOfRange: "INPUT_VALIDATION",
   kieVideoDurationOutOfRange: "INPUT_VALIDATION",

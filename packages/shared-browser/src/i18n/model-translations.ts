@@ -152,9 +152,9 @@ export const MODEL_TRANSLATIONS_EN: Record<string, ModelTranslation> = {
       "ElevenLabs text-to-speech — wide library of official voices. Higher quality and expressiveness than OpenAI TTS, but more expensive.",
   },
   suno: {
-    name: "🎵 Music Generation (Suno)",
+    name: "🎵 Suno",
     description:
-      "Generates full music tracks with vocals and arrangement. Set style, mood and song lyrics. Up to 4 minutes. Slower than ElevenLabs, but with full vocals.",
+      "Generates full music tracks with vocals and arrangement. Set style, mood and song lyrics. Up to 4 minutes. Instrumental-only mode is also available under ⚙ Management.",
   },
   "sounds-el": {
     name: "🔔 Sound Effects (ElevenLabs)",

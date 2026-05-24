@@ -121,11 +121,14 @@ export class KieSunoAdapter implements AudioAdapter {
         );
       }
     } else if (input.prompt.length > NON_CUSTOM_PROMPT_MAX) {
+      // Non-custom режим (без своих lyrics) — у Suno жёсткий лимит 500. Отдельный
+      // ключ нужен чтобы показать юзеру выход: вписать свой текст в Управление,
+      // тогда лимит на сам текст вырастает до 5000, а описание в чате — до 1000.
       throw new UserFacingError(
         `Kie Suno: prompt ${input.prompt.length} > ${NON_CUSTOM_PROMPT_MAX} chars`,
         {
-          key: "sunoPromptTooLong",
-          params: { max: NON_CUSTOM_PROMPT_MAX, current: input.prompt.length },
+          key: "sunoPromptTooLongNoLyrics",
+          params: { current: input.prompt.length },
         },
       );
     }
