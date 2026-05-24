@@ -234,6 +234,7 @@
     "typeImage": "images",
     "typeVideo": "video",
     "typeAudio": "audio",
+    "expiredFilesDropped": "Some files have expired and were removed. Please upload again.",
     "historyTitle": "Recent generations",
     "historyGenerating": "Generating…",
     "historyError": "Generation failed",

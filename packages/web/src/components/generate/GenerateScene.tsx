@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { Trans, useTranslation } from "react-i18next";
-import { uploadChatFile, type ChatUploadDto } from "@/api/uploads";
+import { uploadChatFile, signChatUploads, type ChatUploadDto } from "@/api/uploads";
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
 import { ChipPopover } from "@/components/settings/ChipPopover";
@@ -234,11 +234,15 @@ function SlotCard({
   files,
   onAdd,
   onRemove,
+  onSlotError,
 }: {
   slot: MediaInputSlotDto;
   files: SlotFile[];
   onAdd: (files: FileList) => void;
   onRemove: (id: string) => void;
+  /** Превью не загрузилось (presigned URL мёртв / 403). Родитель удаляет файл
+   *  и показывает rate-limited toast. */
+  onSlotError?: (id: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isMulti = slot.maxImages > 1;
@@ -279,7 +283,12 @@ function SlotCard({
       ) : (
         <div className="gen-slot-grid">
           {files.map((f) => (
-            <SlotFileTile key={f.id} file={f} onRemove={() => onRemove(f.id)} />
+            <SlotFileTile
+              key={f.id}
+              file={f}
+              onRemove={() => onRemove(f.id)}
+              onPreviewError={() => onSlotError?.(f.id)}
+            />
           ))}
           {canAddMore && (
             <button
@@ -301,7 +310,16 @@ function SlotCard({
   );
 }
 
-function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void }) {
+function SlotFileTile({
+  file,
+  onRemove,
+  onPreviewError,
+}: {
+  file: SlotFile;
+  onRemove: () => void;
+  /** Превью (img/video) выдало `error` — родитель решает, удалять ли tile. */
+  onPreviewError?: () => void;
+}) {
   // ObjectURL для preview из локального File (быстрее чем ждать presigned URL).
   // Для image — превью; для video — тоже превью (первый кадр через <video>).
   // Audio не превьюим — там нечего показать, останется иконка.
@@ -322,6 +340,11 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
   const previewKind = fileKind ?? dtoKind;
   const url = file.status === "ready" ? (file.dto.url ?? localUrl) : localUrl;
   const altName = file.file?.name ?? (file.status === "ready" ? file.dto.name : "");
+  // Только restored-файлы (без сырого File) могут «протухнуть» — у свежезагруженных
+  // fallback на localUrl всё равно покажет картинку, дроп бы был ложным.
+  const handlePreviewError = () => {
+    if (!file.file) onPreviewError?.();
+  };
   return (
     <div
       className={clsx(
@@ -331,9 +354,9 @@ function SlotFileTile({ file, onRemove }: { file: SlotFile; onRemove: () => void
       )}
     >
       {url && previewKind === "image" ? (
-        <img src={url} alt={altName} />
+        <img src={url} alt={altName} onError={handlePreviewError} />
       ) : url && previewKind === "video" ? (
-        <video src={url} muted playsInline preload="metadata" />
+        <video src={url} muted playsInline preload="metadata" onError={handlePreviewError} />
       ) : (
         <div className="gen-slot-tile-icon">
           <ImageIcon size={16} />
@@ -751,6 +774,7 @@ export function GenerateScene({
       },
       { replace: true },
     );
+    void refreshRestoredSlotUrls(slots);
   }
 
   // Читает per-family bag из draft-store, фильтрует слоты по mediaInputs
@@ -862,6 +886,7 @@ export function GenerateScene({
     const { settings, slots } = restoreDraftForModel(modelId);
     setSettingValues(settings);
     setSlotFiles(slots);
+    void refreshRestoredSlotUrls(slots);
   }, [modelId, models]);
 
   // Sync settingValues → draft-store под per-family key.
@@ -1373,6 +1398,71 @@ export function GenerateScene({
     }));
   }
 
+  // Rate-limit для toast'а «файл устарел»: при батче битых превью (например, 4
+  // картинки в multi-слоте все с протухшей подписью) не хотим 4 одинаковых
+  // тоста подряд. Достаточно одного раз в 3 секунды.
+  const expiredToastAtRef = useRef<number>(0);
+  function pushExpiredToastOnce() {
+    const now = Date.now();
+    if (now - expiredToastAtRef.current < 3_000) return;
+    expiredToastAtRef.current = now;
+    pushToast({ type: "info", message: t("generate.expiredFilesDropped") });
+  }
+
+  function handleSlotPreviewError(slotKey: string, id: string) {
+    removeFromSlot(slotKey, id);
+    pushExpiredToastOnce();
+  }
+
+  // Перевыпускает presigned URL'ы для restored-файлов (status="ready" без
+  // сырого File). Если backend вернул `null` (s3Key мёртв / чужой) — файл
+  // выбрасываем из слота. Sync-effect `slotFiles → setSlots` ниже сам
+  // запишет обновлённый DTO обратно в draft-store.
+  async function refreshRestoredSlotUrls(slots: Record<string, SlotFile[]>) {
+    const keys = new Set<string>();
+    for (const arr of Object.values(slots)) {
+      for (const f of arr) {
+        if (f.status === "ready" && !f.file) keys.add(f.dto.s3Key);
+      }
+    }
+    if (keys.size === 0) return;
+    let result: Record<string, string | null>;
+    try {
+      result = await signChatUploads(Array.from(keys));
+    } catch {
+      // На ошибке сети ничего не делаем — onError-fallback на <img>/<video>
+      // подчистит мёртвые tile'ы по факту.
+      return;
+    }
+    let dropped = 0;
+    setSlotFiles((prev) => {
+      const next: Record<string, SlotFile[]> = {};
+      for (const [slotKey, arr] of Object.entries(prev)) {
+        const kept: SlotFile[] = [];
+        for (const f of arr) {
+          if (f.status !== "ready" || f.file) {
+            kept.push(f);
+            continue;
+          }
+          const fresh = result[f.dto.s3Key];
+          if (fresh === undefined) {
+            // ключ не в ответе (например, добавлен пока летел запрос) — оставляем
+            kept.push(f);
+            continue;
+          }
+          if (fresh === null) {
+            dropped++;
+            continue;
+          }
+          kept.push({ ...f, dto: { ...f.dto, url: fresh } });
+        }
+        next[slotKey] = kept;
+      }
+      return next;
+    });
+    if (dropped > 0) pushExpiredToastOnce();
+  }
+
   // Аплоад в процессе → дизейблим CTA. Без этого юзер может стартовать
   // генерацию с пустым/неполным набором ассетов (s3Key'и ещё не выданы).
   const uploadInProgress = useMemo(
@@ -1780,6 +1870,7 @@ export function GenerateScene({
                   files={slotFiles[slot.slotKey] ?? []}
                   onAdd={(fl) => addToSlot(slot.slotKey, fl)}
                   onRemove={(id) => removeFromSlot(slot.slotKey, id)}
+                  onSlotError={(id) => handleSlotPreviewError(slot.slotKey, id)}
                 />
               ))}
             </div>

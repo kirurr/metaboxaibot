@@ -41,7 +41,7 @@ import {
   PDF_BYTES,
   PNG_BYTES,
 } from "./fixtures/multipart.js";
-import { uploadBuffer } from "../src/services/s3.service.js";
+import { getFileUrl, uploadBuffer } from "../src/services/s3.service.js";
 
 interface UploadResponse {
   s3Key: string;
@@ -243,5 +243,176 @@ describe("POST /web/chat-uploads", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as UploadResponse;
     expect(body.name).toBe("upload.png");
+  });
+});
+
+/**
+ * POST /web/chat-uploads/sign — перевыпускает presigned URL'ы по массиву s3Key.
+ * Используется restored-слотами на странице генерации (presigned живёт 1 час,
+ * draft в localStorage дольше). Чужой ключ (не `chat-uploads/{aibUserId}/...`)
+ * → null в ответе, без 403, чтобы один битый ключ не ронял batch.
+ */
+describe("POST /web/chat-uploads/sign", () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = await buildTestApp();
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    vi.mocked(getFileUrl).mockClear();
+    vi.mocked(getFileUrl).mockImplementation(async (key: string) => `https://s3.test/${key}`);
+  });
+
+  interface SignResponse {
+    urls: Record<string, string | null>;
+  }
+
+  // ── Auth guard ────────────────────────────────────────────────────────────
+
+  it("returns 401 without Authorization header", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: ["chat-uploads/anybody/x.png"] },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns 403 TELEGRAM_NOT_LINKED for web-only user", async () => {
+    const { accessToken } = await createTestUser({ withTelegram: false });
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: ["chat-uploads/anybody/x.png"] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ code: "TELEGRAM_NOT_LINKED" });
+  });
+
+  // ── Schema validation ─────────────────────────────────────────────────────
+
+  it("returns 400 when s3Keys is missing", async () => {
+    const { accessToken } = await createTestUser();
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: {},
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when s3Keys exceeds maxItems (32)", async () => {
+    const { user, accessToken } = await createTestUser();
+    const s3Keys = Array.from({ length: 33 }, (_, i) => `chat-uploads/${user.id}/file-${i}.png`);
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  // ── Happy path ────────────────────────────────────────────────────────────
+
+  it("returns fresh urls for the user's own s3Keys", async () => {
+    const { user, accessToken } = await createTestUser();
+    const k1 = `chat-uploads/${user.id}/aaa.png`;
+    const k2 = `chat-uploads/${user.id}/bbb.mp4`;
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [k1, k2] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[k1]).toBe(`https://s3.test/${k1}`);
+    expect(body.urls[k2]).toBe(`https://s3.test/${k2}`);
+    expect(vi.mocked(getFileUrl)).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns empty urls map for empty s3Keys array", async () => {
+    const { accessToken } = await createTestUser();
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ urls: {} });
+    expect(vi.mocked(getFileUrl)).not.toHaveBeenCalled();
+  });
+
+  // ── Security: foreign s3Key prefix ────────────────────────────────────────
+
+  it("returns null for s3Keys belonging to another user (no getFileUrl call)", async () => {
+    const { user, accessToken } = await createTestUser();
+    const own = `chat-uploads/${user.id}/own.png`;
+    // Чужой префикс: другой userId.
+    const foreign = `chat-uploads/some-other-user-id/secret.png`;
+    // Нестандартный путь полностью (например, попытка достать произвольный файл).
+    const random = `private/admin-export.csv`;
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [own, foreign, random] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[own]).toBe(`https://s3.test/${own}`);
+    expect(body.urls[foreign]).toBeNull();
+    expect(body.urls[random]).toBeNull();
+    // getFileUrl зовётся ТОЛЬКО для своих ключей — чужие отсекаются по префиксу
+    // ДО вызова S3, чтобы один чужой ключ не дал утечку через signed URL.
+    expect(vi.mocked(getFileUrl)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getFileUrl)).toHaveBeenCalledWith(own);
+  });
+
+  // ── Failure modes ─────────────────────────────────────────────────────────
+
+  it("returns null when getFileUrl rejects (e.g. S3 transient error)", async () => {
+    vi.mocked(getFileUrl).mockRejectedValueOnce(new Error("S3 down"));
+    const { user, accessToken } = await createTestUser();
+    const broken = `chat-uploads/${user.id}/broken.png`;
+    const ok = `chat-uploads/${user.id}/ok.png`;
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [broken, ok] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[broken]).toBeNull();
+    expect(body.urls[ok]).toBe(`https://s3.test/${ok}`);
+  });
+
+  // ── Dedup ─────────────────────────────────────────────────────────────────
+
+  it("deduplicates s3Keys before calling getFileUrl", async () => {
+    const { user, accessToken } = await createTestUser();
+    const k = `chat-uploads/${user.id}/dup.png`;
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [k, k, k] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[k]).toBe(`https://s3.test/${k}`);
+    expect(Object.keys(body.urls)).toHaveLength(1);
+    expect(vi.mocked(getFileUrl)).toHaveBeenCalledTimes(1);
   });
 });

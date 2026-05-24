@@ -234,6 +234,7 @@
     "typeImage": "изображения",
     "typeVideo": "видео",
     "typeAudio": "аудио",
+    "expiredFilesDropped": "Часть файлов устарела и удалена. Загрузите заново.",
     "historyTitle": "Недавние генерации",
     "historyGenerating": "Генерация…",
     "historyError": "Ошибка генерации",
