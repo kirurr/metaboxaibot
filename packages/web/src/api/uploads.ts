@@ -1,4 +1,4 @@
-import { ApiError, API_BASE } from "./client";
+import { apiClient, ApiError, API_BASE } from "./client";
 import { useAuthStore } from "@/stores/authStore";
 
 /**
@@ -65,4 +65,17 @@ export async function uploadChatFile(file: File): Promise<ChatUploadDto> {
     throw new ApiError(res.status, body.code, body.error || `upload failed: ${res.status}`, body);
   }
   return (await res.json()) as ChatUploadDto;
+}
+
+/**
+ * Перевыпускает presigned URL'ы для уже загруженных файлов по их s3Key.
+ * Возвращает мапу s3Key → url|null (null если ключ чужой или getFileUrl упал).
+ */
+export async function signChatUploads(s3Keys: string[]): Promise<Record<string, string | null>> {
+  if (s3Keys.length === 0) return {};
+  const { urls } = await apiClient<{ urls: Record<string, string | null> }, { s3Keys: string[] }>(
+    ENDPOINT + "/sign",
+    { method: "POST", body: { s3Keys } },
+  );
+  return urls ?? {};
 }

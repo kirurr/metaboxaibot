@@ -213,6 +213,63 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  // ── POST /web/chat-uploads/sign ────────────────────────────────────────
+  /**
+   * Перевыпускает presigned URL'ы для уже загруженных файлов по их s3Key.
+   * Используется страницами генерации (`GenerateScene`) при rehydrate
+   * draft-state — presigned URL живёт час, draft хранится в localStorage
+   * дольше, поэтому без рефреша превью бы ломалось.
+   *
+   * Чужой ключ (не `chat-uploads/{aibUserId}/...`) → возвращаем `null`,
+   * чтобы один битый ключ не ронял весь batch.
+   */
+  fastify.post<{ Body: { s3Keys: string[] } }>(
+    "/web/chat-uploads/sign",
+    {
+      schema: {
+        description: "Refresh presigned URLs for previously uploaded chat-uploads files",
+        body: {
+          type: "object",
+          required: ["s3Keys"],
+          properties: {
+            s3Keys: {
+              type: "array",
+              items: { type: "string" },
+              maxItems: 32,
+            },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              urls: {
+                type: "object",
+                additionalProperties: { type: "string", nullable: true },
+              },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request) => {
+      const { aibUserId } = request.webUser!;
+      const expectedPrefix = `chat-uploads/${aibUserId}/`;
+      const unique = Array.from(new Set(request.body.s3Keys));
+      const urls: Record<string, string | null> = {};
+      await Promise.all(
+        unique.map(async (key) => {
+          urls[key] = key.startsWith(expectedPrefix)
+            ? await getFileUrl(key).catch(() => null)
+            : null;
+        }),
+      );
+      return { urls };
+    },
+  );
+
   // ── GET /web/balance ────────────────────────────────────────────────────
   fastify.get("/web/balance", { schema: { hide: true } as any }, async (request) => {
     const { aibUserId } = request.webUser!;
