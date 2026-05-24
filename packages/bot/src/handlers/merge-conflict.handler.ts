@@ -2,6 +2,7 @@ import type { BotContext } from "../types/context.js";
 import { db } from "@metabox/api/db";
 import { confirmMerge } from "@metabox/api/services";
 import { config } from "@metabox/shared";
+import { finalizeStart } from "../commands/start.js";
 
 /**
  * User chose a mentor (Step 1 → Step 2: confirmation).
@@ -39,10 +40,16 @@ export async function handleMergeChoice(ctx: BotContext): Promise<void> {
 /**
  * User cancelled merge.
  * callback_data: "merge:cancel"
+ *
+ * MENTOR_CONFLICT прервал /start ДО finalizeStart — юзер мог остаться без
+ * welcome-бонуса, языка, FSM=IDLE и главного меню. После cancel'а гоняем
+ * finalizeStart, чтобы он мог использовать бота без повторного /start.
+ * Подавляем «Мы нашли ваш аккаунт на Metabox» — связи с Metabox не было.
  */
 export async function handleMergeCancel(ctx: BotContext): Promise<void> {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText("Объединение отменено. Ваши аккаунты остались раздельными.");
+  await finalizeStart(ctx, { suppressMetaboxLinkedNotification: true });
 }
 
 /**
@@ -81,4 +88,11 @@ export async function handleMergeConfirm(ctx: BotContext): Promise<void> {
       `❌ Не удалось объединить аккаунты. Попробуйте ещё раз или обратитесь в поддержку: @${config.supportTg}`,
     );
   }
+
+  // MENTOR_CONFLICT прервал /start ДО finalizeStart — даже после успешного
+  // merge юзер остался бы без welcome-бонуса и главного меню. Гоняем хвост
+  // здесь. Подавляем «Мы нашли ваш аккаунт на Metabox» — пользователь уже
+  // увидел «✅ Аккаунты успешно объединены», дубликат не нужен. При ошибке
+  // confirmMerge всё равно вызываем — юзер хотя бы получит бонус и меню.
+  await finalizeStart(ctx, { suppressMetaboxLinkedNotification: true });
 }

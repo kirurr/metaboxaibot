@@ -170,6 +170,166 @@ async function sendStartMessages(
 }
 
 /**
+ * Финализация любого `/start`: язык, FSM=IDLE, registerBotUser (fire-and-forget),
+ * welcome-бонус (идемпотентно через welcome_bonus_receipts), welcome-пакет
+ * сообщений, команды. Гарантия — после вызова юзер может пользоваться ботом
+ * без повторного `/start`.
+ *
+ * Вызывается из:
+ *   - `handleStart` — общий хвост любых deep-link веток. Ошибки `link_`/`linkweb_`
+ *     (TELEGRAM_MISMATCH, state expired, MERGE_BLOCKED и т.д.) теперь не делают
+ *     early-return — они показывают своё сообщение об ошибке и падают сюда,
+ *     чтобы юзер всё равно получил бонус и оказался в working state.
+ *   - merge-conflict callback'ов (`handleMergeConfirm`/`handleMergeCancel`) —
+ *     MENTOR_CONFLICT прерывает /start (юзер в picker-flow), и без вызова
+ *     finalizeStart из callback'ов юзер остался бы без бонуса даже после resolve.
+ *
+ * Welcome-бонусная подписка создаётся ТОЛЬКО при отсутствии LocalSubscription —
+ * см. user.service.ts. Если из metabox уже пришла подписка (sync через
+ * /internal/sync-subscription), Trial не создаётся, токены всё равно начисляются.
+ */
+export async function finalizeStart(
+  ctx: BotContext,
+  opts: {
+    param?: string;
+    resolvedReferrerUserId?: string | null;
+    /** Подавить «Мы нашли ваш аккаунт на Metabox…» (для linkweb_/merge-callback'ов,
+     *  которые уже отправили своё сообщение о привязке). */
+    suppressMetaboxLinkedNotification?: boolean;
+  } = {},
+): Promise<void> {
+  if (!ctx.user) return;
+
+  const inferredLang = inferTelegramLanguage(ctx);
+  const isNew = ctx.user.isNew;
+  const updatedUser = await userService.setLanguage(ctx.user.id, inferredLang);
+  await userStateService.setState(ctx.user.id, "IDLE");
+  const t = getT(inferredLang);
+
+  // Register stub account on Metabox (or link existing) — fire-and-forget
+  if (config.metabox?.apiUrl) {
+    (async () => {
+      try {
+        const freshUser = await db.user.findUnique({
+          where: { id: ctx.user!.id },
+          select: {
+            referredById: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            telegramId: true,
+            referredBy: { select: { telegramId: true } },
+          },
+        });
+        const referrerTelegramId = freshUser?.referredBy?.telegramId ?? null;
+        const telegramId = ctx.user!.telegramId ?? freshUser?.telegramId;
+        if (!telegramId) {
+          logger.warn(
+            { userId: ctx.user!.id.toString() },
+            "[finalizeStart registerBotUser] no telegramId on user — skip Metabox register",
+          );
+          return;
+        }
+        const { registerBotUser } = await import("@metabox/api/services");
+        const result = await registerBotUser({
+          telegramId,
+          firstName: freshUser?.firstName ?? ctx.user!.firstName,
+          lastName: freshUser?.lastName ?? ctx.user!.lastName,
+          username: freshUser?.username ?? ctx.user!.username,
+          referrerTelegramId,
+          referrerUserId: opts.resolvedReferrerUserId ?? undefined,
+          aiboxUserId: ctx.user!.id,
+        });
+        if (result?.ok) {
+          const previousMetaboxUserId = ctx.user!.metaboxUserId;
+          const driftDetected = !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
+
+          if (!result.isStub) {
+            try {
+              await mergeWebUserIfExists(ctx.user!.id, result.userId);
+            } catch (mergeErr) {
+              logger.error(
+                { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
+                "[finalizeStart registerBotUser] merge with web-only user failed",
+              );
+              return;
+            }
+          }
+
+          await db.user.update({
+            where: { id: ctx.user!.id },
+            data: {
+              metaboxReferralCode: result.referralCode,
+              ...(!result.isStub ? { metaboxUserId: result.userId } : {}),
+            },
+          });
+
+          if (driftDetected) {
+            logger.warn(
+              {
+                telegramId: telegramId.toString(),
+                userId: ctx.user!.id.toString(),
+                from: previousMetaboxUserId,
+                to: result.userId,
+                isStub: result.isStub,
+              },
+              "[finalizeStart registerBotUser] metaboxUserId drift — local cache pointed to a different user",
+            );
+          }
+
+          if (!result.isStub) {
+            const isLinkwebFlow = opts.param?.startsWith("linkweb_") === true;
+            const suppress = opts.suppressMetaboxLinkedNotification ?? isLinkwebFlow;
+            if (!suppress) {
+              const mentorInfo = result.mentor
+                ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
+                : "";
+              await ctx
+                .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
+                .catch(() => {});
+            }
+
+            void syncMetaboxGrants(ctx.user!.id, telegramId).catch((err) => {
+              logger.error({ err }, "[finalizeStart registerBotUser] grant sync failed");
+            });
+
+            void backfillBotReferrals(ctx.user!.id, result.userId).catch((err) => {
+              logger.error({ err }, "[finalizeStart registerBotUser] referral backfill failed");
+            });
+          }
+        }
+      } catch (registerErr) {
+        logger.error({ err: registerErr }, "[finalizeStart] registerBotUser failed");
+      }
+    })();
+  }
+
+  // creditedNow=true только если бонус реально начислен в этом вызове.
+  // Если welcome_bonus_receipts уже содержит запись (например, юзер удалил
+  // аккаунт и /start заново, или MENTOR_CONFLICT resolve после уже выданного
+  // бонуса) — фактического начисления нет, сообщение «вот ваши N токенов»
+  // показывать нельзя; воспринимаем юзера как возвращающегося.
+  const creditedNow =
+    isNew && ctx.user.telegramId
+      ? await userService.creditWelcomeBonus(ctx.user.id, ctx.user.telegramId)
+      : false;
+
+  await sendStartMessages(ctx, inferredLang, {
+    isNew: creditedNow,
+    tokenBalance: updatedUser.tokenBalance as number,
+  });
+
+  // Set per-chat bot commands in user's language
+  if (ctx.chat?.id) {
+    await ctx.api
+      .setMyCommands(buildCommands(t), { scope: { type: "chat", chat_id: ctx.chat.id } })
+      .catch(() => void 0);
+  }
+
+  ctx.user = { ...updatedUser, isNew: false };
+}
+
+/**
  * /start — handles deep link params, resets FSM state, shows language selection.
  *
  * Supported deep link params:
@@ -245,9 +405,11 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       // (ensureAibUserForMetabox). Если он есть с этим metaboxUserId — сливаем
       // в текущий ctx.user, иначе получим duplicate (web-side смотрит на
       // старого, бот на нового).
+      let mergeOk = true;
       try {
         await mergeWebUserIfExists(ctx.user.id, metaboxUserId);
       } catch (mergeErr) {
+        mergeOk = false;
         logger.error(
           { err: mergeErr, userId: ctx.user.id.toString(), metaboxUserId },
           "[start link] merge with web-only user failed",
@@ -255,24 +417,29 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         await ctx.reply(
           `❌ Не удалось объединить веб-аккаунт с Telegram. Напишите в поддержку: @${config.supportTg}`,
         );
-        return;
-      }
-      await db.user.update({
-        where: { id: ctx.user.id },
-        data: { metaboxUserId, metaboxReferralCode: referralCode },
-      });
-      await ctx.reply(ctx.t.start.metaboxLinked ?? "✅ Аккаунт Metabox успешно привязан!");
-      if (mergedFrom) {
-        const siteUrl = config.metabox.apiUrl
-          ? new URL(config.metabox.apiUrl).hostname
-          : "meta-box.ru";
-        await ctx.reply(ctx.t.start.accountsMerged.replace("{siteUrl}", siteUrl));
       }
 
-      // Sync subscription and pending token grants from Metabox after linking
-      void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
-        logger.error({ err }, "[start link] grant sync failed");
-      });
+      // Привязку и сообщение об успехе делаем ТОЛЬКО если merge прошёл —
+      // иначе записали бы metaboxUserId, оставив на bot-стороне duplicate
+      // (web-only AI Box User со старым metaboxUserId + наш ctx.user с тем же).
+      if (mergeOk) {
+        await db.user.update({
+          where: { id: ctx.user.id },
+          data: { metaboxUserId, metaboxReferralCode: referralCode },
+        });
+        await ctx.reply(ctx.t.start.metaboxLinked ?? "✅ Аккаунт Metabox успешно привязан!");
+        if (mergedFrom) {
+          const siteUrl = config.metabox.apiUrl
+            ? new URL(config.metabox.apiUrl).hostname
+            : "meta-box.ru";
+          await ctx.reply(ctx.t.start.accountsMerged.replace("{siteUrl}", siteUrl));
+        }
+
+        // Sync subscription and pending token grants from Metabox after linking
+        void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
+          logger.error({ err }, "[start link] grant sync failed");
+        });
+      }
     } catch (err) {
       const apiErr = err as { code?: string; data?: Record<string, unknown> };
 
@@ -320,6 +487,10 @@ export async function handleStart(ctx: BotContext): Promise<void> {
       }
 
       // ── MERGE_BLOCKED (row 13): both mentors + both have purchases ──
+      // Линковка невозможна, но юзер всё равно зарегистрирован в боте —
+      // падаем в общий хвост (finalizeStart), чтобы получить бонус + меню.
+      // В отличие от MENTOR_CONFLICT здесь нет интерактивного picker'а, юзер
+      // ничего не решает, поэтому welcome поверх ошибки не ломает UX.
       if (apiErr.code === "MERGE_BLOCKED" && apiErr.data) {
         const d = apiErr.data as {
           siteMentor: { name: string; contact: string };
@@ -340,24 +511,21 @@ export async function handleStart(ctx: BotContext): Promise<void> {
             `Если у вас есть вопросы — обратитесь в поддержку: @${config.supportTg}`,
           { parse_mode: "Markdown" },
         );
-        return;
+      } else {
+        let msg = "❌ Не удалось привязать аккаунт. Попробуйте ещё раз.";
+        if (apiErr.code === "TELEGRAM_MISMATCH") {
+          const linkedTg = apiErr.data?.linkedUsername ? ` (@${apiErr.data.linkedUsername})` : "";
+          msg = `⚠️ Невозможно привязать AI Box.\n\nВаш аккаунт на сайте уже привязан к другому Telegram${linkedTg}.\n\nИспользуйте тот же Telegram-аккаунт для привязки.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
+        } else if (apiErr.code === "TELEGRAM_ALREADY_LINKED") {
+          const email = apiErr.data?.linkedEmail ? String(apiErr.data.linkedEmail) : "";
+          msg = `⚠️ Этот Telegram уже привязан к другому аккаунту на Metabox${email ? ` (${email})` : ""}.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
+        }
+        await ctx.reply(msg);
       }
-
-      let msg = "❌ Не удалось привязать аккаунт. Попробуйте ещё раз.";
-      if (apiErr.code === "TELEGRAM_MISMATCH") {
-        const linkedTg = apiErr.data?.linkedUsername ? ` (@${apiErr.data.linkedUsername})` : "";
-        msg = `⚠️ Невозможно привязать AI Box.\n\nВаш аккаунт на сайте уже привязан к другому Telegram${linkedTg}.\n\nИспользуйте тот же Telegram-аккаунт для привязки.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
-      } else if (apiErr.code === "TELEGRAM_ALREADY_LINKED") {
-        const email = apiErr.data?.linkedEmail ? String(apiErr.data.linkedEmail) : "";
-        msg = `⚠️ Этот Telegram уже привязан к другому аккаунту на Metabox${email ? ` (${email})` : ""}.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
-      }
-      await ctx.reply(msg);
-      // Линковка не состоялась — НЕ продолжаем общий welcome-flow, иначе
-      // пакет приветственных сообщений перекроет сверху это уведомление,
-      // и юзер не заметит причину отказа. Юзер увидит ошибку в чате и
-      // сможет сделать /start снова (без link-параметра) — на следующий
-      // вызов получит обычный welcome.
-      return;
+      // Линковка не состоялась — но юзер всё равно зарегистрирован в боте
+      // (upsertByTelegramId выше). Падаем в finalizeStart, чтобы получить
+      // welcome-бонус, Trial-подписку и главное меню — иначе юзер бы остался
+      // в полу-инициализированном состоянии и был вынужден слать /start снова.
     }
   } else if (param?.startsWith("linkweb_") && ctx.user) {
     // ── ai.metabox.global → Bot: привязка web-аккаунта ───────────────────────
@@ -373,8 +541,8 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         await ctx.reply(
           "⚠️ Ссылка недействительна или истекла. Вернитесь на сайт и нажмите «Привязать Telegram» ещё раз.",
         );
-        // Линковка не удалась — не показываем welcome-пакет поверх ошибки.
-        return;
+        // Линковка не состоялась — но юзер уже зарегистрирован (upsertByTelegramId),
+        // даём ему пройти в finalizeStart, чтобы получить бонус + меню.
       } else {
         // Раньше здесь была проверка `ctx.user.metaboxUserId !== metaboxUserId`
         // с сообщением «уже привязан к другому Metabox-аккаунту». После
@@ -407,6 +575,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
         // (stub `tg_<id>@…` со старыми покупками и real R) — последующие
         // bot-invoices пойдут на stub, новые подписки на R, всё развалится.
         // Эндпоинт ставит R.telegramId, и если есть stub — мержит его в R.
+        let linkOk = true;
         let metaboxMerged = false;
         try {
           const linkResult = await linkTelegramFromWeb({
@@ -417,6 +586,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
           });
           metaboxMerged = !!linkResult.mergedFrom;
         } catch (linkErr) {
+          linkOk = false;
           if (linkErr instanceof MetaboxApiError && linkErr.status === 409) {
             const code = linkErr.code;
             let msg = `⚠️ Не удалось привязать Telegram к аккаунту Metabox.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
@@ -426,57 +596,64 @@ export async function handleStart(ctx: BotContext): Promise<void> {
               msg = `⚠️ Этот Telegram уже привязан к другому Metabox-аккаунту.\n\nЕсли это ошибка — напишите в поддержку: @${config.supportTg}`;
             }
             await ctx.reply(msg);
-            return;
+          } else {
+            logger.error(
+              { err: linkErr, userId: ctx.user.id.toString(), metaboxUserId },
+              "[start linkweb] linkTelegramFromWeb failed",
+            );
+            await ctx.reply(
+              `❌ Не удалось привязать аккаунт. Попробуйте ещё раз через минуту, либо напишите в поддержку: @${config.supportTg}`,
+            );
           }
-          logger.error(
-            { err: linkErr, userId: ctx.user.id.toString(), metaboxUserId },
-            "[start linkweb] linkTelegramFromWeb failed",
-          );
-          await ctx.reply(
-            `❌ Не удалось привязать аккаунт. Попробуйте ещё раз через минуту, либо напишите в поддержку: @${config.supportTg}`,
-          );
-          return;
         }
 
-        // AI Box-side merge: если ранее web-логин создал web-only AI Box
-        // User (через ensureAibUserForMetabox), сливаем его в ctx.user,
-        // чтобы не получить дубль metaboxUserId на нашей стороне.
-        try {
-          await mergeWebUserIfExists(ctx.user.id, metaboxUserId);
-        } catch (mergeErr) {
-          logger.error(
-            { err: mergeErr, userId: ctx.user.id.toString(), metaboxUserId },
-            "[start linkweb] merge with web-only user failed",
-          );
-          await ctx.reply(
-            `❌ Не удалось объединить веб-аккаунт с Telegram. Напишите в поддержку: @${config.supportTg}`,
-          );
-          return;
+        if (linkOk) {
+          // AI Box-side merge: если ранее web-логин создал web-only AI Box
+          // User (через ensureAibUserForMetabox), сливаем его в ctx.user,
+          // чтобы не получить дубль metaboxUserId на нашей стороне.
+          let mergeOk = true;
+          try {
+            await mergeWebUserIfExists(ctx.user.id, metaboxUserId);
+          } catch (mergeErr) {
+            mergeOk = false;
+            logger.error(
+              { err: mergeErr, userId: ctx.user.id.toString(), metaboxUserId },
+              "[start linkweb] merge with web-only user failed",
+            );
+            await ctx.reply(
+              `❌ Не удалось объединить веб-аккаунт с Telegram. Напишите в поддержку: @${config.supportTg}`,
+            );
+          }
+
+          // Запись metaboxUserId и сообщение об успехе делаем ТОЛЬКО при
+          // успешном AI Box-side merge — иначе остался бы duplicate (web-only
+          // AI Box User с этим metaboxUserId + наш ctx.user с тем же).
+          if (mergeOk) {
+            await db.user.update({
+              where: { id: ctx.user.id },
+              data: { metaboxUserId },
+            });
+            await markLinkTelegramLinked(
+              state,
+              ctx.user.telegramId!.toString(),
+              ctx.from?.username ?? null,
+            );
+            await ctx.reply(
+              metaboxMerged
+                ? "✅ Аккаунт привязан, старые покупки бота объединены с веб-аккаунтом. Возвращайтесь на ai.metabox.global — нейросети уже доступны."
+                : "✅ Аккаунт привязан. Возвращайтесь на ai.metabox.global — нейросети уже доступны.",
+            );
+            // Синхронизируем токены/подписки из metabox
+            void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
+              logger.error({ err }, "[start linkweb] grant sync failed");
+            });
+          }
         }
-        await db.user.update({
-          where: { id: ctx.user.id },
-          data: { metaboxUserId },
-        });
-        await markLinkTelegramLinked(
-          state,
-          ctx.user.telegramId!.toString(),
-          ctx.from?.username ?? null,
-        );
-        await ctx.reply(
-          metaboxMerged
-            ? "✅ Аккаунт привязан, старые покупки бота объединены с веб-аккаунтом. Возвращайтесь на ai.metabox.global — нейросети уже доступны."
-            : "✅ Аккаунт привязан. Возвращайтесь на ai.metabox.global — нейросети уже доступны.",
-        );
-        // Синхронизируем токены/подписки из metabox
-        void syncMetaboxGrants(ctx.user.id, ctx.user.telegramId!).catch((err) => {
-          logger.error({ err }, "[start linkweb] grant sync failed");
-        });
       }
     } catch (err) {
       logger.error({ err, state }, "[start linkweb] failed");
       await ctx.reply("❌ Не удалось привязать аккаунт. Попробуйте ещё раз.");
-      // Линковка не удалась — не активируем бота, чтобы юзер увидел ошибку.
-      return;
+      // Падаем в finalizeStart, чтобы юзер не остался без бонуса + меню.
     }
   }
   // Store resolved referrer info for registerBotUser.
@@ -541,183 +718,9 @@ export async function handleStart(ctx: BotContext): Promise<void> {
     }
   }
 
-  if (!ctx.user) return;
-
-  // Авто-определяем язык из Telegram-клиента (`from.language_code`) и сразу
-  // сохраняем его в БД. Никакого AWAITING_LANGUAGE — пользователь должен
-  // мочь работать с ботом сразу после /start. Сменить язык можно через
-  // кнопку «Язык» в главном меню.
-  const inferredLang = inferTelegramLanguage(ctx);
-  const isNew = ctx.user.isNew;
-  const updatedUser = await userService.setLanguage(ctx.user.id, inferredLang);
-  await userStateService.setState(ctx.user.id, "IDLE");
-  const t = getT(inferredLang);
-
-  // Register stub account on Metabox (or link existing) — fire-and-forget
-  if (config.metabox?.apiUrl) {
-    (async () => {
-      try {
-        // Re-read user from DB to get updated referredById (set in ref_ handler above).
-        // referredById — внутренний User.id ментора; Metabox ожидает tgid, поэтому
-        // подтягиваем `referrer.telegramId` отдельным lookup'ом.
-        const freshUser = await db.user.findUnique({
-          where: { id: ctx.user!.id },
-          select: {
-            referredById: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            telegramId: true,
-            referredBy: { select: { telegramId: true } },
-          },
-        });
-        const referrerTelegramId = freshUser?.referredBy?.telegramId ?? null;
-        const telegramId = ctx.user!.telegramId ?? freshUser?.telegramId;
-        if (!telegramId) {
-          logger.warn(
-            { userId: ctx.user!.id.toString() },
-            "[start registerBotUser] no telegramId on user — skip Metabox register",
-          );
-          return;
-        }
-        const { registerBotUser } = await import("@metabox/api/services");
-        const result = await registerBotUser({
-          telegramId,
-          firstName: freshUser?.firstName ?? ctx.user!.firstName,
-          lastName: freshUser?.lastName ?? ctx.user!.lastName,
-          username: freshUser?.username ?? ctx.user!.username,
-          referrerTelegramId,
-          referrerUserId: resolvedReferrerUserId ?? undefined,
-          aiboxUserId: ctx.user!.id,
-        });
-        if (result?.ok) {
-          // Drift detection: если на metabox-стороне произошёл merge, наш
-          // закешированный `metaboxUserId` мог стать secondary'ем. registerBotUser
-          // ищет по telegramId, который после merge сидит на primary, поэтому
-          // `result.userId` = живой primary. Если он отличается от нашего
-          // кеша — обновляем + логируем для аудита.
-          const previousMetaboxUserId = ctx.user!.metaboxUserId;
-          const driftDetected = !!previousMetaboxUserId && previousMetaboxUserId !== result.userId;
-
-          // Merge web-only AI Box User → ctx.user — только для REAL аккаунтов.
-          // Для stub'ов merge не нужен: web-flow привязывается ТОЛЬКО к
-          // real-юзерам metabox (`ensureAibUserForMetabox` зовётся после
-          // `webValidateCredentials`, который требует email-verified real),
-          // поэтому AI Box User'а с `metaboxUserId === stub.id` не существует
-          // и `mergeWebUserIfExists` всё равно сделал бы no-op.
-          if (!result.isStub) {
-            try {
-              await mergeWebUserIfExists(ctx.user!.id, result.userId);
-            } catch (mergeErr) {
-              logger.error(
-                { err: mergeErr, userId: ctx.user!.id.toString(), metaboxUserId: result.userId },
-                "[start registerBotUser] merge with web-only user failed",
-              );
-              return;
-            }
-          }
-
-          // `metaboxUserId` пишем ТОЛЬКО для real-аккаунтов (`!isStub`).
-          //
-          // Семантика поля: «AI Box User привязан к РЕАЛЬНОМУ Metabox-аккаунту
-          // (real email, может покупать тарифы, делать вывод, smотреть обучение)».
-          // Stub'ы (auto-email `tg_<id>@aibox.meta-box.ru`) этому не отвечают —
-          // они technical placeholder'ы, юзер про них не знает и через
-          // mini-app/web их upgrad'ит до real (тогда мы тут запишем metaboxUserId).
-          //
-          // ВАЖНО: двусторонняя связь для admin-grants РАБОТАЕТ И ДЛЯ STUB'ОВ —
-          // независимо от того, пишем ли мы metaboxUserId локально. Связь
-          // материализуется на metabox-стороне: `registerBotUser` body содержит
-          // `aiboxUserId`, и метабокс кэширует его в `User.aiboxUserId` (в т.ч.
-          // на stub'е). Так `process-subscription-payment` находит identity
-          // через `aiboxUserId` и пушит токены сразу же.
-          //
-          // metaboxReferralCode тоже пишется для обоих — оно не семантический
-          // маркер «real», а просто кешированный код реферера, который у stub'ов
-          // тоже валиден (на случай если кто-то будет шарить /start ref_…).
-          await db.user.update({
-            where: { id: ctx.user!.id },
-            data: {
-              metaboxReferralCode: result.referralCode,
-              ...(!result.isStub ? { metaboxUserId: result.userId } : {}),
-            },
-          });
-
-          if (driftDetected) {
-            logger.warn(
-              {
-                telegramId: telegramId.toString(),
-                userId: ctx.user!.id.toString(),
-                from: previousMetaboxUserId,
-                to: result.userId,
-                isStub: result.isStub,
-              },
-              "[start registerBotUser] metaboxUserId drift — local cache pointed to a different user",
-            );
-          }
-
-          if (!result.isStub) {
-            // Notify user about auto-linking — но НЕ при linkweb_ flow:
-            // там мы уже отправили «✅ Аккаунт привязан, старые покупки бота
-            // объединены с веб-аккаунтом…», и второе сообщение «Мы нашли ваш
-            // аккаунт на Metabox» было бы дубликатом. linkweb_-flow всегда
-            // приходит к этому состоянию (registerBotUser возвращает real
-            // R.id, потому что linkTelegramFromWeb уже поставил R.telegramId).
-            const isLinkwebFlow = param?.startsWith("linkweb_") === true;
-            if (!isLinkwebFlow) {
-              const mentorInfo = result.mentor
-                ? `\nВаш наставник: ${result.mentor.name}${result.mentor.telegramUsername ? ` (@${result.mentor.telegramUsername})` : ""}`
-                : "";
-              await ctx
-                .reply(`✅ Мы нашли ваш аккаунт на Metabox и привязали его к боту.${mentorInfo}`)
-                .catch(() => {});
-            }
-
-            // Sync subscription + pending token grants from Metabox
-            void syncMetaboxGrants(ctx.user!.id, telegramId).catch((err) => {
-              logger.error({ err }, "[start registerBotUser] grant sync failed");
-            });
-
-            // Backfill referredById для прямых рефералов этого юзера в боте.
-            // Закрывает дыру: реферал мог зарегистрироваться в боте раньше
-            // наставника — тогда его referredById остался null, потому что
-            // строки наставника в db.user ещё не было. Идемпотентно.
-            //
-            // Первый параметр — внутренний `User.id` ментора (FK для referredById).
-            void backfillBotReferrals(ctx.user!.id, result.userId).catch((err) => {
-              logger.error({ err }, "[start registerBotUser] referral backfill failed");
-            });
-          }
-        }
-      } catch (registerErr) {
-        logger.error({ err: registerErr }, "[start] registerBotUser failed");
-      }
-    })();
-  }
-
-  // creditedNow=true только если бонус реально начислен в этом вызове.
-  // Когда `welcome_bonus_receipts` уже содержит запись (повторный /start
-  // после удаления аккаунта) — фактического начисления не было, поэтому
-  // сообщение «вот ваши N приветственных токенов» показывать нельзя;
-  // воспринимаем юзера как возвращающегося (balance + main menu).
-  const creditedNow =
-    isNew && ctx.user.telegramId
-      ? await userService.creditWelcomeBonus(ctx.user.id, ctx.user.telegramId)
-      : false;
-
-  await sendStartMessages(ctx, inferredLang, {
-    isNew: creditedNow,
-    tokenBalance: updatedUser.tokenBalance as number,
-  });
-
-  // Set per-chat bot commands in user's language
-  if (ctx.chat?.id) {
-    await ctx.api
-      .setMyCommands(buildCommands(t), { scope: { type: "chat", chat_id: ctx.chat.id } })
-      .catch(() => void 0);
-  }
-
-  ctx.user = { ...updatedUser, isNew: false };
+  // Общий хвост любых deep-link веток: язык, FSM=IDLE, registerBotUser,
+  // welcome-бонус, welcome-пакет, команды. См. finalizeStart выше.
+  await finalizeStart(ctx, { param, resolvedReferrerUserId });
 }
 
 /**
