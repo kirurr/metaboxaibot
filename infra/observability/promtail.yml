@@ -13,12 +13,16 @@ positions:
 
 clients:
   - url: https://loki.stage.meta-box.ru/loki/api/v1/push
-    # 4 MiB / 5s — реже, но крупнее запросы. Под нагрузкой держит
+    # 2 MiB / 5s — реже, но крупнее запросы. Под нагрузкой держит
     # ~1 req/5s вместо ~10 req/s, переживает короткие сетевые блипы
     # без раздувания WAL до точки, где Loki режет "entry too far behind"
     # (инцидент 2026-05-24: после редеплоев WAL накапливался, старее
     # max_chunk_age — Loki их режет и логи теряются).
-    batchsize: 4194304
+    # Выше 2 MiB поднять нельзя: Loki по умолчанию имеет
+    # grpc_server_max_recv_msg_size = 4 MiB; с protobuf overhead
+    # 4 MiB логов превращаются в ~4.5 MiB сообщения и режутся
+    # distributor'ом с "ResourceExhausted: received message larger than max".
+    batchsize: 2097152
     batchwait: 5s
     # Defensive timeouts in case the stage server is briefly unreachable —
     # promtail retries with backoff before dropping.
