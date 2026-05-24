@@ -271,6 +271,7 @@
     "send": "Send",
     "tokensEst": "tokens",
     "tokensSpent": "tokens spent on generation",
+    "per1kSymbols": "1k symbols",
     "renamePrompt": "New name",
     "deletePrompt": "Delete this dialog? History can't be recovered.",
     "errorCreateDialog": "Couldn't create dialog",

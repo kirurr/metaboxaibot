@@ -71,7 +71,7 @@ export const ChatEmpty = memo(function ChatEmpty({
                   {modelDisplayName(m)}
                   {m.id === modelId && <Check size={12} />}
                 </span>
-                <span className="mp-row-rate mono">{modelRate(m)}</span>
+                <span className="mp-row-rate mono">{modelRate(m, t)}</span>
                 <span className="mp-row-desc">{modelDesc(m)}</span>
               </button>
             ))}

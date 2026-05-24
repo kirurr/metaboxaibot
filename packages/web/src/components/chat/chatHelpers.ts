@@ -15,7 +15,7 @@ export function modelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
 }
 
-export function modelRate(m: WebModelDto): string {
+export function modelRate(m: WebModelDto, t: (k: string) => string): string {
   // LLM: бэк отдаёт стоимость за 1000 токенов сообщения (доли ✦) — округление
   // до десятков, которое работает для image/video/audio (там значения 10–500 ✦),
   // здесь схлопывало бы всё в 0. Поэтому формат с 2–3 знаками после запятой.
@@ -24,7 +24,7 @@ export function modelRate(m: WebModelDto): string {
     // Стоимость в токенах * множитель символов = 1000 токенов / 3500 символов
     const v = m.tokenCostApprox * Number((1000 / 3500).toFixed(2));
     const formatted = v < 0.1 ? v.toFixed(3) : v.toFixed(2);
-    return `≈ ${formatted} ✦ / 1k symbol`;
+    return `≈ ${formatted} ${t("chat.tokensEst")} / ${t("chat.per1kSymbols")}`;
   }
 
   const n = Math.round(m.tokenCostApprox / 10) * 10;
