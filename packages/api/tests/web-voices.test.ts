@@ -27,7 +27,6 @@ import { buildTestApp } from "./helpers/build-app.js";
 import { bearer, createTestUser } from "./fixtures/users.js";
 import { createTestProviderKey } from "./fixtures/provider-keys.js";
 import { mswServer } from "./msw/server.js";
-import { CARTESIA_PREVIEW_CDN_URL } from "./msw/handlers/voices.js";
 import { invalidatePoolCache } from "../src/services/key-pool.service.js";
 
 interface VoiceItem {

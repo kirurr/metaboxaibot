@@ -46,6 +46,7 @@ import {
 import { buildTestApp } from "./helpers/build-app.js";
 import { db } from "./helpers/db.js";
 import { bearer, createTestUser } from "./fixtures/users.js";
+import { buildMultipart, MP4_BYTES, PNG_BYTES } from "./fixtures/multipart.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -85,50 +86,6 @@ async function seedPromptExample(overrides: SeedOverrides = {}): Promise<PrismaP
     },
   });
 }
-
-interface MultipartPart {
-  name: string;
-  value: string | Buffer;
-  filename?: string;
-  contentType?: string;
-}
-
-function buildMultipart(parts: MultipartPart[]): {
-  payload: Buffer;
-  headers: Record<string, string>;
-} {
-  const boundary = `----vitest-${Math.random().toString(36).slice(2)}`;
-  const chunks: Buffer[] = [];
-  for (const p of parts) {
-    chunks.push(Buffer.from(`--${boundary}\r\n`));
-    if (p.filename !== undefined) {
-      chunks.push(
-        Buffer.from(
-          `Content-Disposition: form-data; name="${p.name}"; filename="${p.filename}"\r\n`,
-        ),
-      );
-      chunks.push(
-        Buffer.from(`Content-Type: ${p.contentType ?? "application/octet-stream"}\r\n\r\n`),
-      );
-    } else {
-      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${p.name}"\r\n\r\n`));
-    }
-    chunks.push(typeof p.value === "string" ? Buffer.from(p.value) : p.value);
-    chunks.push(Buffer.from("\r\n"));
-  }
-  chunks.push(Buffer.from(`--${boundary}--\r\n`));
-  return {
-    payload: Buffer.concat(chunks),
-    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
-  };
-}
-
-// Минимальный валидный PNG (8-байт сигнатура; multipart-парсеру достаточно)
-const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-// MP4 ftyp header — на случай если кто-то детектит mime по магии
-const MP4_BYTES = Buffer.from([
-  0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
-]);
 
 // ── App lifecycle ──────────────────────────────────────────────────────────
 
