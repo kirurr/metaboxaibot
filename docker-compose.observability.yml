@@ -34,14 +34,15 @@ services:
     restart: always
     mem_limit: 256m
     volumes:
-      # Live container logs come from Docker's json-file driver via the socket.
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Promtail config — points at https://loki.stage.meta-box.ru and tags
-      # all entries with `server=aibot-prod`.
+      # json-file логи всех контейнеров на хосте, readonly. Промтейл тейлит
+      # их напрямую через inotify+offset (см. infra/observability/promtail.yml).
+      # docker.sock больше НЕ маунтим: Docker live-stream API (`logs --follow`)
+      # на этой версии docker'а нестабилен — баг проявляется зависающими
+      # стримами на idle-контейнерах, инцидент 2026-05-24.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./infra/observability/promtail.yml:/etc/promtail/config.yml:ro
-      # `positions.yaml` tracks where in each docker-log promtail has read up
-      # to. Without a named volume for /tmp it would reset on every restart
-      # and re-ship all docker-logs from scratch.
+      # positions.yaml хранит offset'ы каждого тейлуемого файла. Через named
+      # volume переживает рестарты промтейла → не реим логи с нуля.
       - promtail-positions:/tmp
     command: -config.file=/etc/promtail/config.yml
 
