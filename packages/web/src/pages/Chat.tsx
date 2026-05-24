@@ -172,6 +172,7 @@ export default function Chat() {
   useEffect(() => {
     if (!activeId) {
       setMessages([]);
+      loadedRef.current = null;
       return;
     }
     if (loadedRef.current === activeId) return;
