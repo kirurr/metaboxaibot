@@ -16,6 +16,7 @@ import {
 } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
+import { acquireLock, releaseLock } from "../utils/dedup.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
 
 /**
@@ -205,95 +206,113 @@ export async function handlePhotoAnimateCallback(ctx: BotContext): Promise<void>
   }
   if (action !== "go") return;
 
-  const slots = await userStateService.getMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
-  const srcKey = slots[PHOTO_ANIMATE_SRC_SLOT]?.[0];
-  const storedAr = slots[PHOTO_ANIMATE_AR_SLOT]?.[0];
-  if (!srcKey) {
-    // Буфер потерян (выход в меню / сервис рестартанул) — просим прислать фото
-    // заново.
-    await userStateService.setState(userId, "PHOTO_ANIMATE_AWAIT_PHOTO", null);
-    await ctx.reply(
-      `${ctx.t.scenarios.photoAnimateBufferLost}\n\n${ctx.t.scenarios.photoAnimateStepPhoto}`,
-      { parse_mode: "HTML" },
-    );
+  // Race-guard: атомарный Redis-lock на (userId, scenario). Защищает от двух
+  // параллельных колбеков двойного тапа «Animate», которые grammy НЕ
+  // сериализует — без lock'а оба могут пройти проверку буфера до того, как
+  // любой успеет clearMediaInputs, и оба вызовут submitVideo + два списания.
+  // TTL 60s = типичный submitVideo path (db.create + queue.add ≪ 1s) + запас
+  // на сетевые задержки. При краше пода lock уйдёт по TTL сам, retry юзера
+  // через минуту пройдёт.
+  const lockKey = `photo-animate:submit:${userId}`;
+  const lockAcquired = await acquireLock(lockKey, 60);
+  if (!lockAcquired) {
+    // Параллельный колбек уже выполняется — silently ignore, юзер увидит
+    // результат первого submit'а в любом случае.
     return;
   }
-
-  const telegramId = ctx.user.telegramId;
-  const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
-  if (chatId === undefined) return;
-
-  // Race-guard: до сабмита очищаем буфер и сбрасываем state. Второй tap по
-  // «Animate» (если первый колбек ещё не успел потушить keyboard) увидит
-  // пустой буфер и уйдёт в branch «buffer lost» — без второго submitVideo
-  // и без двойного списания токенов. AR/srcKey уже зафиксированы в локальных
-  // переменных, генерация ничего не теряет.
-  await userStateService.clearMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
-  await userStateService.setState(userId, "PHOTO_ANIMATE_AWAIT_PHOTO", null);
-
-  let resolved: Record<string, string[]>;
-  try {
-    resolved = await resolveMediaInputUrls({ [PHOTO_ANIMATE_SRC_SLOT]: [srcKey] }, undefined);
-  } catch (err) {
-    if (err instanceof UserFacingError) {
-      await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
-    } else {
-      logger.error(err, "Photo animate: failed to resolve media URL");
-      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
-    }
-    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
-    return;
-  }
-
-  // AR детектится при upload'е и кладётся в буфер до confirm-callback'а —
-  // здесь только читаем. Defensive fallback на 1:1 — лучше квадрат, чем
-  // ошибка в адаптере на неизвестном AR.
-  const aspectRatio =
-    storedAr && PHOTO_ANIMATE_SUPPORTED_ASPECT_RATIOS.includes(storedAr) ? storedAr : "1:1";
-
-  await ctx.reply(ctx.t.scenarios.photoAnimateGenerating);
 
   let submitOk = false;
   try {
-    await videoGenerationService.submitVideo({
-      userId,
-      modelId: PHOTO_ANIMATE_MODEL_ID,
-      // prompt пустой по дизайну: реальный фикс-промпт инжектится в адаптере
-      // (kie.adapter / fal.adapter) при modelId === "photo-animate". Так
-      // англоязычная instruction не попадает в БД, web/webapp gallery, TG
-      // caption и историю транзакций — нигде не светится.
-      prompt: "",
-      mediaInputs: resolved,
-      aspectRatio,
-      duration: PHOTO_ANIMATE_DURATION_SEC,
-      extraModelSettings: {
-        resolution: PHOTO_ANIMATE_RESOLUTION,
-        aspect_ratio: aspectRatio,
-      },
-      telegramChatId: chatId,
-      sendOriginalLabel: ctx.t.common.sendOriginal,
-      // Defense-in-depth: даже при empty prompt, флаг гарантирует что worker
-      // не покажет blockquote — на случай если кто-то перепутает payloads.
-      hidePromptInCaption: true,
-    });
-    submitOk = true;
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message === "NO_SUBSCRIPTION") {
-      await replyNoSubscription(ctx);
-    } else if (err instanceof Error && err.message === "INSUFFICIENT_TOKENS") {
-      await replyInsufficientTokens(ctx);
-    } else if (err instanceof UserFacingError) {
-      await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
-    } else {
-      logger.error(err, "Photo animate submit failed");
-      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
+    const slots = await userStateService.getMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
+    const srcKey = slots[PHOTO_ANIMATE_SRC_SLOT]?.[0];
+    const storedAr = slots[PHOTO_ANIMATE_AR_SLOT]?.[0];
+    if (!srcKey) {
+      // Буфер потерян (выход в меню / сервис рестартанул) — просим прислать
+      // фото заново.
+      await userStateService.setState(userId, "PHOTO_ANIMATE_AWAIT_PHOTO", null);
+      await ctx.reply(
+        `${ctx.t.scenarios.photoAnimateBufferLost}\n\n${ctx.t.scenarios.photoAnimateStepPhoto}`,
+        { parse_mode: "HTML" },
+      );
+      return;
     }
-  }
 
-  // Буфер уже очищен до сабмита (race-guard) и state стоит в AWAIT_PHOTO —
-  // на успехе ничего больше делать не нужно, следующий присланный кадр
-  // стартует новый flow. На ошибке возвращаемся в Сценарии.
-  if (!submitOk) {
-    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
+    const telegramId = ctx.user.telegramId;
+    const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
+    if (chatId === undefined) return;
+
+    // Буфер очищаем сразу после снимка srcKey/storedAr в локальные переменные —
+    // на retry после ошибки submit'а юзер должен прислать фото заново. State
+    // оставляем в AWAIT_PHOTO: следующий присланный кадр стартует новый flow.
+    await userStateService.clearMediaInputs(userId, PHOTO_ANIMATE_BUFFER_MODEL_ID);
+    await userStateService.setState(userId, "PHOTO_ANIMATE_AWAIT_PHOTO", null);
+
+    let resolved: Record<string, string[]>;
+    try {
+      resolved = await resolveMediaInputUrls({ [PHOTO_ANIMATE_SRC_SLOT]: [srcKey] }, undefined);
+    } catch (err) {
+      if (err instanceof UserFacingError) {
+        await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
+      } else {
+        logger.error(err, "Photo animate: failed to resolve media URL");
+        await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
+      }
+      await userStateService.setState(userId, "SCENARIOS_SECTION", null);
+      return;
+    }
+
+    // AR детектится при upload'е и кладётся в буфер до confirm-callback'а —
+    // здесь только читаем. Defensive fallback на 1:1 — лучше квадрат, чем
+    // ошибка в адаптере на неизвестном AR.
+    const aspectRatio =
+      storedAr && PHOTO_ANIMATE_SUPPORTED_ASPECT_RATIOS.includes(storedAr) ? storedAr : "1:1";
+
+    await ctx.reply(ctx.t.scenarios.photoAnimateGenerating);
+
+    try {
+      await videoGenerationService.submitVideo({
+        userId,
+        modelId: PHOTO_ANIMATE_MODEL_ID,
+        // prompt пустой по дизайну: реальный фикс-промпт инжектится в адаптере
+        // (kie.adapter / fal.adapter) при modelId === "photo-animate". Так
+        // англоязычная instruction не попадает в БД, web/webapp gallery, TG
+        // caption и историю транзакций — нигде не светится.
+        prompt: "",
+        mediaInputs: resolved,
+        aspectRatio,
+        duration: PHOTO_ANIMATE_DURATION_SEC,
+        extraModelSettings: {
+          resolution: PHOTO_ANIMATE_RESOLUTION,
+          aspect_ratio: aspectRatio,
+        },
+        telegramChatId: chatId,
+        sendOriginalLabel: ctx.t.common.sendOriginal,
+        // Defense-in-depth: даже при empty prompt, флаг гарантирует что worker
+        // не покажет blockquote — на случай если кто-то перепутает payloads.
+        hidePromptInCaption: true,
+      });
+      submitOk = true;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message === "NO_SUBSCRIPTION") {
+        await replyNoSubscription(ctx);
+      } else if (err instanceof Error && err.message === "INSUFFICIENT_TOKENS") {
+        await replyInsufficientTokens(ctx);
+      } else if (err instanceof UserFacingError) {
+        await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
+      } else {
+        logger.error(err, "Photo animate submit failed");
+        await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
+      }
+    }
+
+    if (!submitOk) {
+      await userStateService.setState(userId, "SCENARIOS_SECTION", null);
+    }
+  } finally {
+    // На успехе можно было бы дать lock'у уйти по TTL (отсечь спам ретраев
+    // в первую минуту), но в нашем сценарии следующий легитимный submit
+    // юзера = новое фото = новый flow — задержка ничего не даёт. На ошибке
+    // тем более релизим, чтобы юзер мог сразу перезагрузить.
+    await releaseLock(lockKey).catch(() => void 0);
   }
 }
