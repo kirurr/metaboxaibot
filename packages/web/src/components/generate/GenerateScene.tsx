@@ -660,6 +660,8 @@ export function GenerateScene({
   const [imageSelectFor, setImageSelectFor] = useState<Element | null>(null);
   // Активный inline-`@`-токен у курсора (для dropdown'а подсказок).
   const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null);
+  // Подсвеченный пункт dropdown'а (клавиатурная навигация ↑/↓/Enter).
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   // Выбор картинок per-element: elementId → s3Key[] (персист в draft-store).
   const [elementSelections, setElementSelections] = useState<Record<string, string[]>>({});
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1672,14 +1674,39 @@ export function GenerateScene({
     }
     const caret = ta.selectionStart ?? ta.value.length;
     const m = ta.value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
-    if (m) setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
-    else setMentionQuery(null);
+    if (m) {
+      setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
+      setMentionActiveIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
   }
 
   // onChange промпта: обновляем текст и пересчитываем меншен у курсора.
   function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setPrompt(e.target.value);
     detectMention(e.target);
+  }
+
+  // Клавиатура в inline-`@` dropdown: ↑/↓ — навигация, Enter — выбор, Esc —
+  // закрытие. Активно только пока dropdown открыт; иначе клавиши идут в textarea.
+  function onPromptKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!mentionQuery || mentionMatches.length === 0) return;
+    const len = mentionMatches.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setMentionActiveIndex((i) => (i + 1) % len);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setMentionActiveIndex((i) => (i - 1 + len) % len);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const el = mentionMatches[Math.min(mentionActiveIndex, len - 1)];
+      if (el) handlePickElement(el);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setMentionQuery(null);
+    }
   }
 
   // Вставляет `@name ` в промпт: заменяет набранный inline-`@`-токен (если есть),
@@ -2142,7 +2169,14 @@ export function GenerateScene({
               // Перемещение каретки мышью/стрелками не триггерит onChange —
               // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
               onClick={(e) => detectMention(e.currentTarget)}
-              onKeyUp={(e) => detectMention(e.currentTarget)}
+              onKeyDown={onPromptKeyDown}
+              onKeyUp={(e) => {
+                // Навигационные клавиши обрабатывает onPromptKeyDown; здесь их
+                // пропускаем, иначе detectMention переоткрыл бы dropdown (Esc)
+                // и сбрасывал бы подсветку (↑/↓).
+                if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) return;
+                detectMention(e.currentTarget);
+              }}
               onBlur={() => {
                 // Закрываем dropdown после клика по подсказке (mousedown успевает
                 // отработать раньше blur), иначе — при уходе фокуса.
@@ -2156,6 +2190,8 @@ export function GenerateScene({
                     type="button"
                     className="gen-prompt-examples-btn"
                     onClick={openPromptsDialog}
+                    title={t("generate.openPromptExamples")}
+                    aria-label={t("generate.openPromptExamples")}
                   >
                     <Wand2 size={14} />
                     <span>{t("generate.openPromptExamples")}</span>
@@ -2166,6 +2202,8 @@ export function GenerateScene({
                     type="button"
                     className="gen-prompt-examples-btn"
                     onClick={() => setMentionPickerOpen(true)}
+                    title={t("generate.elementsButton")}
+                    aria-label={t("generate.elementsButton")}
                   >
                     <AtSign size={14} />
                     <span>{t("generate.elementsButton")}</span>
@@ -2190,7 +2228,7 @@ export function GenerateScene({
                   listStyle: "none",
                 }}
               >
-                {mentionMatches.map((el) => (
+                {mentionMatches.map((el, i) => (
                   <li key={el.id}>
                     <button
                       type="button"
@@ -2199,7 +2237,14 @@ export function GenerateScene({
                         e.preventDefault();
                         handlePickElement(el);
                       }}
-                      className="flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text hover:bg-bg-elevated"
+                      // Синхронизируем подсветку с мышью, чтобы ↑/↓ и hover не расходились.
+                      onMouseEnter={() => setMentionActiveIndex(i)}
+                      className={clsx(
+                        "flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text",
+                        i === Math.min(mentionActiveIndex, mentionMatches.length - 1)
+                          ? "bg-bg-elevated"
+                          : "hover:bg-bg-elevated",
+                      )}
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
                         {el.media[0]?.url ? (

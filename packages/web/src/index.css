@@ -5156,6 +5156,13 @@ select {
   background: var(--bg-secondary);
   border-color: var(--accent);
 }
+/* На узких экранах кнопки панели сворачиваются в иконку (текст — в title/aria),
+   чтобы две пилюли гарантированно влезали рядом и не вылезали за край инпута. */
+@media (max-width: 400px) {
+  .gen-prompt-tools .gen-prompt-examples-btn span {
+    display: none;
+  }
+}
 
 /* Settings v2 — flex-row wrap из chip-pill'ов. Каждый chip отображает
    `Label : Value` и при клике открывает popover с фактическим контролом.
