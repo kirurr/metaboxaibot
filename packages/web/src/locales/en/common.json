@@ -230,6 +230,9 @@
     "btnAddToSlot": "Add file to {{slot}}",
     "btnEnterPrompt": "Enter a prompt",
     "btnPromptOrMedia": "Enter a prompt or add a file",
+    "elementsButton": "Elements",
+    "elementLimit": "No more than {{max}} elements in the prompt",
+    "elementNoImages": "Element @{{name}} has no images",
     "errorWrongFileType": "This slot only accepts {{type}}",
     "typeImage": "images",
     "typeVideo": "video",
@@ -528,6 +531,16 @@
     "nameInvalid": "Only letters, digits and underscore (max 64)",
     "nameConflict": "You already have an element with this name",
     "uploadError": "Upload failed"
+  },
+  "elementMention": {
+    "title": "Pick an element",
+    "empty": "You don't have any elements yet",
+    "limitReached": "Element limit reached"
+  },
+  "elementSelect": {
+    "hint": "Choose up to {{max}} images",
+    "empty": "This element has no images",
+    "done": "Done"
   },
   "avatarModal": {
     "heygenTitle": "Create a HeyGen avatar",

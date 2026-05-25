@@ -5121,19 +5121,26 @@ select {
 .gen-prompt-wrap .gen-prompt {
   width: 100%;
 }
-/* Резерв места снизу, чтобы текст не заезжал под кнопку. */
-.gen-prompt-wrap.has-examples-btn .gen-prompt {
+/* Резерв места снизу, чтобы текст не заезжал под панель кнопок. */
+.gen-prompt-wrap.has-inline-tools .gen-prompt {
   padding-bottom: 44px;
 }
-.gen-prompt-examples-btn {
+/* Панель инлайн-кнопок («Готовые промпты» + «Элементы») в левом нижнем углу. */
+.gen-prompt-tools {
   position: absolute;
   left: 10px;
   bottom: 10px;
+  display: flex;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+}
+.gen-prompt-examples-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
   font-size: 12px;
+  white-space: nowrap;
   color: var(--text-secondary);
   background: var(--bg-elevated);
   border: 1px solid var(--border);

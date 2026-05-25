@@ -230,6 +230,9 @@
     "btnAddToSlot": "Загрузите файл: {{slot}}",
     "btnEnterPrompt": "Введите запрос",
     "btnPromptOrMedia": "Введите запрос или загрузите файл",
+    "elementsButton": "Элементы",
+    "elementLimit": "Не более {{max}} элементов в промпте",
+    "elementNoImages": "В элементе @{{name}} нет изображений",
     "errorWrongFileType": "Этот слот принимает только {{type}}",
     "typeImage": "изображения",
     "typeVideo": "видео",
@@ -530,6 +533,16 @@
     "nameInvalid": "Только буквы, цифры и подчёркивание (до 64)",
     "nameConflict": "У вас уже есть элемент с таким названием",
     "uploadError": "Ошибка загрузки"
+  },
+  "elementMention": {
+    "title": "Выберите элемент",
+    "empty": "У вас пока нет элементов",
+    "limitReached": "Достигнут лимит элементов"
+  },
+  "elementSelect": {
+    "hint": "Выберите до {{max}} изображений",
+    "empty": "В элементе нет изображений",
+    "done": "Готово"
   },
   "avatarModal": {
     "heygenTitle": "Создать HeyGen-аватар",
