@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  AtSign,
   Check,
   ChevronDown,
   Image as ImageIcon,
@@ -49,6 +50,15 @@ import { uploadedMediaKeys } from "@/api/uploadedMedia";
 import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
 import { MediaReusePopup, type ReusedMedia } from "./MediaReusePopup";
+import { ElementMentionPicker } from "./ElementMentionPicker";
+import { ElementImageSelectPopup } from "./ElementImageSelectPopup";
+import { useElements } from "@/hooks/useElements";
+import type { Element } from "@/api/elements";
+import {
+  parseActiveMentions,
+  translateMentionsToCanonical,
+  buildElementMediaInputs,
+} from "@/utils/elementMentions";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
 import { FloatingMediaBg } from "./FloatingMediaBg";
@@ -642,6 +652,17 @@ export function GenerateScene({
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
   // Какой слот сейчас открыл попап выбора медиа (upload / переиспользование).
   const [reuseSlotKey, setReuseSlotKey] = useState<string | null>(null);
+
+  // ── @-меншены элементов (MVP) ───────────────────────────────────────────────
+  // Открыт ли модальный пикер элементов (кнопка @Elements).
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  // Для какого элемента открыт попап выбора картинок (null — закрыт).
+  const [imageSelectFor, setImageSelectFor] = useState<Element | null>(null);
+  // Активный inline-`@`-токен у курсора (для dropdown'а подсказок).
+  const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null);
+  // Выбор картинок per-element: elementId → s3Key[] (персист в draft-store).
+  const [elementSelections, setElementSelections] = useState<Record<string, string[]>>({});
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -749,12 +770,13 @@ export function GenerateScene({
   // (React батчит) → UI не показывает stale slot files предыдущей модели.
   function pickModel(id: string) {
     if (id === modelId) return;
-    const { settings, slots } = restoreDraftForModel(id);
+    const { settings, slots, elementSelections: sel } = restoreDraftForModel(id);
     lastPickedRef.current = id;
     restoredForRef.current = id;
     setModeId(null);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setElementSelections(sel);
     setModelId(id);
     setSearchParams(
       (prev) => {
@@ -772,12 +794,13 @@ export function GenerateScene({
   function restoreDraftForModel(id: string): {
     settings: Record<string, unknown>;
     slots: Record<string, SlotFile[]>;
+    elementSelections: Record<string, string[]>;
   } {
     const target = models.find((m) => m.id === id);
-    if (!target) return { settings: {}, slots: {} };
+    if (!target) return { settings: {}, slots: {}, elementSelections: {} };
     const key = target.familyId ?? target.id;
     const entry = useGenerationDraftStore.getState().byKey[key];
-    if (!entry) return { settings: {}, slots: {} };
+    if (!entry) return { settings: {}, slots: {}, elementSelections: {} };
     const slots: Record<string, SlotFile[]> = {};
     for (const slot of target.mediaInputs ?? []) {
       const arr = entry.slots[slot.slotKey];
@@ -789,7 +812,7 @@ export function GenerateScene({
         }));
       }
     }
-    return { settings: entry.settings, slots };
+    return { settings: entry.settings, slots, elementSelections: entry.elementSelections ?? {} };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -864,6 +887,7 @@ export function GenerateScene({
       setModeId(null);
       setSettingValues({});
       setSlotFiles({});
+      setElementSelections({});
       restoredForRef.current = null;
       return;
     }
@@ -873,9 +897,10 @@ export function GenerateScene({
 
     setModeId(null);
     restoredForRef.current = modelId;
-    const { settings, slots } = restoreDraftForModel(modelId);
+    const { settings, slots, elementSelections: sel } = restoreDraftForModel(modelId);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setElementSelections(sel);
     void refreshRestoredSlotUrls(slots);
   }, [modelId, models]);
 
@@ -901,6 +926,14 @@ export function GenerateScene({
     }
     useGenerationDraftStore.getState().setSlots(key, stored);
   }, [selectedModel, slotFiles]);
+
+  // Sync elementSelections → draft-store (выбор картинок @-элементов).
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setElementSelections(key, elementSelections);
+  }, [selectedModel, elementSelections]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1025,6 +1058,47 @@ export function GenerateScene({
     () => (selectedModel ? getActiveSlots(selectedModel.mediaInputs, activeMode) : []),
     [selectedModel, activeMode],
   );
+
+  // ── @-меншены элементов: capability + активные меншены ──────────────────────
+  // Модель поддерживает @-элементы, если в promptRefs задан `elements`. Картинки
+  // элемента кладутся в слоты ref_element_N — их карточки в UI прячем (juзер
+  // подставляет элементы через @ в промпте), но в каталоге слоты остаются.
+  const elementsCap = selectedModel?.promptRefs?.elements ?? null;
+  const elementsFeatureOn = !!elementsCap;
+  const maxImagesPerElement = useMemo(
+    () => selectedModel?.mediaInputs.find((s) => s.mode === "reference_element")?.maxImages ?? 4,
+    [selectedModel],
+  );
+  // Список грузим только когда фича включена (enabled toggle в useElements).
+  const { elements: userElements } = useElements(elementsFeatureOn);
+  // Активные элементы выводятся из текста промпта (порядок = первое появление).
+  const activeMentions = useMemo(
+    () => (elementsFeatureOn ? parseActiveMentions(prompt, userElements) : []),
+    [elementsFeatureOn, prompt, userElements],
+  );
+  const activeElementIds = useMemo(
+    () => new Set(activeMentions.map((m) => m.element.id)),
+    [activeMentions],
+  );
+  // Слоты без reference_element — их карточки рендерим, элементные прячем.
+  const visibleSlots = useMemo(
+    () => activeSlots.filter((s) => s.mode !== "reference_element"),
+    [activeSlots],
+  );
+  // Меншены в пределах лимита модели — только они едут в слоты/трансляцию.
+  const cappedMentions = useMemo(
+    () => (elementsCap ? activeMentions.slice(0, elementsCap.max) : []),
+    [elementsCap, activeMentions],
+  );
+  // Подсказки inline-`@`: элементы по фильтру, без уже активных, при не-лимите.
+  const mentionMatches = useMemo(() => {
+    if (!mentionQuery || !elementsFeatureOn) return [];
+    if (elementsCap && activeMentions.length >= elementsCap.max) return [];
+    const q = mentionQuery.query.toLowerCase();
+    return userElements
+      .filter((el) => !activeElementIds.has(el.id) && el.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionQuery, elementsFeatureOn, elementsCap, activeMentions, userElements, activeElementIds]);
 
   // Список доступных settings — выкидываем unsupported types и применяем dependsOn.
   const visibleSettings = useMemo(() => {
@@ -1530,10 +1604,101 @@ export function GenerateScene({
         return t("generate.btnPromptOrMedia");
       }
     }
+
+    // @-элементы: лимит модели и пустые элементы блокируют генерацию.
+    if (elementsCap) {
+      if (activeMentions.length > elementsCap.max) {
+        return t("generate.elementLimit", { max: elementsCap.max });
+      }
+      const empty = activeMentions.find((m) => m.element.media.length === 0);
+      if (empty) return t("generate.elementNoImages", { name: empty.element.name });
+    }
     return null;
-  }, [busy, uploadInProgress, selectedModel, activeSlots, slotFiles, prompt, t]);
+  }, [
+    busy,
+    uploadInProgress,
+    selectedModel,
+    activeSlots,
+    slotFiles,
+    prompt,
+    elementsCap,
+    activeMentions,
+    t,
+  ]);
 
   const canGenerate = blockerReason === null;
+
+  // ── @-меншены: ввод/вставка/выбор ───────────────────────────────────────────
+  // onChange промпта: обновляем текст и детектим незакрытый `@<word>` у курсора.
+  function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setPrompt(value);
+    if (!elementsFeatureOn) {
+      if (mentionQuery) setMentionQuery(null);
+      return;
+    }
+    const caret = e.target.selectionStart ?? value.length;
+    const m = value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
+    if (m) setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
+    else setMentionQuery(null);
+  }
+
+  // Вставляет `@name ` в промпт: заменяет набранный inline-`@`-токен (если есть),
+  // иначе вставляет в позицию курсора. Возвращает фокус и каретку после вставки.
+  function insertMentionText(name: string) {
+    const ta = taRef.current;
+    const insert = `@${name} `;
+    const caret = ta?.selectionStart ?? prompt.length;
+    let next: string;
+    let newCaret: number;
+    if (mentionQuery) {
+      const before = prompt.slice(0, mentionQuery.start);
+      const after = prompt.slice(caret);
+      next = before + insert + after;
+      newCaret = before.length + insert.length;
+    } else {
+      next = prompt.slice(0, caret) + insert + prompt.slice(caret);
+      newCaret = caret + insert.length;
+    }
+    setPrompt(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      ta?.setSelectionRange(newCaret, newCaret);
+    });
+  }
+
+  // Выбор элемента (из @Elements-пикера или inline-dropdown'а): вставляем меншен
+  // и сразу открываем выбор картинок (если у элемента они есть).
+  function handlePickElement(el: Element) {
+    insertMentionText(el.name);
+    setMentionPickerOpen(false);
+    if (el.media.length > 0) setImageSelectFor(el);
+  }
+
+  // ── Сборка payload для submit/preview ───────────────────────────────────────
+  // mediaInputs: слоты-кадры (без ref_element_*, ими управляют @-меншены) +
+  // картинки активных @-элементов в ref_element_N.
+  function buildSubmitMediaInputs(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const [slotKey, files] of Object.entries(slotFiles)) {
+      if (slotKey.startsWith("ref_element_")) continue;
+      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+      if (keys.length > 0) out[slotKey] = keys;
+    }
+    if (elementsCap) {
+      Object.assign(
+        out,
+        buildElementMediaInputs(cappedMentions, elementSelections, maxImagesPerElement),
+      );
+    }
+    return out;
+  }
+
+  // Промпт для отправки: дружелюбные @имя → каноническая @ElementN (MVP-трансляция).
+  function buildSubmitPrompt(): string {
+    return elementsCap ? translateMentionsToCanonical(prompt, cappedMentions) : prompt;
+  }
 
   // ── Debounced cost preview ─────────────────────────────────────────────────
   // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
@@ -1545,11 +1710,8 @@ export function GenerateScene({
     if (!selectedModel) return;
     if (uploadInProgress) return;
 
-    const mediaInputs: Record<string, string[]> = {};
-    for (const [slotKey, files] of Object.entries(slotFiles)) {
-      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
-      if (keys.length > 0) mediaInputs[slotKey] = keys;
-    }
+    const mediaInputs = buildSubmitMediaInputs();
+    const submitPrompt = buildSubmitPrompt();
 
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -1560,7 +1722,7 @@ export function GenerateScene({
         {
           modelId: selectedModel.id,
           ...(modeId ? { modeId } : {}),
-          prompt,
+          prompt: submitPrompt,
           ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
           ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
         },
@@ -1585,7 +1747,18 @@ export function GenerateScene({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedModel, modeId, prompt, settingValues, slotFiles, uploadInProgress]);
+  }, [
+    selectedModel,
+    modeId,
+    prompt,
+    settingValues,
+    slotFiles,
+    uploadInProgress,
+    elementsCap,
+    cappedMentions,
+    elementSelections,
+    maxImagesPerElement,
+  ]);
 
   // Reset preview при смене модели — старая цифра не имеет смысла для новой
   // модели, лучше показать фоллбэк tokenCostApprox чем устаревшую оценку.
@@ -1600,12 +1773,10 @@ export function GenerateScene({
     setSubmitError(null);
     try {
       // В payload — только ready-файлы (uploading/error пропускаем). Передаём
-      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит.
-      const mediaInputs: Record<string, string[]> = {};
-      for (const [slotKey, files] of Object.entries(slotFiles)) {
-        const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
-        if (keys.length > 0) mediaInputs[slotKey] = keys;
-      }
+      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит. Картинки
+      // @-элементов кладутся в ref_element_N, а @имя в промпте → @ElementN (MVP).
+      const mediaInputs = buildSubmitMediaInputs();
+      const submitPrompt = buildSubmitPrompt();
 
       const section = selectedModel.section;
       const settingsField =
@@ -1616,7 +1787,7 @@ export function GenerateScene({
       if (section === "design" || section === "image") {
         const body: SubmitImageGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...(modeId ? { modeId } : {}),
           ...settingsField,
           ...mediaField,
@@ -1625,7 +1796,7 @@ export function GenerateScene({
       } else if (section === "video") {
         const body: SubmitVideoGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...(modeId ? { modeId } : {}),
           ...settingsField,
           ...mediaField,
@@ -1634,7 +1805,7 @@ export function GenerateScene({
       } else if (section === "audio") {
         const body: SubmitAudioGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...settingsField,
         };
         result = await submitAudioGeneration(body);
@@ -1892,15 +2063,16 @@ export function GenerateScene({
         {/* Скроллящийся блок с слотами / промптом / настройками.
             Фикс'нутый footer ниже (model picker + CTA) всегда виден. */}
         <div className="gen-panel-scroll">
-          {/* Media slots — фильтруются по активному режиму. */}
-          {activeSlots.length > 0 && (
+          {/* Media slots — фильтруются по активному режиму. Слоты reference_element
+              скрыты: элементы подставляются через @-меншены в промпте. */}
+          {visibleSlots.length > 0 && (
             <div
-              className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
+              className={clsx("gen-slots", visibleSlots.length === 1 && "is-single")}
               style={{
-                gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
+                gridTemplateColumns: `repeat(${Math.min(visibleSlots.length, 2)}, minmax(0, 1fr))`,
               }}
             >
-              {activeSlots.map((slot) => (
+              {visibleSlots.map((slot) => (
                 <SlotCard
                   key={slot.slotKey}
                   slot={slot}
@@ -1914,12 +2086,21 @@ export function GenerateScene({
           )}
 
           {/* Prompt. Кнопка «Готовые промпты» — в левом нижнем углу инпута. */}
-          <div className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}>
+          <div
+            className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}
+            style={{ position: "relative" }}
+          >
             <textarea
+              ref={taRef}
               className="gen-prompt"
               placeholder={promptPlaceholder}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={onPromptChange}
+              onBlur={() => {
+                // Закрываем dropdown после клика по подсказке (mousedown успевает
+                // отработать раньше blur), иначе — при уходе фокуса.
+                window.setTimeout(() => setMentionQuery(null), 150);
+              }}
               rows={3}
             />
             {promptSection && (
@@ -1928,7 +2109,104 @@ export function GenerateScene({
                 <span>{t("generate.openPromptExamples")}</span>
               </button>
             )}
+            {/* Inline-`@` dropdown подсказок элементов. */}
+            {mentionQuery && mentionMatches.length > 0 && (
+              <ul
+                className="card"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: "100%",
+                  marginTop: 4,
+                  zIndex: 50,
+                  maxHeight: 240,
+                  overflowY: "auto",
+                  padding: 4,
+                  listStyle: "none",
+                }}
+              >
+                {mentionMatches.map((el) => (
+                  <li key={el.id}>
+                    <button
+                      type="button"
+                      // mousedown (не click): срабатывает до blur textarea.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handlePickElement(el);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text hover:bg-bg-elevated"
+                    >
+                      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
+                        {el.media[0]?.url ? (
+                          <img
+                            src={el.media[0].url}
+                            alt=""
+                            className="size-full object-cover"
+                          />
+                        ) : (
+                          <AtSign size={14} className="text-text-secondary" />
+                        )}
+                      </span>
+                      <span className="truncate">@{el.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
+
+          {/* @-элементы: кнопка-пикер + чипы активных элементов (только для
+              моделей с promptRefs.elements, напр. Kling). */}
+          {elementsFeatureOn && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                marginTop: 8,
+              }}
+            >
+              <button
+                type="button"
+                className="gen-chip-pill"
+                onClick={() => setMentionPickerOpen(true)}
+              >
+                <AtSign size={14} />
+                <span>{t("generate.elementsButton")}</span>
+              </button>
+              {activeMentions.map(({ element }, i) => {
+                const count =
+                  elementSelections[element.id]?.length ??
+                  Math.min(maxImagesPerElement, element.media.length);
+                const over = elementsCap ? i >= elementsCap.max : false;
+                const cover = element.media[0]?.url ?? null;
+                return (
+                  <button
+                    key={element.id}
+                    type="button"
+                    className={clsx("gen-chip-pill", !over && "is-on")}
+                    title={over ? t("generate.elementLimit", { max: elementsCap?.max }) : undefined}
+                    onClick={() => setImageSelectFor(element)}
+                  >
+                    <span
+                      className="flex shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated"
+                      style={{ width: 16, height: 16 }}
+                    >
+                      {cover ? (
+                        <img src={cover} alt="" className="size-full object-cover" />
+                      ) : (
+                        <AtSign size={10} className="text-text-secondary" />
+                      )}
+                    </span>
+                    <span className="gen-chip-pill-label">@{element.name}</span>
+                    <span className="gen-chip-pill-val">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
               Family axis chip'ы (version / variant) идут первыми — это про
@@ -2163,6 +2441,30 @@ export function GenerateScene({
             />
           );
         })()}
+
+      {/* @Elements: модальный пикер элементов (кнопка @Elements). */}
+      {mentionPickerOpen && (
+        <ElementMentionPicker
+          activeElementIds={activeElementIds}
+          atLimit={!!elementsCap && activeMentions.length >= elementsCap.max}
+          onPick={handlePickElement}
+          onClose={() => setMentionPickerOpen(false)}
+        />
+      )}
+
+      {/* @Elements: выбор подмножества картинок элемента (2..maxImages). */}
+      {imageSelectFor && (
+        <ElementImageSelectPopup
+          element={imageSelectFor}
+          maxImages={maxImagesPerElement}
+          initialSelected={elementSelections[imageSelectFor.id] ?? []}
+          onConfirm={(keys) => {
+            setElementSelections((prev) => ({ ...prev, [imageSelectFor.id]: keys }));
+            setImageSelectFor(null);
+          }}
+          onClose={() => setImageSelectFor(null)}
+        />
+      )}
 
       {createAvatarProvider && (
         <CreateAvatarModal

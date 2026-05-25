@@ -111,6 +111,15 @@ export type WebModelDto = {
   settings: ModelSettingDto[];
   promptOptional: boolean;
   promptOptionalRequiresMedia: boolean;
+  /**
+   * @-reference возможности модели в промпте (форма `PromptRefCapabilities`).
+   * `null`/`undefined` — модель не поддерживает @-рефы (кнопка @Elements не рендерится).
+   */
+  promptRefs?: {
+    elements?: { max: number };
+    images?: { max: number };
+    video?: boolean;
+  } | null;
 };
 
 /**
