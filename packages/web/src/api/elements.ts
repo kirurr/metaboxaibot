@@ -12,7 +12,16 @@ export type { Element, ElementMedia };
 /** Все элементы пользователя (newest first) с вложенными референсными картинками. */
 export async function listElements(signal?: AbortSignal): Promise<Element[]> {
   const data = await apiClient("/web/elements", { signal });
-  return elementsResponseSchema.parse(data).items;
+  const items = elementsResponseSchema.parse(data).items;
+  // Бэк отдаёт media newest-first; для UI удобнее creation order (старые первыми,
+  // новые в конце): обложка элемента = первая добавленная картинка, а свежезалитая
+  // не «прыгает» из конца грида в начало после рефетча.
+  for (const el of items) {
+    el.media.sort((a, b) =>
+      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1,
+    );
+  }
+  return items;
 }
 
 /** Создаёт пустой элемент. Бросает ApiError(409) если имя уже занято. */

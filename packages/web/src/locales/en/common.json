@@ -499,6 +499,9 @@
   },
   "mediaReuse": {
     "tabUpload": "Uploads",
+    "tabElements": "Elements",
+    "createElement": "Create",
+    "editElement": "Edit",
     "generatedImage": "Generated images",
     "generatedVideo": "Generated videos",
     "generatedAudio": "Generated audio",
@@ -506,6 +509,23 @@
     "emptyGenerated": "No generations yet",
     "delete": "Delete",
     "done": "Done"
+  },
+  "elementModal": {
+    "createTitle": "New element",
+    "editTitle": "Edit element",
+    "name": "Name",
+    "namePlaceholder": "hero",
+    "addImage": "Add image",
+    "removeImage": "Remove image",
+    "maxImages": "{{n}}/{{max}} images",
+    "empty": "Add reference images for this element",
+    "create": "Create",
+    "done": "Done",
+    "cancel": "Cancel",
+    "nameRequired": "Enter a name",
+    "nameInvalid": "Only letters, digits and underscore (max 64)",
+    "nameConflict": "You already have an element with this name",
+    "uploadError": "Upload failed"
   },
   "avatarModal": {
     "heygenTitle": "Create a HeyGen avatar",

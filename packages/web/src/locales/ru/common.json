@@ -501,6 +501,9 @@
   },
   "mediaReuse": {
     "tabUpload": "Загрузки",
+    "tabElements": "Элементы",
+    "createElement": "Создать",
+    "editElement": "Изменить",
     "generatedImage": "Сгенерированные изображения",
     "generatedVideo": "Сгенерированные видео",
     "generatedAudio": "Сгенерированное аудио",
@@ -508,6 +511,23 @@
     "emptyGenerated": "Пока нет генераций",
     "delete": "Удалить",
     "done": "Готово"
+  },
+  "elementModal": {
+    "createTitle": "Новый элемент",
+    "editTitle": "Редактирование элемента",
+    "name": "Название",
+    "namePlaceholder": "hero",
+    "addImage": "Добавить",
+    "removeImage": "Убрать изображение",
+    "maxImages": "{{n}}/{{max}} изображений",
+    "empty": "Добавьте референсные изображения для элемента",
+    "create": "Создать",
+    "done": "Готово",
+    "cancel": "Отмена",
+    "nameRequired": "Введите название",
+    "nameInvalid": "Только буквы, цифры и подчёркивание (до 64)",
+    "nameConflict": "У вас уже есть элемент с таким названием",
+    "uploadError": "Ошибка загрузки"
   },
   "avatarModal": {
     "heygenTitle": "Создать HeyGen-аватар",
