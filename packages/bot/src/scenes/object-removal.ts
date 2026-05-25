@@ -135,8 +135,9 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
-  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п. HEIC от iPhone декодится
-  // через heic-convert.
+  // провайдеры отбивают CMYK / 16-bit / progressive JPEG и т.п. HEIC файлом
+  // sharp не парсит — на decode-failure юзер получит сообщение «отправь
+  // через кнопку Фото» (Telegram сам перекодирует HEIC в JPEG).
   const s3Key = `object_removal/${userId.toString()}/${Date.now()}.jpg`;
   let normalized;
   try {

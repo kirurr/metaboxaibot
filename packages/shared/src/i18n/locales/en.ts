@@ -122,7 +122,7 @@ export default {
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
     imageDecodeFailed:
-      "📷 I couldn't process this image — format is unsupported or file is corrupted. Try saving it as JPEG or PNG and send it again.",
+      "📷 I couldn't process this file — format may be unsupported (e.g. iPhone HEIC). Please resend the photo from your gallery as an image, not as a file/document — Telegram will convert it to JPEG.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",

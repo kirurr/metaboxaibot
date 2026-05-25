@@ -223,9 +223,9 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  // Перекодируем вход в JPEG: nano-banana отбивает HEIC / CMYK / 16-bit /
+  // Перекодируем вход в JPEG: nano-banana отбивает CMYK / 16-bit /
   // прогрессивный JPEG и т.п. uploadNormalizedImage заодно грузит файл в S3.
-  // HEIC от iPhone декодится через heic-convert.
+  // HEIC файлом sharp не парсит — юзер получит сообщение «пришли из галереи».
   const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.jpg`;
   let normalized;
   try {

@@ -81,10 +81,10 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
 
   const userId = ctx.user.id;
   // Album dedup регистрируем ДО upload'а: если первое фото альбома
-  // декод-failed (например HEIC и heic-convert не справился), мы не хотим
-  // получить N одинаковых сообщений «формат не поддерживается» на каждый
-  // sibling. По спецификации «берётся только первое фото альбома» — failure
-  // первого тоже считается «обработали».
+  // декод-failed (например HEIC файлом), мы не хотим получить N одинаковых
+  // сообщений «формат не поддерживается» на каждый sibling. По спецификации
+  // «берётся только первое фото альбома» — failure первого тоже считается
+  // «обработали».
   if (mediaGroupKey) {
     processedMediaGroups.add(mediaGroupKey);
     if (processedMediaGroups.size > 1000) {
@@ -98,9 +98,9 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
-  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п. HEIC от iPhone декодится
-  // через heic-convert. На decode-failure показываем юзеру понятное «формат
-  // не поддерживается», а не generic «модель отдыхает».
+  // провайдеры отбивают CMYK / 16-bit / progressive JPEG и т.п. На decode-
+  // failure (например HEIC документом — sharp не умеет HEVC) показываем
+  // юзеру понятное «отправь через кнопку Фото», а не generic «модель отдыхает».
   const s3Key = `bg_removal/${userId.toString()}/${Date.now()}.jpg`;
   let normalized;
   try {
