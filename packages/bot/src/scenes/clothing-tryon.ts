@@ -102,10 +102,10 @@ export async function handleClothingTryonPhoto(ctx: BotContext): Promise<void> {
   if (!isPerson && !isClothing) return;
 
   // Download from Telegram + upload to S3. Перекодируем вход в JPEG: провайдер
-  // (fal Hy-Wu Edit) отбивает HEIC / CMYK / 16-bit / progressive JPEG и т.п.
+  // (fal Hy-Wu Edit) отбивает CMYK / 16-bit / progressive JPEG и т.п.
   // `uploadNormalizedImage` читает реальные magic bytes через sharp — mime
-  // юзерского файла не имеет значения, любой image-формат превратится в JPEG.
-  // HEIC от iPhone декодится через heic-convert.
+  // юзерского файла не имеет значения. HEIC файлом sharp не парсит — юзер
+  // получит сообщение «отправь через кнопку Фото».
   const userId = ctx.user.id;
   // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
   // альбома мы не хотим получить N одинаковых сообщений «формат не
