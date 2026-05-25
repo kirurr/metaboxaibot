@@ -97,6 +97,20 @@ export interface Translations {
     photoAnimateAlbumNotice: string;
     photoAnimateBufferLost: string;
     photoAnimateGenerating: string;
+    photoCreate: string;
+    photoCreateWelcome: string;
+    photoCreateStepPhoto: string;
+    photoCreateStepPrompt: string;
+    photoCreateStepAr: string;
+    photoCreatePromptUpdated: string;
+    photoCreateNotPhoto: string;
+    photoCreatePhotoTooLarge: string;
+    photoCreateAlbumNotice: string;
+    photoCreatePromptEmpty: string;
+    photoCreatePromptTooLong: string;
+    photoCreateBufferLost: string;
+    photoCreateGenerating: string;
+    photoCreateAwaitArHint: string;
     imageDecodeFailed: string;
   };
   gpt: {
