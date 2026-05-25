@@ -5,6 +5,7 @@ import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
+import { isImageDocument } from "./upscale.js";
 import {
   UserFacingError,
   resolveUserFacingErrorVariant,
@@ -73,15 +74,13 @@ export async function handleClothingTryonPhoto(ctx: BotContext): Promise<void> {
 
   let fileId: string | undefined;
   let fileSize: number | undefined;
-  let mimeHint: string | undefined;
   if (ctx.message?.photo) {
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
-    mimeHint = ctx.message.document.mime_type;
   }
   if (!fileId) {
     await ctx.reply(ctx.t.scenarios.clothingTryonNotPhoto);
@@ -97,19 +96,21 @@ export async function handleClothingTryonPhoto(ctx: BotContext): Promise<void> {
   const isClothing = state?.state === "CLOTHING_TRYON_AWAIT_CLOTHING";
   if (!isPerson && !isClothing) return;
 
-  // Download from Telegram + upload to S3.
+  // Download from Telegram + upload to S3. Перекодируем вход в JPEG: провайдер
+  // (fal Hy-Wu Edit) отбивает HEIC / CMYK / 16-bit / progressive JPEG и т.п.
+  // `uploadNormalizedImage` читает реальные magic bytes через sharp — mime
+  // юзерского файла не имеет значения, любой image-формат превратится в JPEG.
   const userId = ctx.user.id;
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  const contentType = mimeHint?.startsWith("image/") ? mimeHint : "image/jpeg";
-  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
   const slot = isPerson ? CLOTHING_TRYON_SLOT_PERSON : CLOTHING_TRYON_SLOT_CLOTHING;
-  const s3Key = `clothing_tryon/${userId.toString()}/${Date.now()}_${slot}.${ext}`;
-  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
-  if (!uploadedKey) {
+  const s3Key = `clothing_tryon/${userId.toString()}/${Date.now()}_${slot}.jpg`;
+  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
+  if (!normalized) {
     await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.clothingTryon, "design"));
     return;
   }
+  const uploadedKey = normalized.key;
 
   // Persist the S3 key under the pseudo-model buffer so the second photo can
   // read it back. overflow=true → retries on the same slot replace the value.

@@ -72,11 +72,9 @@ export {
 } from "./constants/object-removal.js";
 export {
   PHOTO_ANIMATE_MODEL_ID,
-  PHOTO_ANIMATE_BUFFER_MODEL_ID,
   PHOTO_ANIMATE_DURATION_SEC,
   PHOTO_ANIMATE_RESOLUTION,
   PHOTO_ANIMATE_PROMPT,
-  PHOTO_ANIMATE_SUPPORTED_ASPECT_RATIOS,
 } from "./constants/photo-animate.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";

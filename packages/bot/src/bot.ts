@@ -30,11 +30,7 @@ import {
   handleObjectRemovalPhoto,
   handleObjectRemovalPrompt,
 } from "./scenes/object-removal.js";
-import {
-  handlePhotoAnimateEnter,
-  handlePhotoAnimatePhoto,
-  handlePhotoAnimateCallback,
-} from "./scenes/photo-animate.js";
+import { handlePhotoAnimateEnter, handlePhotoAnimatePhoto } from "./scenes/photo-animate.js";
 import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
@@ -352,7 +348,6 @@ export function createBot(token: string): Bot<BotContext> {
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
   });
   bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
-  bot.callbackQuery(/^photo_animate:/, handlePhotoAnimateCallback);
 
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
@@ -521,7 +516,8 @@ export function createBot(token: string): Bot<BotContext> {
     }
     if (state?.state === "FACE_SWAP_AWAIT_REFERENCE" || state?.state === "FACE_SWAP_AWAIT_FACE") {
       if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handleFaceSwapPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
       return;
     }
@@ -530,33 +526,28 @@ export function createBot(token: string): Bot<BotContext> {
       state?.state === "CLOTHING_TRYON_AWAIT_CLOTHING"
     ) {
       if (ctx.message?.photo) return handleClothingTryonPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleClothingTryonPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.clothingTryonNotPhoto);
       return;
     }
     if (state?.state === "BG_REMOVAL_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handleBackgroundRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleBackgroundRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.backgroundRemovalNotPhoto);
       return;
     }
     if (state?.state === "OBJECT_REMOVAL_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleObjectRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.objectRemovalNotPhoto);
       return;
     }
-    if (
-      state?.state === "PHOTO_ANIMATE_AWAIT_PHOTO" ||
-      state?.state === "PHOTO_ANIMATE_AWAIT_CONFIRM"
-    ) {
-      // На AWAIT_CONFIRM новое фото = «передумал, заменю» — handler перезапишет
-      // buffer и снова покажет confirm-кнопку.
+    if (state?.state === "PHOTO_ANIMATE_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handlePhotoAnimatePhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handlePhotoAnimatePhoto(ctx);
       await ctx.reply(ctx.t.scenarios.photoAnimateNotPhoto);
       return;
@@ -568,7 +559,7 @@ export function createBot(token: string): Bot<BotContext> {
       // голосовое и т.п.) — мягкая подсказка «опишите фразой».
       if (ctx.message?.text) return handleObjectRemovalPrompt(ctx);
       if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleObjectRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.objectRemovalPromptEmpty);
       return;
