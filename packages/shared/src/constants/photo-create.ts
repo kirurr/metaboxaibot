@@ -32,9 +32,12 @@ export const PHOTO_CREATE_RESOLUTION = "2K";
  * `nano-banana-pro.supportedAspectRatios` — проверка стоит в build'е через
  * tsconfig (несуществующее значение → ошибка на сабмите от провайдера).
  *
- * Символы-префиксы — Unicode arrows (не эмодзи):
- *   ↕ U+2195 — вертикальные форматы (9:16, 3:4)
- *   ↔ U+2194 — горизонтальные форматы (16:9, 4:3)
+ * Символы-префиксы — Unicode arrows со СУФФИКСОМ U+FE0E (variation selector
+ * "text presentation"), без него iOS-Telegram рендерит ↕ как цветной emoji,
+ * а ↔ оставляет текстовым — получается асимметрия в клавиатуре. FE0E форсит
+ * text-glyph на обеих стрелках на всех платформах.
+ *   ↕︎ — вертикальные форматы (9:16, 3:4)
+ *   ↔︎ — горизонтальные форматы (16:9, 4:3)
  *   без префикса — квадрат (1:1) и auto
  */
 export interface PhotoCreateArOption {
@@ -47,10 +50,10 @@ export interface PhotoCreateArOption {
 export const PHOTO_CREATE_AR_OPTIONS: readonly PhotoCreateArOption[] = [
   { value: "auto", label: "Авто" },
   { value: "1:1", label: "1:1" },
-  { value: "16:9", label: "↔ 16:9" },
-  { value: "9:16", label: "↕ 9:16" },
-  { value: "4:3", label: "↔ 4:3" },
-  { value: "3:4", label: "↕ 3:4" },
+  { value: "16:9", label: "↔︎ 16:9" },
+  { value: "9:16", label: "↕︎ 9:16" },
+  { value: "4:3", label: "↔︎ 4:3" },
+  { value: "3:4", label: "↕︎ 3:4" },
 ] as const;
 
 /**
