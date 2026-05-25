@@ -80,8 +80,9 @@ export function ElementMentionPicker({
               </div>
             )}
           </button>
-          {/* Hover-кнопки редактирования/удаления (siblings, не вложены в кнопку-плитку). */}
-          <div className="absolute left-1 top-1 hidden gap-1 sm:group-hover:flex">
+          {/* Кнопки редактирования/удаления (siblings, не вложены в кнопку-плитку).
+              На мобилке видны всегда (нет hover), на десктопе — по наведению. */}
+          <div className="absolute left-1 top-1 flex gap-1 sm:hidden sm:group-hover:flex">
             <button
               type="button"
               onClick={() => setEditing({ mode: "edit", element: el })}

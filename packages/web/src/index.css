@@ -4880,14 +4880,24 @@ select {
   flex: 0 0 auto;
 }
 
-/* Mode tabs — underline-style, как в референсе. */
+/* Mode tabs — underline-style, как в референсе. На узких экранах длинные
+   режимы (text→video / image→video и т.п.) скроллятся по горизонтали. */
 .gen-mode-tabs {
   display: flex;
   gap: 24px;
   border-bottom: 1px solid var(--border);
   padding: 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+.gen-mode-tabs::-webkit-scrollbar {
+  display: none;
 }
 .gen-mode-tab {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
   padding: 10px 0;
   background: transparent;
   border: none;
@@ -4940,6 +4950,15 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* На узких экранах лейбл + бейдж Required/Optional стакаются в колонку,
+   иначе длинное имя слота выталкивает бейдж за край карточки. */
+@media (max-width: 640px) {
+  .gen-slot-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
 }
 .gen-slot-label {
   font-size: 12.5px;
@@ -5155,6 +5174,13 @@ select {
   color: var(--text);
   background: var(--bg-secondary);
   border-color: var(--accent);
+}
+/* На узких экранах кнопки панели сворачиваются в иконку (текст — в title/aria),
+   чтобы две пилюли гарантированно влезали рядом и не вылезали за край инпута. */
+@media (max-width: 400px) {
+  .gen-prompt-tools .gen-prompt-examples-btn span {
+    display: none;
+  }
 }
 
 /* Settings v2 — flex-row wrap из chip-pill'ов. Каждый chip отображает

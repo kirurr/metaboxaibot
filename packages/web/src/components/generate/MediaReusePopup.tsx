@@ -97,6 +97,8 @@ export function MediaReusePopup({
   const [viewingElementId, setViewingElementId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Активный таб секции — чтобы доскроллить к нему при переключении.
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
 
   const uploaded = useUploadedMedia(slotType);
   const deleteMutation = useDeleteUploadedMedia(slotType);
@@ -115,6 +117,15 @@ export function MediaReusePopup({
     setTab(next);
     setViewingElementId(null);
   }
+
+  // Доскроллить полосу табов к активному (горизонтально, без vertical-jump).
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [tab]);
 
   // Esc закрывает попап. Но пока открыт вложенный ElementEditPopup (у него свой
   // Esc-листенер) — не реагируем, иначе Esc закрыл бы оба попапа разом.
@@ -310,8 +321,9 @@ export function MediaReusePopup({
               </div>
             )}
           </button>
-          {/* Hover-кнопки: редактировать / удалить (siblings, не вложены в кнопку-плитку). */}
-          <div className="absolute right-1 top-1 hidden gap-1 sm:group-hover:flex">
+          {/* Кнопки редактировать / удалить (siblings, не вложены в кнопку-плитку).
+              На мобилке видны всегда (нет hover), на десктопе — по наведению. */}
+          <div className="absolute right-1 top-1 flex gap-1 sm:hidden sm:group-hover:flex">
             <button
               type="button"
               onClick={() => setEditing({ mode: "edit", element: el })}
@@ -413,6 +425,7 @@ export function MediaReusePopup({
                 ).map(([key, label]) => (
                   <button
                     key={key}
+                    ref={tab === key ? activeTabRef : null}
                     type="button"
                     onClick={() => selectTab(key)}
                     className={clsx(
