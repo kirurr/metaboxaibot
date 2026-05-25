@@ -20,6 +20,8 @@ export interface CreateUploadedMediaParams {
   name: string;
   mimeType: string;
   size: number;
+  // Если задан — медиа привязано к Element'у и исключается из общего списка.
+  elementId?: string;
 }
 
 export const uploadedMediaService = {
@@ -28,6 +30,9 @@ export const uploadedMediaService = {
 
     const where: Prisma.UploadedMediaWhereInput = {
       userId,
+      // Картинки, привязанные к Element'у, в общий список переиспользования
+      // не попадают (питают только /web/elements).
+      elementId: null,
       ...(type ? { type } : {}),
       ...(cursor ? { id: { lt: cursor } } : {}),
     };

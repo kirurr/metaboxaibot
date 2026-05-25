@@ -154,4 +154,53 @@ export async function apiClient<TResponse = unknown, TBody = unknown>(
   return (await res.text()) as unknown as TResponse;
 }
 
+/**
+ * POST одного файла как `multipart/form-data` на `path`. Тот же auth/refresh
+ * flow, что у `apiClient`: освежает access перед запросом, на 401 один раз
+ * ретраит через tryRefresh. Возвращает сырой Response — вызывающий парсит свою
+ * схему; на !ok бросает ApiError.
+ *
+ * НЕ через apiClient — нужен FormData без Content-Type (браузер сам ставит
+ * multipart boundary). Используется загрузками чата и Element'ов.
+ */
+export async function postMultipartFile(path: string, file: File): Promise<Response> {
+  const auth = useAuthStore.getState();
+  if (auth.accessTokenExpiresAt && auth.accessTokenExpiresAt - Date.now() < 5_000) {
+    await auth.tryRefresh();
+  }
+
+  const form = new FormData();
+  form.append("file", file, file.name);
+
+  const doFetch = async () => {
+    const token = useAuthStore.getState().accessToken;
+    const csrf = useAuthStore.getState().csrfToken;
+    return fetch(API_BASE.replace(/\/$/, "") + path, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+      },
+      body: form,
+    });
+  };
+
+  let res = await doFetch();
+  if (res.status === 401) {
+    const refreshed = await useAuthStore.getState().tryRefresh();
+    if (refreshed) res = await doFetch();
+  }
+  if (!res.ok) {
+    let body: { code?: string; error?: string } = {};
+    try {
+      body = (await res.json()) as { code?: string; error?: string };
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, body.code, body.error || `upload failed: ${res.status}`, body);
+  }
+  return res;
+}
+
 export { API_BASE };
