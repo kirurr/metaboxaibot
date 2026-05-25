@@ -5,6 +5,7 @@ import {
   userStateService,
   s3Service,
   calculateCost,
+  ImageDecodeError,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
+import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
 
@@ -90,9 +92,12 @@ export function isVideoDocument(doc: { mime_type?: string; file_name?: string })
 
 /**
  * Расширения изображений, по которым принимаем документ при generic mime —
- * симметрично `isVideoDocument`. Формат всё равно нормализуется через sharp.
+ * симметрично `isVideoDocument`. Список лояльный: всё, что разумно похоже на
+ * фото-формат. Что sharp сможет — нормализуется (jpeg/png/webp/tiff/gif/avif),
+ * что не сможет (heic/heif/bmp/прочее) — отдаст decode-error, scene покажет
+ * понятное сообщение «не удалось обработать формат».
  */
-const IMAGE_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif)$/i;
+const IMAGE_DOC_EXT_RE = /\.(jpe?g|jfif|png|webp|tiff?|gif|avif|heic|heif|bmp)$/i;
 
 /** True если Telegram-документ — это изображение (по mime ИЛИ по расширению). */
 export function isImageDocument(doc: { mime_type?: string; file_name?: string }): boolean {
@@ -164,15 +169,27 @@ export async function handlePhotoUpscaleEnter(ctx: BotContext): Promise<void> {
   await userStateService.clearMediaInputs(ctx.user.id, PHOTO_UPSCALE_BUFFER_MODEL_ID);
   await userStateService.setState(ctx.user.id, "PHOTO_UPSCALE_AWAIT_PHOTO", null);
 
+  // Цена показывается в welcome, т.к. апскейл идёт сразу после загрузки фото
+  // (без кнопки-подтверждения) — юзер должен увидеть стоимость ДО отправки.
+  const model = AI_MODELS[PHOTO_UPSCALE_MODEL_ID];
+  const costLine = model ? buildCostLine(model, PHOTO_UPSCALE_SETTINGS, ctx.t) : "";
   const text = [
     `<b>${ctx.t.scenarios.photoUpscale}</b>`,
     ctx.t.scenarios.photoUpscaleWelcome,
     ctx.t.scenarios.photoUpscaleStep,
-  ].join("\n\n");
+    costLine,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   await ctx.reply(text, { parse_mode: "HTML" });
 }
 
-/** Handles a photo (compressed or image-document) in PHOTO_UPSCALE_AWAIT_PHOTO. */
+/**
+ * Принимает фото (compressed или image-document) в PHOTO_UPSCALE_AWAIT_PHOTO
+ * и сразу же запускает апскейл — одинаковый флоу с остальными scenario-
+ * пресетами (object-removal / bg-removal / photo-animate): загрузка = намерение,
+ * никакой промежуточной кнопки подтверждения.
+ */
 export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
 
@@ -200,15 +217,30 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  // Перекодируем вход в JPEG: nano-banana отбивает HEIC / CMYK / 16-bit /
+  // Перекодируем вход в JPEG: nano-banana отбивает CMYK / 16-bit /
   // прогрессивный JPEG и т.п. uploadNormalizedImage заодно грузит файл в S3.
+  // HEIC файлом sharp не парсит — юзер получит сообщение «пришли из галереи».
   const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Photo upscale: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+    }
     return;
+  }
+  if (mediaGroupKey) {
+    await ctx.reply(ctx.t.scenarios.upscaleAlbumNotice);
   }
 
   await userStateService.addMediaInput(
@@ -218,21 +250,66 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
     normalized.key,
     true,
   );
-  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
 
-  // Фактор больше не выбирается — апскейл всегда на 4K. Одна кнопка с
-  // фиксированной ценой: тап → старт.
-  const model = AI_MODELS[PHOTO_UPSCALE_MODEL_ID];
-  const cost = model
-    ? calculateCost(model, 0, 0, undefined, undefined, PHOTO_UPSCALE_SETTINGS, undefined)
-    : 0;
-  const label =
-    cost > 0
-      ? `${ctx.t.scenarios.upscaleStartButton} · ${cost.toFixed(2)} ✦`
-      : ctx.t.scenarios.upscaleStartButton;
-  await ctx.reply(ctx.t.scenarios.upscalePhotoReady, {
-    reply_markup: new InlineKeyboard().text(label, "upscale:photo:go"),
-  });
+  const chatId = ctx.chat?.id ?? (ctx.user.telegramId ? Number(ctx.user.telegramId) : undefined);
+  if (chatId === undefined) return;
+
+  let resolved: Record<string, string[]>;
+  try {
+    resolved = await resolveMediaInputUrls({ [UPSCALE_SLOT]: [normalized.key] });
+  } catch (err) {
+    if (err instanceof UserFacingError) {
+      await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
+    } else {
+      logger.error(err, "Photo upscale: failed to resolve media URL");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+    }
+    await userStateService.clearMediaInputs(userId, PHOTO_UPSCALE_BUFFER_MODEL_ID);
+    await userStateService.setState(userId, "SCENARIOS_SECTION", null);
+    return;
+  }
+  const srcUrl = resolved[UPSCALE_SLOT]?.[0];
+  if (!srcUrl) {
+    await ctx.reply(ctx.t.scenarios.photoUpscaleStep, { parse_mode: "HTML" });
+    return;
+  }
+
+  await ctx.reply(ctx.t.scenarios.upscaleGenerating);
+
+  let submitOk = false;
+  try {
+    await generationService.submitImage({
+      userId,
+      modelId: PHOTO_UPSCALE_MODEL_ID,
+      prompt: PHOTO_UPSCALE_PROMPT,
+      mediaInputs: { edit: [srcUrl] },
+      extraModelSettings: PHOTO_UPSCALE_SETTINGS,
+      telegramChatId: chatId,
+      sendOriginalLabel: ctx.t.common.sendOriginal,
+      displayNameOverride: ctx.t.scenarios.photoUpscale,
+      hidePromptInCaption: true,
+      hideRefineButton: true,
+    });
+    submitOk = true;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message === "NO_SUBSCRIPTION") {
+      await replyNoSubscription(ctx);
+    } else if (err instanceof Error && err.message === "INSUFFICIENT_TOKENS") {
+      await replyInsufficientTokens(ctx);
+    } else if (err instanceof UserFacingError) {
+      await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
+    } else {
+      logger.error(err, "Photo upscale submit failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+    }
+  }
+
+  await userStateService.clearMediaInputs(userId, PHOTO_UPSCALE_BUFFER_MODEL_ID);
+  await userStateService.setState(
+    userId,
+    submitOk ? "PHOTO_UPSCALE_AWAIT_PHOTO" : "SCENARIOS_SECTION",
+    null,
+  );
 }
 
 // ── Video upscale ────────────────────────────────────────────────────────────
@@ -374,15 +451,19 @@ export async function handleVideoUpscaleVideo(ctx: BotContext): Promise<void> {
   });
 }
 
-// ── Factor selection callback ────────────────────────────────────────────────
+// ── Video factor selection callback ─────────────────────────────────────────
 
-/** Handles `upscale:photo:<factor>` / `upscale:video:<factor>`. */
+/**
+ * Handles `upscale:video:<factor>`. Фото-апскейл больше не использует callback
+ * (сабмит идёт сразу из `handlePhotoUpscalePhoto`), но видео-апскейл всё ещё
+ * требует выбор фактора (×2/×4 с разной ценой).
+ */
 export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.callbackQuery?.data) return;
   const parts = ctx.callbackQuery.data.split(":");
   const kind = parts[1];
   const factor = parts[2];
-  if ((kind !== "photo" && kind !== "video") || !factor) {
+  if (kind !== "video" || !factor) {
     await ctx.answerCallbackQuery();
     return;
   }
@@ -391,41 +472,28 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
   await ctx.editMessageReplyMarkup().catch(() => void 0);
 
   const userId = ctx.user.id;
-  const isPhoto = kind === "photo";
-  const bufferId = isPhoto ? PHOTO_UPSCALE_BUFFER_MODEL_ID : VIDEO_UPSCALE_BUFFER_MODEL_ID;
-  const scenarioLabel = isPhoto ? ctx.t.scenarios.photoUpscale : ctx.t.scenarios.videoUpscale;
-  const awaitState = isPhoto ? "PHOTO_UPSCALE_AWAIT_PHOTO" : "VIDEO_UPSCALE_AWAIT_VIDEO";
-  const section = isPhoto ? "design" : "video";
+  const scenarioLabel = ctx.t.scenarios.videoUpscale;
 
-  const slots = await userStateService.getMediaInputs(userId, bufferId);
+  const slots = await userStateService.getMediaInputs(userId, VIDEO_UPSCALE_BUFFER_MODEL_ID);
   const srcKey = slots[UPSCALE_SLOT]?.[0];
   if (!srcKey) {
     // Буфер очищен (выход в меню и т.п.) — просим прислать файл заново.
-    await userStateService.setState(userId, awaitState, null);
-    await ctx.reply(isPhoto ? ctx.t.scenarios.photoUpscaleStep : ctx.t.scenarios.videoUpscaleStep, {
-      parse_mode: "HTML",
-    });
+    await userStateService.setState(userId, "VIDEO_UPSCALE_AWAIT_VIDEO", null);
+    await ctx.reply(ctx.t.scenarios.videoUpscaleStep, { parse_mode: "HTML" });
     return;
   }
 
-  // Видео тарифицируется по результату — метаданные берём из буфера (рядом с
-  // файлом). Фото-апскейл фиксированный (4K) — метаданные ему не нужны.
-  const meta: UpscaleMeta = isPhoto
-    ? {}
-    : {
-        durationSec: Number(slots[UPSCALE_DUR_SLOT]?.[0]),
-        heightPx: Number(slots[UPSCALE_HEIGHT_SLOT]?.[0]) || DEFAULT_VIDEO_HEIGHT,
-        fps: Number(slots[UPSCALE_FPS_SLOT]?.[0]) || DEFAULT_VIDEO_FPS,
-      };
+  const meta: UpscaleMeta = {
+    durationSec: Number(slots[UPSCALE_DUR_SLOT]?.[0]),
+    heightPx: Number(slots[UPSCALE_HEIGHT_SLOT]?.[0]) || DEFAULT_VIDEO_HEIGHT,
+    fps: Number(slots[UPSCALE_FPS_SLOT]?.[0]) || DEFAULT_VIDEO_FPS,
+  };
 
-  if (
-    !isPhoto &&
-    (!meta.durationSec || !Number.isFinite(meta.durationSec) || meta.durationSec <= 0)
-  ) {
+  if (!meta.durationSec || !Number.isFinite(meta.durationSec) || meta.durationSec <= 0) {
     // Длительность не прочиталась (повреждённый буфер) — без неё посекундную
     // цену не посчитать.
-    await userStateService.clearMediaInputs(userId, bufferId);
-    await userStateService.setState(userId, awaitState, null);
+    await userStateService.clearMediaInputs(userId, VIDEO_UPSCALE_BUFFER_MODEL_ID);
+    await userStateService.setState(userId, "VIDEO_UPSCALE_AWAIT_VIDEO", null);
     await ctx.reply(ctx.t.scenarios.upscaleVideoUnreadable);
     return;
   }
@@ -440,19 +508,17 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     if (err instanceof UserFacingError) {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
     } else {
-      logger.error(err, "Upscale: failed to resolve media URL");
-      await ctx.reply(pickGenerationFailedMessage(ctx.t, scenarioLabel, section));
+      logger.error(err, "Video upscale: failed to resolve media URL");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, scenarioLabel, "video"));
     }
-    await userStateService.clearMediaInputs(userId, bufferId);
+    await userStateService.clearMediaInputs(userId, VIDEO_UPSCALE_BUFFER_MODEL_ID);
     await userStateService.setState(userId, "SCENARIOS_SECTION", null);
     return;
   }
   const resolvedUrl = resolved[UPSCALE_SLOT]?.[0];
   if (!resolvedUrl) {
-    await userStateService.setState(userId, awaitState, null);
-    await ctx.reply(isPhoto ? ctx.t.scenarios.photoUpscaleStep : ctx.t.scenarios.videoUpscaleStep, {
-      parse_mode: "HTML",
-    });
+    await userStateService.setState(userId, "VIDEO_UPSCALE_AWAIT_VIDEO", null);
+    await ctx.reply(ctx.t.scenarios.videoUpscaleStep, { parse_mode: "HTML" });
     return;
   }
   // Провайдеру отдаём presigned-S3 URL напрямую. НЕ через `/download/<token>` —
@@ -465,31 +531,16 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
 
   let submitOk = false;
   try {
-    if (isPhoto) {
-      await generationService.submitImage({
-        userId,
-        modelId: PHOTO_UPSCALE_MODEL_ID,
-        prompt: PHOTO_UPSCALE_PROMPT,
-        mediaInputs: { edit: [srcUrl] },
-        extraModelSettings: PHOTO_UPSCALE_SETTINGS,
-        telegramChatId: chatId,
-        sendOriginalLabel: ctx.t.common.sendOriginal,
-        displayNameOverride: scenarioLabel,
-        hidePromptInCaption: true,
-        hideRefineButton: true,
-      });
-    } else {
-      await videoGenerationService.submitVideo({
-        userId,
-        modelId: VIDEO_UPSCALE_MODEL_ID,
-        prompt: "",
-        mediaInputs: { motion_video: [srcUrl] },
-        extraModelSettings: videoUpscaleSettings(factor, meta),
-        duration: meta.durationSec,
-        telegramChatId: chatId,
-        sendOriginalLabel: ctx.t.common.sendOriginal,
-      });
-    }
+    await videoGenerationService.submitVideo({
+      userId,
+      modelId: VIDEO_UPSCALE_MODEL_ID,
+      prompt: "",
+      mediaInputs: { motion_video: [srcUrl] },
+      extraModelSettings: videoUpscaleSettings(factor, meta),
+      duration: meta.durationSec,
+      telegramChatId: chatId,
+      sendOriginalLabel: ctx.t.common.sendOriginal,
+    });
     submitOk = true;
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "NO_SUBSCRIPTION") {
@@ -499,15 +550,15 @@ export async function handleUpscaleFactorSelect(ctx: BotContext): Promise<void> 
     } else if (err instanceof UserFacingError) {
       await ctx.reply(resolveUserFacingErrorVariant(err, ctx.t));
     } else {
-      logger.error(err, "Upscale submit failed");
-      await ctx.reply(pickGenerationFailedMessage(ctx.t, scenarioLabel, section));
+      logger.error(err, "Video upscale submit failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, scenarioLabel, "video"));
     }
   }
 
   if (submitOk) {
-    await userStateService.clearMediaInputs(userId, bufferId);
+    await userStateService.clearMediaInputs(userId, VIDEO_UPSCALE_BUFFER_MODEL_ID);
     // Авто-рестарт: следующий присланный файл стартует новый апскейл.
-    await userStateService.setState(userId, awaitState, null);
+    await userStateService.setState(userId, "VIDEO_UPSCALE_AWAIT_VIDEO", null);
   } else {
     await userStateService.setState(userId, "SCENARIOS_SECTION", null);
   }

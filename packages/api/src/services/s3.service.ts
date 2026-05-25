@@ -299,16 +299,39 @@ export interface NormalizedImageUpload {
 }
 
 /**
+ * Thrown when sharp cannot decode the source image (unsupported / corrupted
+ * format, например `.bmp`, экзотический tiff и т.п.). Caller (сцена-пресет)
+ * ловит этот тип и показывает юзеру понятное сообщение «формат не поддержан»
+ * вместо generic «модель отдыхает».
+ */
+export class ImageDecodeError extends Error {
+  constructor(cause?: unknown) {
+    super("Image decode failed");
+    this.name = "ImageDecodeError";
+    if (cause instanceof Error) this.cause = cause;
+  }
+}
+
+/**
  * Fetches an image, normalizes it to a provider-safe JPEG and uploads to S3.
  *
  * Re-encoding through sharp fixes inputs that AI upscale providers (Topaz)
- * reject with "Image format error" — HEIC, CMYK, 16-bit, progressive JPEG,
+ * reject with "Image format error" — CMYK, 16-bit, progressive JPEG,
  * animated/odd WebP, broken ICC/EXIF. EXIF orientation is baked in (`.rotate()`)
  * and alpha is flattened on white (JPEG has no alpha channel).
  *
+ * Sharp prebuilt binaries бандлят libheif, но БЕЗ HEVC-декодера (патенты), так
+ * что HEIC от iPhone (= HEIF+HEVC) sharp отбивает. Мы НЕ перекодируем такие
+ * файлы своими силами — это требовало бы +~192МБ heap peak на 48MP-фото и
+ * имеет проблемы с ориентацией. Вместо этого бросаем `ImageDecodeError` →
+ * сцена просит юзера прислать фото «через кнопку 📷 Фото» (Telegram сам
+ * пережмёт в JPEG, любой HEIC превратится в нормальный jpeg ещё на стороне TG).
+ *
  * Returns the S3 key and the normalized image's megapixels (single fetch +
  * decode — caller doesn't need a separate `measureImageMegapixels` call).
- * Throws on fetch/decode/upload failure so the caller can surface an error.
+ * Throws `ImageDecodeError` если sharp не смог распарсить буфер — caller
+ * покажет юзеру понятное сообщение. Любые другие ошибки (fetch/S3)
+ * пробрасываются как обычный Error.
  */
 export async function uploadNormalizedImage(
   key: string,
@@ -316,12 +339,21 @@ export async function uploadNormalizedImage(
 ): Promise<NormalizedImageUpload> {
   const res = await fetch(sourceUrl);
   if (!res.ok) throw new Error(`Failed to fetch image for normalization: ${res.status}`);
-  const srcBuf = Buffer.from(await res.arrayBuffer());
-  const { data, info } = await sharp(srcBuf)
-    .rotate()
-    .flatten({ background: "#ffffff" })
-    .jpeg({ quality: 92 })
-    .toBuffer({ resolveWithObject: true });
+  const rawBuf = Buffer.from(await res.arrayBuffer());
+
+  let data: Buffer;
+  let info: sharp.OutputInfo;
+  try {
+    ({ data, info } = await sharp(rawBuf)
+      .rotate()
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 92 })
+      .toBuffer({ resolveWithObject: true }));
+  } catch (err) {
+    logger.warn({ err }, "uploadNormalizedImage: sharp decode failed");
+    throw new ImageDecodeError(err);
+  }
+
   const uploaded = await uploadBuffer(key, data, "image/jpeg");
   // uploadBuffer возвращает null если S3 не сконфигурирован — НЕ выдаём
   // фейковый success с несуществующим ключом, иначе вызывающий код пойдёт

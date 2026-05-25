@@ -1,5 +1,10 @@
 import type { BotContext } from "../types/context.js";
-import { generationService, userStateService, s3Service } from "@metabox/api/services";
+import {
+  generationService,
+  userStateService,
+  s3Service,
+  ImageDecodeError,
+} from "@metabox/api/services";
 import {
   AI_MODELS,
   config,
@@ -11,6 +16,7 @@ import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
+import { isImageDocument } from "./upscale.js";
 
 // Сценарий «Удаление фона»: primary — fal Ideogram remove-background,
 // fallback — Replicate bria/remove-background. Один входной кадр, без промпта.
@@ -60,7 +66,7 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
   }
@@ -74,18 +80,11 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
   }
 
   const userId = ctx.user.id;
-  const file = await ctx.api.getFile(fileId);
-  const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
-  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п. Выход всё равно PNG.
-  const s3Key = `bg_removal/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(
-      pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.backgroundRemoval, "design"),
-    );
-    return;
-  }
+  // Album dedup регистрируем ДО upload'а: если первое фото альбома
+  // декод-failed (например HEIC файлом), мы не хотим получить N одинаковых
+  // сообщений «формат не поддерживается» на каждый sibling. По спецификации
+  // «берётся только первое фото альбома» — failure первого тоже считается
+  // «обработали».
   if (mediaGroupKey) {
     processedMediaGroups.add(mediaGroupKey);
     if (processedMediaGroups.size > 1000) {
@@ -95,6 +94,29 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
         if (v) processedMediaGroups.delete(v);
       }
     }
+  }
+  const file = await ctx.api.getFile(fileId);
+  const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
+  // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
+  // провайдеры отбивают CMYK / 16-bit / progressive JPEG и т.п. На decode-
+  // failure (например HEIC документом — sharp не умеет HEVC) показываем
+  // юзеру понятное «отправь через кнопку Фото», а не generic «модель отдыхает».
+  const s3Key = `bg_removal/${userId.toString()}/${Date.now()}.jpg`;
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "BG removal: upload normalize failed");
+      await ctx.reply(
+        pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.backgroundRemoval, "design"),
+      );
+    }
+    return;
+  }
+  if (mediaGroupKey) {
     await ctx.reply(ctx.t.scenarios.backgroundRemovalAlbumNotice);
   }
 

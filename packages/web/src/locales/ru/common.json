@@ -230,6 +230,9 @@
     "btnAddToSlot": "Загрузите файл: {{slot}}",
     "btnEnterPrompt": "Введите запрос",
     "btnPromptOrMedia": "Введите запрос или загрузите файл",
+    "elementsButton": "Элементы",
+    "elementLimit": "Не более {{max}} элементов в промпте",
+    "elementNoImages": "В элементе @{{name}} нет изображений",
     "errorWrongFileType": "Этот слот принимает только {{type}}",
     "typeImage": "изображения",
     "typeVideo": "видео",
@@ -498,6 +501,48 @@
       "failed": "Не удалось",
       "orphaned": "Недоступен"
     }
+  },
+  "mediaReuse": {
+    "tabUpload": "Загрузки",
+    "tabElements": "Элементы",
+    "createElement": "Создать",
+    "editElement": "Изменить",
+    "back": "Назад",
+    "elementImagesEmpty": "В этом элементе пока нет картинок",
+    "generatedImage": "Сгенерированные изображения",
+    "generatedVideo": "Сгенерированные видео",
+    "generatedAudio": "Сгенерированное аудио",
+    "upload": "Загрузить",
+    "emptyGenerated": "Пока нет генераций",
+    "delete": "Удалить",
+    "done": "Готово"
+  },
+  "elementModal": {
+    "createTitle": "Новый элемент",
+    "editTitle": "Редактирование элемента",
+    "name": "Название",
+    "namePlaceholder": "hero",
+    "addImage": "Добавить",
+    "removeImage": "Убрать изображение",
+    "maxImages": "{{n}}/{{max}} изображений",
+    "empty": "Добавьте референсные изображения для элемента",
+    "create": "Создать",
+    "done": "Готово",
+    "cancel": "Отмена",
+    "nameRequired": "Введите название",
+    "nameInvalid": "Только буквы, цифры и подчёркивание (до 64)",
+    "nameConflict": "У вас уже есть элемент с таким названием",
+    "uploadError": "Ошибка загрузки"
+  },
+  "elementMention": {
+    "title": "Выберите элемент",
+    "empty": "У вас пока нет элементов",
+    "limitReached": "Достигнут лимит элементов"
+  },
+  "elementSelect": {
+    "hint": "Выберите до {{max}} изображений",
+    "empty": "В элементе нет изображений",
+    "done": "Готово"
   },
   "avatarModal": {
     "heygenTitle": "Создать HeyGen-аватар",

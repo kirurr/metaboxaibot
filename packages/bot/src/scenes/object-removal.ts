@@ -4,6 +4,7 @@ import {
   userStateService,
   s3Service,
   translatePromptIfNeeded,
+  ImageDecodeError,
 } from "@metabox/api/services";
 import {
   AI_MODELS,
@@ -19,6 +20,7 @@ import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
+import { isImageDocument } from "./upscale.js";
 
 /**
  * Сценарий «Убрать объект с фото». Под капотом — KIE `gpt-image-2-image-to-image`
@@ -112,7 +114,7 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
   }
@@ -126,14 +128,27 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
-  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п.
+  // провайдеры отбивают CMYK / 16-bit / progressive JPEG и т.п. HEIC файлом
+  // sharp не парсит — на decode-failure юзер получит сообщение «отправь
+  // через кнопку Фото» (Telegram сам перекодирует HEIC в JPEG).
   const s3Key = `object_removal/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.objectRemoval, "design"));
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Object removal: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.objectRemoval, "design"));
+    }
     return;
   }
 
@@ -145,7 +160,6 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
     true,
   );
   if (mediaGroupKey) {
-    rememberMediaGroup(mediaGroupKey);
     await ctx.reply(ctx.t.scenarios.objectRemovalAlbumNotice);
   }
 
@@ -201,6 +215,11 @@ export async function handleObjectRemovalPrompt(ctx: BotContext): Promise<void> 
       { auto_translate_prompt: true },
       userId,
       OBJECT_REMOVAL_MODEL_ID,
+      // Перевод — внутренняя кухня сценария, юзер не должен видеть отдельную
+      // строку «autotranslate» в истории и не платит за это отдельно. Цена
+      // мизерная (gpt-5-nano на 400-char-промпт ≈ $0.0001) — поглощается
+      // сценарием, в base price object-removal ($0.03) уже c запасом покрыта.
+      { silent: true },
     );
   } catch (err) {
     logger.warn({ err }, "Object removal: prompt translation failed, falling back to original");

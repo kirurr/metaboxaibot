@@ -202,9 +202,13 @@ export class EvolinkImageAdapter implements ImageAdapter {
   }
 
   async submit(input: ImageInput): Promise<string> {
-    // image-upscale (готовый сценарий «Апскейл фото») гоняется через evolink
-    // ровно как nano-banana-pro — алиасим modelId, дальше вся ветка общая.
-    const modelId = this.modelId === "image-upscale" ? "nano-banana-pro" : this.modelId;
+    // image-upscale / photo-create (готовые сценарии под капотом nano-banana-pro)
+    // гоняются через evolink ровно как nano-banana-pro — алиасим modelId, дальше
+    // вся ветка общая.
+    const modelId =
+      this.modelId === "image-upscale" || this.modelId === "photo-create"
+        ? "nano-banana-pro"
+        : this.modelId;
     const evolinkModel = EVOLINK_MODEL_NAMES[modelId];
     if (!evolinkModel) {
       throw new Error(`Evolink: unknown model ${modelId}`);

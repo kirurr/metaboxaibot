@@ -32,6 +32,12 @@ export interface VideoJobData {
   lastIntervalMs?: number;
   /** Soft retry counter for transient network failures (DNS hiccups etc.). */
   transientRetries?: number;
+  /**
+   * Прячем «цитату промпта» в подписи результата. Нужно для сценариев-пресетов
+   * с фикс-промптом (Оживить фото и т.п.) — иначе технический английский
+   * промпт окажется в blockquote под видео и спалит реальную модель.
+   */
+  hidePromptInCaption?: boolean;
 }
 
 export function getVideoQueue(): Queue<VideoJobData> {

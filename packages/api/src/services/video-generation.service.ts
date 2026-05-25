@@ -51,6 +51,12 @@ export interface SubmitVideoParams {
    * повторный fetch+ffprobe того же mp3 (экономит ~200–500ms на HeyGen-сабмите).
    */
   audioDurationSecHint?: number;
+  /**
+   * Прячем «цитату промпта» в подписи к результату. Используется сценариями
+   * с фикс-промптом (Оживить фото и т.п.), где реальный промпт — технический
+   * английский, который не должен светиться юзеру.
+   */
+  hidePromptInCaption?: boolean;
 }
 
 export interface SubmitVideoResult {
@@ -181,6 +187,10 @@ export const videoGenerationService = {
               ? { modelSettings: JSON.parse(JSON.stringify(historySettings)) }
               : {};
           })(),
+          // Persist scenario-masking overrides — без этого reconcile после
+          // Redis-wipe пересоберёт job из БД, а воркер пришлёт результат с
+          // открытым техническим промптом под видео.
+          ...(params.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
         },
         status: "pending",
         ...(params.sourceMessageId ? { sourceMessageId: params.sourceMessageId } : {}),
@@ -204,6 +214,7 @@ export const videoGenerationService = {
         duration: effectiveDuration,
         modelSettings,
         ...(params.promptMessageId ? { promptMessageId: params.promptMessageId } : {}),
+        ...(params.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
       },
       {
         jobId: job.id,

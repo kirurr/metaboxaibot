@@ -125,6 +125,7 @@ export async function requeueGenerationJob(job: GenerationJobRow, delayMs?: numb
         modelSettings: inputData.modelSettings ?? {},
         stage,
         ...(stage === "poll" ? { pollStartedAt } : {}),
+        ...(inputData.hidePromptInCaption ? { hidePromptInCaption: true } : {}),
       },
       opts,
     );

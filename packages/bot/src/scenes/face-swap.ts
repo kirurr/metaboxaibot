@@ -1,10 +1,16 @@
 import type { BotContext } from "../types/context.js";
-import { generationService, userStateService, s3Service } from "@metabox/api/services";
+import {
+  generationService,
+  userStateService,
+  s3Service,
+  ImageDecodeError,
+} from "@metabox/api/services";
 import { AI_MODELS, config } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
+import { isImageDocument } from "./upscale.js";
 import {
   UserFacingError,
   resolveUserFacingErrorVariant,
@@ -160,15 +166,13 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
 
   let fileId: string | undefined;
   let fileSize: number | undefined;
-  let mimeHint: string | undefined;
   if (ctx.message?.photo) {
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
-    mimeHint = ctx.message.document.mime_type;
   }
   if (!fileId) {
     await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
@@ -184,31 +188,17 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
   const isFace = state?.state === "FACE_SWAP_AWAIT_FACE";
   if (!isReference && !isFace) return;
 
-  // Download from Telegram + upload to S3.
+  // Download from Telegram + upload to S3. Перекодируем вход в JPEG: провайдер
+  // (fal Hy-Wu Edit) отбивает CMYK / 16-bit / progressive JPEG и т.п.
+  // `uploadNormalizedImage` читает реальные magic bytes через sharp — mime
+  // юзерского файла не имеет значения. HEIC файлом sharp не парсит — юзер
+  // получит сообщение «отправь через кнопку Фото».
   const userId = ctx.user.id;
-  const file = await ctx.api.getFile(fileId);
-  const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
-  const contentType = mimeHint?.startsWith("image/") ? mimeHint : "image/jpeg";
-  const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
-  const slot = isReference ? FACE_SWAP_SLOT_REFERENCE : FACE_SWAP_SLOT_FACE;
-  const s3Key = `face_swap/${userId.toString()}/${Date.now()}_${slot}.${ext}`;
-  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
-  if (!uploadedKey) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.faceSwap, "design"));
-    return;
-  }
-
-  // Persist the S3 key under the pseudo-model buffer so the second photo can
-  // read it back. Use addMediaInput with overflow=true so retries on the same
-  // slot replace the previous value rather than appending.
-  await userStateService.addMediaInput(userId, FACE_SWAP_BUFFER_MODEL_ID, slot, uploadedKey, true);
-
-  // Commit album dedup AFTER successful upload + notify the user once per
-  // album. If upload had failed we'd have early-returned above without
-  // marking the group — the next sibling can retry.
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
   if (mediaGroupKey) {
     processedMediaGroups.add(mediaGroupKey);
-    // Cap the set so it can't grow unbounded across the bot's lifetime.
     if (processedMediaGroups.size > 1000) {
       const iter = processedMediaGroups.values();
       for (let i = 0; i < 100; i++) {
@@ -216,6 +206,31 @@ export async function handleFaceSwapPhoto(ctx: BotContext): Promise<void> {
         if (v) processedMediaGroups.delete(v);
       }
     }
+  }
+  const file = await ctx.api.getFile(fileId);
+  const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
+  const slot = isReference ? FACE_SWAP_SLOT_REFERENCE : FACE_SWAP_SLOT_FACE;
+  const s3Key = `face_swap/${userId.toString()}/${Date.now()}_${slot}.jpg`;
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Face swap: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.faceSwap, "design"));
+    }
+    return;
+  }
+  const uploadedKey = normalized.key;
+
+  // Persist the S3 key under the pseudo-model buffer so the second photo can
+  // read it back. Use addMediaInput with overflow=true so retries on the same
+  // slot replace the previous value rather than appending.
+  await userStateService.addMediaInput(userId, FACE_SWAP_BUFFER_MODEL_ID, slot, uploadedKey, true);
+
+  if (mediaGroupKey) {
     await ctx.reply(ctx.t.scenarios.faceSwapAlbumNotice);
   }
 

@@ -25,6 +25,54 @@ metaboxaibot prod                     stage server (metabox-site)
 - `prod` — прод-сервер сайта (metabox-site);
 - `stage` — stage-сервер сайта (там же где и центральный Loki/Prom/Grafana).
 
+## Docker daemon configuration
+
+Промтейл читает docker-логи **напрямую с диска**
+(`/var/lib/docker/containers/*/*-json.log`), а не через docker daemon API.
+Это решает баг live-streaming endpoint'а в Docker 29.4 / containerd 2.2.3,
+когда `docker logs --follow` тихо зависает на idle-контейнерах и кладёт
+сбор логов через `docker_sd_configs` (см. инцидент 2026-05-24).
+
+Чтобы `service`-лейбл в Loki содержал имя контейнера (а не container_id),
+docker должен подмешивать имя в каждую строку json-лога через log-opts.
+Создай или допиши `/etc/docker/daemon.json`:
+
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "tag": "{{.Name}}",
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+```
+
+- `tag: "{{.Name}}"` — в каждой строке json-лога будет `attrs.tag` с именем
+  контейнера. Промтейл его парсит и кладёт в label `service`.
+- `max-size: "10m"` + `max-file: "3"` — автоматическая ротация json-файлов
+  на 10 MB × 3 копии. Профилактика накопления sparse-corruption'а
+  (когда-то у cadvisor'а одна «строка» из NULL-блоков выросла до 80 MB
+  и валила Loki rate-limit'ом).
+
+Применить:
+
+```bash
+sudo systemctl restart docker
+```
+
+⚠️ Это **рестартует все контейнеры на хосте** (~30 сек даунтайма).
+Контейнеры с `restart: always` (наш стек) поднимутся сами. log-opts
+применяется только к НОВЫМ контейнерам — поэтому после рестарта daemon'а
+все запущенные контейнеры будут пересозданы и получат тег.
+
+Проверить, что тег записывается:
+
+```bash
+# для любого контейнера — должен быть "attrs":{"tag":"<container_name>"}
+sudo tail -n 1 /var/lib/docker/containers/$(docker inspect -f '{{.Id}}' aibot_api)/*-json.log | jq .attrs
+```
+
 ## Деплой на прод-сервере бота
 
 ### 1. DNS

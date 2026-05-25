@@ -14,12 +14,22 @@ export type StoredSlotFile = {
 export type GenerationDraftEntry = {
   settings: Record<string, unknown>;
   slots: Record<string, StoredSlotFile[]>;
+  /** Текст промпта (включая @-меншены элементов) — переживает перезагрузку. */
+  prompt?: string;
+  /**
+   * Выбор картинок для @-меншенов элементов: elementId → выбранные s3Key.
+   * Активные элементы выводятся из текста промпта, а вот какие именно картинки
+   * элемента уходят в генерацию (модель берёт лишь часть) — храним здесь.
+   */
+  elementSelections?: Record<string, string[]>;
 };
 
 type GenerationDraftState = {
   byKey: Record<string, GenerationDraftEntry>;
   setSettings: (key: string, values: Record<string, unknown>) => void;
   setSlots: (key: string, slots: Record<string, StoredSlotFile[]>) => void;
+  setPrompt: (key: string, prompt: string) => void;
+  setElementSelections: (key: string, selections: Record<string, string[]>) => void;
   clearForKey: (key: string) => void;
   clearAll: () => void;
 };
@@ -33,7 +43,7 @@ export const useGenerationDraftStore = create<GenerationDraftState>()(
         set((state) => ({
           byKey: {
             ...state.byKey,
-            [key]: { settings: values, slots: state.byKey[key]?.slots ?? {} },
+            [key]: { ...state.byKey[key], settings: values, slots: state.byKey[key]?.slots ?? {} },
           },
         })),
 
@@ -41,7 +51,33 @@ export const useGenerationDraftStore = create<GenerationDraftState>()(
         set((state) => ({
           byKey: {
             ...state.byKey,
-            [key]: { settings: state.byKey[key]?.settings ?? {}, slots },
+            [key]: { ...state.byKey[key], settings: state.byKey[key]?.settings ?? {}, slots },
+          },
+        })),
+
+      setPrompt: (key, prompt) =>
+        set((state) => ({
+          byKey: {
+            ...state.byKey,
+            [key]: {
+              ...state.byKey[key],
+              settings: state.byKey[key]?.settings ?? {},
+              slots: state.byKey[key]?.slots ?? {},
+              prompt,
+            },
+          },
+        })),
+
+      setElementSelections: (key, selections) =>
+        set((state) => ({
+          byKey: {
+            ...state.byKey,
+            [key]: {
+              ...state.byKey[key],
+              settings: state.byKey[key]?.settings ?? {},
+              slots: state.byKey[key]?.slots ?? {},
+              elementSelections: selections,
+            },
           },
         })),
 

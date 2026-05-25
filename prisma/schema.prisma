@@ -55,6 +55,8 @@ model User {
   pendingGeneration PendingGeneration?
   generationJobs    GenerationJob[]
   webNotifications  WebNotification[]
+  uploadedMedia     UploadedMedia[]
+  elements          Element[]
 
   @@map("users")
 }
@@ -234,7 +236,7 @@ model TokenTransaction {
    * provider-side стоимость (= mediaUsd + inputImageUsd + addonUsd + llmUsd
    * по модели actualProvider'а). Для аудита фактических расходов / маржи.
    */
-  actualCostUsd Decimal? @db.Decimal(12, 6)
+  actualCostUsd  Decimal? @db.Decimal(12, 6)
 
   createdAt DateTime @default(now())
 
@@ -255,16 +257,16 @@ model GenerationJob {
   modelId  String
   status   String @default("pending") // pending | processing | done | failed
 
-  prompt          String
-  inputData       Json? // доп. параметры (размер, стиль и т.д.)
-  providerJobId   String? // external provider task ID — persisted after submit for poll resume on restart
-  providerKeyId   String? // ProviderKey.id выбранный на submit; null = был использован env-fallback
-  sourceMessageId String? // "{chatId}:{messageId}" of the inline button that triggered this job
-  pollStartedAt   DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
-  tokensSpent     Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
+  prompt           String
+  inputData        Json? // доп. параметры (размер, стиль и т.д.)
+  providerJobId    String? // external provider task ID — persisted after submit for poll resume on restart
+  providerKeyId    String? // ProviderKey.id выбранный на submit; null = был использован env-fallback
+  sourceMessageId  String? // "{chatId}:{messageId}" of the inline button that triggered this job
+  pollStartedAt    DateTime? // момент перехода в poll-стадию — фиксируется при записи providerJobId, чтобы 24ч-таймаут корректно работал после recovery
+  tokensSpent      Decimal?  @db.Decimal(12, 4) // сколько внутренних токенов списано за эту джобу (для отображения в галерее); null = неизвестно (старые джобы или recovery fast-path)
   // Сырое exception-сообщение для ops/debugging. Никогда не показывается
   // пользователю напрямую — для UI используется `errorUserMessage` ниже.
-  error           String?
+  error            String?
   // Локализованное user-facing сообщение об ошибке (из `resolveUserFacingMessage`
   // / `pickGenerationFailedMessage`). То же, что бот шлёт в чат и что пишется
   // в WS-нотификацию. Web-UI читает это поле для истории генераций. null =
@@ -281,7 +283,7 @@ model GenerationJob {
   // Хранится строкой (не enum'ом) для forward-compat: новые коды можно
   // добавлять в TS без миграции. null = ошибки нет ИЛИ старая джоба
   // (до выкатки этой колонки).
-  errorCode       String?
+  errorCode        String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -367,16 +369,66 @@ model UserUpload {
 }
 
 // ─────────────────────────────────────────────
+// Загруженные пользователем медиа (для попапа «переиспользовать загруженное»).
+// Запись создаётся на каждый upload image/video/audio через POST /web/chat-uploads
+// (документы не сохраняются). Удаление записи НЕ удаляет S3-объект — тот же s3Key
+// может быть в отправленном Message.attachments или в чужом черновике генерации.
+// ─────────────────────────────────────────────
+model UploadedMedia {
+  id        String   @id @default(cuid())
+  userId    BigInt
+  type      String // image | video | audio
+  s3Key     String
+  name      String
+  mimeType  String
+  size      Int
+  createdAt DateTime @default(now())
+  // Если задан — медиа принадлежит пользовательскому Element'у (набору референсов)
+  // и НЕ показывается в общем списке переиспользования (uploadedMediaService.list
+  // фильтрует elementId IS NULL).
+  elementId String?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  element Element? @relation(fields: [elementId], references: [id], onDelete: Cascade)
+
+  // Курсорная пагинация по новизне: cuid монотонен, id desc ≈ createdAt desc.
+  @@index([userId, id(sort: Desc)])
+  @@index([userId, type, id(sort: Desc)])
+  @@index([elementId])
+  @@map("uploaded_media")
+}
+
+// ─────────────────────────────────────────────
+// Element — именованный (@-тег) набор референсных изображений, который юзер
+// создаёт для себя и подставляет в промпт моделей с @-синтаксисом (Kling и т.п.).
+// Картинки — это строки UploadedMedia с проставленным elementId; удаление
+// элемента каскадит их (S3-объекты не трогаем, как и при обычном удалении media).
+// ─────────────────────────────────────────────
+model Element {
+  id        String   @id @default(cuid())
+  userId    BigInt
+  name      String // @-тег без символа @, валидация ^[a-zA-Z0-9_]+$
+  createdAt DateTime @default(now())
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media UploadedMedia[]
+
+  @@unique([userId, name])
+  @@index([userId, id(sort: Desc)])
+  @@map("elements")
+}
+
+// ─────────────────────────────────────────────
 // Пользовательские аватары (кастомные, создаются через провайдеры)
 // ─────────────────────────────────────────────
 model UserAvatar {
-  id            String  @id @default(cuid())
+  id            String   @id @default(cuid())
   userId        BigInt
   provider      String // "heygen" | "higgsfield_soul"
   name          String
   externalId    String? // talking_photo_id (HeyGen) / Soul ID
   previewUrl    String?
-  status        String  @default("creating") // "creating" | "ready" | "failed" | "orphaned"
+  status        String   @default("creating") // "creating" | "ready" | "failed" | "orphaned"
   // ProviderKey, на котором был создан внешний ресурс. Внешние provider-айди
   // (talking_photo_id и т.п.) живут в аккаунте конкретного API-ключа, поэтому
   // потреблять их можно только тем же ключом. null = был использован env-fallback.

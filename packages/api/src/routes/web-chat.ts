@@ -21,13 +21,15 @@ import {
 } from "../services/chat.service.js";
 import { db } from "../db.js";
 import { getFileUrl, uploadBuffer } from "../services/s3.service.js";
+import { uploadedMediaService } from "../services/uploaded-media.service.js";
 import { logger } from "../logger.js";
 import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
+import { CHAT_UPLOAD_MAX_BYTES, isAllowedUploadMime, extFromMime } from "../utils/upload-mime.js";
 import type { OutgoingHttpHeaders } from "node:http";
 
 // ── Загрузка вложений для чата ───────────────────────────────────────────────
-// Принимаемые типы:
+// Принимаемые типы (см. utils/upload-mime.ts):
 //  - images: показываются модели как картинки (через imageS3Keys в chat.service).
 //  - documents: PDF — native через `supportsDocuments`, остальные (txt/csv/json/
 //    docx/xlsx) — text-class через `documentTextExtractFallback` (inline extract).
@@ -35,83 +37,6 @@ import type { OutgoingHttpHeaders } from "node:http";
 //    (Kling Motion `motion_video`, Heygen `voice_audio`, Wan `driving_audio`
 //    и т.п.). В обычный чат-композер они не попадают — он сам ограничивает
 //    `accept` до image+document.
-const CHAT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — покрывает обычные PDF/изображения
-
-const IMAGE_MIMES = new Set<string>(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const DOCUMENT_MIMES = new Set<string>([
-  "application/pdf",
-  "application/json",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-  "text/comma-separated-values",
-]);
-const VIDEO_MIMES = new Set<string>(["video/mp4", "video/quicktime", "video/webm"]);
-const AUDIO_MIMES = new Set<string>([
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/mp4",
-  "audio/x-m4a",
-  "audio/webm",
-  "audio/ogg",
-]);
-function isAllowedUploadMime(mime: string): "image" | "document" | "video" | "audio" | null {
-  if (IMAGE_MIMES.has(mime)) return "image";
-  if (DOCUMENT_MIMES.has(mime)) return "document";
-  if (VIDEO_MIMES.has(mime)) return "video";
-  if (AUDIO_MIMES.has(mime)) return "audio";
-  // Прочие text/* (plain, csv, markdown, ...) — text-class, идут как document.
-  if (mime.startsWith("text/")) return "document";
-  return null;
-}
-
-function extFromMime(mime: string): string {
-  switch (mime) {
-    case "image/png":
-      return "png";
-    case "image/jpeg":
-      return "jpg";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    case "application/pdf":
-      return "pdf";
-    case "application/json":
-      return "json";
-    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      return "docx";
-    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-      return "xlsx";
-    case "text/comma-separated-values":
-    case "text/csv":
-      return "csv";
-    case "text/markdown":
-      return "md";
-    case "text/plain":
-      return "txt";
-    case "video/mp4":
-      return "mp4";
-    case "video/quicktime":
-      return "mov";
-    case "video/webm":
-      return "webm";
-    case "audio/mpeg":
-    case "audio/mp3":
-      return "mp3";
-    case "audio/wav":
-    case "audio/x-wav":
-      return "wav";
-    case "audio/mp4":
-    case "audio/x-m4a":
-      return "m4a";
-    case "audio/ogg":
-      return "ogg";
-    default:
-      return "bin";
-  }
-}
 
 export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
   // Все роуты здесь требуют и авторизации, и привязанного Telegram.
@@ -201,10 +126,30 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ error: "S3 недоступен" });
       }
 
+      const name = part.filename || `upload.${ext}`;
+
+      // Персистим медиа (image/video/audio) для попапа «переиспользовать
+      // загруженное». Документы не сохраняем. Best-effort: сбой записи не должен
+      // ронять саму загрузку — файл уже лежит в S3.
+      if (kind !== "document") {
+        await uploadedMediaService
+          .create({
+            userId: aibUserId!,
+            type: kind,
+            s3Key,
+            name,
+            mimeType: part.mimetype,
+            size: buffer.byteLength,
+          })
+          .catch((err) => {
+            logger.error({ err, s3Key }, "chat-uploads: failed to persist uploaded media");
+          });
+      }
+
       const url = await getFileUrl(s3Key).catch(() => null);
       return {
         s3Key,
-        name: part.filename || `upload.${ext}`,
+        name,
         mimeType: part.mimetype,
         size: buffer.byteLength,
         kind,
@@ -220,8 +165,10 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
    * draft-state — presigned URL живёт час, draft хранится в localStorage
    * дольше, поэтому без рефреша превью бы ломалось.
    *
-   * Чужой ключ (не `chat-uploads/{aibUserId}/...`) → возвращаем `null`,
-   * чтобы один битый ключ не ронял весь batch.
+   * Разрешённые ключи: собственные `chat-uploads/{aibUserId}/...` (по префиксу)
+   * и s3Key'и генераций этого юзера (по GenerationJobOutput) — последнее нужно,
+   * чтобы переиспользованное в media-слоте сгенерированное медиа переживало
+   * rehydrate. Чужой ключ → `null`, чтобы один битый ключ не ронял весь batch.
    */
   fastify.post<{ Body: { s3Keys: string[] } }>(
     "/web/chat-uploads/sign",
@@ -258,12 +205,32 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
       const { aibUserId } = request.webUser!;
       const expectedPrefix = `chat-uploads/${aibUserId}/`;
       const unique = Array.from(new Set(request.body.s3Keys));
+
+      // Помимо собственных chat-uploads ключей (по префиксу) разрешаем ресайнить
+      // ключи генераций этого юзера — чтобы переиспользованное в media-слоте
+      // сгенерированное медиа переживало восстановление черновика. Владение
+      // проверяем по GenerationJobOutput (s3Key / thumbnailS3Key + job.userId).
+      const foreignKeys = unique.filter((k) => !k.startsWith(expectedPrefix));
+      const ownedOutputKeys = new Set<string>();
+      if (foreignKeys.length > 0) {
+        const rows = await db.generationJobOutput.findMany({
+          where: {
+            job: { userId: aibUserId! },
+            OR: [{ s3Key: { in: foreignKeys } }, { thumbnailS3Key: { in: foreignKeys } }],
+          },
+          select: { s3Key: true, thumbnailS3Key: true },
+        });
+        for (const r of rows) {
+          if (r.s3Key) ownedOutputKeys.add(r.s3Key);
+          if (r.thumbnailS3Key) ownedOutputKeys.add(r.thumbnailS3Key);
+        }
+      }
+
       const urls: Record<string, string | null> = {};
       await Promise.all(
         unique.map(async (key) => {
-          urls[key] = key.startsWith(expectedPrefix)
-            ? await getFileUrl(key).catch(() => null)
-            : null;
+          const allowed = key.startsWith(expectedPrefix) || ownedOutputKeys.has(key);
+          urls[key] = allowed ? await getFileUrl(key).catch(() => null) : null;
         }),
       );
       return { urls };

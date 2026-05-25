@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  AtSign,
   Check,
   ChevronDown,
   Image as ImageIcon,
@@ -44,8 +45,20 @@ import {
   deleteUserAvatar,
   type UserAvatarDto,
 } from "@/api/userAvatars";
+import { useQueryClient } from "@tanstack/react-query";
+import { uploadedMediaKeys } from "@/api/uploadedMedia";
 import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
+import { MediaReusePopup, type ReusedMedia } from "./MediaReusePopup";
+import { ElementMentionPicker } from "./ElementMentionPicker";
+import { ElementImageSelectPopup } from "./ElementImageSelectPopup";
+import { useElements } from "@/hooks/useElements";
+import type { Element } from "@/api/elements";
+import {
+  parseActiveMentions,
+  translateMentionsToCanonical,
+  buildElementMediaInputs,
+} from "@/utils/elementMentions";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
 import { FloatingMediaBg } from "./FloatingMediaBg";
@@ -232,22 +245,21 @@ type SlotFile =
 function SlotCard({
   slot,
   files,
-  onAdd,
+  onOpenPicker,
   onRemove,
   onSlotError,
 }: {
   slot: MediaInputSlotDto;
   files: SlotFile[];
-  onAdd: (files: FileList) => void;
+  /** Открыть попап выбора медиа (загрузка/переиспользование). */
+  onOpenPicker: () => void;
   onRemove: (id: string) => void;
   /** Превью не загрузилось (presigned URL мёртв / 403). Родитель удаляет файл
    *  и показывает rate-limited toast. */
   onSlotError?: (id: string) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const isMulti = slot.maxImages > 1;
   const canAddMore = files.length < slot.maxImages;
-  const accept = slotAcceptFor(slot);
 
   return (
     <div className={clsx("gen-slot", isMulti && "gen-slot-multi")}>
@@ -257,21 +269,10 @@ function SlotCard({
           {slot.required ? "Required" : "Optional"}
         </span>
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        multiple={isMulti}
-        style={{ display: "none" }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) onAdd(e.target.files);
-          e.target.value = "";
-        }}
-      />
       {files.length === 0 ? (
         <button
           className="gen-slot-drop"
-          onClick={() => inputRef.current?.click()}
+          onClick={onOpenPicker}
           aria-label={`Загрузить ${slot.label}`}
         >
           <div className="gen-slot-icon">
@@ -291,11 +292,7 @@ function SlotCard({
             />
           ))}
           {canAddMore && (
-            <button
-              className="gen-slot-add"
-              onClick={() => inputRef.current?.click()}
-              aria-label="Добавить ещё"
-            >
+            <button className="gen-slot-add" onClick={onOpenPicker} aria-label="Добавить ещё">
               <Plus size={18} />
               {isMulti && (
                 <span className="gen-slot-count">
@@ -653,6 +650,24 @@ export function GenerateScene({
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
+  // Какой слот сейчас открыл попап выбора медиа (upload / переиспользование).
+  const [reuseSlotKey, setReuseSlotKey] = useState<string | null>(null);
+
+  // ── @-меншены элементов (MVP) ───────────────────────────────────────────────
+  // Открыт ли модальный пикер элементов (кнопка @Elements).
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  // Для какого элемента открыт попап выбора картинок (null — закрыт).
+  const [imageSelectFor, setImageSelectFor] = useState<Element | null>(null);
+  // Активный inline-`@`-токен у курсора (для dropdown'а подсказок).
+  const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null);
+  // Подсвеченный пункт dropdown'а (клавиатурная навигация ↑/↓/Enter).
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  // Выбор картинок per-element: elementId → s3Key[] (персист в draft-store).
+  const [elementSelections, setElementSelections] = useState<Record<string, string[]>>({});
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Активный mode-tab — чтобы доскроллить к нему при переключении режима.
+  const activeModeTabRef = useRef<HTMLButtonElement | null>(null);
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
@@ -759,12 +774,14 @@ export function GenerateScene({
   // (React батчит) → UI не показывает stale slot files предыдущей модели.
   function pickModel(id: string) {
     if (id === modelId) return;
-    const { settings, slots } = restoreDraftForModel(id);
+    const { settings, slots, prompt: p, elementSelections: sel } = restoreDraftForModel(id);
     lastPickedRef.current = id;
     restoredForRef.current = id;
     setModeId(null);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setPrompt(p);
+    setElementSelections(sel);
     setModelId(id);
     setSearchParams(
       (prev) => {
@@ -782,12 +799,14 @@ export function GenerateScene({
   function restoreDraftForModel(id: string): {
     settings: Record<string, unknown>;
     slots: Record<string, SlotFile[]>;
+    prompt: string;
+    elementSelections: Record<string, string[]>;
   } {
     const target = models.find((m) => m.id === id);
-    if (!target) return { settings: {}, slots: {} };
+    if (!target) return { settings: {}, slots: {}, prompt: "", elementSelections: {} };
     const key = target.familyId ?? target.id;
     const entry = useGenerationDraftStore.getState().byKey[key];
-    if (!entry) return { settings: {}, slots: {} };
+    if (!entry) return { settings: {}, slots: {}, prompt: "", elementSelections: {} };
     const slots: Record<string, SlotFile[]> = {};
     for (const slot of target.mediaInputs ?? []) {
       const arr = entry.slots[slot.slotKey];
@@ -799,7 +818,12 @@ export function GenerateScene({
         }));
       }
     }
-    return { settings: entry.settings, slots };
+    return {
+      settings: entry.settings,
+      slots,
+      prompt: entry.prompt ?? "",
+      elementSelections: entry.elementSelections ?? {},
+    };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -874,6 +898,8 @@ export function GenerateScene({
       setModeId(null);
       setSettingValues({});
       setSlotFiles({});
+      setPrompt("");
+      setElementSelections({});
       restoredForRef.current = null;
       return;
     }
@@ -883,9 +909,11 @@ export function GenerateScene({
 
     setModeId(null);
     restoredForRef.current = modelId;
-    const { settings, slots } = restoreDraftForModel(modelId);
+    const { settings, slots, prompt: p, elementSelections: sel } = restoreDraftForModel(modelId);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setPrompt(p);
+    setElementSelections(sel);
     void refreshRestoredSlotUrls(slots);
   }, [modelId, models]);
 
@@ -911,6 +939,31 @@ export function GenerateScene({
     }
     useGenerationDraftStore.getState().setSlots(key, stored);
   }, [selectedModel, slotFiles]);
+
+  // Sync elementSelections → draft-store (выбор картинок @-элементов).
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setElementSelections(key, elementSelections);
+  }, [selectedModel, elementSelections]);
+
+  // Sync prompt → draft-store (per-family) — переживает перезагрузку страницы.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setPrompt(key, prompt);
+  }, [selectedModel, prompt]);
+
+  // Авто-рост textarea промпта под контент (в пределах CSS min/max-height).
+  // Реагирует и на ввод, и на программную подстановку (restore / @-меншены).
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [prompt]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1031,10 +1084,67 @@ export function GenerateScene({
     [selectedModel, modeId],
   );
 
+  // Доскроллить tab-полосу к активному режиму (горизонтально, без vertical-jump).
+  useEffect(() => {
+    activeModeTabRef.current?.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [activeMode?.id]);
+
   const activeSlots = useMemo(
     () => (selectedModel ? getActiveSlots(selectedModel.mediaInputs, activeMode) : []),
     [selectedModel, activeMode],
   );
+
+  // ── @-меншены элементов: capability + активные меншены ──────────────────────
+  // Модель поддерживает @-элементы, если в promptRefs задан `elements`. Картинки
+  // элемента кладутся в слоты ref_element_N — их карточки в UI прячем (juзер
+  // подставляет элементы через @ в промпте), но в каталоге слоты остаются.
+  const elementsCap = selectedModel?.promptRefs?.elements ?? null;
+  const elementsFeatureOn = !!elementsCap;
+  const maxImagesPerElement = useMemo(
+    () => selectedModel?.mediaInputs.find((s) => s.mode === "reference_element")?.maxImages ?? 4,
+    [selectedModel],
+  );
+  // Список грузим только когда фича включена (enabled toggle в useElements).
+  const { elements: userElements } = useElements(elementsFeatureOn);
+  // Активные элементы выводятся из текста промпта (порядок = первое появление).
+  const activeMentions = useMemo(
+    () => (elementsFeatureOn ? parseActiveMentions(prompt, userElements) : []),
+    [elementsFeatureOn, prompt, userElements],
+  );
+  const activeElementIds = useMemo(
+    () => new Set(activeMentions.map((m) => m.element.id)),
+    [activeMentions],
+  );
+  // Слоты без reference_element — их карточки рендерим, элементные прячем.
+  const visibleSlots = useMemo(
+    () => activeSlots.filter((s) => s.mode !== "reference_element"),
+    [activeSlots],
+  );
+  // Меншены в пределах лимита модели — только они едут в слоты/трансляцию.
+  const cappedMentions = useMemo(
+    () => (elementsCap ? activeMentions.slice(0, elementsCap.max) : []),
+    [elementsCap, activeMentions],
+  );
+  // Подсказки inline-`@`: элементы по фильтру, без уже активных, при не-лимите.
+  const mentionMatches = useMemo(() => {
+    if (!mentionQuery || !elementsFeatureOn) return [];
+    if (elementsCap && activeMentions.length >= elementsCap.max) return [];
+    const q = mentionQuery.query.toLowerCase();
+    return userElements
+      .filter((el) => !activeElementIds.has(el.id) && el.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [
+    mentionQuery,
+    elementsFeatureOn,
+    elementsCap,
+    activeMentions,
+    userElements,
+    activeElementIds,
+  ]);
 
   // Список доступных settings — выкидываем unsupported types и применяем dependsOn.
   const visibleSettings = useMemo(() => {
@@ -1398,6 +1508,53 @@ export function GenerateScene({
     }));
   }
 
+  // Кладёт выбранные в попапе медиа (uploaded / generated) в слот как готовые
+  // SlotFile без аплоада — submit отправит их s3Key'и, бэкенд пресайнит.
+  function reusedToSlotFile(item: ReusedMedia): Extract<SlotFile, { status: "ready" }> {
+    return {
+      id: `r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status: "ready",
+      dto: {
+        s3Key: item.s3Key,
+        name: item.name,
+        mimeType: item.mimeType,
+        size: 0,
+        kind: item.type,
+        url: item.url,
+      },
+    };
+  }
+
+  function addReusedToSlot(slotKey: string, items: ReusedMedia[]) {
+    const slot = activeSlots.find((s) => s.slotKey === slotKey);
+    if (!slot || items.length === 0) return;
+    setSlotFiles((prev) => {
+      const existing = prev[slotKey] ?? [];
+      // single-слот — заменяем содержимое единственным выбором.
+      if (slot.maxImages <= 1) {
+        return { ...prev, [slotKey]: [reusedToSlotFile(items[0])] };
+      }
+      // multi — добавляем, дедуп по s3Key, обрезаем по остатку места.
+      const existingKeys = new Set(
+        existing.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : [])),
+      );
+      const room = Math.max(0, slot.maxImages - existing.length);
+      const additions = items
+        .filter((it) => !existingKeys.has(it.s3Key))
+        .slice(0, room)
+        .map(reusedToSlotFile);
+      return { ...prev, [slotKey]: [...existing, ...additions] };
+    });
+  }
+
+  // Upload из попапа: переиспользуем существующий addToSlot (кладёт в слот +
+  // грузит в S3 + персистит в uploaded_media на бэке), затем инвалидируем
+  // uploaded-media запрос, чтобы новый файл появился в гриде Upload.
+  async function handleReuseUpload(slotKey: string, slotType: SlotMediaType, fileList: FileList) {
+    await addToSlot(slotKey, fileList);
+    void queryClient.invalidateQueries({ queryKey: uploadedMediaKeys.list(slotType) });
+  }
+
   // Rate-limit для toast'а «файл устарел»: при батче битых превью (например, 4
   // картинки в multi-слоте все с протухшей подписью) не хотим 4 одинаковых
   // тоста подряд. Достаточно одного раз в 3 секунды.
@@ -1493,10 +1650,132 @@ export function GenerateScene({
         return t("generate.btnPromptOrMedia");
       }
     }
+
+    // @-элементы: лимит модели и пустые элементы блокируют генерацию.
+    if (elementsCap) {
+      if (activeMentions.length > elementsCap.max) {
+        return t("generate.elementLimit", { max: elementsCap.max });
+      }
+      const empty = activeMentions.find((m) => m.element.media.length === 0);
+      if (empty) return t("generate.elementNoImages", { name: empty.element.name });
+    }
     return null;
-  }, [busy, uploadInProgress, selectedModel, activeSlots, slotFiles, prompt, t]);
+  }, [
+    busy,
+    uploadInProgress,
+    selectedModel,
+    activeSlots,
+    slotFiles,
+    prompt,
+    elementsCap,
+    activeMentions,
+    t,
+  ]);
 
   const canGenerate = blockerReason === null;
+
+  // ── @-меншены: ввод/вставка/выбор ───────────────────────────────────────────
+  // Детект незакрытого `@<word>` слева от курсора. Вызываем не только на вводе,
+  // но и при перемещении каретки (клик/стрелки) — иначе stale-позиция привела бы
+  // к вырезанию чужого куска текста при выборе подсказки.
+  function detectMention(ta: HTMLTextAreaElement) {
+    if (!elementsFeatureOn) {
+      setMentionQuery(null);
+      return;
+    }
+    const caret = ta.selectionStart ?? ta.value.length;
+    const m = ta.value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
+    if (m) {
+      setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
+      setMentionActiveIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  // onChange промпта: обновляем текст и пересчитываем меншен у курсора.
+  function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setPrompt(e.target.value);
+    detectMention(e.target);
+  }
+
+  // Клавиатура в inline-`@` dropdown: ↑/↓ — навигация, Enter — выбор, Esc —
+  // закрытие. Активно только пока dropdown открыт; иначе клавиши идут в textarea.
+  function onPromptKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!mentionQuery || mentionMatches.length === 0) return;
+    const len = mentionMatches.length;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setMentionActiveIndex((i) => (i + 1) % len);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setMentionActiveIndex((i) => (i - 1 + len) % len);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const el = mentionMatches[Math.min(mentionActiveIndex, len - 1)];
+      if (el) handlePickElement(el);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setMentionQuery(null);
+    }
+  }
+
+  // Вставляет `@name ` в промпт: заменяет набранный inline-`@`-токен (если есть),
+  // иначе вставляет в позицию курсора. Возвращает фокус и каретку после вставки.
+  function insertMentionText(name: string) {
+    const ta = taRef.current;
+    const insert = `@${name} `;
+    const caret = ta?.selectionStart ?? prompt.length;
+    let next: string;
+    let newCaret: number;
+    if (mentionQuery) {
+      const before = prompt.slice(0, mentionQuery.start);
+      const after = prompt.slice(caret);
+      next = before + insert + after;
+      newCaret = before.length + insert.length;
+    } else {
+      next = prompt.slice(0, caret) + insert + prompt.slice(caret);
+      newCaret = caret + insert.length;
+    }
+    setPrompt(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      ta?.setSelectionRange(newCaret, newCaret);
+    });
+  }
+
+  // Выбор элемента (из @Elements-пикера или inline-dropdown'а): вставляем меншен
+  // и сразу открываем выбор картинок (если у элемента они есть).
+  function handlePickElement(el: Element) {
+    insertMentionText(el.name);
+    setMentionPickerOpen(false);
+    if (el.media.length > 0) setImageSelectFor(el);
+  }
+
+  // ── Сборка payload для submit/preview ───────────────────────────────────────
+  // mediaInputs: слоты-кадры (без ref_element_*, ими управляют @-меншены) +
+  // картинки активных @-элементов в ref_element_N.
+  function buildSubmitMediaInputs(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const [slotKey, files] of Object.entries(slotFiles)) {
+      if (slotKey.startsWith("ref_element_")) continue;
+      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
+      if (keys.length > 0) out[slotKey] = keys;
+    }
+    if (elementsCap) {
+      Object.assign(
+        out,
+        buildElementMediaInputs(cappedMentions, elementSelections, maxImagesPerElement),
+      );
+    }
+    return out;
+  }
+
+  // Промпт для отправки: дружелюбные @имя → каноническая @ElementN (MVP-трансляция).
+  function buildSubmitPrompt(): string {
+    return elementsCap ? translateMentionsToCanonical(prompt, cappedMentions) : prompt;
+  }
 
   // ── Debounced cost preview ─────────────────────────────────────────────────
   // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
@@ -1508,11 +1787,8 @@ export function GenerateScene({
     if (!selectedModel) return;
     if (uploadInProgress) return;
 
-    const mediaInputs: Record<string, string[]> = {};
-    for (const [slotKey, files] of Object.entries(slotFiles)) {
-      const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
-      if (keys.length > 0) mediaInputs[slotKey] = keys;
-    }
+    const mediaInputs = buildSubmitMediaInputs();
+    const submitPrompt = buildSubmitPrompt();
 
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -1523,7 +1799,7 @@ export function GenerateScene({
         {
           modelId: selectedModel.id,
           ...(modeId ? { modeId } : {}),
-          prompt,
+          prompt: submitPrompt,
           ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
           ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
         },
@@ -1548,7 +1824,18 @@ export function GenerateScene({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedModel, modeId, prompt, settingValues, slotFiles, uploadInProgress]);
+  }, [
+    selectedModel,
+    modeId,
+    prompt,
+    settingValues,
+    slotFiles,
+    uploadInProgress,
+    elementsCap,
+    cappedMentions,
+    elementSelections,
+    maxImagesPerElement,
+  ]);
 
   // Reset preview при смене модели — старая цифра не имеет смысла для новой
   // модели, лучше показать фоллбэк tokenCostApprox чем устаревшую оценку.
@@ -1563,12 +1850,10 @@ export function GenerateScene({
     setSubmitError(null);
     try {
       // В payload — только ready-файлы (uploading/error пропускаем). Передаём
-      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит.
-      const mediaInputs: Record<string, string[]> = {};
-      for (const [slotKey, files] of Object.entries(slotFiles)) {
-        const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
-        if (keys.length > 0) mediaInputs[slotKey] = keys;
-      }
+      // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит. Картинки
+      // @-элементов кладутся в ref_element_N, а @имя в промпте → @ElementN (MVP).
+      const mediaInputs = buildSubmitMediaInputs();
+      const submitPrompt = buildSubmitPrompt();
 
       const section = selectedModel.section;
       const settingsField =
@@ -1579,7 +1864,7 @@ export function GenerateScene({
       if (section === "design" || section === "image") {
         const body: SubmitImageGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...(modeId ? { modeId } : {}),
           ...settingsField,
           ...mediaField,
@@ -1588,7 +1873,7 @@ export function GenerateScene({
       } else if (section === "video") {
         const body: SubmitVideoGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...(modeId ? { modeId } : {}),
           ...settingsField,
           ...mediaField,
@@ -1597,7 +1882,7 @@ export function GenerateScene({
       } else if (section === "audio") {
         const body: SubmitAudioGenerationBody = {
           modelId: selectedModel.id,
-          prompt,
+          prompt: submitPrompt,
           ...settingsField,
         };
         result = await submitAudioGeneration(body);
@@ -1843,6 +2128,7 @@ export function GenerateScene({
             {selectedModel.modes.map((m) => (
               <button
                 key={m.id}
+                ref={activeMode?.id === m.id ? activeModeTabRef : null}
                 className={clsx("gen-mode-tab", activeMode?.id === m.id && "on")}
                 onClick={() => setModeId(m.id)}
               >
@@ -1855,20 +2141,21 @@ export function GenerateScene({
         {/* Скроллящийся блок с слотами / промптом / настройками.
             Фикс'нутый footer ниже (model picker + CTA) всегда виден. */}
         <div className="gen-panel-scroll">
-          {/* Media slots — фильтруются по активному режиму. */}
-          {activeSlots.length > 0 && (
+          {/* Media slots — фильтруются по активному режиму. Слоты reference_element
+              скрыты: элементы подставляются через @-меншены в промпте. */}
+          {visibleSlots.length > 0 && (
             <div
-              className={clsx("gen-slots", activeSlots.length === 1 && "is-single")}
+              className={clsx("gen-slots", visibleSlots.length === 1 && "is-single")}
               style={{
-                gridTemplateColumns: `repeat(${Math.min(activeSlots.length, 2)}, minmax(0, 1fr))`,
+                gridTemplateColumns: `repeat(${Math.min(visibleSlots.length, 2)}, minmax(0, 1fr))`,
               }}
             >
-              {activeSlots.map((slot) => (
+              {visibleSlots.map((slot) => (
                 <SlotCard
                   key={slot.slotKey}
                   slot={slot}
                   files={slotFiles[slot.slotKey] ?? []}
-                  onAdd={(fl) => addToSlot(slot.slotKey, fl)}
+                  onOpenPicker={() => setReuseSlotKey(slot.slotKey)}
                   onRemove={(id) => removeFromSlot(slot.slotKey, id)}
                   onSlotError={(id) => handleSlotPreviewError(slot.slotKey, id)}
                 />
@@ -1876,22 +2163,159 @@ export function GenerateScene({
             </div>
           )}
 
-          {/* Prompt. Кнопка «Готовые промпты» — в левом нижнем углу инпута. */}
-          <div className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}>
+          {/* Prompt. Кнопки «Готовые промпты» + «Элементы» — панелью в левом
+              нижнем углу инпута; textarea авторастёт и резервирует место снизу. */}
+          <div
+            className={clsx(
+              "gen-prompt-wrap",
+              (promptSection || elementsFeatureOn) && "has-inline-tools",
+            )}
+            style={{ position: "relative" }}
+          >
             <textarea
+              ref={taRef}
               className="gen-prompt"
               placeholder={promptPlaceholder}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={3}
+              onChange={onPromptChange}
+              // Перемещение каретки мышью/стрелками не триггерит onChange —
+              // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
+              onClick={(e) => detectMention(e.currentTarget)}
+              onKeyDown={onPromptKeyDown}
+              onKeyUp={(e) => {
+                // Навигационные клавиши обрабатывает onPromptKeyDown; здесь их
+                // пропускаем, иначе detectMention переоткрыл бы dropdown (Esc)
+                // и сбрасывал бы подсветку (↑/↓).
+                if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) return;
+                detectMention(e.currentTarget);
+              }}
+              onBlur={() => {
+                // Закрываем dropdown после клика по подсказке (mousedown успевает
+                // отработать раньше blur), иначе — при уходе фокуса.
+                window.setTimeout(() => setMentionQuery(null), 150);
+              }}
             />
-            {promptSection && (
-              <button type="button" className="gen-prompt-examples-btn" onClick={openPromptsDialog}>
-                <Wand2 size={14} />
-                <span>{t("generate.openPromptExamples")}</span>
-              </button>
+            {(promptSection || elementsFeatureOn) && (
+              <div className="gen-prompt-tools">
+                {promptSection && (
+                  <button
+                    type="button"
+                    className="gen-prompt-examples-btn"
+                    onClick={openPromptsDialog}
+                    title={t("generate.openPromptExamples")}
+                    aria-label={t("generate.openPromptExamples")}
+                  >
+                    <Wand2 size={14} />
+                    <span>{t("generate.openPromptExamples")}</span>
+                  </button>
+                )}
+                {elementsFeatureOn && (
+                  <button
+                    type="button"
+                    className="gen-prompt-examples-btn"
+                    onClick={() => setMentionPickerOpen(true)}
+                    title={t("generate.elementsButton")}
+                    aria-label={t("generate.elementsButton")}
+                  >
+                    <AtSign size={14} />
+                    <span>{t("generate.elementsButton")}</span>
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Inline-`@` dropdown подсказок элементов. */}
+            {mentionQuery && mentionMatches.length > 0 && (
+              <ul
+                className="card"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: "100%",
+                  marginTop: 4,
+                  zIndex: 50,
+                  maxHeight: 240,
+                  overflowY: "auto",
+                  padding: 4,
+                  listStyle: "none",
+                }}
+              >
+                {mentionMatches.map((el, i) => (
+                  <li key={el.id}>
+                    <button
+                      type="button"
+                      // mousedown (не click): срабатывает до blur textarea.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handlePickElement(el);
+                      }}
+                      // Синхронизируем подсветку с мышью, чтобы ↑/↓ и hover не расходились.
+                      onMouseEnter={() => setMentionActiveIndex(i)}
+                      className={clsx(
+                        "flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text",
+                        i === Math.min(mentionActiveIndex, mentionMatches.length - 1)
+                          ? "bg-bg-elevated"
+                          : "hover:bg-bg-elevated",
+                      )}
+                    >
+                      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
+                        {el.media[0]?.url ? (
+                          <img src={el.media[0].url} alt="" className="size-full object-cover" />
+                        ) : (
+                          <AtSign size={14} className="text-text-secondary" />
+                        )}
+                      </span>
+                      <span className="truncate">@{el.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
+
+          {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
+              картинок элемента. Кнопка «Элементы» живёт внутри textarea выше. */}
+          {elementsFeatureOn && activeMentions.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                marginTop: 8,
+              }}
+            >
+              {activeMentions.map(({ element }, i) => {
+                const count =
+                  elementSelections[element.id]?.length ??
+                  Math.min(maxImagesPerElement, element.media.length);
+                const over = elementsCap ? i >= elementsCap.max : false;
+                const cover = element.media[0]?.url ?? null;
+                return (
+                  <button
+                    key={element.id}
+                    type="button"
+                    className={clsx("gen-chip-pill", !over && "is-on")}
+                    title={over ? t("generate.elementLimit", { max: elementsCap?.max }) : undefined}
+                    onClick={() => setImageSelectFor(element)}
+                  >
+                    <span
+                      className="flex shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated"
+                      style={{ width: 16, height: 16 }}
+                    >
+                      {cover ? (
+                        <img src={cover} alt="" className="size-full object-cover" />
+                      ) : (
+                        <AtSign size={10} className="text-text-secondary" />
+                      )}
+                    </span>
+                    <span className="gen-chip-pill-label">@{element.name}</span>
+                    <span className="gen-chip-pill-val">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Настройки модели — каждая как chip с popover'ом, wrap'ятся в строку.
               Family axis chip'ы (version / variant) идут первыми — это про
@@ -2103,6 +2527,52 @@ export function GenerateScene({
             onDelete={mediaPickerOnCreate ? handleDeleteUserAvatar : undefined}
           />
         </>
+      )}
+
+      {reuseSlotKey &&
+        (() => {
+          const slot = activeSlots.find((s) => s.slotKey === reuseSlotKey);
+          if (!slot) return null;
+          const slotType = slotTypeFor(slot);
+          const readyCount = (slotFiles[reuseSlotKey] ?? []).filter(
+            (f) => f.status === "ready",
+          ).length;
+          const room = slot.maxImages <= 1 ? 1 : Math.max(0, slot.maxImages - readyCount);
+          return (
+            <MediaReusePopup
+              slotType={slotType}
+              accept={slotAcceptFor(slot)}
+              room={room}
+              multi={slot.maxImages > 1}
+              onUpload={(fl) => handleReuseUpload(reuseSlotKey, slotType, fl)}
+              onSelect={(items) => addReusedToSlot(reuseSlotKey, items)}
+              onClose={() => setReuseSlotKey(null)}
+            />
+          );
+        })()}
+
+      {/* @Elements: модальный пикер элементов (кнопка @Elements). */}
+      {mentionPickerOpen && (
+        <ElementMentionPicker
+          activeElementIds={activeElementIds}
+          atLimit={!!elementsCap && activeMentions.length >= elementsCap.max}
+          onPick={handlePickElement}
+          onClose={() => setMentionPickerOpen(false)}
+        />
+      )}
+
+      {/* @Elements: выбор подмножества картинок элемента (2..maxImages). */}
+      {imageSelectFor && (
+        <ElementImageSelectPopup
+          element={imageSelectFor}
+          maxImages={maxImagesPerElement}
+          initialSelected={elementSelections[imageSelectFor.id] ?? []}
+          onConfirm={(keys) => {
+            setElementSelections((prev) => ({ ...prev, [imageSelectFor.id]: keys }));
+            setImageSelectFor(null);
+          }}
+          onClose={() => setImageSelectFor(null)}
+        />
       )}
 
       {createAvatarProvider && (

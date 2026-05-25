@@ -109,6 +109,8 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     settings: m.settings ?? [],
     promptOptional: m.promptOptional ?? false,
     promptOptionalRequiresMedia: m.promptOptionalRequiresMedia ?? false,
+    /** @-reference capabilities (elements/images/video). null = модель не поддерживает @-рефы. */
+    promptRefs: m.promptRefs ?? null,
     /** Базовая стоимость в токенах. Для LLM — за 1000 токенов сообщения (500 in + 500 out);
      * для прочих — за 1 единицу соответствующего unit'а. UI показывает рядом с моделью. */
     tokenCostApprox: isLLM

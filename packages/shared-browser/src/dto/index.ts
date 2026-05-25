@@ -18,6 +18,27 @@ export type {
   AdminPromptsModelsResponse,
 } from "./prompt-example.js";
 export {
+  uploadedMediaSchema,
+  uploadedMediaPageSchema,
+  listUploadedMediaQuerySchema,
+} from "./uploaded-media.js";
+export type { UploadedMedia, UploadedMediaPage, ListUploadedMediaQuery } from "./uploaded-media.js";
+export {
+  elementNameSchema,
+  elementMediaSchema,
+  elementSchema,
+  elementsResponseSchema,
+  createElementBodySchema,
+  updateElementBodySchema,
+} from "./element.js";
+export type {
+  Element,
+  ElementMedia,
+  ElementsResponse,
+  CreateElementBody,
+  UpdateElementBody,
+} from "./element.js";
+export {
   modelSettingDefSchema,
   modelSettingOptionSchema,
   modelSettingTypeSchema,

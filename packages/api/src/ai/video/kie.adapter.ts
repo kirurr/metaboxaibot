@@ -4,7 +4,7 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
+import { AI_MODELS, config, UserFacingError, PHOTO_ANIMATE_PROMPT } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
@@ -57,6 +57,13 @@ const GROK_MODEL_MAP: Record<string, { t2v: string; i2v: string }> = {
     t2v: "grok-imagine/text-to-video",
     i2v: "grok-imagine/image-to-video",
   },
+  // Сценарий «🎞️ Оживить фото» — alias на Grok r2v: фикс-промпт, фикс 720p/6s,
+  // aspect_ratio детектится в сцене из исходника. Endpoint и payload-структура
+  // ровно те же, что у `grok-imagine-r2v` (см. isI2V ниже).
+  "photo-animate": {
+    t2v: "grok-imagine/text-to-video",
+    i2v: "grok-imagine/image-to-video",
+  },
 };
 
 /**
@@ -68,6 +75,9 @@ const GROK_MODEL_MAP: Record<string, { t2v: string; i2v: string }> = {
 const GROK_MAX_DURATION_BY_MODEL: Record<string, number> = {
   "grok-imagine": 15,
   "grok-imagine-r2v": 10,
+  // `photo-animate` фиксит 6s в сцене, но defensive cap всё равно ставим как
+  // у basic r2v — на случай кривого state'а.
+  "photo-animate": 10,
 };
 
 /** Seedance 2.0: single model name for all scenarios. */
@@ -147,8 +157,12 @@ export class KieVideoAdapter implements VideoAdapter {
     const seedanceModel = SEEDANCE_MODEL_MAP[this.modelId];
     const klingMode = KLING_MODEL_MAP[this.modelId];
     const klingMotionMode = KLING_MOTION_MODEL_MAP[this.modelId];
+    // Сценарий «🎞️ Оживить фото» хранит prompt в БД как пустой (чтобы не
+    // светить технический английский в gallery/caption/transactions) — реальный
+    // фикс-промпт инжектится здесь, прямо в провайдер.
+    const effectivePrompt = this.modelId === "photo-animate" ? PHOTO_ANIMATE_PROMPT : input.prompt;
     const inputPayload: Record<string, unknown> = {
-      prompt: input.prompt,
+      prompt: effectivePrompt,
     };
 
     let model: string;
@@ -389,7 +403,8 @@ export class KieVideoAdapter implements VideoAdapter {
       //   - `grok-imagine-r2v` → всегда i2v, требует ref_images (required-slot
       //     валидация на стороне бота уже отсеяла пустой случай; адаптер
       //     просто шлёт что есть).
-      const isI2V = this.modelId === "grok-imagine-r2v";
+      //   - `photo-animate` → alias на r2v (сценарий «Оживить фото»).
+      const isI2V = this.modelId === "grok-imagine-r2v" || this.modelId === "photo-animate";
       model = isI2V ? grokMapping.i2v : grokMapping.t2v;
       const refImages = mi.ref_images ?? [];
       const legacyImage = input.imageUrl;

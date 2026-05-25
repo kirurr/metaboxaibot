@@ -11,6 +11,7 @@ import {
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
+  PHOTO_CREATE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 import type { Section, Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
@@ -23,6 +24,12 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
   // «🎬 Апскейл видео» временно убран из меню — сцена и модель `video-upscale`
   // на месте; вернуть = дописать обратно `.row().text(t.scenarios.videoUpscale,
   // "scenario:video_upscale")`.
+  //
+  // «📸 Создать фотографию» — временно скрыт из меню (MET-176, до доработки).
+  // Сцена, модель `photo-create` (KIE+evolink alias), callback-роутинг и i18n
+  // на месте; вернуть = дописать обратно
+  //   `.text(t.scenarios.photoCreate, "scenario:photo_create").row()`
+  // первой строкой ниже.
   return new InlineKeyboard()
     .text(t.scenarios.faceSwap, "scenario:face_swap")
     .row()
@@ -31,6 +38,8 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
     .text(t.scenarios.backgroundRemoval, "scenario:bg_removal")
     .row()
     .text(t.scenarios.objectRemoval, "scenario:object_removal")
+    .row()
+    .text(t.scenarios.photoAnimate, "scenario:photo_animate")
     .row()
     .text(t.scenarios.photoUpscale, "scenario:photo_upscale");
 }
@@ -65,6 +74,9 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
         .catch(() => void 0),
       userStateService
         .clearMediaInputs(ctx.user.id, OBJECT_REMOVAL_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, PHOTO_CREATE_BUFFER_MODEL_ID)
         .catch(() => void 0),
     ]);
     clearActiveSlot(ctx.user.id);

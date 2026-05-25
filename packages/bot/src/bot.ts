@@ -30,6 +30,13 @@ import {
   handleObjectRemovalPhoto,
   handleObjectRemovalPrompt,
 } from "./scenes/object-removal.js";
+import { handlePhotoAnimateEnter, handlePhotoAnimatePhoto } from "./scenes/photo-animate.js";
+import {
+  handlePhotoCreateEnter,
+  handlePhotoCreatePhoto,
+  handlePhotoCreatePrompt,
+  handlePhotoCreateArSelect,
+} from "./scenes/photo-create.js";
 import {
   handlePhotoUpscaleEnter,
   handlePhotoUpscalePhoto,
@@ -342,10 +349,13 @@ export function createBot(token: string): Bot<BotContext> {
     if (which === "clothing_tryon") return handleClothingTryonEnter(ctx);
     if (which === "bg_removal") return handleBackgroundRemovalEnter(ctx);
     if (which === "object_removal") return handleObjectRemovalEnter(ctx);
+    if (which === "photo_animate") return handlePhotoAnimateEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
+    if (which === "photo_create") return handlePhotoCreateEnter(ctx);
   });
   bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
+  bot.callbackQuery(/^photo_create:ar:/, handlePhotoCreateArSelect);
 
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
@@ -514,7 +524,8 @@ export function createBot(token: string): Bot<BotContext> {
     }
     if (state?.state === "FACE_SWAP_AWAIT_REFERENCE" || state?.state === "FACE_SWAP_AWAIT_FACE") {
       if (ctx.message?.photo) return handleFaceSwapPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/")) return handleFaceSwapPhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handleFaceSwapPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.faceSwapNotPhoto);
       return;
     }
@@ -523,23 +534,30 @@ export function createBot(token: string): Bot<BotContext> {
       state?.state === "CLOTHING_TRYON_AWAIT_CLOTHING"
     ) {
       if (ctx.message?.photo) return handleClothingTryonPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleClothingTryonPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.clothingTryonNotPhoto);
       return;
     }
     if (state?.state === "BG_REMOVAL_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handleBackgroundRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleBackgroundRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.backgroundRemovalNotPhoto);
       return;
     }
     if (state?.state === "OBJECT_REMOVAL_AWAIT_PHOTO") {
       if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleObjectRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.objectRemovalNotPhoto);
+      return;
+    }
+    if (state?.state === "PHOTO_ANIMATE_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handlePhotoAnimatePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoAnimatePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.photoAnimateNotPhoto);
       return;
     }
     if (state?.state === "OBJECT_REMOVAL_AWAIT_PROMPT") {
@@ -549,7 +567,7 @@ export function createBot(token: string): Bot<BotContext> {
       // голосовое и т.п.) — мягкая подсказка «опишите фразой».
       if (ctx.message?.text) return handleObjectRemovalPrompt(ctx);
       if (ctx.message?.photo) return handleObjectRemovalPhoto(ctx);
-      if (ctx.message?.document?.mime_type?.startsWith("image/"))
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handleObjectRemovalPhoto(ctx);
       await ctx.reply(ctx.t.scenarios.objectRemovalPromptEmpty);
       return;
@@ -559,6 +577,36 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handlePhotoUpscalePhoto(ctx);
       await ctx.reply(ctx.t.scenarios.upscaleNotPhoto);
+      return;
+    }
+    if (state?.state === "PHOTO_CREATE_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoCreatePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.photoCreateNotPhoto);
+      return;
+    }
+    if (state?.state === "PHOTO_CREATE_AWAIT_PROMPT") {
+      // На шаге описания принимаем text как основной ввод; фото — как
+      // «передумал, заменю фото» (handlePhotoCreatePhoto перезаписывает буфер
+      // и возвращает state в AWAIT_PROMPT). Прочее — мягкая подсказка.
+      if (ctx.message?.text) return handlePhotoCreatePrompt(ctx);
+      if (ctx.message?.photo) return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoCreatePhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.photoCreatePromptEmpty);
+      return;
+    }
+    if (state?.state === "PHOTO_CREATE_AWAIT_AR") {
+      // На шаге выбора AR ждём callback с инлайн-клавиатуры. Любое медиа =
+      // «передумал, заменю фото» → переход в AWAIT_PHOTO. Текст = новый промпт.
+      // Прочее (voice/sticker/video) — мягкая подсказка: «выбери AR ниже или
+      // пришли новое фото/описание»; без этого юзер ловит молчание.
+      if (ctx.message?.photo) return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.text) return handlePhotoCreatePrompt(ctx);
+      await ctx.reply(ctx.t.scenarios.photoCreateAwaitArHint);
       return;
     }
     if (state?.state === "VIDEO_UPSCALE_AWAIT_VIDEO") {
