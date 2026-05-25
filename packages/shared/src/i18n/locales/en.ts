@@ -99,9 +99,9 @@ export default {
     objectRemoval: "🪄 Remove object",
     objectRemovalWelcome:
       "I'll remove the object you describe and inpaint the background in its place. Good for removing passers-by, captions, wires, and the like.",
-    objectRemovalStepPhoto: "Step 1 of 2. Send a <b>photo</b>. Max 20 MB.",
+    objectRemovalStepPhoto: "<b>Step 1 of 2.</b> Send a <b>photo</b>. Max 20 MB.",
     objectRemovalStepPrompt:
-      'Step 2 of 2. Describe in <b>one phrase</b> what to remove. For example: "person on the left", "text on the wall", "wires in the background". Up to 400 characters.',
+      '<b>Step 2 of 2.</b> Describe in <b>one phrase</b> what to remove. For example: "person on the left", "text on the wall", "wires in the background".',
     objectRemovalNotPhoto: "📷 That's not a photo. Please send an image.",
     objectRemovalPhotoTooLarge: "📷 Photo is too large. Max 20 MB.",
     objectRemovalAlbumNotice:
@@ -113,7 +113,7 @@ export default {
     objectRemovalGenerating: "🪄 Removing the object...",
     photoAnimate: "🎞️ Animate photo",
     photoAnimateWelcome:
-      "Turns a photo into a short animated clip (6 seconds, 720p). Aspect ratio is matched to the source image.",
+      "Turns a photo into a short video. Aspect ratio is matched to the source image.",
     photoAnimateStepPhoto: "Send the <b>photo</b> you want to animate. Max — 20 MB.",
     photoAnimateNotPhoto: "📷 That's not a photo. Please send an image.",
     photoAnimatePhotoTooLarge: "📷 The photo is too large. Max — 20 MB.",

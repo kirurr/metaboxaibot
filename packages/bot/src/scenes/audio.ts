@@ -84,7 +84,7 @@ export async function handleAudioSubSection(ctx: BotContext, modelId: string): P
       // tts-el / tts-cartesia: голосовой ввод как «текст для синтеза» неприменим
       // (это TTS), и оба hint'а содержат HTML-разметку <blockquote>/<b>.
       const ttsTextOnly = modelId === "tts-el" || modelId === "tts-cartesia";
-      const voiceInputHint = ttsTextOnly ? "" : `\n${ctx.t.voice.inputHint}`;
+      const voiceInputHint = ttsTextOnly ? "" : `\n\n${ctx.t.voice.inputHint}`;
       await ctx.reply(`${modelName}\n\n${modelDesc}\n\n${hint}${voiceInputHint}\n\n${costLine}`, {
         reply_markup: kb,
         parse_mode: ttsTextOnly ? "HTML" : undefined,
