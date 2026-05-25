@@ -4,6 +4,7 @@ import {
   userStateService,
   s3Service,
   translatePromptIfNeeded,
+  ImageDecodeError,
 } from "@metabox/api/services";
 import {
   AI_MODELS,
@@ -127,14 +128,26 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   // Перекодируем вход в JPEG (uploadNormalizedImage заодно грузит в S3) —
-  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п.
+  // провайдеры отбивают HEIC / CMYK / 16-bit и т.п. HEIC от iPhone декодится
+  // через heic-convert.
   const s3Key = `object_removal/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.objectRemoval, "design"));
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Object removal: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.objectRemoval, "design"));
+    }
     return;
   }
 
@@ -146,7 +159,6 @@ export async function handleObjectRemovalPhoto(ctx: BotContext): Promise<void> {
     true,
   );
   if (mediaGroupKey) {
-    rememberMediaGroup(mediaGroupKey);
     await ctx.reply(ctx.t.scenarios.objectRemovalAlbumNotice);
   }
 

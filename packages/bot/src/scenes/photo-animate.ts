@@ -1,5 +1,10 @@
 import type { BotContext } from "../types/context.js";
-import { videoGenerationService, userStateService, s3Service } from "@metabox/api/services";
+import {
+  videoGenerationService,
+  userStateService,
+  s3Service,
+  ImageDecodeError,
+} from "@metabox/api/services";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import {
   AI_MODELS,
@@ -130,17 +135,27 @@ export async function handlePhotoAnimatePhoto(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   const s3Key = `photo_animate/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Photo animate: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoAnimate, "video"));
+    }
     return;
   }
 
   if (mediaGroupKey) {
-    rememberMediaGroup(mediaGroupKey);
     await ctx.reply(ctx.t.scenarios.photoAnimateAlbumNotice);
   }
 

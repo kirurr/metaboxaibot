@@ -121,6 +121,8 @@ export default {
       "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
+    imageDecodeFailed:
+      "📷 I couldn't process this image — format is unsupported or file is corrupted. Try saving it as JPEG or PNG and send it again.",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
