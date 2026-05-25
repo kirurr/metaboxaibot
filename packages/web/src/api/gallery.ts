@@ -175,6 +175,8 @@ export const galleryKeys = {
   all: ["gallery"] as const,
   jobs: () => [...galleryKeys.all, "jobs"] as const,
   jobsList: (params: ListGalleryJobsQuery) => [...galleryKeys.jobs(), params] as const,
+  infiniteJobs: (section: string | undefined) =>
+    [...galleryKeys.jobs(), "infinite", section ?? null] as const,
   detail: (id: string) => [...galleryKeys.all, "detail", id] as const,
   modelCounts: (section: string | undefined, folderId: string | undefined) =>
     [...galleryKeys.all, "model-counts", section ?? null, folderId ?? null] as const,

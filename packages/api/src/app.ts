@@ -23,6 +23,7 @@ import { registry } from "./metrics.js";
 import { authRoutes } from "./routes/auth.js";
 import { webAuthRoutes } from "./routes/web-auth.js";
 import { webChatRoutes } from "./routes/web-chat.js";
+import { webUploadedMediaRoutes } from "./routes/web-uploaded-media.js";
 import { webModelsRoutes } from "./routes/web-models.js";
 import { webGalleryRoutes } from "./routes/web-gallery.js";
 import { webVoicesRoutes } from "./routes/web-voices.js";
@@ -223,6 +224,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await server.register(authRoutes);
   await server.register(webAuthRoutes);
   await server.register(webChatRoutes);
+  await server.register(webUploadedMediaRoutes);
   await server.register(webModelsRoutes);
   await server.register(webGalleryRoutes);
   await server.register(webVoicesRoutes);

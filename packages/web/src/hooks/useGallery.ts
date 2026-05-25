@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   addJobToGalleryFolder,
   addToGalleryFavorites,
@@ -34,6 +40,35 @@ export function useGalleryJobs(params: ListGalleryJobsQuery = {}) {
     queryFn: ({ signal }) => listGalleryJobs(params, signal),
     placeholderData: keepPreviousData,
   });
+}
+
+/**
+ * Инфинит-список завершённых генераций по секции (image|video|audio) — для
+ * грида в попапе переиспользования медиа. Page-based (`/web/gallery` отдаёт
+ * page/limit/total); `keepPreviousData` чтобы грид не фликал при подгрузке.
+ */
+export function useInfiniteGalleryJobs(params: { section: string }) {
+  const limit = 24;
+  const query = useInfiniteQuery({
+    queryKey: galleryKeys.infiniteJobs(params.section),
+    queryFn: ({ pageParam, signal }) =>
+      listGalleryJobs({ section: params.section, page: pageParam, limit }, signal),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page * lastPage.limit < lastPage.total ? lastPage.page + 1 : undefined,
+    placeholderData: keepPreviousData,
+  });
+
+  const jobs = query.data?.pages.flatMap((p) => p.items) ?? [];
+
+  return {
+    jobs,
+    isLoading: query.isLoading,
+    isFetchingNextPage: query.isFetchingNextPage,
+    hasNextPage: query.hasNextPage,
+    fetchNextPage: query.fetchNextPage,
+    error: query.error,
+  };
 }
 
 export function useGalleryFolders() {

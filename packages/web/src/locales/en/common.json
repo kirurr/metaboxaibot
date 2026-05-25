@@ -497,6 +497,16 @@
       "orphaned": "Unavailable"
     }
   },
+  "mediaReuse": {
+    "tabUpload": "Uploads",
+    "generatedImage": "Generated images",
+    "generatedVideo": "Generated videos",
+    "generatedAudio": "Generated audio",
+    "upload": "Upload",
+    "emptyGenerated": "No generations yet",
+    "delete": "Delete",
+    "done": "Done"
+  },
   "avatarModal": {
     "heygenTitle": "Create a HeyGen avatar",
     "soulTitle": "Create a Soul character",
