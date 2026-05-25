@@ -865,7 +865,10 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       !!mediaInputs?.voice_audio?.length ||
       !!mediaInputs?.driving_audio?.length ||
       !!mediaInputs?.reference_audios?.length;
-    const caption = buildResultCaption(t, model?.name ?? modelId, prompt, {
+    // Сценарии-пресеты (Оживить фото и т.п.) гасят «цитату промпта»: реальный
+    // промпт там — технический английский, который выдал бы внутреннюю модель.
+    const captionPrompt = job.data.hidePromptInCaption ? "" : prompt;
+    const caption = buildResultCaption(t, model?.name ?? modelId, captionPrompt, {
       cost: deductResult?.deducted,
       subscriptionBalance: deductResult?.subscriptionTokenBalance,
       tokenBalance: deductResult?.tokenBalance,

@@ -1,6 +1,6 @@
 import { fal } from "@fal-ai/client";
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { config, UserFacingError, PHOTO_ANIMATE_PROMPT } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
@@ -258,12 +258,21 @@ export class FalVideoAdapter implements VideoAdapter {
     //     legacy-state у юзеров, которые до разделения сохранили ref_images
     //     под этим modelId; UI слот больше не показывает).
     //   - `grok-imagine-r2v` → всегда r2v.
-    if (this.modelId === "grok-imagine" || this.modelId === "grok-imagine-r2v") {
-      const isR2V = this.modelId === "grok-imagine-r2v";
+    //   - `photo-animate`    → alias r2v (сценарий «Оживить фото»).
+    if (
+      this.modelId === "grok-imagine" ||
+      this.modelId === "grok-imagine-r2v" ||
+      this.modelId === "photo-animate"
+    ) {
+      const isR2V = this.modelId === "grok-imagine-r2v" || this.modelId === "photo-animate";
       const endpoint = isR2V ? FAL_GROK_IMAGINE_R2V_ENDPOINT : FAL_GROK_IMAGINE_T2V_ENDPOINT;
 
+      // Сценарий «🎞️ Оживить фото»: prompt в БД пустой, реальный фикс-промпт
+      // инжектится здесь, в провайдер.
+      const effectivePrompt =
+        this.modelId === "photo-animate" ? PHOTO_ANIMATE_PROMPT : (input.prompt ?? "");
       const grokBody: Record<string, unknown> = {
-        prompt: translatePromptRefs(input.prompt ?? "", { dialect: "fal" }),
+        prompt: translatePromptRefs(effectivePrompt, { dialect: "fal" }),
       };
 
       if (isR2V) {

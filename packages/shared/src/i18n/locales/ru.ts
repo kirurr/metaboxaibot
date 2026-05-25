@@ -111,6 +111,20 @@ export default {
       "✍️ Слишком длинное описание ({current} символов). Максимум — {max}. Сократите и пришлите снова.",
     objectRemovalBufferLost: "📷 Не нашёл загруженное фото — пришлите его ещё раз.",
     objectRemovalGenerating: "🪄 Убираю объект...",
+    photoAnimate: "🎞️ Оживить фото",
+    photoAnimateWelcome:
+      "Превращаю фотографию в короткое видео-оживление (6 секунд, 720p). Соотношение сторон видео подберётся под исходник.",
+    photoAnimateStepPhoto: "Пришлите <b>фотографию</b>, которую нужно оживить. Максимум — 20 МБ.",
+    photoAnimateNotPhoto: "📷 Это не фото. Пришлите изображение.",
+    photoAnimatePhotoTooLarge: "📷 Фото слишком большое. Максимум — 20 МБ.",
+    photoAnimateAlbumNotice:
+      "📷 Из альбома взято только первое фото. Если хотите другое — пришлите его отдельным сообщением.",
+    photoAnimateReady: "🎞️ Фото получено. Нажмите кнопку — оживлю на 6 секунд.",
+    photoAnimateStartButton: "✨ Оживить фото",
+    photoAnimateCancelButton: "✖ Отмена",
+    photoAnimateCancelled: "❌ Отменено. Если передумаете — пришлите фото ещё раз.",
+    photoAnimateBufferLost: "📷 Не нашёл загруженное фото — пришлите его ещё раз.",
+    photoAnimateGenerating: "🎞️ Запускаю оживление...",
   },
   gpt: {
     sectionTitle: "💡 GPTs/Claude/Gemini",
