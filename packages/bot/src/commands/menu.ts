@@ -11,7 +11,6 @@ import {
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
-  PHOTO_ANIMATE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 import type { Section, Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
@@ -68,9 +67,6 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
         .catch(() => void 0),
       userStateService
         .clearMediaInputs(ctx.user.id, OBJECT_REMOVAL_BUFFER_MODEL_ID)
-        .catch(() => void 0),
-      userStateService
-        .clearMediaInputs(ctx.user.id, PHOTO_ANIMATE_BUFFER_MODEL_ID)
         .catch(() => void 0),
     ]);
     clearActiveSlot(ctx.user.id);

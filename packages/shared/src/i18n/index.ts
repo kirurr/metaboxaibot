@@ -71,11 +71,10 @@ export interface Translations {
     photoUpscaleStep: string;
     videoUpscaleStep: string;
     upscaleChooseFactor: string;
-    upscalePhotoReady: string;
-    upscaleStartButton: string;
     upscaleNotPhoto: string;
     upscaleNotVideo: string;
     upscalePhotoTooLarge: string;
+    upscaleAlbumNotice: string;
     upscaleFileTooLarge: string;
     upscaleVideoUnreadable: string;
     upscaleGenerating: string;
@@ -96,10 +95,6 @@ export interface Translations {
     photoAnimateNotPhoto: string;
     photoAnimatePhotoTooLarge: string;
     photoAnimateAlbumNotice: string;
-    photoAnimateReady: string;
-    photoAnimateStartButton: string;
-    photoAnimateCancelButton: string;
-    photoAnimateCancelled: string;
     photoAnimateBufferLost: string;
     photoAnimateGenerating: string;
   };

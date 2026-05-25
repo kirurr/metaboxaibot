@@ -88,20 +88,20 @@ export default {
     photoUpscaleStep: "Send the <b>photo</b> you want to enhance. Maximum is 10 MB.",
     videoUpscaleStep: "Send the <b>video</b> you want to enhance. Maximum is 20 MB.",
     upscaleChooseFactor: "Choose the upscale factor 👇",
-    upscalePhotoReady: "📷 Photo received. Tap the button — I'll upscale it to 4K.",
-    upscaleStartButton: "✨ Upscale",
     upscaleNotPhoto: "📷 That's not a photo. Please send an image.",
     upscaleNotVideo: "🎬 That's not a video. Please send a video file.",
     upscalePhotoTooLarge: "📷 Photo is too large. Maximum is 10 MB.",
+    upscaleAlbumNotice:
+      "📷 Only the first photo from the album was used. To use a different one — send it as a separate message.",
     upscaleFileTooLarge: "📦 File is too large. Maximum is 20 MB.",
     upscaleVideoUnreadable: "🎬 Couldn't read the video. Please send an MP4 file.",
     upscaleGenerating: "✨ Starting upscale...",
     objectRemoval: "🪄 Remove object",
     objectRemovalWelcome:
       "I'll remove the object you describe and inpaint the background in its place. Good for removing passers-by, captions, wires, and the like.",
-    objectRemovalStepPhoto: "Step 1 of 2. Send a <b>photo</b>. Max 20 MB.",
+    objectRemovalStepPhoto: "<b>Step 1 of 2.</b> Send a <b>photo</b>. Max 20 MB.",
     objectRemovalStepPrompt:
-      'Step 2 of 2. Describe in <b>one phrase</b> what to remove. For example: "person on the left", "text on the wall", "wires in the background". Up to 400 characters.',
+      '<b>Step 2 of 2.</b> Describe in <b>one phrase</b> what to remove. For example: "person on the left", "text on the wall", "wires in the background".',
     objectRemovalNotPhoto: "📷 That's not a photo. Please send an image.",
     objectRemovalPhotoTooLarge: "📷 Photo is too large. Max 20 MB.",
     objectRemovalAlbumNotice:
@@ -113,16 +113,12 @@ export default {
     objectRemovalGenerating: "🪄 Removing the object...",
     photoAnimate: "🎞️ Animate photo",
     photoAnimateWelcome:
-      "Turns a photo into a short animated clip (6 seconds, 720p). Aspect ratio is matched to the source image.",
+      "Turns a photo into a short video. Aspect ratio is matched to the source image.",
     photoAnimateStepPhoto: "Send the <b>photo</b> you want to animate. Max — 20 MB.",
     photoAnimateNotPhoto: "📷 That's not a photo. Please send an image.",
     photoAnimatePhotoTooLarge: "📷 The photo is too large. Max — 20 MB.",
     photoAnimateAlbumNotice:
       "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
-    photoAnimateReady: "🎞️ Got the photo. Tap the button — I'll animate it for 6 seconds.",
-    photoAnimateStartButton: "✨ Animate",
-    photoAnimateCancelButton: "✖ Cancel",
-    photoAnimateCancelled: "❌ Cancelled. If you change your mind — send the photo again.",
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
   },

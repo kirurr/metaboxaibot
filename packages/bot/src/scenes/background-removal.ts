@@ -11,6 +11,7 @@ import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
+import { isImageDocument } from "./upscale.js";
 
 // Сценарий «Удаление фона»: primary — fal Ideogram remove-background,
 // fallback — Replicate bria/remove-background. Один входной кадр, без промпта.
@@ -60,7 +61,7 @@ export async function handleBackgroundRemovalPhoto(ctx: BotContext): Promise<voi
     const largest = ctx.message.photo.at(-1);
     fileId = largest?.file_id;
     fileSize = largest?.file_size;
-  } else if (ctx.message?.document?.mime_type?.startsWith("image/")) {
+  } else if (ctx.message?.document && isImageDocument(ctx.message.document)) {
     fileId = ctx.message.document.file_id;
     fileSize = ctx.message.document.file_size;
   }

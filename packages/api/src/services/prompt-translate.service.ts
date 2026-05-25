@@ -46,12 +46,19 @@ export function looksEnglish(text: string): boolean {
  *
  * Ключ берётся из пула (provider="openai") — поддержка ротации/прокси.
  * Если пул исчерпан — silent fallback на оригинальный prompt.
+ *
+ * `options.silent === true` — translation runs as usual, но `deductTokens` НЕ
+ * вызывается: цена перевода ложится на бизнес и не светится в истории
+ * транзакций юзера. Используется в готовых сценариях (object-removal и т.п.),
+ * где перевод — внутренняя кухня сцены, и юзер не должен платить за него
+ * отдельной строкой.
  */
 export async function translatePromptIfNeeded(
   prompt: string,
   modelSettings: Record<string, unknown> | undefined,
   userId: bigint,
   forModel: string,
+  options?: { silent?: boolean },
 ): Promise<string> {
   if (!modelSettings || modelSettings.auto_translate_prompt !== true) return prompt;
   if (looksEnglish(prompt)) return prompt;
@@ -96,15 +103,33 @@ export async function translatePromptIfNeeded(
     const outputTokens = response.usage?.output_tokens ?? 0;
     const cost = calculateCost(model, inputTokens, outputTokens);
     if (cost > 0) {
-      // Audit: автоперевод идёт через фиксированный TRANSLATE_MODEL_ID без
-      // fallback'а — actualProvider = model.provider, raw USD по нему.
-      const actualCostUsd = calculateProviderCostUsd(model, inputTokens, outputTokens);
-      await deductTokens(userId, cost, forModel, undefined, "autotranslate", {
-        actualProvider: model.provider,
-        actualCostUsd,
-      }).catch((err) => {
-        logger.warn({ err, userId: userId.toString() }, "Failed to deduct translation cost");
-      });
+      if (options?.silent) {
+        // Silent mode (scenario-internal translation): билинг пропускаем —
+        // юзер не должен видеть отдельную строку «autotranslate» в истории.
+        // Логируем поглощённую стоимость для аудита/ops, чтобы видеть сколько
+        // мы абсорбируем в сценариях.
+        logger.info(
+          {
+            userId: userId.toString(),
+            forModel,
+            absorbedCost: cost,
+            absorbedUsd: calculateProviderCostUsd(model, inputTokens, outputTokens),
+            inputTokens,
+            outputTokens,
+          },
+          "Auto-translate silent: cost absorbed by scenario",
+        );
+      } else {
+        // Audit: автоперевод идёт через фиксированный TRANSLATE_MODEL_ID без
+        // fallback'а — actualProvider = model.provider, raw USD по нему.
+        const actualCostUsd = calculateProviderCostUsd(model, inputTokens, outputTokens);
+        await deductTokens(userId, cost, forModel, undefined, "autotranslate", {
+          actualProvider: model.provider,
+          actualCostUsd,
+        }).catch((err) => {
+          logger.warn({ err, userId: userId.toString() }, "Failed to deduct translation cost");
+        });
+      }
     }
 
     return translated;
