@@ -8,6 +8,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "@metabox/shared";
 import sharp from "sharp";
+import heicConvert from "heic-convert";
 import { createRequire } from "module";
 import ffmpeg from "fluent-ffmpeg";
 import { PassThrough } from "stream";
@@ -299,6 +300,35 @@ export interface NormalizedImageUpload {
 }
 
 /**
+ * Thrown when sharp cannot decode the source image (unsupported / corrupted
+ * format, например `.bmp`, экзотический tiff и т.п.). Caller (сцена-пресет)
+ * ловит этот тип и показывает юзеру понятное сообщение «формат не поддержан»
+ * вместо generic «модель отдыхает».
+ */
+export class ImageDecodeError extends Error {
+  constructor(cause?: unknown) {
+    super("Image decode failed");
+    this.name = "ImageDecodeError";
+    if (cause instanceof Error) this.cause = cause;
+  }
+}
+
+/**
+ * HEIC/HEIF магические байты: container — ISO BMFF, byte 4..7 = "ftyp",
+ * byte 8..11 = brand из набора `heic|heix|heim|heis|hevc|hevm|hevs|mif1|msf1`.
+ * Sharp prebuilt binaries бандлят libheif, но БЕЗ HEVC-декодера (патенты), так
+ * что HEIC-вход (= HEIF+HEVC, дефолтный формат iPhone-фото) sharp отбивает с
+ * «no suitable reader». Префильтруем такие буферы через heic-convert (libheif
+ * в wasm/JS) → JPEG, дальше sharp нормализует EXIF/flatten как обычно.
+ */
+function isHeicBuffer(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  if (buf.toString("ascii", 4, 8) !== "ftyp") return false;
+  const brand = buf.toString("ascii", 8, 12);
+  return ["heic", "heix", "heim", "heis", "hevc", "hevm", "hevs", "mif1", "msf1"].includes(brand);
+}
+
+/**
  * Fetches an image, normalizes it to a provider-safe JPEG and uploads to S3.
  *
  * Re-encoding through sharp fixes inputs that AI upscale providers (Topaz)
@@ -306,9 +336,15 @@ export interface NormalizedImageUpload {
  * animated/odd WebP, broken ICC/EXIF. EXIF orientation is baked in (`.rotate()`)
  * and alpha is flattened on white (JPEG has no alpha channel).
  *
+ * HEIC (iPhone-default) sharp нативно не декодирует (см. комментарий к
+ * `isHeicBuffer`) — для таких файлов сначала прогоняем через `heic-convert`
+ * (pure-JS libheif), потом sharp нормализует уже-JPEG для единообразия.
+ *
  * Returns the S3 key and the normalized image's megapixels (single fetch +
  * decode — caller doesn't need a separate `measureImageMegapixels` call).
- * Throws on fetch/decode/upload failure so the caller can surface an error.
+ * Throws `ImageDecodeError` если sharp не смог распарсить буфер (даже после
+ * HEIC-конверсии) — caller покажет юзеру «формат не поддерживается». Любые
+ * другие ошибки (fetch/S3) пробрасываются как Error.
  */
 export async function uploadNormalizedImage(
   key: string,
@@ -316,12 +352,58 @@ export async function uploadNormalizedImage(
 ): Promise<NormalizedImageUpload> {
   const res = await fetch(sourceUrl);
   if (!res.ok) throw new Error(`Failed to fetch image for normalization: ${res.status}`);
-  const srcBuf = Buffer.from(await res.arrayBuffer());
-  const { data, info } = await sharp(srcBuf)
-    .rotate()
-    .flatten({ background: "#ffffff" })
-    .jpeg({ quality: 92 })
-    .toBuffer({ resolveWithObject: true });
+  const rawBuf = Buffer.from(await res.arrayBuffer());
+  const isHeic = isHeicBuffer(rawBuf);
+
+  let data: Buffer;
+  let width: number;
+  let height: number;
+
+  if (isHeic) {
+    // HEIC fast-path: heic-convert уже отдаёт чистый JPEG с применённой EXIF-
+    // ориентацией и без alpha (JPEG не поддерживает). Sharp re-encode здесь
+    // ничего полезного не делал бы — `rotate()` no-op (orientation уже baked
+    // in), `flatten()` no-op (alpha нет), а декод 4K-фото в raw-RGBA даёт
+    // +~192МБ heap peak (плюс ещё повторный JPEG-encode = потеря ~1-2%
+    // качества). Пропускаем sharp, читаем dimensions через `.metadata()`
+    // (header-only parse, без pixel decode) и грузим heic-convert output
+    // напрямую.
+    try {
+      const jpegArrayBuf = await heicConvert({
+        buffer: rawBuf as unknown as ArrayBufferLike,
+        format: "JPEG",
+        quality: 0.92,
+      });
+      data = Buffer.from(jpegArrayBuf);
+    } catch (err) {
+      logger.warn({ err }, "uploadNormalizedImage: HEIC pre-decode failed");
+      throw new ImageDecodeError(err);
+    }
+    try {
+      const meta = await sharp(data).metadata();
+      if (!meta.width || !meta.height) throw new Error("missing dimensions");
+      width = meta.width;
+      height = meta.height;
+    } catch (err) {
+      logger.warn({ err }, "uploadNormalizedImage: dimensions read failed on HEIC output");
+      throw new ImageDecodeError(err);
+    }
+  } else {
+    try {
+      const out = await sharp(rawBuf)
+        .rotate()
+        .flatten({ background: "#ffffff" })
+        .jpeg({ quality: 92 })
+        .toBuffer({ resolveWithObject: true });
+      data = out.data;
+      width = out.info.width;
+      height = out.info.height;
+    } catch (err) {
+      logger.warn({ err }, "uploadNormalizedImage: sharp decode failed");
+      throw new ImageDecodeError(err);
+    }
+  }
+
   const uploaded = await uploadBuffer(key, data, "image/jpeg");
   // uploadBuffer возвращает null если S3 не сконфигурирован — НЕ выдаём
   // фейковый success с несуществующим ключом, иначе вызывающий код пойдёт
@@ -329,9 +411,9 @@ export async function uploadNormalizedImage(
   if (!uploaded) throw new Error("uploadNormalizedImage: S3 upload failed (not configured?)");
   return {
     key: uploaded,
-    megapixels: (info.width * info.height) / 1_000_000,
-    width: info.width,
-    height: info.height,
+    megapixels: (width * height) / 1_000_000,
+    width,
+    height,
   };
 }
 

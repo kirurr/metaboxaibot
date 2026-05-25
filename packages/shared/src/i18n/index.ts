@@ -97,6 +97,7 @@ export interface Translations {
     photoAnimateAlbumNotice: string;
     photoAnimateBufferLost: string;
     photoAnimateGenerating: string;
+    imageDecodeFailed: string;
   };
   gpt: {
     sectionTitle: string;

@@ -55,6 +55,7 @@ export {
   measureImageMegapixels,
   probeImageMetadata,
   uploadNormalizedImage,
+  ImageDecodeError,
 } from "./s3.service.js";
 export { probeAudioDurationSec } from "../utils/audio-transcode.js";
 export type { ImageProbeInfo, NormalizedImageUpload } from "./s3.service.js";

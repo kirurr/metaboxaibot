@@ -5,6 +5,7 @@ import {
   userStateService,
   s3Service,
   calculateCost,
+  ImageDecodeError,
 } from "@metabox/api/services";
 import { probeVideoMetadata } from "@metabox/api/utils/mp4-duration";
 import {
@@ -91,9 +92,12 @@ export function isVideoDocument(doc: { mime_type?: string; file_name?: string })
 
 /**
  * Расширения изображений, по которым принимаем документ при generic mime —
- * симметрично `isVideoDocument`. Формат всё равно нормализуется через sharp.
+ * симметрично `isVideoDocument`. Список лояльный: всё, что разумно похоже на
+ * фото-формат. Что sharp сможет — нормализуется (jpeg/png/webp/tiff/gif/avif),
+ * что не сможет (heic/heif/bmp/прочее) — отдаст decode-error, scene покажет
+ * понятное сообщение «не удалось обработать формат».
  */
-const IMAGE_DOC_EXT_RE = /\.(jpe?g|png|webp|heic|heif)$/i;
+const IMAGE_DOC_EXT_RE = /\.(jpe?g|jfif|png|webp|tiff?|gif|avif|heic|heif|bmp)$/i;
 
 /** True если Telegram-документ — это изображение (по mime ИЛИ по расширению). */
 export function isImageDocument(doc: { mime_type?: string; file_name?: string }): boolean {
@@ -213,18 +217,29 @@ export async function handlePhotoUpscalePhoto(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Album dedup регистрируем ДО upload'а: на decode-failure первого фото из
+  // альбома мы не хотим получить N одинаковых сообщений «формат не
+  // поддерживается» по числу siblings. Failure первого = «альбом обработан».
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   // Перекодируем вход в JPEG: nano-banana отбивает HEIC / CMYK / 16-bit /
   // прогрессивный JPEG и т.п. uploadNormalizedImage заодно грузит файл в S3.
+  // HEIC от iPhone декодится через heic-convert.
   const s3Key = `photo_upscale/${userId.toString()}/${Date.now()}.jpg`;
-  const normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl).catch(() => null);
-  if (!normalized) {
-    await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+  let normalized;
+  try {
+    normalized = await s3Service.uploadNormalizedImage(s3Key, tgUrl);
+  } catch (err) {
+    if (err instanceof ImageDecodeError) {
+      await ctx.reply(ctx.t.scenarios.imageDecodeFailed);
+    } else {
+      logger.error(err, "Photo upscale: upload normalize failed");
+      await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.photoUpscale, "design"));
+    }
     return;
   }
   if (mediaGroupKey) {
-    rememberMediaGroup(mediaGroupKey);
     await ctx.reply(ctx.t.scenarios.upscaleAlbumNotice);
   }
 
