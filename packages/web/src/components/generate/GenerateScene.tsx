@@ -665,6 +665,8 @@ export function GenerateScene({
   // Выбор картинок per-element: elementId → s3Key[] (персист в draft-store).
   const [elementSelections, setElementSelections] = useState<Record<string, string[]>>({});
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Активный mode-tab — чтобы доскроллить к нему при переключении режима.
+  const activeModeTabRef = useRef<HTMLButtonElement | null>(null);
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -1081,6 +1083,15 @@ export function GenerateScene({
     () => resolveActiveMode(selectedModel?.modes ?? null, modeId),
     [selectedModel, modeId],
   );
+
+  // Доскроллить tab-полосу к активному режиму (горизонтально, без vertical-jump).
+  useEffect(() => {
+    activeModeTabRef.current?.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [activeMode?.id]);
 
   const activeSlots = useMemo(
     () => (selectedModel ? getActiveSlots(selectedModel.mediaInputs, activeMode) : []),
@@ -2117,6 +2128,7 @@ export function GenerateScene({
             {selectedModel.modes.map((m) => (
               <button
                 key={m.id}
+                ref={activeMode?.id === m.id ? activeModeTabRef : null}
                 className={clsx("gen-mode-tab", activeMode?.id === m.id && "on")}
                 onClick={() => setModeId(m.id)}
               >
