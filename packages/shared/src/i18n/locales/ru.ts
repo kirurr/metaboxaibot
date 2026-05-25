@@ -122,9 +122,8 @@ export default {
     photoAnimateBufferLost: "📷 Не нашёл загруженное фото — пришлите его ещё раз.",
     photoAnimateGenerating: "🎞️ Запускаю оживление...",
     photoCreate: "📸 Создать фотографию",
-    photoCreateWelcome: "Сделаю реалистичное фото по вашей фотографии и описанию. Качество — 2K.",
-    photoCreateStepPhoto:
-      "<b>Шаг 1 из 3.</b> Пришлите <b>фотографию</b>-референс. Максимум — 20 МБ.",
+    photoCreateWelcome: "Создаю реалистичные стильные портреты по вашему фото и описанию.",
+    photoCreateStepPhoto: "<b>Шаг 1 из 3.</b> Пришлите <b>ваше фото</b>. Максимум — 20 МБ.",
     photoCreateStepPrompt: "<b>Шаг 2 из 3.</b> Опишите, какую фотографию хотите получить.",
     photoCreateStepAr: "<b>Шаг 3 из 3.</b> Выберите соотношение сторон:",
     photoCreatePromptUpdated: "✍️ Описание обновлено. Выберите соотношение сторон:",

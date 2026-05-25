@@ -122,9 +122,8 @@ export default {
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
     photoCreate: "📸 Create photo",
-    photoCreateWelcome:
-      "I'll generate a realistic photo from your reference image and description. Quality — 2K.",
-    photoCreateStepPhoto: "<b>Step 1 of 3.</b> Send a <b>reference photo</b>. Max 20 MB.",
+    photoCreateWelcome: "I make realistic stylish portraits from your photo and description.",
+    photoCreateStepPhoto: "<b>Step 1 of 3.</b> Send <b>your photo</b>. Max 20 MB.",
     photoCreateStepPrompt: "<b>Step 2 of 3.</b> Describe what photo you want to get.",
     photoCreateStepAr: "<b>Step 3 of 3.</b> Choose the aspect ratio:",
     photoCreatePromptUpdated: "✍️ Description updated. Choose the aspect ratio:",
