@@ -56,6 +56,7 @@ model User {
   generationJobs    GenerationJob[]
   webNotifications  WebNotification[]
   uploadedMedia     UploadedMedia[]
+  elements          Element[]
 
   @@map("users")
 }
@@ -382,13 +383,39 @@ model UploadedMedia {
   mimeType  String
   size      Int
   createdAt DateTime @default(now())
+  // Если задан — медиа принадлежит пользовательскому Element'у (набору референсов)
+  // и НЕ показывается в общем списке переиспользования (uploadedMediaService.list
+  // фильтрует elementId IS NULL).
+  elementId String?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  element Element? @relation(fields: [elementId], references: [id], onDelete: Cascade)
 
   // Курсорная пагинация по новизне: cuid монотонен, id desc ≈ createdAt desc.
   @@index([userId, id(sort: Desc)])
   @@index([userId, type, id(sort: Desc)])
+  @@index([elementId])
   @@map("uploaded_media")
+}
+
+// ─────────────────────────────────────────────
+// Element — именованный (@-тег) набор референсных изображений, который юзер
+// создаёт для себя и подставляет в промпт моделей с @-синтаксисом (Kling и т.п.).
+// Картинки — это строки UploadedMedia с проставленным elementId; удаление
+// элемента каскадит их (S3-объекты не трогаем, как и при обычном удалении media).
+// ─────────────────────────────────────────────
+model Element {
+  id        String   @id @default(cuid())
+  userId    BigInt
+  name      String // @-тег без символа @, валидация ^[a-zA-Z0-9_]+$
+  createdAt DateTime @default(now())
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media UploadedMedia[]
+
+  @@unique([userId, name])
+  @@index([userId, id(sort: Desc)])
+  @@map("elements")
 }
 
 // ─────────────────────────────────────────────
