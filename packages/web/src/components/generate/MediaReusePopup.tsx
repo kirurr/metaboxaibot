@@ -235,7 +235,7 @@ export function MediaReusePopup({
               tile.onDelete?.();
             }}
             aria-label={t("mediaReuse.delete")}
-            className="absolute left-1 top-1 hidden size-5 items-center justify-center rounded-full bg-black/60 text-white group-hover:flex hover:bg-black/80"
+            className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 sm:hidden sm:group-hover:flex"
           >
             <Trash2 size={11} />
           </button>
@@ -246,28 +246,42 @@ export function MediaReusePopup({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="card flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden p-0"
+        className="card flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden p-0 sm:max-h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header: tabs + close */}
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 p-4">
-          <div className="auth-tab !mb-0">
-            <button className={clsx(tab === "upload" && "on")} onClick={() => setTab("upload")}>
-              {t("mediaReuse.tabUpload")}
-            </button>
-            <button
-              className={clsx(tab === "generated" && "on")}
-              onClick={() => setTab("generated")}
-            >
-              {sectionLabel}
-            </button>
+        {/* Header: переключатель секций (скроллится по горизонтали на узких
+            экранах) + кнопка закрытия (всегда видна справа). */}
+        <div className="flex items-center gap-3 border-b border-white/10 p-3 sm:p-4">
+          <div className="min-w-0 flex-1 snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="inline-flex gap-2 rounded-xl bg-bg-elevated p-1">
+              {(
+                [
+                  ["upload", t("mediaReuse.tabUpload")],
+                  ["generated", sectionLabel],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={clsx(
+                    "h-9 shrink-0 snap-start whitespace-nowrap rounded-lg px-3.5 text-sm font-medium transition",
+                    tab === key
+                      ? "bg-bg-card text-text shadow-sm"
+                      : "text-text-secondary hover:text-text",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <button
-            className="btn btn-ghost btn-icon"
+            className="btn btn-ghost btn-icon shrink-0"
             onClick={onClose}
             aria-label={t("common.close")}
           >
@@ -275,11 +289,12 @@ export function MediaReusePopup({
           </button>
         </div>
 
-        {/* Body. Высота от контента (по умолчанию одна row), растёт с числом
-            плиток до потолка 45vh, дальше скроллит. scrollbar-gutter:stable —
+        {/* Body. Mobile: заметная высота (min 55vh, потолок 70vh) — попап не
+            выглядит куцым. Desktop (sm+): высота от контента (по умолчанию одна
+            row), растёт до 45vh, дальше скроллит. scrollbar-gutter:stable —
             чтобы появление скроллбара не сдвигало контент по горизонтали. */}
-        <div className="max-h-[45vh] overflow-y-auto p-4 [scrollbar-gutter:stable]">
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+        <div className="min-h-[55vh] max-h-[70vh] overflow-y-auto p-4 [scrollbar-gutter:stable] sm:min-h-0 sm:max-h-[45vh]">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {tab === "upload" && (
               <button
                 type="button"
