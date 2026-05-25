@@ -14,10 +14,11 @@ import {
  * Кэш живёт между открытиями — UI не фликает. Каждый элемент содержит вложенный
  * массив media (картинки с пресайн-url).
  */
-export function useElements() {
+export function useElements(enabled = true) {
   const query = useQuery({
     queryKey: elementKeys.list(),
     queryFn: ({ signal }) => listElements(signal),
+    enabled,
   });
 
   return {

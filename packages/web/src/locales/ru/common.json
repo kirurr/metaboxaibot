@@ -504,6 +504,8 @@
     "tabElements": "Элементы",
     "createElement": "Создать",
     "editElement": "Изменить",
+    "back": "Назад",
+    "elementImagesEmpty": "В этом элементе пока нет картинок",
     "generatedImage": "Сгенерированные изображения",
     "generatedVideo": "Сгенерированные видео",
     "generatedAudio": "Сгенерированное аудио",

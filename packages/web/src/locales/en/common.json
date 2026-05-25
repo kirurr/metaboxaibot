@@ -502,6 +502,8 @@
     "tabElements": "Elements",
     "createElement": "Create",
     "editElement": "Edit",
+    "back": "Back",
+    "elementImagesEmpty": "This element has no images yet",
     "generatedImage": "Generated images",
     "generatedVideo": "Generated videos",
     "generatedAudio": "Generated audio",

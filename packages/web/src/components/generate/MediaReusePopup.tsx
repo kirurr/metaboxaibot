@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ImagePlus, Loader2, Music, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ImagePlus,
+  Loader2,
+  Music,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { useUploadedMedia, useDeleteUploadedMedia } from "@/hooks/useUploadedMedia";
@@ -82,6 +93,8 @@ export function MediaReusePopup({
   const [tab, setTab] = useState<Tab>("upload");
   const [selected, setSelected] = useState<ReusedMedia[]>([]);
   const [editing, setEditing] = useState<ElementEditState>(null);
+  // Drill-in: открытый элемент, чьи картинки выбираем в слот (null — список элементов).
+  const [viewingElementId, setViewingElementId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -89,19 +102,29 @@ export function MediaReusePopup({
   const deleteMutation = useDeleteUploadedMedia(slotType);
   const generated = useInfiniteGalleryJobs({ section: slotType });
 
-  // Elements — управление наборами референсных картинок. Только для image-слотов.
+  // Elements — управление наборами референсных картинок. Только для image-слотов
+  // (на video/audio вкладка скрыта — список не грузим).
   const elementsEnabled = slotType === "image";
-  const { elements, isLoading: elementsLoading } = useElements();
+  const { elements, isLoading: elementsLoading } = useElements(elementsEnabled);
   const deleteElementMutation = useDeleteElement();
+  // Свежий объект (после рефетча списка), а не залипший — как в ElementEditPopup.
+  const viewingElement = elements.find((e) => e.id === viewingElementId);
 
-  // Esc закрывает попап.
+  // Переключение вкладки сбрасывает drill-in (возврат на Elements → список).
+  function selectTab(next: Tab) {
+    setTab(next);
+    setViewingElementId(null);
+  }
+
+  // Esc закрывает попап. Но пока открыт вложенный ElementEditPopup (у него свой
+  // Esc-листенер) — не реагируем, иначе Esc закрыл бы оба попапа разом.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !editing) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, editing]);
 
   const uploadTiles: Tile[] = useMemo(
     () =>
@@ -140,6 +163,18 @@ export function MediaReusePopup({
           })),
       ),
     [generated.jobs, slotType],
+  );
+
+  // Картинки открытого элемента как выбираемые плитки (тот же механизм, что Uploads).
+  const elementImageTiles: Tile[] = useMemo(
+    () =>
+      (viewingElement?.media ?? []).map((m) => ({
+        key: m.id,
+        previewUrl: m.url,
+        media: { s3Key: m.s3Key, url: m.url, mimeType: m.mimeType, name: m.name, type: "image" },
+        label: m.name,
+      })),
+    [viewingElement],
   );
 
   const active = tab === "upload" ? uploaded : generated;
@@ -264,7 +299,7 @@ export function MediaReusePopup({
         <div className="relative">
           <button
             type="button"
-            onClick={() => setEditing({ mode: "edit", element: el })}
+            onClick={() => setViewingElementId(el.id)}
             className="relative aspect-square w-full overflow-hidden rounded-[var(--radius)] bg-bg-elevated ring-2 ring-transparent transition hover:ring-white/30"
           >
             {cover ? (
@@ -302,6 +337,56 @@ export function MediaReusePopup({
     );
   }
 
+  // Вкладка Elements: drill-in (картинки открытого элемента) либо список элементов.
+  function renderElementsTab() {
+    if (viewingElement) {
+      return (
+        <>
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setViewingElementId(null)}
+              className="btn btn-ghost btn-icon shrink-0"
+              aria-label={t("mediaReuse.back")}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="min-w-0 truncate text-sm font-medium text-text">
+              @{viewingElement.name}
+            </span>
+          </div>
+          {elementImageTiles.length === 0 ? (
+            <div className="py-8 text-center text-text-secondary">
+              {t("mediaReuse.elementImagesEmpty")}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {elementImageTiles.map((tile) => renderTile(tile))}
+            </div>
+          )}
+        </>
+      );
+    }
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <button
+          type="button"
+          onClick={() => setEditing({ mode: "create" })}
+          className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-[var(--radius)] border border-dashed border-white/20 bg-bg-elevated text-text-secondary transition hover:border-white/40 hover:text-white"
+        >
+          <Plus size={20} />
+          <span className="text-xs">{t("mediaReuse.createElement")}</span>
+        </button>
+
+        {elementsLoading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="aspect-square w-full rounded-[var(--radius)] skeleton" />
+            ))
+          : elements.map((el) => renderElementCard(el))}
+      </div>
+    );
+  }
+
   return (
     <>
       <div
@@ -329,7 +414,7 @@ export function MediaReusePopup({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setTab(key)}
+                    onClick={() => selectTab(key)}
                     className={clsx(
                       "h-9 shrink-0 snap-start whitespace-nowrap rounded-lg px-3.5 text-sm font-medium transition",
                       tab === key
@@ -357,25 +442,7 @@ export function MediaReusePopup({
             чтобы появление скроллбара не сдвигало контент по горизонтали. */}
           <div className="min-h-[55vh] max-h-[70vh] overflow-y-auto p-4 [scrollbar-gutter:stable] sm:min-h-0 sm:max-h-[45vh]">
             {tab === "elements" ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={() => setEditing({ mode: "create" })}
-                  className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-[var(--radius)] border border-dashed border-white/20 bg-bg-elevated text-text-secondary transition hover:border-white/40 hover:text-white"
-                >
-                  <Plus size={20} />
-                  <span className="text-xs">{t("mediaReuse.createElement")}</span>
-                </button>
-
-                {elementsLoading
-                  ? Array.from({ length: 4 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className="aspect-square w-full rounded-[var(--radius)] skeleton"
-                      />
-                    ))
-                  : elements.map((el) => renderElementCard(el))}
-              </div>
+              renderElementsTab()
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
