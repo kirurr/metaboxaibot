@@ -499,6 +499,16 @@
       "orphaned": "Недоступен"
     }
   },
+  "mediaReuse": {
+    "tabUpload": "Загрузки",
+    "generatedImage": "Сгенерированные изображения",
+    "generatedVideo": "Сгенерированные видео",
+    "generatedAudio": "Сгенерированное аудио",
+    "upload": "Загрузить",
+    "emptyGenerated": "Пока нет генераций",
+    "delete": "Удалить",
+    "done": "Готово"
+  },
   "avatarModal": {
     "heygenTitle": "Создать HeyGen-аватар",
     "soulTitle": "Создать Soul-персонажа",

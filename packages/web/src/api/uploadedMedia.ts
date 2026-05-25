@@ -26,3 +26,12 @@ export async function deleteUploadedMedia(id: string) {
     method: "DELETE",
   });
 }
+
+// ── Query keys ──────────────────────────────────────────────────────────────
+// Иерархическая фабрика (как `galleryKeys`) — точечная инвалидация по типу и
+// веерная по всему домену. `type ?? null` чтобы ключ был стабильным для
+// «все типы».
+export const uploadedMediaKeys = {
+  all: ["uploadedMedia"] as const,
+  list: (type?: string) => [...uploadedMediaKeys.all, "list", type ?? null] as const,
+};

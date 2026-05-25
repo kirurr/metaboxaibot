@@ -6,6 +6,9 @@ import z from "zod";
 export const uploadedMediaSchema = z.object({
   id: z.string(),
   type: z.string(),
+  // s3Key нужен фронту, чтобы переиспользовать медиа в media-слоте генерации
+  // (submit шлёт s3Key'и). Это собственный chat-uploads ключ пользователя.
+  s3Key: z.string(),
   name: z.string(),
   mimeType: z.string(),
   size: z.number(),

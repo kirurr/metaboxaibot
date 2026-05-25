@@ -20,6 +20,7 @@ async function serialize(item: PrismaUploadedMedia) {
   return {
     id: item.id,
     type: item.type,
+    s3Key: item.s3Key,
     name: item.name,
     mimeType: item.mimeType,
     size: item.size,
@@ -34,6 +35,7 @@ const itemSchema = {
   properties: {
     id: { type: "string" },
     type: { type: "string" },
+    s3Key: { type: "string" },
     name: { type: "string" },
     mimeType: { type: "string" },
     size: { type: "number" },

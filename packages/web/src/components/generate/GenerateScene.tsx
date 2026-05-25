@@ -44,8 +44,11 @@ import {
   deleteUserAvatar,
   type UserAvatarDto,
 } from "@/api/userAvatars";
+import { useQueryClient } from "@tanstack/react-query";
+import { uploadedMediaKeys } from "@/api/uploadedMedia";
 import { VoicePicker } from "./VoicePicker";
 import { MediaPicker, type MediaPickItem, type MediaUserItem } from "./MediaPicker";
+import { MediaReusePopup, type ReusedMedia } from "./MediaReusePopup";
 import { CreateAvatarModal } from "./CreateAvatarModal";
 import { GenerationHistory, type PendingJob } from "./GenerationHistory";
 import { FloatingMediaBg } from "./FloatingMediaBg";
@@ -232,22 +235,21 @@ type SlotFile =
 function SlotCard({
   slot,
   files,
-  onAdd,
+  onOpenPicker,
   onRemove,
   onSlotError,
 }: {
   slot: MediaInputSlotDto;
   files: SlotFile[];
-  onAdd: (files: FileList) => void;
+  /** Открыть попап выбора медиа (загрузка/переиспользование). */
+  onOpenPicker: () => void;
   onRemove: (id: string) => void;
   /** Превью не загрузилось (presigned URL мёртв / 403). Родитель удаляет файл
    *  и показывает rate-limited toast. */
   onSlotError?: (id: string) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const isMulti = slot.maxImages > 1;
   const canAddMore = files.length < slot.maxImages;
-  const accept = slotAcceptFor(slot);
 
   return (
     <div className={clsx("gen-slot", isMulti && "gen-slot-multi")}>
@@ -257,21 +259,10 @@ function SlotCard({
           {slot.required ? "Required" : "Optional"}
         </span>
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        multiple={isMulti}
-        style={{ display: "none" }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) onAdd(e.target.files);
-          e.target.value = "";
-        }}
-      />
       {files.length === 0 ? (
         <button
           className="gen-slot-drop"
-          onClick={() => inputRef.current?.click()}
+          onClick={onOpenPicker}
           aria-label={`Загрузить ${slot.label}`}
         >
           <div className="gen-slot-icon">
@@ -291,11 +282,7 @@ function SlotCard({
             />
           ))}
           {canAddMore && (
-            <button
-              className="gen-slot-add"
-              onClick={() => inputRef.current?.click()}
-              aria-label="Добавить ещё"
-            >
+            <button className="gen-slot-add" onClick={onOpenPicker} aria-label="Добавить ещё">
               <Plus size={18} />
               {isMulti && (
                 <span className="gen-slot-count">
@@ -653,6 +640,9 @@ export function GenerateScene({
   const [prompt, setPrompt] = useState("");
   const [settingValues, setSettingValues] = useState<Record<string, unknown>>({});
   const [slotFiles, setSlotFiles] = useState<Record<string, SlotFile[]>>({});
+  // Какой слот сейчас открыл попап выбора медиа (upload / переиспользование).
+  const [reuseSlotKey, setReuseSlotKey] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
@@ -1398,6 +1388,53 @@ export function GenerateScene({
     }));
   }
 
+  // Кладёт выбранные в попапе медиа (uploaded / generated) в слот как готовые
+  // SlotFile без аплоада — submit отправит их s3Key'и, бэкенд пресайнит.
+  function reusedToSlotFile(item: ReusedMedia): Extract<SlotFile, { status: "ready" }> {
+    return {
+      id: `r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status: "ready",
+      dto: {
+        s3Key: item.s3Key,
+        name: item.name,
+        mimeType: item.mimeType,
+        size: 0,
+        kind: item.type,
+        url: item.url,
+      },
+    };
+  }
+
+  function addReusedToSlot(slotKey: string, items: ReusedMedia[]) {
+    const slot = activeSlots.find((s) => s.slotKey === slotKey);
+    if (!slot || items.length === 0) return;
+    setSlotFiles((prev) => {
+      const existing = prev[slotKey] ?? [];
+      // single-слот — заменяем содержимое единственным выбором.
+      if (slot.maxImages <= 1) {
+        return { ...prev, [slotKey]: [reusedToSlotFile(items[0])] };
+      }
+      // multi — добавляем, дедуп по s3Key, обрезаем по остатку места.
+      const existingKeys = new Set(
+        existing.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : [])),
+      );
+      const room = Math.max(0, slot.maxImages - existing.length);
+      const additions = items
+        .filter((it) => !existingKeys.has(it.s3Key))
+        .slice(0, room)
+        .map(reusedToSlotFile);
+      return { ...prev, [slotKey]: [...existing, ...additions] };
+    });
+  }
+
+  // Upload из попапа: переиспользуем существующий addToSlot (кладёт в слот +
+  // грузит в S3 + персистит в uploaded_media на бэке), затем инвалидируем
+  // uploaded-media запрос, чтобы новый файл появился в гриде Upload.
+  async function handleReuseUpload(slotKey: string, slotType: SlotMediaType, fileList: FileList) {
+    await addToSlot(slotKey, fileList);
+    void queryClient.invalidateQueries({ queryKey: uploadedMediaKeys.list(slotType) });
+  }
+
   // Rate-limit для toast'а «файл устарел»: при батче битых превью (например, 4
   // картинки в multi-слоте все с протухшей подписью) не хотим 4 одинаковых
   // тоста подряд. Достаточно одного раз в 3 секунды.
@@ -1868,7 +1905,7 @@ export function GenerateScene({
                   key={slot.slotKey}
                   slot={slot}
                   files={slotFiles[slot.slotKey] ?? []}
-                  onAdd={(fl) => addToSlot(slot.slotKey, fl)}
+                  onOpenPicker={() => setReuseSlotKey(slot.slotKey)}
                   onRemove={(id) => removeFromSlot(slot.slotKey, id)}
                   onSlotError={(id) => handleSlotPreviewError(slot.slotKey, id)}
                 />
@@ -2104,6 +2141,28 @@ export function GenerateScene({
           />
         </>
       )}
+
+      {reuseSlotKey &&
+        (() => {
+          const slot = activeSlots.find((s) => s.slotKey === reuseSlotKey);
+          if (!slot) return null;
+          const slotType = slotTypeFor(slot);
+          const readyCount = (slotFiles[reuseSlotKey] ?? []).filter(
+            (f) => f.status === "ready",
+          ).length;
+          const room = slot.maxImages <= 1 ? 1 : Math.max(0, slot.maxImages - readyCount);
+          return (
+            <MediaReusePopup
+              slotType={slotType}
+              accept={slotAcceptFor(slot)}
+              room={room}
+              multi={slot.maxImages > 1}
+              onUpload={(fl) => handleReuseUpload(reuseSlotKey, slotType, fl)}
+              onSelect={(items) => addReusedToSlot(reuseSlotKey, items)}
+              onClose={() => setReuseSlotKey(null)}
+            />
+          );
+        })()}
 
       {createAvatarProvider && (
         <CreateAvatarModal
