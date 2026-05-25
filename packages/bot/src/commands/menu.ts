@@ -11,6 +11,7 @@ import {
   PHOTO_UPSCALE_BUFFER_MODEL_ID,
   VIDEO_UPSCALE_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
+  PHOTO_CREATE_BUFFER_MODEL_ID,
 } from "@metabox/shared";
 import type { Section, Translations } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
@@ -24,6 +25,8 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
   // на месте; вернуть = дописать обратно `.row().text(t.scenarios.videoUpscale,
   // "scenario:video_upscale")`.
   return new InlineKeyboard()
+    .text(t.scenarios.photoCreate, "scenario:photo_create")
+    .row()
     .text(t.scenarios.faceSwap, "scenario:face_swap")
     .row()
     .text(t.scenarios.clothingTryon, "scenario:clothing_tryon")
@@ -67,6 +70,9 @@ export async function handleMenu(ctx: BotContext): Promise<void> {
         .catch(() => void 0),
       userStateService
         .clearMediaInputs(ctx.user.id, OBJECT_REMOVAL_BUFFER_MODEL_ID)
+        .catch(() => void 0),
+      userStateService
+        .clearMediaInputs(ctx.user.id, PHOTO_CREATE_BUFFER_MODEL_ID)
         .catch(() => void 0),
     ]);
     clearActiveSlot(ctx.user.id);

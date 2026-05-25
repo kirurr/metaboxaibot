@@ -441,6 +441,32 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
+  // Готовый сценарий «📸 Создать фотографию». Под капотом — nano-banana-pro
+  // (KIE primary, evolink fallback) @ 2K. Сцена `photo-create.ts` зашивает
+  // resolution 2K, aspect_ratio выбирает юзер на инлайн-клавиатуре (Авто /
+  // 1:1 / 16:9 / 9:16 / 4:3 / 3:4); «Авто» snap'ится клиент-сайд к ближайшему
+  // из поддерживаемых. hiddenFromCarousel убирает модель из карусели Дизайна —
+  // в карусели, истории и аналитике она видна только как «📸 Создать
+  // фотографию»; nano-banana-pro нигде не светится.
+  "photo-create": {
+    id: "photo-create",
+    name: "📸 Создать фотографию",
+    description: "Генерирует реалистичное фото по референсу и описанию в качестве 2K.",
+    section: "design",
+    provider: "kie",
+    costUsdPerRequest: 0.09, // nano-banana-pro @ 2K
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
   // Готовый сценарий «Убрать объект». Под капотом — GPT Image 2 i2i (KIE) @ 1K
   // c aspect_ratio:"auto" (единственная комбинация у KIE, при которой формат
   // выхода совпадает с форматом входа — 2K/4K требуют явный aspect_ratio из
@@ -2569,6 +2595,31 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto"],
+    mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
+  },
+  // ── Photo create fallback (evolink: gemini-3-pro-image-preview) ─────────────
+  // Готовый сценарий «📸 Создать фотографию» = nano-banana-pro @ 2K под капотом.
+  // KIE primary `photo-create` фолбэчится на evolink ровно как nano-banana-pro.
+  // Списание с ЮЗЕРА — всегда по primary (image processor при usedFallback
+  // считает цену primary-моделью). `costUsdPerRequest` отсюда — в audit-
+  // метаданные `actualCostUsd` (реальная провайдерская цена на 2K у evolink).
+  {
+    id: "photo-create",
+    name: "📸 Создать фотографию (evolink fallback)",
+    description: "Fallback на evolink при недоступности KIE.",
+    section: "design",
+    provider: "evolink",
+    costUsdPerRequest: 0.125, // evolink gemini-3-pro-image @ 2K — для actualCostUsd
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    supportedAspectRatios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
   // ── Замена лица: цепочка фолбэков ───────────────────────────────────────────

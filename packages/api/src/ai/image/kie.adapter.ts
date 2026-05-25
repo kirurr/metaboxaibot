@@ -40,6 +40,9 @@ const NANO_BANANA_MODEL_NAMES: Record<string, string> = {
   // Готовый сценарий «Апскейл фото» — под капотом гоняется как nano-banana-pro
   // (сцена upscale.ts зашивает resolution 4K, aspect_ratio auto и фикс-промт).
   "image-upscale": "nano-banana-pro",
+  // Готовый сценарий «📸 Создать фотографию» — тоже nano-banana-pro, но @ 2K
+  // и с aspect_ratio из инлайн-клавиатуры (см. scenes/photo-create.ts).
+  "photo-create": "nano-banana-pro",
 };
 
 /**

@@ -121,6 +121,24 @@ export default {
       "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
+    photoCreate: "📸 Create photo",
+    photoCreateWelcome:
+      "I'll generate a realistic photo from your reference image and description. Quality — 2K.",
+    photoCreateStepPhoto: "<b>Step 1 of 3.</b> Send a <b>reference photo</b>. Max 20 MB.",
+    photoCreateStepPrompt: "<b>Step 2 of 3.</b> Describe what photo you want to get.",
+    photoCreateStepAr: "<b>Step 3 of 3.</b> Choose the aspect ratio:",
+    photoCreatePromptUpdated: "✍️ Description updated. Choose the aspect ratio:",
+    photoCreateAwaitArHint:
+      "👇 Choose an aspect ratio on the keyboard below, or send a new photo / description.",
+    photoCreateNotPhoto: "📷 That's not a photo. Please send an image.",
+    photoCreatePhotoTooLarge: "📷 Photo is too large. Max 20 MB.",
+    photoCreateAlbumNotice:
+      "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
+    photoCreatePromptEmpty: "✍️ Describe what photo you want to get.",
+    photoCreatePromptTooLong:
+      "✍️ Description is too long ({current} characters). The maximum is {max}. Shorten it and try again.",
+    photoCreateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
+    photoCreateGenerating: "📸 Creating photo...",
     imageDecodeFailed:
       "📷 I couldn't process this file — format may be unsupported (e.g. iPhone HEIC). Please resend the photo from your gallery as an image, not as a file/document — Telegram will convert it to JPEG.",
   },
