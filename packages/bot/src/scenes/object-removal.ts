@@ -202,6 +202,11 @@ export async function handleObjectRemovalPrompt(ctx: BotContext): Promise<void> 
       { auto_translate_prompt: true },
       userId,
       OBJECT_REMOVAL_MODEL_ID,
+      // Перевод — внутренняя кухня сценария, юзер не должен видеть отдельную
+      // строку «autotranslate» в истории и не платит за это отдельно. Цена
+      // мизерная (gpt-5-nano на 400-char-промпт ≈ $0.0001) — поглощается
+      // сценарием, в base price object-removal ($0.03) уже c запасом покрыта.
+      { silent: true },
     );
   } catch (err) {
     logger.warn({ err }, "Object removal: prompt translation failed, falling back to original");
