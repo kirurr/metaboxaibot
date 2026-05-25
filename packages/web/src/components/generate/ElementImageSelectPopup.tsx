@@ -71,9 +71,7 @@ export function ElementImageSelectPopup({
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-white/10 p-3 sm:p-4">
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-semibold text-text">
-              @{element.name}
-            </h3>
+            <h3 className="truncate text-base font-semibold text-text">@{element.name}</h3>
             <p className="truncate text-xs text-text-secondary">
               {t("elementSelect.hint", { max: maxImages })}
             </p>

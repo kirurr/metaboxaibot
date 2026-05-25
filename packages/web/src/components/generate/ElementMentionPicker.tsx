@@ -119,7 +119,10 @@ export function ElementMentionPicker({
 
               {isLoading
                 ? Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="aspect-square w-full rounded-[var(--radius)] skeleton" />
+                    <div
+                      key={i}
+                      className="aspect-square w-full rounded-[var(--radius)] skeleton"
+                    />
                   ))
                 : elements.map((el) => renderCard(el))}
             </div>

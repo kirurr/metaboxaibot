@@ -770,12 +770,13 @@ export function GenerateScene({
   // (React батчит) → UI не показывает stale slot files предыдущей модели.
   function pickModel(id: string) {
     if (id === modelId) return;
-    const { settings, slots, elementSelections: sel } = restoreDraftForModel(id);
+    const { settings, slots, prompt: p, elementSelections: sel } = restoreDraftForModel(id);
     lastPickedRef.current = id;
     restoredForRef.current = id;
     setModeId(null);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setPrompt(p);
     setElementSelections(sel);
     setModelId(id);
     setSearchParams(
@@ -794,13 +795,14 @@ export function GenerateScene({
   function restoreDraftForModel(id: string): {
     settings: Record<string, unknown>;
     slots: Record<string, SlotFile[]>;
+    prompt: string;
     elementSelections: Record<string, string[]>;
   } {
     const target = models.find((m) => m.id === id);
-    if (!target) return { settings: {}, slots: {}, elementSelections: {} };
+    if (!target) return { settings: {}, slots: {}, prompt: "", elementSelections: {} };
     const key = target.familyId ?? target.id;
     const entry = useGenerationDraftStore.getState().byKey[key];
-    if (!entry) return { settings: {}, slots: {}, elementSelections: {} };
+    if (!entry) return { settings: {}, slots: {}, prompt: "", elementSelections: {} };
     const slots: Record<string, SlotFile[]> = {};
     for (const slot of target.mediaInputs ?? []) {
       const arr = entry.slots[slot.slotKey];
@@ -812,7 +814,12 @@ export function GenerateScene({
         }));
       }
     }
-    return { settings: entry.settings, slots, elementSelections: entry.elementSelections ?? {} };
+    return {
+      settings: entry.settings,
+      slots,
+      prompt: entry.prompt ?? "",
+      elementSelections: entry.elementSelections ?? {},
+    };
   }
 
   // selectedModel ищем в полном `models` (sibling-варианты тоже там) —
@@ -887,6 +894,7 @@ export function GenerateScene({
       setModeId(null);
       setSettingValues({});
       setSlotFiles({});
+      setPrompt("");
       setElementSelections({});
       restoredForRef.current = null;
       return;
@@ -897,9 +905,10 @@ export function GenerateScene({
 
     setModeId(null);
     restoredForRef.current = modelId;
-    const { settings, slots, elementSelections: sel } = restoreDraftForModel(modelId);
+    const { settings, slots, prompt: p, elementSelections: sel } = restoreDraftForModel(modelId);
     setSettingValues(settings);
     setSlotFiles(slots);
+    setPrompt(p);
     setElementSelections(sel);
     void refreshRestoredSlotUrls(slots);
   }, [modelId, models]);
@@ -934,6 +943,23 @@ export function GenerateScene({
     const key = selectedModel.familyId ?? selectedModel.id;
     useGenerationDraftStore.getState().setElementSelections(key, elementSelections);
   }, [selectedModel, elementSelections]);
+
+  // Sync prompt → draft-store (per-family) — переживает перезагрузку страницы.
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (restoredForRef.current !== selectedModel.id) return;
+    const key = selectedModel.familyId ?? selectedModel.id;
+    useGenerationDraftStore.getState().setPrompt(key, prompt);
+  }, [selectedModel, prompt]);
+
+  // Авто-рост textarea промпта под контент (в пределах CSS min/max-height).
+  // Реагирует и на ввод, и на программную подстановку (restore / @-меншены).
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [prompt]);
 
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
@@ -1098,7 +1124,14 @@ export function GenerateScene({
     return userElements
       .filter((el) => !activeElementIds.has(el.id) && el.name.toLowerCase().includes(q))
       .slice(0, 6);
-  }, [mentionQuery, elementsFeatureOn, elementsCap, activeMentions, userElements, activeElementIds]);
+  }, [
+    mentionQuery,
+    elementsFeatureOn,
+    elementsCap,
+    activeMentions,
+    userElements,
+    activeElementIds,
+  ]);
 
   // Список доступных settings — выкидываем unsupported types и применяем dependsOn.
   const visibleSettings = useMemo(() => {
@@ -1629,18 +1662,24 @@ export function GenerateScene({
   const canGenerate = blockerReason === null;
 
   // ── @-меншены: ввод/вставка/выбор ───────────────────────────────────────────
-  // onChange промпта: обновляем текст и детектим незакрытый `@<word>` у курсора.
-  function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const value = e.target.value;
-    setPrompt(value);
+  // Детект незакрытого `@<word>` слева от курсора. Вызываем не только на вводе,
+  // но и при перемещении каретки (клик/стрелки) — иначе stale-позиция привела бы
+  // к вырезанию чужого куска текста при выборе подсказки.
+  function detectMention(ta: HTMLTextAreaElement) {
     if (!elementsFeatureOn) {
-      if (mentionQuery) setMentionQuery(null);
+      setMentionQuery(null);
       return;
     }
-    const caret = e.target.selectionStart ?? value.length;
-    const m = value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
+    const caret = ta.selectionStart ?? ta.value.length;
+    const m = ta.value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
     if (m) setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
     else setMentionQuery(null);
+  }
+
+  // onChange промпта: обновляем текст и пересчитываем меншен у курсора.
+  function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setPrompt(e.target.value);
+    detectMention(e.target);
   }
 
   // Вставляет `@name ` в промпт: заменяет набранный inline-`@`-токен (если есть),
@@ -2085,9 +2124,13 @@ export function GenerateScene({
             </div>
           )}
 
-          {/* Prompt. Кнопка «Готовые промпты» — в левом нижнем углу инпута. */}
+          {/* Prompt. Кнопки «Готовые промпты» + «Элементы» — панелью в левом
+              нижнем углу инпута; textarea авторастёт и резервирует место снизу. */}
           <div
-            className={clsx("gen-prompt-wrap", promptSection && "has-examples-btn")}
+            className={clsx(
+              "gen-prompt-wrap",
+              (promptSection || elementsFeatureOn) && "has-inline-tools",
+            )}
             style={{ position: "relative" }}
           >
             <textarea
@@ -2096,18 +2139,39 @@ export function GenerateScene({
               placeholder={promptPlaceholder}
               value={prompt}
               onChange={onPromptChange}
+              // Перемещение каретки мышью/стрелками не триггерит onChange —
+              // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
+              onClick={(e) => detectMention(e.currentTarget)}
+              onKeyUp={(e) => detectMention(e.currentTarget)}
               onBlur={() => {
                 // Закрываем dropdown после клика по подсказке (mousedown успевает
                 // отработать раньше blur), иначе — при уходе фокуса.
                 window.setTimeout(() => setMentionQuery(null), 150);
               }}
-              rows={3}
             />
-            {promptSection && (
-              <button type="button" className="gen-prompt-examples-btn" onClick={openPromptsDialog}>
-                <Wand2 size={14} />
-                <span>{t("generate.openPromptExamples")}</span>
-              </button>
+            {(promptSection || elementsFeatureOn) && (
+              <div className="gen-prompt-tools">
+                {promptSection && (
+                  <button
+                    type="button"
+                    className="gen-prompt-examples-btn"
+                    onClick={openPromptsDialog}
+                  >
+                    <Wand2 size={14} />
+                    <span>{t("generate.openPromptExamples")}</span>
+                  </button>
+                )}
+                {elementsFeatureOn && (
+                  <button
+                    type="button"
+                    className="gen-prompt-examples-btn"
+                    onClick={() => setMentionPickerOpen(true)}
+                  >
+                    <AtSign size={14} />
+                    <span>{t("generate.elementsButton")}</span>
+                  </button>
+                )}
+              </div>
             )}
             {/* Inline-`@` dropdown подсказок элементов. */}
             {mentionQuery && mentionMatches.length > 0 && (
@@ -2139,11 +2203,7 @@ export function GenerateScene({
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
                         {el.media[0]?.url ? (
-                          <img
-                            src={el.media[0].url}
-                            alt=""
-                            className="size-full object-cover"
-                          />
+                          <img src={el.media[0].url} alt="" className="size-full object-cover" />
                         ) : (
                           <AtSign size={14} className="text-text-secondary" />
                         )}
@@ -2156,9 +2216,9 @@ export function GenerateScene({
             )}
           </div>
 
-          {/* @-элементы: кнопка-пикер + чипы активных элементов (только для
-              моделей с promptRefs.elements, напр. Kling). */}
-          {elementsFeatureOn && (
+          {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
+              картинок элемента. Кнопка «Элементы» живёт внутри textarea выше. */}
+          {elementsFeatureOn && activeMentions.length > 0 && (
             <div
               style={{
                 display: "flex",
@@ -2168,14 +2228,6 @@ export function GenerateScene({
                 marginTop: 8,
               }}
             >
-              <button
-                type="button"
-                className="gen-chip-pill"
-                onClick={() => setMentionPickerOpen(true)}
-              >
-                <AtSign size={14} />
-                <span>{t("generate.elementsButton")}</span>
-              </button>
               {activeMentions.map(({ element }, i) => {
                 const count =
                   elementSelections[element.id]?.length ??
