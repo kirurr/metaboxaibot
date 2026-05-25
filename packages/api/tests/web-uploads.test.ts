@@ -42,6 +42,7 @@ import {
   PNG_BYTES,
 } from "./fixtures/multipart.js";
 import { getFileUrl, uploadBuffer } from "../src/services/s3.service.js";
+import { db } from "./helpers/db.js";
 
 interface UploadResponse {
   s3Key: string;
@@ -414,5 +415,52 @@ describe("POST /web/chat-uploads/sign", () => {
     expect(body.urls[k]).toBe(`https://s3.test/${k}`);
     expect(Object.keys(body.urls)).toHaveLength(1);
     expect(vi.mocked(getFileUrl)).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Owned generation output keys (reused generated media) ───────────────────
+
+  it("re-signs the user's own generation output s3Key (different prefix)", async () => {
+    const { user, accessToken } = await createTestUser();
+    const job = await db.generationJob.create({
+      data: { userId: user.id!, dialogId: "d-1", section: "image", modelId: "m", prompt: "p" },
+    });
+    const genKey = `generations/${user.id}/out.png`;
+    await db.generationJobOutput.create({ data: { jobId: job.id, index: 0, s3Key: genKey } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [genKey] },
+      headers: bearer(accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[genKey]).toBe(`https://s3.test/${genKey}`);
+  });
+
+  it("returns null for another user's generation output key", async () => {
+    const owner = await createTestUser();
+    const other = await createTestUser();
+    const job = await db.generationJob.create({
+      data: {
+        userId: owner.user.id!,
+        dialogId: "d-2",
+        section: "image",
+        modelId: "m",
+        prompt: "p",
+      },
+    });
+    const genKey = `generations/${owner.user.id}/secret.png`;
+    await db.generationJobOutput.create({ data: { jobId: job.id, index: 0, s3Key: genKey } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/web/chat-uploads/sign",
+      payload: { s3Keys: [genKey] },
+      headers: bearer(other.accessToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as SignResponse;
+    expect(body.urls[genKey]).toBeNull();
   });
 });
