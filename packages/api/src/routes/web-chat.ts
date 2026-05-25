@@ -21,6 +21,7 @@ import {
 } from "../services/chat.service.js";
 import { db } from "../db.js";
 import { getFileUrl, uploadBuffer } from "../services/s3.service.js";
+import { uploadedMediaService } from "../services/uploaded-media.service.js";
 import { logger } from "../logger.js";
 import { AI_MODELS, type Section } from "@metabox/shared";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
@@ -201,10 +202,30 @@ export const webChatRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ error: "S3 недоступен" });
       }
 
+      const name = part.filename || `upload.${ext}`;
+
+      // Персистим медиа (image/video/audio) для попапа «переиспользовать
+      // загруженное». Документы не сохраняем. Best-effort: сбой записи не должен
+      // ронять саму загрузку — файл уже лежит в S3.
+      if (kind !== "document") {
+        await uploadedMediaService
+          .create({
+            userId: aibUserId!,
+            type: kind,
+            s3Key,
+            name,
+            mimeType: part.mimetype,
+            size: buffer.byteLength,
+          })
+          .catch((err) => {
+            logger.error({ err, s3Key }, "chat-uploads: failed to persist uploaded media");
+          });
+      }
+
       const url = await getFileUrl(s3Key).catch(() => null);
       return {
         s3Key,
-        name: part.filename || `upload.${ext}`,
+        name,
         mimeType: part.mimetype,
         size: buffer.byteLength,
         kind,
