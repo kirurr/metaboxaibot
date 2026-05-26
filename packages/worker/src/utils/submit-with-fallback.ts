@@ -93,7 +93,8 @@ export type FallbackReason =
   | "long_window_rate_limit"
   | "persistent_5xx"
   | "provider_long_cooldown_marker"
-  | "kie_credits_exhausted";
+  | "kie_credits_exhausted"
+  | "unknown_error";
 
 export interface FallbackCandidateAttempt {
   provider: string;
@@ -105,7 +106,8 @@ export interface FallbackCandidateAttempt {
     | "persistent_5xx"
     | "provider_unavailable"
     | "incompatible_input"
-    | "credits_exhausted";
+    | "credits_exhausted"
+    | "unknown_error";
   error?: string;
 }
 
@@ -442,11 +444,51 @@ export async function submitWithFallback<T, D extends object>(
         continue;
       }
 
-      // Другая ошибка (4xx non-429, validation, content policy, transient 5xx
-      // на attempt 1-2, etc.) — НЕ fallback'имся. Пробрасываем наверх:
-      // BullMQ ретраит, либо processor превратит в user-facing failure.
+      // 5xx на ранних попытках (allowFiveXxFallback=false) — известная категория,
+      // НЕ fallback. Пробрасываем наверх, чтобы BullMQ ретраил job с другим ключом
+      // того же провайдера. На attemptsMade >= threshold ветка выше уже даст
+      // fallback'у шанс.
+      if (isFiveXxError(err)) {
+        if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
+        throw err;
+      }
+
+      // Unknown / unclassified error (4xx non-429, validation, content policy,
+      // network reset, неизвестные строки в теле ответа, etc.). Раньше throw'или
+      // сразу — пользователь получал failure, даже если соседний провайдер мог бы
+      // справиться. Теперь best-effort: пробуем следующего кандидата, плюс шлём
+      // burst-throttled алерт в tech-чат (дедуп по provider + первым 80 символам
+      // сообщения) — чтобы ops видели «фактически неклассифицированную» категорию
+      // и могли добавить classifier при повторении паттерна. Если все кандидаты
+      // упали так же — lastError пробросится наверх ниже (`throw lastError`),
+      // юзер получит обычную failure-кнопку, processor добавит свой top-level
+      // notifyTechError.
       if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
-      throw err;
+      attempts.push({
+        provider: candidateProvider,
+        outcome: "unknown_error",
+        error: message.slice(0, 200),
+      });
+      void notifyTechErrorThrottled(
+        err instanceof Error ? err : new Error(message),
+        {
+          section: opts.section,
+          modelId: opts.primaryModel.id,
+          jobId: opts.jobId,
+          userId: opts.userId,
+        },
+        `unknown-error:${candidateProvider}:${message.slice(0, 80)}`,
+      );
+      logger.warn(
+        {
+          jobId: opts.jobId,
+          provider: candidateProvider,
+          modelId: opts.primaryModel.id,
+          err: message.slice(0, 200),
+        },
+        "submitWithFallback: unknown error — trying next candidate",
+      );
+      continue;
     }
   }
 
@@ -534,6 +576,7 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "long_window") return "long_window_rate_limit";
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
   if (primaryOutcome === "credits_exhausted") return "kie_credits_exhausted";
+  if (primaryOutcome === "unknown_error") return "unknown_error";
   return "pool_exhausted";
 }
 
