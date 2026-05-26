@@ -663,6 +663,35 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     mediaInputs: KLING_MOTION_MEDIA_INPUTS,
     settings: [...KLING_MOTION_SETTINGS],
   },
+  // Готовый сценарий «🎬 Копировать движение». Под капотом — kling-3.0/motion-
+  // control @ 1080p Pro (KIE primary, FAL и Evolink — fallbacks). Юзер не
+  // настраивает ничего: грузит фото + референс-видео, адаптеры форсят
+  // character_orientation="video" и background_source="input_image" (KIE — оба,
+  // FAL/Evolink — только ориентацию: их endpoint'ы background_source не
+  // поддерживают). Длительность результата = длительность референс-видео
+  // (3-30 с). Pricing идентичен kling-motion-pro 1080p: $0.135/с с подкачкой
+  // по фактической длительности результата. hiddenFromCarousel — юзеру модель
+  // видна только как «🎬 Копировать движение», kling-motion-pro нигде не светится.
+  "copy-motion": {
+    id: "copy-motion",
+    name: "🎬 Копировать движение",
+    description: "Переносит движения из референсного видео на персонажа с вашей фотографии.",
+    section: "video",
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.135,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: KLING_MOTION_MEDIA_INPUTS,
+  },
   // KIE Topaz Video Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
   // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
   // Цена — посекундная, ставка по результату (фактор × разрешение × fps):
