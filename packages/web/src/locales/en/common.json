@@ -51,6 +51,10 @@
         "objectRemoval": {
           "name": "Remove Object",
           "desc": "Removes an object and inpaints the background."
+        },
+        "photoCreate": {
+          "name": "Create Photo",
+          "desc": "A realistic photo from a reference and a description in 2K or 4K."
         }
       },
       "video": {
@@ -109,6 +113,11 @@
         "title": "Remove Object",
         "subtitle": "Removes the chosen object and inpaints the background",
         "promptPlaceholder": "What to remove? E.g.: the person in the background"
+      },
+      "photo-create": {
+        "title": "Create Photo",
+        "subtitle": "Generates a realistic photo from a reference and a description in 2K or 4K",
+        "promptPlaceholder": "Describe the photo. E.g.: cinematic poster-style portrait"
       }
     },
     "video": {

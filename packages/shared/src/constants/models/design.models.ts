@@ -475,6 +475,25 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4"],
+    // Селекторы для web-пресета `/image/photo-create`. Бот их НЕ читает — сцена
+    // `photo-create.ts` рулит через свои `PHOTO_CREATE_AR_OPTIONS` /
+    // `PHOTO_CREATE_RES_OPTIONS`. AR-набор совпадает с supportedAspectRatios выше;
+    // "auto" бэкенд (web-generation.ts) снапит под исходное фото перед сабмитом.
+    // resolution.key == costVariants.settingKey → preview-цена 2K/4K считается верно.
+    settings: [
+      mkAspectRatio(["auto", "1:1", "16:9", "9:16", "4:3", "3:4"]),
+      {
+        key: "resolution",
+        label: "Разрешение",
+        description: "Детализация фото: 2K — стандарт, 4K — максимум. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2K", label: "2K" },
+          { value: "4K", label: "4K" },
+        ],
+        default: "2K",
+      },
+    ],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
   // Готовый сценарий «Убрать объект». Под капотом — GPT Image 2 i2i (KIE) @ 1K

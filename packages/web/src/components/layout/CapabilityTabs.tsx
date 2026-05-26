@@ -67,6 +67,12 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       descKey: "capabilities.features.image.generate.desc",
       glyph: "▢",
     },
+    {
+      nameKey: "capabilities.features.image.photoCreate.name",
+      descKey: "capabilities.features.image.photoCreate.desc",
+      glyph: "❂",
+      link: "photo-create",
+    },
     // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
     // {
     //   nameKey: "capabilities.features.image.product.name",

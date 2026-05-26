@@ -51,6 +51,7 @@ export const WEB_PRESET_MODEL_IDS = new Set<string>([
   "face-swap-classic",
   "clothing-tryon",
   "object-removal",
+  "photo-create",
   "photo-animate",
   "video-upscale",
 ]);

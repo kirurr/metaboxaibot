@@ -26,6 +26,9 @@ import {
   OBJECT_REMOVAL_MODEL_ID,
   OBJECT_REMOVAL_PROMPT_MAX_CHARS,
   buildObjectRemovalPrompt,
+  PHOTO_CREATE_MODEL_ID,
+  PHOTO_CREATE_PROMPT_MAX_CHARS,
+  snapPhotoCreateAr,
   PHOTO_ANIMATE_MODEL_ID,
   snapAspectRatio,
   VIDEO_UPSCALE_MODEL_ID,
@@ -380,6 +383,44 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           translated = userText;
         }
         finalPrompt = buildObjectRemovalPrompt(translated);
+      } else if (modelId === PHOTO_CREATE_MODEL_ID) {
+        // photo-create: юзер описывает желаемое фото. Переводим ru→en silent — как
+        // в bot/scenes/photo-create.ts, НО без обёртки-шаблона (в отличие от
+        // object-removal): описание уходит провайдеру как есть.
+        const userText = prompt.trim().slice(0, PHOTO_CREATE_PROMPT_MAX_CHARS);
+        try {
+          finalPrompt = await translatePromptIfNeeded(
+            userText,
+            { auto_translate_prompt: true },
+            aibUserId!,
+            modelId,
+            { silent: true },
+          );
+        } catch (err) {
+          logger.warn({ err }, "web photo-create: prompt translation failed, using original");
+          finalPrompt = userText;
+        }
+      }
+
+      // photo-create: «auto» AR провайдеру не отдаём — снапим под исходное фото
+      // (как бот через snapPhotoCreateAr). AR на цену не влияет, поэтому делаем
+      // только тут (на сабмите), не в preview. Probe-фейл → fallback "1:1".
+      let effectiveSettings = settings;
+      if (
+        modelId === PHOTO_CREATE_MODEL_ID &&
+        (!settings?.aspect_ratio || settings.aspect_ratio === "auto")
+      ) {
+        let aspectRatio = "1:1";
+        const photoUrl = resolvedMediaInputs?.edit?.[0];
+        if (photoUrl) {
+          try {
+            const meta = await probeImageMetadata(photoUrl);
+            aspectRatio = snapPhotoCreateAr(meta.width, meta.height);
+          } catch (err) {
+            logger.warn({ err }, "web photo-create: image probe failed, defaulting aspect_ratio");
+          }
+        }
+        effectiveSettings = { ...settings, aspect_ratio: aspectRatio };
       }
 
       try {
@@ -389,7 +430,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           prompt: finalPrompt,
           telegramChatId: null,
           ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
-          ...(settings ? { extraModelSettings: settings } : {}),
+          ...(effectiveSettings ? { extraModelSettings: effectiveSettings } : {}),
         });
         return { dbJobId };
       } catch (err) {

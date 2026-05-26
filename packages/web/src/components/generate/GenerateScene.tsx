@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AtSign,
@@ -58,9 +58,10 @@ import {
   parseActiveMentions,
   translateMentionsToCanonical,
   buildElementMediaInputs,
+  type ActiveMention,
 } from "@/utils/elementMentions";
 import { CreateAvatarModal } from "./CreateAvatarModal";
-import { GenerationHistory, type PendingJob } from "./GenerationHistory";
+import { GenerationHistory, type PendingJob, type TrackedJobOutput } from "./GenerationHistory";
 import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -70,6 +71,13 @@ import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate
 import type { GeneratePrefill } from "@/utils/navigateToGenerate";
 import { PromptExamplesGallery } from "@/components/prompts/PromptExamplesGallery";
 import type { PromptExample } from "@/api/promptExamples";
+
+// Стабильная ссылка на пустой список меншенов. Когда @-элементы выключены
+// (модель без promptRefs.elements), `activeMentions` отдаёт ИМЕННО её, а не
+// новый `[]` на каждый рендер. Иначе новый identity на каждый символ промпта
+// протекал в `activeElementIds`/`cappedMentions` и в deps debounce-эффекта
+// превью, перезапуская его на каждое нажатие.
+const EMPTY_MENTIONS: ActiveMention[] = [];
 
 /**
  * Centered-panel UI генерации (Image/Video), ориентированный на референс из
@@ -738,6 +746,24 @@ export function GenerateScene({
   // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
   const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
 
+  // Стабильные колбэки для GenerationHistory — иначе инлайн-стрелки меняли бы
+  // ссылку на каждый рендер и React.memo на истории не срабатывал бы (она
+  // перерисовывалась бы на каждый символ промпта). Завязаны только на стабильный
+  // setPendingJobs, поэтому deps пустые.
+  const handleJobResolved = useCallback((jobId: string) => {
+    setPendingJobs((prev) => prev.filter((p) => p.id !== jobId));
+  }, []);
+  const handleJobFailed = useCallback((jobId: string, errorMessage: string) => {
+    setPendingJobs((prev) =>
+      prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
+    );
+  }, []);
+  const handleJobSucceeded = useCallback((jobId: string, outputs: TrackedJobOutput[]) => {
+    setPendingJobs((prev) =>
+      prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
+    );
+  }, []);
+
   // Есть ли уже генерации в правой пэйне. Пока пусто и задан ambientSection —
   // в фоне показываем «выпадающие» плавающие медиа; как только появилась первая
   // генерация — фон скрывается (его место занимает галерея).
@@ -1127,7 +1153,7 @@ export function GenerateScene({
   const { elements: userElements } = useElements(elementsFeatureOn);
   // Активные элементы выводятся из текста промпта (порядок = первое появление).
   const activeMentions = useMemo(
-    () => (elementsFeatureOn ? parseActiveMentions(prompt, userElements) : []),
+    () => (elementsFeatureOn ? parseActiveMentions(prompt, userElements) : EMPTY_MENTIONS),
     [elementsFeatureOn, prompt, userElements],
   );
   const activeElementIds = useMemo(
@@ -2487,17 +2513,9 @@ export function GenerateScene({
         <GenerationHistory
           selectedModel={selectedModel}
           pendingJobs={pendingJobs}
-          onJobResolved={(jobId) => setPendingJobs((prev) => prev.filter((p) => p.id !== jobId))}
-          onJobFailed={(jobId, errorMessage) =>
-            setPendingJobs((prev) =>
-              prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
-            )
-          }
-          onJobSucceeded={(jobId, outputs) =>
-            setPendingJobs((prev) =>
-              prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
-            )
-          }
+          onJobResolved={handleJobResolved}
+          onJobFailed={handleJobFailed}
+          onJobSucceeded={handleJobSucceeded}
           onHasContentChange={setHistoryHasContent}
         />
       </div>
