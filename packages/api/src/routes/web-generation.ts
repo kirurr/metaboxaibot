@@ -17,8 +17,15 @@ import { videoGenerationService } from "../services/video-generation.service.js"
 import { audioGenerationService } from "../services/audio-generation.service.js";
 import { costPreviewService } from "../services/cost-preview.service.js";
 import { getFileUrl } from "../services/s3.service.js";
+import { translatePromptIfNeeded } from "../services/prompt-translate.service.js";
 import { db } from "../db.js";
-import { AI_MODELS, UserFacingError } from "@metabox/shared";
+import {
+  AI_MODELS,
+  UserFacingError,
+  OBJECT_REMOVAL_MODEL_ID,
+  OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+  buildObjectRemovalPrompt,
+} from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
@@ -287,11 +294,33 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
 
       const resolvedMediaInputs = await resolveMediaInputs(mediaInputs);
 
+      // object-removal: юзер вводит, ЧТО убрать. Переводим ввод на английский и
+      // оборачиваем в фикс-шаблон — та же логика, что в bot/scenes/object-removal.ts
+      // (общий хелпер из @metabox/shared, чтобы бот и веб не разъезжались).
+      let finalPrompt = prompt;
+      if (modelId === OBJECT_REMOVAL_MODEL_ID) {
+        const userText = prompt.trim().slice(0, OBJECT_REMOVAL_PROMPT_MAX_CHARS);
+        let translated: string;
+        try {
+          translated = await translatePromptIfNeeded(
+            userText,
+            { auto_translate_prompt: true },
+            aibUserId!,
+            modelId,
+            { silent: true },
+          );
+        } catch (err) {
+          logger.warn({ err }, "web object-removal: prompt translation failed, using original");
+          translated = userText;
+        }
+        finalPrompt = buildObjectRemovalPrompt(translated);
+      }
+
       try {
         const { dbJobId } = await generationService.submitImage({
           userId: aibUserId!,
           modelId,
-          prompt,
+          prompt: finalPrompt,
           telegramChatId: null,
           ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
           ...(settings ? { extraModelSettings: settings } : {}),

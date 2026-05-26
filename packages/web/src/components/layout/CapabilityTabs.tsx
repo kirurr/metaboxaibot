@@ -67,35 +67,56 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       descKey: "capabilities.features.image.generate.desc",
       glyph: "▢",
     },
-    {
-      nameKey: "capabilities.features.image.product.name",
-      descKey: "capabilities.features.image.product.desc",
-      glyph: "◈",
-    },
-    {
-      nameKey: "capabilities.features.image.edit.name",
-      descKey: "capabilities.features.image.edit.desc",
-      glyph: "◯",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
+    // {
+    //   nameKey: "capabilities.features.image.product.name",
+    //   descKey: "capabilities.features.image.product.desc",
+    //   glyph: "◈",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.edit.name",
+    //   descKey: "capabilities.features.image.edit.desc",
+    //   glyph: "◯",
+    // },
     {
       nameKey: "capabilities.features.image.upscale.name",
       descKey: "capabilities.features.image.upscale.desc",
       glyph: "▲",
+      link: "upscale",
     },
-    {
-      nameKey: "capabilities.features.image.lora.name",
-      descKey: "capabilities.features.image.lora.desc",
-      glyph: "✪",
-    },
-    {
-      nameKey: "capabilities.features.image.style.name",
-      descKey: "capabilities.features.image.style.desc",
-      glyph: "◇",
-    },
+    // {
+    //   nameKey: "capabilities.features.image.lora.name",
+    //   descKey: "capabilities.features.image.lora.desc",
+    //   glyph: "✪",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.style.name",
+    //   descKey: "capabilities.features.image.style.desc",
+    //   glyph: "◇",
+    // },
     {
       nameKey: "capabilities.features.image.background.name",
       descKey: "capabilities.features.image.background.desc",
       glyph: "▦",
+      link: "bg-removal",
+    },
+    {
+      nameKey: "capabilities.features.image.faceSwap.name",
+      descKey: "capabilities.features.image.faceSwap.desc",
+      glyph: "◑",
+      link: "face-swap",
+    },
+    {
+      nameKey: "capabilities.features.image.clothingTryon.name",
+      descKey: "capabilities.features.image.clothingTryon.desc",
+      glyph: "❖",
+      link: "clothing-tryon",
+    },
+    {
+      nameKey: "capabilities.features.image.objectRemoval.name",
+      descKey: "capabilities.features.image.objectRemoval.desc",
+      glyph: "⊘",
+      link: "object-removal",
     },
   ],
   video: [
@@ -205,7 +226,9 @@ export function CapabilityTabs() {
   // утопала: семейство — это бренд, варианты выбираются уже внутри страницы.
   const modelsByCap = useMemo(() => {
     const dedup = (cap: Capability["id"]): WebModelDto[] => {
-      const list = modelsForCapability(allModels, cap);
+      // Preset-only модели (hiddenFromCarousel) в мега-меню не показываем —
+      // они доступны только через свой URL-пресет.
+      const list = modelsForCapability(allModels, cap).filter((m) => !m.hiddenFromCarousel);
       const seenFamilies = new Set<string>();
       const out: WebModelDto[] = [];
       for (const m of list) {

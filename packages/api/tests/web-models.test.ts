@@ -14,6 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { AI_MODELS, MODELS_BY_SECTION } from "@metabox/shared";
+import { WEB_PRESET_MODEL_IDS } from "../src/routes/web-models.js";
 import { buildTestApp } from "./helpers/build-app.js";
 import { bearer, createTestUser } from "./fixtures/users.js";
 import { db } from "./helpers/db.js";
@@ -90,10 +91,27 @@ describe("GET /web/models", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as WebModelDto[];
       expect(body.length).toBeGreaterThan(0);
-      // Ни одна из вернувшихся моделей не должна быть помечена `hiddenFromCarousel`
-      // в исходном каталоге — это гарантия что route-фильтр отработал.
-      const leaked = body.filter((m) => AI_MODELS[m.id]?.hiddenFromCarousel === true);
+      // Ни одна `hiddenFromCarousel`-модель не должна течь в каталог — КРОМЕ
+      // preset-exposed (WEB_PRESET_MODEL_IDS), которые веб активирует через
+      // URL-пресеты (/image/upscale, /image/bg-removal и т.п.).
+      const leaked = body.filter(
+        (m) => AI_MODELS[m.id]?.hiddenFromCarousel === true && !WEB_PRESET_MODEL_IDS.has(m.id),
+      );
       expect(leaked).toEqual([]);
+    });
+
+    it("exposes preset-only hidden models (WEB_PRESET_MODEL_IDS) with hiddenFromCarousel flag", async () => {
+      const { accessToken } = await createTestUser({ withTelegram: true });
+      const res = await app.inject({
+        method: "GET",
+        url: "/web/models",
+        headers: bearer(accessToken),
+      });
+      const body = res.json() as Array<WebModelDto & { hiddenFromCarousel?: boolean }>;
+      // image-upscale помечена hiddenFromCarousel, но отдаётся (preset-exposed) с флагом.
+      const upscale = body.find((m) => m.id === "image-upscale");
+      expect(upscale).toBeDefined();
+      expect(upscale!.hiddenFromCarousel).toBe(true);
     });
 
     it("filters by ?section=gpt", async () => {

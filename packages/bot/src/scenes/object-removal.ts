@@ -15,6 +15,8 @@ import {
   OBJECT_REMOVAL_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+  OBJECT_REMOVAL_SETTINGS,
+  buildObjectRemovalPrompt,
 } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
@@ -41,28 +43,9 @@ const OBJECT_REMOVAL_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 /** Слот буфера, в котором между шагами лежит S3-key загруженного фото. */
 const OBJECT_REMOVAL_SLOT = "src";
 
-/**
- * Фикс-настройки для gpt-image-2 i2i.
- *
- * `resolution:"1K"` + `aspect_ratio:"auto"` — единственная комбинация у KIE,
- * при которой формат выхода в точности совпадает с форматом входа (для 2K/4K
- * нужен явный aspect_ratio из enum {1:1, 9:16, 16:9, 4:3, 3:4} — любой не
- * совпавший с реальным даёт crop или distortion). Сохранение пропорций
- * приоритетнее, чем 2K — поэтому 1K.
- */
-const OBJECT_REMOVAL_SETTINGS: Record<string, string | boolean> = {
-  resolution: "1K",
-  aspect_ratio: "auto",
-};
-
-/**
- * Шаблон, в который оборачивается юзерский ввод (после автоперевода на английский).
- * Подсказывает gpt-image-2 что нужно именно убрать объект и аккуратно дорисовать
- * фон, а не перерисовать всё фото.
- */
-function buildPromptTemplate(userText: string): string {
-  return `Remove the following from the image: ${userText}. Keep everything else exactly as it was — same composition, same subjects, same colors, same lighting. Inpaint the background where the removed object was, photorealistic and seamless.`;
-}
+// Фикс-настройки (resolution 1K / aspect_ratio auto) и шаблон промпта вынесены в
+// @metabox/shared (constants/object-removal.ts) — общие с веб-роутом, чтобы
+// поведение бота и веба не разъезжалось.
 
 /**
  * In-memory dedup of Telegram media groups (albums) — берём только первое
@@ -225,7 +208,7 @@ export async function handleObjectRemovalPrompt(ctx: BotContext): Promise<void> 
     logger.warn({ err }, "Object removal: prompt translation failed, falling back to original");
     translatedUserText = userText;
   }
-  const finalPrompt = buildPromptTemplate(translatedUserText);
+  const finalPrompt = buildObjectRemovalPrompt(translatedUserText);
 
   let resolved: Record<string, string[]>;
   try {

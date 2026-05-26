@@ -41,6 +41,18 @@ import { constructOpenAPIonRouteHook } from "../utils/openapi.js";
 const APPROX_INPUT_TOKENS_PER_1K = 500;
 const APPROX_OUTPUT_TOKENS_PER_1K = 500;
 
+// hiddenFromCarousel-модели в общий каталог не попадают (см. фильтр ниже), но
+// некоторые из них веб активирует через URL-пресеты (`/image/upscale` и т.п.,
+// см. packages/web/src/config/presets.ts). Такие модели отдаём в каталог точечно,
+// а на клиенте они скрыты из дефолтных списков по флагу `hiddenFromCarousel`.
+export const WEB_PRESET_MODEL_IDS = new Set<string>([
+  "image-upscale",
+  "bg-removal",
+  "face-swap-classic",
+  "clothing-tryon",
+  "object-removal",
+]);
+
 function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const t = getT(lang);
   // Modes (operation modes — t2v/i2v/r2v и т.п.). Резолвим labelKey в локаль,
@@ -93,6 +105,10 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     supportsVoice: m.supportsVoice,
     supportsWeb: m.supportsWeb,
     isAsync: m.isAsync,
+    // true только у preset-exposed моделей (WEB_PRESET_MODEL_IDS). Клиент по этому
+    // флагу прячет их из дефолтных списков (дропдаун Дизайна, мега-меню), но
+    // оставляет доступными через URL-пресет.
+    hiddenFromCarousel: m.hiddenFromCarousel ?? false,
     isLLM,
     supportedAspectRatios: m.supportedAspectRatios ?? null,
     supportedDurations: m.supportedDurations ?? null,
@@ -192,6 +208,7 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
                 supportsVoice: { type: "boolean" },
                 supportsWeb: { type: "boolean" },
                 isAsync: { type: "boolean" },
+                hiddenFromCarousel: { type: "boolean" },
                 isLLM: { type: "boolean" },
                 supportedAspectRatios: { type: "array", nullable: true },
                 supportedDurations: { type: "array", nullable: true },
@@ -231,8 +248,12 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
         ? (MODELS_BY_SECTION[section as Section] ?? [])
         : Object.values(AI_MODELS);
       // hiddenFromCarousel-модели активируются только в спец-сценариях (например
-      // «продлить» grok-imagine-extend) и не должны попадать в каталог UI.
-      return all.filter((m) => !m.hiddenFromCarousel).map((mm) => serializeForWeb(mm, lang));
+      // «продлить» grok-imagine-extend) и не должны попадать в каталог UI. Исключение —
+      // preset-exposed модели (WEB_PRESET_MODEL_IDS): их веб активирует через URL-пресет,
+      // поэтому отдаём в каталог (клиент прячет их из дефолтных списков по флагу).
+      return all
+        .filter((m) => !m.hiddenFromCarousel || WEB_PRESET_MODEL_IDS.has(m.id))
+        .map((mm) => serializeForWeb(mm, lang));
     },
   );
 };
