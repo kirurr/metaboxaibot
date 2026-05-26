@@ -309,8 +309,35 @@ async function streamGptResponse(
         withMarkdown ? { parse_mode: "MarkdownV2" } : {},
       );
     };
-    const trySend = async (text: string, withMarkdown: boolean): Promise<void> => {
+    const trySendRaw = async (text: string, withMarkdown: boolean): Promise<void> => {
       await ctx.api.sendMessage(chatId, text, withMarkdown ? { parse_mode: "MarkdownV2" } : {});
+    };
+    // sendMessage с уважением 429 retry_after и общего per-chat cooldown'а
+    // (editBlockedUntil). Telegram 429 на отправку нельзя обойти plain-text'ом —
+    // throttle per-chat. До MAX_ATTEMPTS попыток с sleep'ом между, дальше
+    // сдаёмся (логируем). Non-429 ошибки (parse-fail и т.п.) бросаем наверх,
+    // чтобы caller мог фолбэкнуться на plain text.
+    const SEND_MAX_ATTEMPTS = 3;
+    const trySend = async (text: string, withMarkdown: boolean): Promise<void> => {
+      for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
+        const waitMs = editBlockedUntil - Date.now();
+        if (waitMs > 0) await sleep(waitMs);
+        try {
+          await trySendRaw(text, withMarkdown);
+          return;
+        } catch (err) {
+          const retryMs = parseRetryAfterMs(err);
+          if (retryMs === null) throw err;
+          editBlockedUntil = Date.now() + retryMs + 100;
+          if (attempt === SEND_MAX_ATTEMPTS) {
+            logger.warn(
+              { retryMs, attempts: attempt },
+              "GPT finalize: send still 429 after max attempts, dropping chunk",
+            );
+            return;
+          }
+        }
+      }
     };
 
     if (!isFirst) {
