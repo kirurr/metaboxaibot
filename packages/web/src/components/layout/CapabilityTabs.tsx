@@ -126,42 +126,50 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       glyph: "▷",
     },
     {
-      nameKey: "capabilities.features.video.cinema.name",
-      descKey: "capabilities.features.video.cinema.desc",
-      glyph: "▣",
-      badge: "TOP",
+      nameKey: "capabilities.features.video.animate.name",
+      descKey: "capabilities.features.video.animate.desc",
+      glyph: "◉",
+      link: "photo-animate",
     },
-    {
-      nameKey: "capabilities.features.video.mixed.name",
-      descKey: "capabilities.features.video.mixed.desc",
-      glyph: "◫",
-    },
-    {
-      nameKey: "capabilities.features.video.edit.name",
-      descKey: "capabilities.features.video.edit.desc",
-      glyph: "▥",
-    },
-    {
-      nameKey: "capabilities.features.video.lipsync.name",
-      descKey: "capabilities.features.video.lipsync.desc",
-      glyph: "◎",
-    },
-    {
-      nameKey: "capabilities.features.video.sketch.name",
-      descKey: "capabilities.features.video.sketch.desc",
-      glyph: "✏",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /video).
+    // {
+    //   nameKey: "capabilities.features.video.cinema.name",
+    //   descKey: "capabilities.features.video.cinema.desc",
+    //   glyph: "▣",
+    //   badge: "TOP",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.mixed.name",
+    //   descKey: "capabilities.features.video.mixed.desc",
+    //   glyph: "◫",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.edit.name",
+    //   descKey: "capabilities.features.video.edit.desc",
+    //   glyph: "▥",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.lipsync.name",
+    //   descKey: "capabilities.features.video.lipsync.desc",
+    //   glyph: "◎",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.sketch.name",
+    //   descKey: "capabilities.features.video.sketch.desc",
+    //   glyph: "✏",
+    // },
     {
       nameKey: "capabilities.features.video.upscale.name",
       descKey: "capabilities.features.video.upscale.desc",
       glyph: "▱",
+      link: "video-upscale",
     },
-    {
-      nameKey: "capabilities.features.video.avatar.name",
-      descKey: "capabilities.features.video.avatar.desc",
-      glyph: "◍",
-      badge: "NEW",
-    },
+    // {
+    //   nameKey: "capabilities.features.video.avatar.name",
+    //   descKey: "capabilities.features.video.avatar.desc",
+    //   glyph: "◍",
+    //   badge: "NEW",
+    // },
   ],
   audio: [
     {

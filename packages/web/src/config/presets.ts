@@ -143,7 +143,47 @@ export const imagePresets: PresetMap = {
   },
 };
 
-export const videoPresets: PresetMap = {};
+export const videoPresets: PresetMap = {
+  // Перенос бот-сценария «🎞️ Оживить фото» (scenes/photo-animate.ts). Под капотом —
+  // модель photo-animate (KIE Grok Imagine r2v, fal fallback). Промпт пустой и
+  // скрыт: реальный фикс-промпт инжектится в адаптере по modelId. Юзер грузит
+  // 1 фото в слот ref_images. Фикс 720p/6s. aspect_ratio НЕ задаём — бэкенд
+  // (web-generation.ts) снапит его под исходное фото. Модель hiddenFromCarousel.
+  "photo-animate": {
+    allowedModelIds: ["photo-animate"],
+    modelId: "photo-animate",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt: "",
+    settings: {
+      "photo-animate": {
+        resolution: "720p",
+        duration: 6,
+      },
+    },
+    title: "Оживить фото",
+    subtitle: "Создаёт короткое видео-оживление из одной фотографии",
+  },
+  // Перенос бот-сценария «🎬 Апскейл видео» (scenes/upscale.ts). Модель
+  // video-upscale (KIE Topaz, replicate fallback). Промпт не нужен — модель
+  // promptOptional, поле скрыто. Юзер грузит 1 видео в слот motion_video и
+  // выбирает upscale_factor ×2/×4 (селект рендерится из model.settings).
+  // target_resolution/fps НЕ задаём — бэкенд деривит их из исходного видео.
+  "video-upscale": {
+    allowedModelIds: ["video-upscale"],
+    modelId: "video-upscale",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt: "",
+    settings: {
+      "video-upscale": {
+        upscale_factor: "2",
+      },
+    },
+    title: "Апскейл видео",
+    subtitle: "Увеличивает разрешение и чёткость видео с помощью Topaz AI",
+  },
+};
 
 export const audioPresets: PresetMap = {
   tts: {

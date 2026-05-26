@@ -15,6 +15,7 @@ import {
   PHOTO_ANIMATE_MODEL_ID,
   PHOTO_ANIMATE_DURATION_SEC,
   PHOTO_ANIMATE_RESOLUTION,
+  snapAspectRatio,
 } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { buildCostLine } from "../utils/cost-line.js";
@@ -46,36 +47,6 @@ function rememberMediaGroup(key: string): void {
       if (v) processedMediaGroups.delete(v);
     }
   }
-}
-
-/**
- * Маппит реальный AR исходника (W/H) к ближайшему из списка supported
- * соотношений Grok Imagine r2v. Сравниваем по относительной разнице (|src-tgt|
- * /tgt) — это правильнее abs-разницы: 9:16 vs 16:9 на одинаковом «расстоянии»
- * 1, но 1:1 (=1.0) и 9:16 (≈0.56) такую же по abs-разнице дают ≈0.44 — а
- * относительная даёт 0.44/0.56 = 0.78, что честнее отражает «насколько далеко».
- */
-const SUPPORTED_AR_RATIOS: ReadonlyArray<[string, number]> = [
-  ["1:1", 1],
-  ["2:3", 2 / 3],
-  ["3:2", 3 / 2],
-  ["16:9", 16 / 9],
-  ["9:16", 9 / 16],
-];
-
-function snapAspectRatio(width: number, height: number): string {
-  if (!width || !height) return "1:1";
-  const src = width / height;
-  let best = SUPPORTED_AR_RATIOS[0][0];
-  let bestDiff = Infinity;
-  for (const [label, target] of SUPPORTED_AR_RATIOS) {
-    const diff = Math.abs(src - target) / target;
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = label;
-    }
-  }
-  return best;
 }
 
 /** Entry — user tapped «🎞️ Оживить фото» in the Scenarios submenu. */

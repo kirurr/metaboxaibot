@@ -55,6 +55,10 @@
       },
       "video": {
         "create": { "name": "Create Video", "desc": "Generate AI video from a prompt." },
+        "animate": {
+          "name": "Animate Photo",
+          "desc": "A short animated clip from a single photo."
+        },
         "cinema": { "name": "Cinema Studio", "desc": "Cinematography with an AI director." },
         "mixed": { "name": "Mixed Media", "desc": "Blended projects: photo + video + audio." },
         "edit": { "name": "Edit Video", "desc": "Edit scenes, shots and elements." },

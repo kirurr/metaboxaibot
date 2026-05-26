@@ -77,6 +77,7 @@ export {
   PHOTO_ANIMATE_DURATION_SEC,
   PHOTO_ANIMATE_RESOLUTION,
   PHOTO_ANIMATE_PROMPT,
+  snapAspectRatio,
 } from "./constants/photo-animate.js";
 export {
   PHOTO_CREATE_MODEL_ID,
