@@ -24,13 +24,9 @@ export function buildScenariosKeyboard(t: Translations): InlineKeyboard {
   // «🎬 Апскейл видео» временно убран из меню — сцена и модель `video-upscale`
   // на месте; вернуть = дописать обратно `.row().text(t.scenarios.videoUpscale,
   // "scenario:video_upscale")`.
-  //
-  // «📸 Создать фотографию» — временно скрыт из меню (MET-176, до доработки).
-  // Сцена, модель `photo-create` (KIE+evolink alias), callback-роутинг и i18n
-  // на месте; вернуть = дописать обратно
-  //   `.text(t.scenarios.photoCreate, "scenario:photo_create").row()`
-  // первой строкой ниже.
   return new InlineKeyboard()
+    .text(t.scenarios.photoCreate, "scenario:photo_create")
+    .row()
     .text(t.scenarios.faceSwap, "scenario:face_swap")
     .row()
     .text(t.scenarios.clothingTryon, "scenario:clothing_tryon")

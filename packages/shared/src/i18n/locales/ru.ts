@@ -123,12 +123,15 @@ export default {
     photoAnimateGenerating: "🎞️ Запускаю оживление...",
     photoCreate: "📸 Создать фотографию",
     photoCreateWelcome: "Создаю реалистичные стильные портреты по вашему фото и описанию.",
-    photoCreateStepPhoto: "<b>Шаг 1 из 3.</b> Пришлите <b>ваше фото</b>. Максимум — 20 МБ.",
-    photoCreateStepPrompt: "<b>Шаг 2 из 3.</b> Опишите, какую фотографию хотите получить.",
-    photoCreateStepAr: "<b>Шаг 3 из 3.</b> Выберите соотношение сторон:",
+    photoCreateStepPhoto: "<b>Шаг 1 из 4.</b> Пришлите <b>ваше фото</b>. Максимум — 20 МБ.",
+    photoCreateStepPrompt: "<b>Шаг 2 из 4.</b> Опишите, какую фотографию хотите получить.",
+    photoCreateStepAr: "<b>Шаг 3 из 4.</b> Выберите соотношение сторон:",
+    photoCreateStepRes: "<b>Шаг 4 из 4.</b> Выберите разрешение:",
     photoCreatePromptUpdated: "✍️ Описание обновлено. Выберите соотношение сторон:",
     photoCreateAwaitArHint:
       "👇 Выберите соотношение сторон на клавиатуре ниже или пришлите новое фото / описание.",
+    photoCreateAwaitResHint:
+      "👇 Выберите разрешение на клавиатуре ниже или пришлите новое фото / описание.",
     photoCreateNotPhoto: "📷 Это не фото. Пришлите изображение.",
     photoCreatePhotoTooLarge: "📷 Фото слишком большое. Максимум — 20 МБ.",
     photoCreateAlbumNotice:
