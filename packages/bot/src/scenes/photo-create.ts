@@ -17,7 +17,6 @@ import {
   PHOTO_CREATE_MODEL_ID,
   PHOTO_CREATE_BUFFER_MODEL_ID,
   PHOTO_CREATE_PROMPT_MAX_CHARS,
-  PHOTO_CREATE_RESOLUTION,
   PHOTO_CREATE_AR_OPTIONS,
   PHOTO_CREATE_RES_OPTIONS,
   snapPhotoCreateAr,
@@ -47,10 +46,6 @@ const PHOTO_CREATE_W_SLOT = "w";
 const PHOTO_CREATE_H_SLOT = "h";
 const PHOTO_CREATE_PROMPT_SLOT = "prompt";
 const PHOTO_CREATE_AR_SLOT = "ar";
-
-const PHOTO_CREATE_EXTRA_SETTINGS: Record<string, string> = {
-  resolution: PHOTO_CREATE_RESOLUTION,
-};
 
 /**
  * In-memory dedup of Telegram media groups (albums) — берём только первое
@@ -356,7 +351,9 @@ export async function handlePhotoCreateResSelect(ctx: BotContext): Promise<void>
   // Anti-double-submit: чистим буфер ДО translate/resolve/submit, чтобы второй
   // тап по той же RES-кнопке (если успел проскочить мимо editMessageReplyMarkup)
   // увидел пустой буфер и ушёл по ветке bufferLost вместо повторной оплаченной
-  // генерации. На конце функции clear/setState вызываются повторно — idempotent.
+  // генерации. На конце функции state-set перекрывает наш AWAIT_PHOTO на нужное
+  // значение (AWAIT_PHOTO на успехе / SCENARIOS_SECTION на ошибке submit'а);
+  // resolve-catch ниже делает свой setState(SCENARIOS_SECTION) и return.
   await userStateService.clearMediaInputs(userId, PHOTO_CREATE_BUFFER_MODEL_ID);
   await userStateService.setState(userId, "PHOTO_CREATE_AWAIT_PHOTO", null);
 
@@ -407,11 +404,7 @@ export async function handlePhotoCreateResSelect(ctx: BotContext): Promise<void>
       modelId: PHOTO_CREATE_MODEL_ID,
       prompt: translatedPrompt,
       mediaInputs: resolved,
-      extraModelSettings: {
-        ...PHOTO_CREATE_EXTRA_SETTINGS,
-        aspect_ratio: aspectRatio,
-        resolution,
-      },
+      extraModelSettings: { aspect_ratio: aspectRatio, resolution },
       telegramChatId: chatId,
       sendOriginalLabel: ctx.t.common.sendOriginal,
       // Маскируем модель: подпись «📸 Создать фотографию», без refine

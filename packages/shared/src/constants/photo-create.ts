@@ -23,13 +23,6 @@ export const PHOTO_CREATE_BUFFER_MODEL_ID = "photo_create";
 export const PHOTO_CREATE_PROMPT_MAX_CHARS = 2000;
 
 /**
- * Дефолтное разрешение сценария — 2K (стоимость = nano-banana-pro.costVariants["2K"]).
- * Перед сабмитом перекрывается значением, выбранным юзером на шаге Res
- * (см. `PHOTO_CREATE_RES_OPTIONS`).
- */
-export const PHOTO_CREATE_RESOLUTION = "2K";
-
-/**
  * Resolution варианты, показываемые на инлайн-клавиатуре после AR.
  * 1K не показываем — у nano-banana-pro 1K и 2K стоят одинаково
  * (см. design.models.ts → nano-banana-pro.costVariants), смысла выбирать 1K
