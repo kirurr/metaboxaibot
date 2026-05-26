@@ -664,14 +664,16 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     settings: [...KLING_MOTION_SETTINGS],
   },
   // Готовый сценарий «🎬 Копировать движение». Под капотом — kling-3.0/motion-
-  // control @ 1080p Pro (KIE primary, FAL и Evolink — fallbacks). Юзер не
-  // настраивает ничего: грузит фото + референс-видео, адаптеры форсят
-  // character_orientation="video" и background_source="input_image" (KIE — оба,
-  // FAL/Evolink — только ориентацию: их endpoint'ы background_source не
-  // поддерживают). Длительность результата = длительность референс-видео
-  // (3-30 с). Pricing идентичен kling-motion-pro 1080p: $0.135/с с подкачкой
-  // по фактической длительности результата. hiddenFromCarousel — юзеру модель
-  // видна только как «🎬 Копировать движение», kling-motion-pro нигде не светится.
+  // control @ 1080p Pro (KIE primary, Evolink — fallback; зеркалит fallback-
+  // топологию kling-motion-pro). Юзер не настраивает ничего: грузит фото +
+  // референс-видео, KIE-адаптер форсит character_orientation="video" и
+  // background_source="input_image". Evolink endpoint не принимает
+  // background_source — на fallback'е фон придёт из видео, известная
+  // деградация инварианта (см. FALLBACK_VIDEO_MODELS-запись ниже). Длительность
+  // результата = длительность референс-видео (3-30 с). Pricing идентичен
+  // kling-motion-pro 1080p: $0.135/с с подкачкой по фактической длительности.
+  // hiddenFromCarousel — юзеру модель видна только как «🎬 Копировать движение»,
+  // kling-motion-pro нигде не светится.
   "copy-motion": {
     id: "copy-motion",
     name: "🎬 Копировать движение",
@@ -2092,6 +2094,31 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
         default: true,
       },
     ],
+  },
+  // ── copy-motion via evolink — fallback готового сценария «Копировать
+  // движение». Endpoint и mediaInputs совпадают с kling-motion-pro fallback'ом
+  // выше; адаптер форсит character_orientation="video" по `isCopyMotionPreset`.
+  // background_source="input_image" на evolink не передаётся (endpoint
+  // `kling-v3-motion-control` параметр не принимает) — фон при fallback'е
+  // придёт из видео, известная деградация инварианта пресета.
+  {
+    id: "copy-motion",
+    name: "Copy motion (evolink fallback)",
+    description: "Fallback на evolink при недоступности KIE.",
+    section: "video",
+    provider: "evolink",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.16, // 1080p quality, как у kling-motion-pro fallback
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: KLING_MOTION_MEDIA_INPUTS,
   },
   // ── Kling 3.0 / 3.0 Pro via evolink (kling-o3-image-to-video) ──────────────
   // Routed на эту модель потому что kling-v3-image-to-video требует image_start

@@ -107,6 +107,7 @@ export interface Translations {
     copyMotionVideoTooLarge: string;
     copyMotionVideoTooShort: string;
     copyMotionVideoTooLong: string;
+    copyMotionVideoUnreadable: string;
     copyMotionAlbumNotice: string;
     copyMotionBufferLost: string;
     copyMotionGenerating: string;

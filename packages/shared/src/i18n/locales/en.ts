@@ -134,6 +134,7 @@ export default {
     copyMotionVideoTooLarge: "🎬 The video is too large. Max — 20 MB.",
     copyMotionVideoTooShort: "🎬 The video is too short. Minimum — 3 sec.",
     copyMotionVideoTooLong: "🎬 The video is too long. Maximum — 30 sec.",
+    copyMotionVideoUnreadable: "🎬 Couldn't read the video. Please send it as an MP4 file.",
     copyMotionAlbumNotice:
       "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
     copyMotionBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",

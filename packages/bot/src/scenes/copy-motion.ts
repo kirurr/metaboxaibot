@@ -139,6 +139,13 @@ export async function handleCopyMotionPhoto(ctx: BotContext): Promise<void> {
 export async function handleCopyMotionVideo(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
 
+  // Видео-документы в Telegram могут прилететь альбомом (Прикрепить → Файл,
+  // несколько mp4). Без dedup'а каждый sibling прошёл бы свой submit и
+  // юзера N раз списали бы за один альбом.
+  const mediaGroupId = ctx.message?.media_group_id;
+  const mediaGroupKey = mediaGroupId ? `${ctx.user.id}:${mediaGroupId}` : null;
+  if (mediaGroupKey && processedMediaGroups.has(mediaGroupKey)) return;
+
   let fileId: string | undefined;
   let fileSize: number | undefined;
   let durationSec: number | undefined;
@@ -177,10 +184,16 @@ export async function handleCopyMotionVideo(ctx: BotContext): Promise<void> {
   }
 
   const userId = ctx.user.id;
+  // Регистрируем альбом ДО upload'а — иначе на нечитаемом первом видео все
+  // siblings получили бы ту же ошибку отдельными сообщениями.
+  if (mediaGroupKey) rememberMediaGroup(mediaGroupKey);
   const file = await ctx.api.getFile(fileId);
   const tgUrl = `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`;
   const s3Key = `copy_motion/${userId.toString()}/${Date.now()}.${ext}`;
-  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch(() => null);
+  const uploadedKey = await s3Service.uploadFromUrl(s3Key, tgUrl, contentType).catch((err) => {
+    logger.error(err, "Copy motion: video upload to S3 failed");
+    return null;
+  });
   if (!uploadedKey) {
     await ctx.reply(pickGenerationFailedMessage(ctx.t, ctx.t.scenarios.copyMotion, "video"));
     return;
@@ -192,11 +205,18 @@ export async function handleCopyMotionVideo(ctx: BotContext): Promise<void> {
     const probe = s3Url ? await probeVideoMetadata(s3Url).catch(() => null) : null;
     durationSec = probe?.durationSec ?? undefined;
   }
-  if (durationSec !== undefined && durationSec < COPY_MOTION_VIDEO_MIN_SEC) {
+  // Нечитаемая длительность = провайдер всё равно отбьёт. Лучше упасть здесь
+  // с понятным сообщением, чем потратить токены юзера на гарантированный fail
+  // в kling-motion endpoint'е (видео без duration ему не отдашь).
+  if (!durationSec || durationSec <= 0) {
+    await ctx.reply(ctx.t.scenarios.copyMotionVideoUnreadable);
+    return;
+  }
+  if (durationSec < COPY_MOTION_VIDEO_MIN_SEC) {
     await ctx.reply(ctx.t.scenarios.copyMotionVideoTooShort);
     return;
   }
-  if (durationSec !== undefined && durationSec > COPY_MOTION_VIDEO_MAX_SEC) {
+  if (durationSec > COPY_MOTION_VIDEO_MAX_SEC) {
     await ctx.reply(ctx.t.scenarios.copyMotionVideoTooLong);
     return;
   }
@@ -210,12 +230,14 @@ export async function handleCopyMotionVideo(ctx: BotContext): Promise<void> {
   );
 
   // Читаем оба слота буфера. Фото могли потерять (clear на /menu между шагами):
-  // в этом случае возвращаем юзера в шаг 1, не теряя только что загруженное видео
-  // (оно лежит в буфере и подтянется следующей итерацией).
+  // в этом случае возвращаем юзера в шаг 1 и чистим буфер целиком — иначе
+  // только что загруженный motion_video остался бы висеть в БД до следующего
+  // entry/menu (фото-handler перезатёр бы только image-слот).
   const slots = await userStateService.getMediaInputs(userId, COPY_MOTION_BUFFER_MODEL_ID);
   const imageKey = slots[COPY_MOTION_SLOT_IMAGE]?.[0];
   const videoKey = slots[COPY_MOTION_SLOT_VIDEO]?.[0];
   if (!imageKey || !videoKey) {
+    await userStateService.clearMediaInputs(userId, COPY_MOTION_BUFFER_MODEL_ID);
     await userStateService.setState(userId, "COPY_MOTION_AWAIT_PHOTO", null);
     await ctx.reply(ctx.t.scenarios.copyMotionBufferLost);
     await ctx.reply(ctx.t.scenarios.copyMotionStepPhoto, { parse_mode: "HTML" });
