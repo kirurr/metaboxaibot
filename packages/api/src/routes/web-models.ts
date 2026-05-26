@@ -51,6 +51,8 @@ export const WEB_PRESET_MODEL_IDS = new Set<string>([
   "face-swap-classic",
   "clothing-tryon",
   "object-removal",
+  "photo-animate",
+  "video-upscale",
 ]);
 
 function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {

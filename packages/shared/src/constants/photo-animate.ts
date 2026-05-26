@@ -21,3 +21,36 @@ export const PHOTO_ANIMATE_RESOLUTION = "720p";
  */
 export const PHOTO_ANIMATE_PROMPT =
   "Animate a photo with an average level of emotion and without voice acting. That is, the characters in the photo should not say anything.";
+
+/**
+ * Маппит реальный AR исходника (W/H) к ближайшему из списка supported
+ * соотношений Grok Imagine r2v. Сравниваем по относительной разнице (|src-tgt|
+ * /tgt) — это правильнее abs-разницы: 9:16 vs 16:9 на одинаковом «расстоянии»
+ * 1, но 1:1 (=1.0) и 9:16 (≈0.56) такую же по abs-разнице дают ≈0.44 — а
+ * относительная даёт 0.44/0.56 = 0.78, что честнее отражает «насколько далеко».
+ *
+ * Живёт в shared: bot-сцена «Оживить фото» детектит AR при загрузке, веб-роут
+ * (`web-generation.ts`) — серверно при сабмите. Обе стороны идут от одной таблицы.
+ */
+const SUPPORTED_AR_RATIOS: ReadonlyArray<[string, number]> = [
+  ["1:1", 1],
+  ["2:3", 2 / 3],
+  ["3:2", 3 / 2],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+];
+
+export function snapAspectRatio(width: number, height: number): string {
+  if (!width || !height) return "1:1";
+  const src = width / height;
+  let best = SUPPORTED_AR_RATIOS[0][0];
+  let bestDiff = Infinity;
+  for (const [label, target] of SUPPORTED_AR_RATIOS) {
+    const diff = Math.abs(src - target) / target;
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = label;
+    }
+  }
+  return best;
+}
