@@ -102,6 +102,15 @@ export class CartesiaAdapter implements AudioAdapter {
       if (emotion) generationConfig.emotion = emotion;
     }
 
+    // Cartesia 400 "Your transcript is empty or contains only punctuation" —
+    // ловим до API, чтобы не шумел в логах (особенно из pre-TTS HeyGen-флоу,
+    // где prompt мог обнулиться после translatePromptIfNeeded). Caller'ы либо
+    // ловят и фолбэчатся на raw voice_id (video.processor), либо UserFacing.
+    const trimmedTranscript = (input.prompt ?? "").trim();
+    if (!trimmedTranscript || trimmedTranscript.replace(/[\p{P}\s]+/gu, "").length === 0) {
+      throw new Error("Cartesia TTS: empty or punctuation-only transcript");
+    }
+
     const body: Record<string, unknown> = {
       model_id: modelId,
       transcript: input.prompt,
