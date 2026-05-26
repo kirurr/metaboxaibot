@@ -28,6 +28,7 @@ export default function Image() {
       models={setup.models}
       hideModelPicker={setup.hideModelPicker}
       hidePrompt={setup.hidePrompt}
+      fixedPrompt={setup.hidePrompt ? setup.preset?.prompt : undefined}
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
       ambientSection="image"

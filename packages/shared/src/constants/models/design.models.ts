@@ -409,6 +409,10 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
+    // Удаление фона не использует текстовый промпт (fal Ideogram remove-background
+    // его игнорирует) — бот шлёт prompt:"". promptOptional снимает требование
+    // промпта в веб-пресете (/image/bg-removal) и в серверном гарде web-generation.
+    promptOptional: true,
     hiddenFromCarousel: true,
     deliverAsDocument: true,
     contextStrategy: "db_history",

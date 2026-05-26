@@ -94,11 +94,18 @@ export type GenerateSceneProps = {
    */
   hideModelPicker?: boolean;
   /**
-   * Скрыть поле промпта целиком. Значение `prompt` (из пресета) остаётся в state и
-   * уходит в сабмит, поэтому модели с обязательным промптом не блокируются. Для
-   * сценариев, где юзер только грузит медиа — например, апскейл фото (/image/upscale).
+   * Скрыть поле промпта целиком. Для сценариев, где юзер только грузит медиа —
+   * например, апскейл фото / удаление фона / замена лица (/image/<preset>).
    */
   hidePrompt?: boolean;
+  /**
+   * Фикс-промпт пресета. Если задан — именно он уходит в сабмит/preview, минуя
+   * изменяемый `prompt`-стейт. Нужно для hidePrompt-пресетов: иначе при SPA-навигации
+   * система восстановления черновика может затереть предзаполненный промпт пустым,
+   * и бэкенд вернёт «Prompt is required». Пустая строка ("") — валидное значение
+   * (модель promptOptional). `undefined` — обычный режим (промпт из стейта/ввода юзера).
+   */
+  fixedPrompt?: string;
   /**
    * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
    * вручную изменил modelId / prompt / settings относительно пресет-снимка.
@@ -615,6 +622,7 @@ export function GenerateScene({
   models,
   hideModelPicker = false,
   hidePrompt = false,
+  fixedPrompt,
   onReset,
   presetSettingsByModel,
   ambientSection,
@@ -1651,7 +1659,12 @@ export function GenerateScene({
       arr.some((f) => f.status === "ready"),
     );
     const promptIsEmpty = prompt.trim().length === 0;
-    if (promptIsEmpty) {
+    if (hidePrompt) {
+      // hidePrompt-пресеты (апскейл/удаление фона/замена лица…): промпт скрыт и
+      // задан пресетом — не требуем его, не зависим от promptOptional в каталоге.
+      // Вместо промпта гейтим по медиа: генерировать без фото нечего.
+      if (!hasReadyMedia) return t("generate.btnAddMedia");
+    } else if (promptIsEmpty) {
       if (!selectedModel.promptOptional) return t("generate.btnEnterPrompt");
       if (selectedModel.promptOptionalRequiresMedia && !hasReadyMedia) {
         return t("generate.btnPromptOrMedia");
@@ -1780,8 +1793,11 @@ export function GenerateScene({
   }
 
   // Промпт для отправки: дружелюбные @имя → каноническая @ElementN (MVP-трансляция).
+  // fixedPrompt (hidePrompt-пресеты) авторитетнее изменяемого стейта — защищает от
+  // гонки с восстановлением черновика при SPA-навигации (см. проп fixedPrompt).
   function buildSubmitPrompt(): string {
-    return elementsCap ? translateMentionsToCanonical(prompt, cappedMentions) : prompt;
+    const base = fixedPrompt != null ? fixedPrompt : prompt;
+    return elementsCap ? translateMentionsToCanonical(base, cappedMentions) : base;
   }
 
   // ── Debounced cost preview ─────────────────────────────────────────────────

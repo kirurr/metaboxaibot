@@ -83,6 +83,64 @@ export const imagePresets: PresetMap = {
     title: "Апскейл фото",
     subtitle: "Увеличивает разрешение и чёткость фотографии до 4K",
   },
+  // Перенос бот-сценария «✂️ Удаление фона» (scenes/background-removal.ts).
+  // Модель bg-removal (fal Ideogram remove-background). Промпт не нужен —
+  // модель promptOptional, поле скрыто. Юзер только грузит 1 фото в слот edit.
+  "bg-removal": {
+    allowedModelIds: ["bg-removal"],
+    modelId: "bg-removal",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt: "",
+    title: "Удаление фона",
+    subtitle: "Удаляет фон с фотографии, оставляя объект на прозрачном фоне",
+  },
+  // Перенос бот-сценария «🔄 Замена лица» (scenes/face-swap.ts). Модель
+  // face-swap-classic. Фикс-промпт, поле скрыто. Слот edit принимает 2 фото —
+  // порядок важен (см. subtitle).
+  "face-swap": {
+    allowedModelIds: ["face-swap-classic"],
+    modelId: "face-swap-classic",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt:
+      "Take image 1 as a reference and transfer the face from image 2 to image 1, maintaining the proportions, emotion, and light in image 1.",
+    title: "Замена лица",
+    subtitle: "Загрузите 2 фото: 1-е — куда вставить лицо, 2-е — чьё лицо взять",
+  },
+  // Перенос бот-сценария «👗 Примерка одежды» (scenes/clothing-tryon.ts). Модель
+  // clothing-tryon. Фикс-промпт, поле скрыто. Слот edit принимает 2 фото —
+  // порядок важен (см. subtitle).
+  "clothing-tryon": {
+    allowedModelIds: ["clothing-tryon"],
+    modelId: "clothing-tryon",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt:
+      "Take image 1 as a reference and transfer the clothing from image 2 to image 1, maintaining the body, pose, and light in image 1. Keep the person's face and don't change anything else.",
+    title: "Примерка одежды",
+    subtitle: "Загрузите 2 фото: 1-е — человек, 2-е — одежда",
+  },
+  // Перенос бот-сценария «🪄 Убрать объект» (scenes/object-removal.ts). Модель
+  // object-removal (gpt-image-2 i2i). Поле промпта ПОКАЗЫВАЕМ — юзер пишет, что
+  // убрать; бэкенд (web-generation.ts) переводит ввод и оборачивает в шаблон.
+  // Настройки 1K/auto уходят отсюда.
+  "object-removal": {
+    allowedModelIds: ["object-removal"],
+    modelId: "object-removal",
+    hideModelPicker: true,
+    hidePrompt: false,
+    prompt: "",
+    promptPlaceholder: "Что убрать? Напр.: человек на заднем плане",
+    settings: {
+      "object-removal": {
+        resolution: "1K",
+        aspect_ratio: "auto",
+      },
+    },
+    title: "Убрать объект",
+    subtitle: "Удаляет указанный объект с фото, дорисовывая фон на его месте",
+  },
 };
 
 export const videoPresets: PresetMap = {};

@@ -45,7 +45,13 @@ const APPROX_OUTPUT_TOKENS_PER_1K = 500;
 // некоторые из них веб активирует через URL-пресеты (`/image/upscale` и т.п.,
 // см. packages/web/src/config/presets.ts). Такие модели отдаём в каталог точечно,
 // а на клиенте они скрыты из дефолтных списков по флагу `hiddenFromCarousel`.
-const WEB_PRESET_MODEL_IDS = new Set<string>(["image-upscale"]);
+export const WEB_PRESET_MODEL_IDS = new Set<string>([
+  "image-upscale",
+  "bg-removal",
+  "face-swap-classic",
+  "clothing-tryon",
+  "object-removal",
+]);
 
 function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const t = getT(lang);

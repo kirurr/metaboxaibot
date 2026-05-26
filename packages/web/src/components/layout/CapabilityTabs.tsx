@@ -97,6 +97,25 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       nameKey: "capabilities.features.image.background.name",
       descKey: "capabilities.features.image.background.desc",
       glyph: "▦",
+      link: "bg-removal",
+    },
+    {
+      nameKey: "capabilities.features.image.faceSwap.name",
+      descKey: "capabilities.features.image.faceSwap.desc",
+      glyph: "◑",
+      link: "face-swap",
+    },
+    {
+      nameKey: "capabilities.features.image.clothingTryon.name",
+      descKey: "capabilities.features.image.clothingTryon.desc",
+      glyph: "❖",
+      link: "clothing-tryon",
+    },
+    {
+      nameKey: "capabilities.features.image.objectRemoval.name",
+      descKey: "capabilities.features.image.objectRemoval.desc",
+      glyph: "⊘",
+      link: "object-removal",
     },
   ],
   video: [

@@ -69,6 +69,8 @@ export {
   OBJECT_REMOVAL_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+  OBJECT_REMOVAL_SETTINGS,
+  buildObjectRemovalPrompt,
 } from "./constants/object-removal.js";
 export {
   PHOTO_ANIMATE_MODEL_ID,

@@ -40,8 +40,14 @@
         "lora": { "name": "LoRA Training", "desc": "Train a model on your face." },
         "style": { "name": "Style Transfer", "desc": "Move the style of one photo onto another." },
         "background": {
-          "name": "Background Edit",
-          "desc": "Background replacement and retouching."
+          "name": "Remove Background",
+          "desc": "Removes the background, leaving the subject on transparency."
+        },
+        "faceSwap": { "name": "Face Swap", "desc": "Transfer a face from one photo to another." },
+        "clothingTryon": { "name": "Clothing Try-On", "desc": "Virtually try clothing on a photo." },
+        "objectRemoval": {
+          "name": "Remove Object",
+          "desc": "Removes an object and inpaints the background."
         }
       },
       "video": {
@@ -230,6 +236,7 @@
     "btnAddToSlot": "Add file to {{slot}}",
     "btnEnterPrompt": "Enter a prompt",
     "btnPromptOrMedia": "Enter a prompt or add a file",
+    "btnAddMedia": "Add a photo",
     "elementsButton": "Elements",
     "elementLimit": "No more than {{max}} elements in the prompt",
     "elementNoImages": "Element @{{name}} has no images",
