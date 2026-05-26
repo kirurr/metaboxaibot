@@ -141,6 +141,26 @@ export const imagePresets: PresetMap = {
     title: "presets.image.object-removal.title",
     subtitle: "presets.image.object-removal.subtitle",
   },
+  // Перенос бот-сценария «📸 Создать фотографию» (scenes/photo-create.ts). Модель
+  // photo-create (nano-banana-pro @ KIE, hiddenFromCarousel). Промпт ПОКАЗЫВАЕМ —
+  // юзер описывает фото; бэкенд (web-generation.ts) переводит ru→en silent. AR и
+  // resolution — селекты из model.settings; «auto» AR бэкенд снапит под исходное фото.
+  "photo-create": {
+    allowedModelIds: ["photo-create"],
+    modelId: "photo-create",
+    hideModelPicker: true,
+    hidePrompt: false,
+    prompt: "",
+    promptPlaceholder: "presets.image.photo-create.promptPlaceholder",
+    settings: {
+      "photo-create": {
+        aspect_ratio: "auto",
+        resolution: "2K",
+      },
+    },
+    title: "presets.image.photo-create.title",
+    subtitle: "presets.image.photo-create.subtitle",
+  },
 };
 
 export const videoPresets: PresetMap = {
