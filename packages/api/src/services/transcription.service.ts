@@ -1,13 +1,33 @@
 import OpenAI, { type ClientOptions as OpenAIClientOptions } from "openai";
-import { transcodeOggToMp3 } from "../utils/audio-transcode.js";
+import { transcodeToMp3 } from "../utils/audio-transcode.js";
 import { logger } from "../logger.js";
 import { acquireKey, recordSuccess, recordError, markRateLimited } from "./key-pool.service.js";
 import { classifyRateLimit } from "../utils/rate-limit-error.js";
 import { buildProxyFetch } from "../ai/transport/proxy-fetch.js";
 
 /**
+ * Whisper API принимает только эти расширения. Любое другое → 400
+ * "Invalid file format". Поэтому всё, что не в whitelist'е, прогоняем
+ * через ffmpeg → mp3. Список из официальной OpenAI-ошибки.
+ */
+const WHISPER_SUPPORTED_EXTS = new Set([
+  "flac",
+  "m4a",
+  "mp3",
+  "mp4",
+  "mpeg",
+  "mpga",
+  "oga",
+  "ogg",
+  "wav",
+  "webm",
+]);
+
+/**
  * Transcribes an audio buffer to text using OpenAI Whisper API.
- * Automatically transcodes OGG/Opus (Telegram voice) to MP3 before sending.
+ * Любой формат вне whitelist'а Whisper'а транскодится в MP3 через ffmpeg
+ * (Telegram voice = OGG/Opus всегда транскодим; обычные audio с экзотическим
+ * mime типа application/quicktime / video/* — тоже).
  *
  * Ключ берётся из пула (provider="openai"). PoolExhaustedError всплывает наверх —
  * caller (бот) должен показать пользователю сообщение об ошибке.
@@ -17,9 +37,10 @@ export async function transcribeAudio(
   mimeType: string,
   language?: string,
 ): Promise<string> {
-  const isOgg = mimeType.includes("ogg") || mimeType.includes("opus");
-  const buffer = isOgg ? await transcodeOggToMp3(audioBuffer) : audioBuffer;
-  const ext = isOgg ? "mp3" : (mimeType.split("/")[1]?.replace(/;.*/, "") ?? "mp3");
+  const rawExt = mimeType.split("/")[1]?.replace(/;.*/, "").toLowerCase() ?? "";
+  const needsTranscode = !WHISPER_SUPPORTED_EXTS.has(rawExt);
+  const buffer = needsTranscode ? await transcodeToMp3(audioBuffer) : audioBuffer;
+  const ext = needsTranscode ? "mp3" : rawExt;
 
   const file = new File([buffer], `voice.${ext}`, { type: `audio/${ext}` });
 
