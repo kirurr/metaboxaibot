@@ -125,6 +125,13 @@ async function augmentScenarioVideoSettings(
       ...settings,
       target_resolution: videoResolutionTier(probe?.height ?? DEFAULT_VIDEO_HEIGHT, factor),
       fps: videoFpsTier(probe?.fps ?? DEFAULT_VIDEO_FPS),
+      // Длительность исходника нужна для посекундного биллинга: matrixCost —
+      // ставка за секунду, итог = duration × rate (token.service.ts). Без этого
+      // previewVideo дефолтит в 5s и цена/списание не зависят от реальной длины
+      // ролика. Округляем вверх, как бот (показанное ≥ списанного). probe null
+      // (не-mp4) → duration не задаём, effectiveDuration упадёт на дефолт, как и
+      // tiers выше.
+      ...(probe?.durationSec ? { duration: Math.ceil(probe.durationSec) } : {}),
     };
   }
 
