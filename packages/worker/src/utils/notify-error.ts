@@ -292,7 +292,12 @@ export interface FallbackNotificationContext {
     | "kie_credits_exhausted"
     | "all_candidates_failed"
     /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
-    | "primary_failed";
+    | "primary_failed"
+    /** Primary упал с unclassified-ошибкой (validation / content policy / network reset
+     *  / неизвестный 4xx-body) — fallback на соседнего кандидата. Параллельно
+     *  submitWithFallback уже шлёт per-candidate notifyTechErrorThrottled с
+     *  оригинальным err'ом. */
+    | "unknown_error";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */
