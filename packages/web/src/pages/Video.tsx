@@ -23,6 +23,8 @@ export default function Video() {
       promptPlaceholder={setup.promptPlaceholder ?? t("generate.videoPromptPlaceholder")}
       models={setup.models}
       hideModelPicker={setup.hideModelPicker}
+      hidePrompt={setup.hidePrompt}
+      fixedPrompt={setup.hidePrompt ? setup.preset?.prompt : undefined}
       onReset={setup.resetPreset}
       presetSettingsByModel={setup.presetSettingsByModel}
       ambientSection="video"

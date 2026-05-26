@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { getAmbientMedia, type AmbientMediaItem, type AmbientSection } from "@/api/ambientMedia";
 
@@ -148,7 +148,7 @@ function buildSlots(vw: number): Slot[] {
   return slots;
 }
 
-function MediaTile({
+const MediaTile = memo(function MediaTile({
   item,
   section,
   slot,
@@ -196,7 +196,7 @@ function MediaTile({
       </motion.div>
     </motion.div>
   );
-}
+});
 
 /** Ширина вьюпорта, бакетированная по ~140px — чтобы мелкие ресайзы не
  *  перегенерировали раскладку, а смена ориентации/значимый ресайз — да. */
@@ -216,7 +216,14 @@ function useViewportBucket(): number {
   return bucket;
 }
 
-export function FloatingMediaBg({ section }: { section: AmbientSection }) {
+// memo: единственный пропс `section` стабилен, поэтому при ререндере родителя
+// (GenerateScene на каждый символ промпта) этот фон с framer-motion-плитками
+// больше не переригрывается — основной источник лагов при вводе.
+export const FloatingMediaBg = memo(function FloatingMediaBg({
+  section,
+}: {
+  section: AmbientSection;
+}) {
   const [items, setItems] = useState<AmbientMediaItem[] | null>(null);
   const widthBucket = useViewportBucket();
 
@@ -252,4 +259,4 @@ export function FloatingMediaBg({ section }: { section: AmbientSection }) {
       ))}
     </div>
   );
-}
+});

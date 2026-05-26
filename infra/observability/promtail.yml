@@ -58,7 +58,6 @@ scrape_configs:
       - json:
           expressions:
             output: log
-            stream: stream
             time: time
             attrs:
       # attrs — вложенный json-объект, второй pass раскрывает tag из него.
@@ -82,7 +81,6 @@ scrape_configs:
           # рестарта daemon'а) tag будет пустым — такие записи попадут
           # в Loki с service="", их видно только по server-label.
           service: tag
-          stream:
       # Cadvisor: stdout-логи бесполезны (метрики идут через /metrics
       # endpoint в Prometheus), плюс в его файле раньше копились sparse
       # NULL-блоки на 80+ MB, валящие Loki rate-limit. Дропаем по имени —

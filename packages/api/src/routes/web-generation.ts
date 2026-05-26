@@ -16,9 +16,25 @@ import { generationService } from "../services/generation.service.js";
 import { videoGenerationService } from "../services/video-generation.service.js";
 import { audioGenerationService } from "../services/audio-generation.service.js";
 import { costPreviewService } from "../services/cost-preview.service.js";
-import { getFileUrl } from "../services/s3.service.js";
+import { getFileUrl, probeImageMetadata } from "../services/s3.service.js";
+import { probeVideoMetadata } from "../utils/mp4-duration.js";
+import { translatePromptIfNeeded } from "../services/prompt-translate.service.js";
 import { db } from "../db.js";
-import { AI_MODELS, UserFacingError } from "@metabox/shared";
+import {
+  AI_MODELS,
+  UserFacingError,
+  OBJECT_REMOVAL_MODEL_ID,
+  OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+  buildObjectRemovalPrompt,
+  PHOTO_CREATE_MODEL_ID,
+  PHOTO_CREATE_PROMPT_MAX_CHARS,
+  snapPhotoCreateAr,
+  PHOTO_ANIMATE_MODEL_ID,
+  snapAspectRatio,
+  VIDEO_UPSCALE_MODEL_ID,
+  videoResolutionTier,
+  videoFpsTier,
+} from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
 
@@ -63,6 +79,66 @@ async function resolveMediaInputs(
       }),
     ),
   );
+}
+
+// Дефолты для probe-фейла video-upscale (контейнер не mp4/mov или moov не
+// прочитался) — те же, что в bot/scenes/upscale.ts.
+const DEFAULT_VIDEO_HEIGHT = 1080;
+const DEFAULT_VIDEO_FPS = 30;
+
+/**
+ * Достраивает modelSettings для скрытых video-сценариев, где часть параметров
+ * вычисляется из загруженного медиа. В боте это делала сцена при загрузке файла;
+ * на вебе сцены нет, поэтому деривим серверно при сабмите/превью.
+ *
+ *  - photo-animate: `aspect_ratio` снапим под исходное фото — адаптер иначе
+ *    дефолтит в 16:9 (kie.adapter.ts), и портрет уехал бы в кроп. Таблица
+ *    соотношений общая с bot-сценой (`snapAspectRatio` в @metabox/shared).
+ *  - video-upscale: `target_resolution` + `fps` деривим из исходного видео —
+ *    без них `costMatrix`-lookup промахивается и цена превью разойдётся со
+ *    списанием (фолбэк-ставка 0.07/s).
+ *
+ * Возвращает НОВЫЙ объект (не мутирует вход). Probe-фейлы → фолбэк на дефолты
+ * (как в боте), сабмит не роняем.
+ */
+async function augmentScenarioVideoSettings(
+  modelId: string,
+  settings: Record<string, unknown> | undefined,
+  resolvedMediaInputs: Record<string, string[]> | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  if (modelId === PHOTO_ANIMATE_MODEL_ID) {
+    const photoUrl = resolvedMediaInputs?.ref_images?.[0];
+    if (!photoUrl) return settings;
+    let aspectRatio = "1:1";
+    try {
+      const meta = await probeImageMetadata(photoUrl);
+      aspectRatio = snapAspectRatio(meta.width, meta.height);
+    } catch (err) {
+      logger.warn({ err }, "web photo-animate: image probe failed, defaulting aspect_ratio");
+    }
+    return { ...settings, aspect_ratio: aspectRatio };
+  }
+
+  if (modelId === VIDEO_UPSCALE_MODEL_ID) {
+    const videoUrl = resolvedMediaInputs?.motion_video?.[0];
+    if (!videoUrl) return settings;
+    const factor = Number((settings?.upscale_factor as string | undefined) ?? "2");
+    const probe = await probeVideoMetadata(videoUrl).catch(() => null);
+    return {
+      ...settings,
+      target_resolution: videoResolutionTier(probe?.height ?? DEFAULT_VIDEO_HEIGHT, factor),
+      fps: videoFpsTier(probe?.fps ?? DEFAULT_VIDEO_FPS),
+      // Длительность исходника нужна для посекундного биллинга: matrixCost —
+      // ставка за секунду, итог = duration × rate (token.service.ts). Без этого
+      // previewVideo дефолтит в 5s и цена/списание не зависят от реальной длины
+      // ролика. Округляем вверх, как бот (показанное ≥ списанного). probe null
+      // (не-mp4) → duration не задаём, effectiveDuration упадёт на дефолт, как и
+      // tiers выше.
+      ...(probe?.durationSec ? { duration: Math.ceil(probe.durationSec) } : {}),
+    };
+  }
+
+  return settings;
 }
 
 export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
@@ -287,14 +363,74 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
 
       const resolvedMediaInputs = await resolveMediaInputs(mediaInputs);
 
+      // object-removal: юзер вводит, ЧТО убрать. Переводим ввод на английский и
+      // оборачиваем в фикс-шаблон — та же логика, что в bot/scenes/object-removal.ts
+      // (общий хелпер из @metabox/shared, чтобы бот и веб не разъезжались).
+      let finalPrompt = prompt;
+      if (modelId === OBJECT_REMOVAL_MODEL_ID) {
+        const userText = prompt.trim().slice(0, OBJECT_REMOVAL_PROMPT_MAX_CHARS);
+        let translated: string;
+        try {
+          translated = await translatePromptIfNeeded(
+            userText,
+            { auto_translate_prompt: true },
+            aibUserId!,
+            modelId,
+            { silent: true },
+          );
+        } catch (err) {
+          logger.warn({ err }, "web object-removal: prompt translation failed, using original");
+          translated = userText;
+        }
+        finalPrompt = buildObjectRemovalPrompt(translated);
+      } else if (modelId === PHOTO_CREATE_MODEL_ID) {
+        // photo-create: юзер описывает желаемое фото. Переводим ru→en silent — как
+        // в bot/scenes/photo-create.ts, НО без обёртки-шаблона (в отличие от
+        // object-removal): описание уходит провайдеру как есть.
+        const userText = prompt.trim().slice(0, PHOTO_CREATE_PROMPT_MAX_CHARS);
+        try {
+          finalPrompt = await translatePromptIfNeeded(
+            userText,
+            { auto_translate_prompt: true },
+            aibUserId!,
+            modelId,
+            { silent: true },
+          );
+        } catch (err) {
+          logger.warn({ err }, "web photo-create: prompt translation failed, using original");
+          finalPrompt = userText;
+        }
+      }
+
+      // photo-create: «auto» AR провайдеру не отдаём — снапим под исходное фото
+      // (как бот через snapPhotoCreateAr). AR на цену не влияет, поэтому делаем
+      // только тут (на сабмите), не в preview. Probe-фейл → fallback "1:1".
+      let effectiveSettings = settings;
+      if (
+        modelId === PHOTO_CREATE_MODEL_ID &&
+        (!settings?.aspect_ratio || settings.aspect_ratio === "auto")
+      ) {
+        let aspectRatio = "1:1";
+        const photoUrl = resolvedMediaInputs?.edit?.[0];
+        if (photoUrl) {
+          try {
+            const meta = await probeImageMetadata(photoUrl);
+            aspectRatio = snapPhotoCreateAr(meta.width, meta.height);
+          } catch (err) {
+            logger.warn({ err }, "web photo-create: image probe failed, defaulting aspect_ratio");
+          }
+        }
+        effectiveSettings = { ...settings, aspect_ratio: aspectRatio };
+      }
+
       try {
         const { dbJobId } = await generationService.submitImage({
           userId: aibUserId!,
           modelId,
-          prompt,
+          prompt: finalPrompt,
           telegramChatId: null,
           ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
-          ...(settings ? { extraModelSettings: settings } : {}),
+          ...(effectiveSettings ? { extraModelSettings: effectiveSettings } : {}),
         });
         return { dbJobId };
       } catch (err) {
@@ -366,11 +502,19 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
 
       const resolvedMediaInputs = await resolveMediaInputs(mediaInputs);
 
+      // Скрытые сценарии (photo-animate / video-upscale) достраивают часть настроек
+      // из загруженного медиа — см. augmentScenarioVideoSettings.
+      const effectiveSettings = await augmentScenarioVideoSettings(
+        modelId,
+        settings,
+        resolvedMediaInputs,
+      );
+
       // Pre-flight адаптер-чек (Veo image→8s, HeyGen avatar+voice и т.п.).
       const validation = videoGenerationService.validateVideoRequest({
         modelId,
         prompt,
-        modelSettings: settings,
+        modelSettings: effectiveSettings,
         mediaInputs: resolvedMediaInputs,
         userId: aibUserId!,
       });
@@ -389,7 +533,7 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           prompt,
           telegramChatId: null,
           ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
-          ...(settings ? { extraModelSettings: settings } : {}),
+          ...(effectiveSettings ? { extraModelSettings: effectiveSettings } : {}),
         });
         return { dbJobId };
       } catch (err) {
@@ -489,13 +633,20 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
           // (HeyGen биллится посекундно). Если слотов нет — pricingMode станет
           // "per_second" и UI покажет «≈ N ✦ / sec».
           const resolvedMediaInputs = await resolveMediaInputs(mediaInputs);
+          // Только video-upscale: его цена зависит от target_resolution/fps,
+          // выводимых из исходного видео. photo-animate флэт-цена — probe фото
+          // на каждый дебаунс превью не нужен.
+          const previewSettings =
+            modelId === VIDEO_UPSCALE_MODEL_ID
+              ? await augmentScenarioVideoSettings(modelId, settings, resolvedMediaInputs)
+              : settings;
           const preview = await costPreviewService.previewVideo({
             userId: aibUserId!,
             modelId,
             prompt: prompt ?? "",
             telegramChatId: null,
             ...(resolvedMediaInputs ? { mediaInputs: resolvedMediaInputs } : {}),
-            ...(settings ? { extraModelSettings: settings } : {}),
+            ...(previewSettings ? { extraModelSettings: previewSettings } : {}),
           });
           return {
             cost: preview.cost,

@@ -23,6 +23,8 @@ export type PresetSetup = {
   subtitle?: string;
   promptPlaceholder?: string;
   hideModelPicker: boolean;
+  /** Скрыть поле промпта целиком (значение пресета всё равно сабмитится). */
+  hidePrompt: boolean;
   /** True если URL содержит preset, которого нет в конфиге — page wrapper должен показать NotFound. */
   notFound: boolean;
   /**
@@ -54,7 +56,10 @@ export function usePresetSetup(
 
   const filteredModels = useMemo(() => {
     if (!preset?.allowedModelIds || preset.allowedModelIds.length === 0) {
-      return allSectionModels;
+      // Дефолтный список секции не должен содержать preset-only моделей
+      // (hiddenFromCarousel) — они доступны только через свой URL-пресет, который
+      // явно перечисляет их в allowedModelIds (ветка ниже).
+      return allSectionModels.filter((m) => !m.hiddenFromCarousel);
     }
     const allowed = new Set(preset.allowedModelIds);
     return allSectionModels.filter((m) => allowed.has(m.id));
@@ -110,6 +115,7 @@ export function usePresetSetup(
     subtitle: preset?.subtitle ? t(preset.subtitle) : undefined,
     promptPlaceholder: preset?.promptPlaceholder ? t(preset.promptPlaceholder) : undefined,
     hideModelPicker: !!preset?.hideModelPicker,
+    hidePrompt: !!preset?.hidePrompt,
     notFound,
     resetPreset: preset?.modelId ? resetPreset : undefined,
     presetSettingsByModel: preset?.settings,

@@ -1,4 +1,5 @@
 import type { NavigateFunction } from "react-router-dom";
+import { findPresetKeyForModel } from "@/config/presets";
 
 /**
  * Префил формы генерации при переходе с Gallery / PromptsPage.
@@ -32,12 +33,22 @@ export function normalizeSection(raw: string): GenerateSection | null {
 
 /**
  * Переходит на страницу генерации соответствующей секции и кладёт префил в
- * `location.state`. `?model=<id>` дублируется в URL для совместимости с
- * существующим URL→state синком в `GenerateScene` и shareable-навигацией из
- * navbar'а.
+ * `location.state`.
+ *
+ * Если у модели есть выделенный URL-пресет (`hideModelPicker`-сценарий вроде
+ * `photo-create` / `upscale` / `clone`), ведём на его страницу `/${section}/${key}`:
+ * иначе preset-only (`hiddenFromCarousel`) модель отфильтровалась бы из списка на
+ * голой странице, и префил откатился бы на дефолтную модель. На пресет-странице
+ * модель есть в `allowedModelIds`, а `usePresetSetup` уступает нашему prefill
+ * (совпадает `modelId`), так что prompt + settings юзера восстанавливаются.
+ *
+ * Для обычных карусельных моделей — голая секция с `?model=<id>` (совместимость с
+ * URL→state синком в `GenerateScene` и shareable-навигацией из navbar'а).
  */
 export function navigateToGenerate(navigate: NavigateFunction, prefill: GeneratePrefill): void {
-  navigate(`/${prefill.section}?model=${encodeURIComponent(prefill.modelId)}`, {
-    state: { prefill },
-  });
+  const presetKey = findPresetKeyForModel(prefill.section, prefill.modelId);
+  const path = presetKey
+    ? `/${prefill.section}/${presetKey}`
+    : `/${prefill.section}?model=${encodeURIComponent(prefill.modelId)}`;
+  navigate(path, { state: { prefill } });
 }

@@ -69,22 +69,25 @@ export {
   OBJECT_REMOVAL_MODEL_ID,
   OBJECT_REMOVAL_BUFFER_MODEL_ID,
   OBJECT_REMOVAL_PROMPT_MAX_CHARS,
+  OBJECT_REMOVAL_SETTINGS,
+  buildObjectRemovalPrompt,
 } from "./constants/object-removal.js";
 export {
   PHOTO_ANIMATE_MODEL_ID,
   PHOTO_ANIMATE_DURATION_SEC,
   PHOTO_ANIMATE_RESOLUTION,
   PHOTO_ANIMATE_PROMPT,
+  snapAspectRatio,
 } from "./constants/photo-animate.js";
 export {
   PHOTO_CREATE_MODEL_ID,
   PHOTO_CREATE_BUFFER_MODEL_ID,
   PHOTO_CREATE_PROMPT_MAX_CHARS,
-  PHOTO_CREATE_RESOLUTION,
   PHOTO_CREATE_AR_OPTIONS,
+  PHOTO_CREATE_RES_OPTIONS,
   snapPhotoCreateAr,
 } from "./constants/photo-create.js";
-export type { PhotoCreateArOption } from "./constants/photo-create.js";
+export type { PhotoCreateArOption, PhotoCreateResOption } from "./constants/photo-create.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";

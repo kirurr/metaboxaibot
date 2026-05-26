@@ -409,6 +409,10 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     supportsVoice: false,
     supportsWeb: false,
     isAsync: true,
+    // Удаление фона не использует текстовый промпт (fal Ideogram remove-background
+    // его игнорирует) — бот шлёт prompt:"". promptOptional снимает требование
+    // промпта в веб-пресете (/image/bg-removal) и в серверном гарде web-generation.
+    promptOptional: true,
     hiddenFromCarousel: true,
     deliverAsDocument: true,
     contextStrategy: "db_history",
@@ -451,10 +455,16 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   "photo-create": {
     id: "photo-create",
     name: "📸 Создать фотографию",
-    description: "Генерирует реалистичное фото по референсу и описанию в качестве 2K.",
+    description: "Генерирует реалистичное фото по референсу и описанию в качестве 2K или 4K.",
     section: "design",
     provider: "kie",
-    costUsdPerRequest: 0.09, // nano-banana-pro @ 2K
+    // Юзер выбирает 2K/4K на инлайн-клавиатуре после AR (см. `photo-create.ts`,
+    // `PHOTO_CREATE_RES_OPTIONS`). Цены 1-в-1 с nano-banana-pro.costVariants —
+    // под капотом та же модель, маппинг alias→nano-banana-pro в kie.adapter.ts.
+    // 1K не показываем юзеру (одинакова с 2K по цене у KIE), поэтому и в map'е
+    // её нет — если когда-нибудь добавим в опции, дописать сюда.
+    costUsdPerRequest: 0.09,
+    costVariants: { settingKey: "resolution", map: { "2K": 0.09, "4K": 0.12 } },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
@@ -465,6 +475,25 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
     contextStrategy: "db_history",
     contextMaxMessages: 0,
     supportedAspectRatios: ["auto", "1:1", "16:9", "9:16", "4:3", "3:4"],
+    // Селекторы для web-пресета `/image/photo-create`. Бот их НЕ читает — сцена
+    // `photo-create.ts` рулит через свои `PHOTO_CREATE_AR_OPTIONS` /
+    // `PHOTO_CREATE_RES_OPTIONS`. AR-набор совпадает с supportedAspectRatios выше;
+    // "auto" бэкенд (web-generation.ts) снапит под исходное фото перед сабмитом.
+    // resolution.key == costVariants.settingKey → preview-цена 2K/4K считается верно.
+    settings: [
+      mkAspectRatio(["auto", "1:1", "16:9", "9:16", "4:3", "3:4"]),
+      {
+        key: "resolution",
+        label: "Разрешение",
+        description: "Детализация фото: 2K — стандарт, 4K — максимум. Влияет на цену.",
+        type: "select",
+        options: [
+          { value: "2K", label: "2K" },
+          { value: "4K", label: "4K" },
+        ],
+        default: "2K",
+      },
+    ],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
   // Готовый сценарий «Убрать объект». Под капотом — GPT Image 2 i2i (KIE) @ 1K

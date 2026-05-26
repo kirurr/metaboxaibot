@@ -40,12 +40,29 @@
         "lora": { "name": "LoRA Training", "desc": "Train a model on your face." },
         "style": { "name": "Style Transfer", "desc": "Move the style of one photo onto another." },
         "background": {
-          "name": "Background Edit",
-          "desc": "Background replacement and retouching."
+          "name": "Remove Background",
+          "desc": "Removes the background, leaving the subject on transparency."
+        },
+        "faceSwap": { "name": "Face Swap", "desc": "Transfer a face from one photo to another." },
+        "clothingTryon": {
+          "name": "Clothing Try-On",
+          "desc": "Virtually try clothing on a photo."
+        },
+        "objectRemoval": {
+          "name": "Remove Object",
+          "desc": "Removes an object and inpaints the background."
+        },
+        "photoCreate": {
+          "name": "Create Photo",
+          "desc": "A realistic photo from a reference and a description in 2K or 4K."
         }
       },
       "video": {
         "create": { "name": "Create Video", "desc": "Generate AI video from a prompt." },
+        "animate": {
+          "name": "Animate Photo",
+          "desc": "A short animated clip from a single photo."
+        },
         "cinema": { "name": "Cinema Studio", "desc": "Cinematography with an AI director." },
         "mixed": { "name": "Mixed Media", "desc": "Blended projects: photo + video + audio." },
         "edit": { "name": "Edit Video", "desc": "Edit scenes, shots and elements." },
@@ -58,6 +75,7 @@
         "tts": { "name": "Text to Speech", "desc": "Turn text into realistic speech." },
         "clone": { "name": "Voice Cloning", "desc": "Clone any voice in 30 seconds." },
         "music": { "name": "Music Generation", "desc": "Full tracks with vocals from a prompt." },
+        "sounds": { "name": "Sound Effects", "desc": "Sounds and effects from a description." },
         "dubbing": { "name": "Dubbing", "desc": "Multilingual lip-sync dubbing." },
         "transcribe": { "name": "Transcription", "desc": "Speech-to-text recognition." },
         "cleanup": { "name": "Audio Cleanup", "desc": "Noise removal and restoration." },
@@ -66,6 +84,69 @@
       "badge": {
         "TOP": "TOP",
         "NEW": "NEW"
+      }
+    }
+  },
+  "presets": {
+    "image": {
+      "swap": {
+        "title": "Face Swap",
+        "subtitle": "Swap a face onto a reference image with AI"
+      },
+      "upscale": {
+        "title": "Photo Upscale",
+        "subtitle": "Boosts photo resolution and sharpness up to 4K"
+      },
+      "bg-removal": {
+        "title": "Remove Background",
+        "subtitle": "Removes the background, leaving the subject on transparency"
+      },
+      "face-swap": {
+        "title": "Face Swap",
+        "subtitle": "Upload 2 photos: 1st — where to place the face, 2nd — whose face to take"
+      },
+      "clothing-tryon": {
+        "title": "Clothing Try-On",
+        "subtitle": "Upload 2 photos: 1st — the person, 2nd — the clothing"
+      },
+      "object-removal": {
+        "title": "Remove Object",
+        "subtitle": "Removes the chosen object and inpaints the background",
+        "promptPlaceholder": "What to remove? E.g.: the person in the background"
+      },
+      "photo-create": {
+        "title": "Create Photo",
+        "subtitle": "Generates a realistic photo from a reference and a description in 2K or 4K",
+        "promptPlaceholder": "Describe the photo. E.g.: cinematic poster-style portrait"
+      }
+    },
+    "video": {
+      "photo-animate": {
+        "title": "Animate Photo",
+        "subtitle": "Creates a short animated clip from a single photo"
+      },
+      "video-upscale": {
+        "title": "Video Upscale",
+        "subtitle": "Boosts video resolution and clarity with Topaz AI"
+      }
+    },
+    "audio": {
+      "tts": {
+        "title": "Text to Speech",
+        "subtitle": "Turns text into realistic speech"
+      },
+      "clone": {
+        "title": "Voice Cloning",
+        "subtitle": "Creates a digital copy of a voice from a short recording"
+      },
+      "music": {
+        "title": "Music Generation",
+        "subtitle": "Creates music tracks from a text prompt"
+      },
+      "sounds": {
+        "title": "Sound Effects",
+        "subtitle": "Generates sound effects from a text description",
+        "promptPlaceholder": "Describe the sound. E.g.: rain on a rooftop"
       }
     }
   },
@@ -230,6 +311,7 @@
     "btnAddToSlot": "Add file to {{slot}}",
     "btnEnterPrompt": "Enter a prompt",
     "btnPromptOrMedia": "Enter a prompt or add a file",
+    "btnAddMedia": "Add a photo",
     "elementsButton": "Elements",
     "elementLimit": "No more than {{max}} elements in the prompt",
     "elementNoImages": "Element @{{name}} has no images",

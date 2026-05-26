@@ -706,6 +706,10 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9", "9:16"],
     durationRange: { min: 6, max: 6 },
+    // Промпт пустой по дизайну (реальный фикс-промпт инжектится в kie/fal-адаптере
+    // по modelId). Флаг нужен, чтобы веб-гард (`web-generation.ts`) не отбил
+    // пустой промпт «Prompt is required» при сабмите из веб-пресета.
+    promptOptional: true,
     // xAI (Grok) hardcap — но сами фикс-промптом не приближаемся.
     maxPromptLength: 4096,
   },

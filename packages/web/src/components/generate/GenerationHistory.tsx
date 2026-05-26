@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -86,7 +86,7 @@ type PreviewItem = {
   job?: GenerationJobDto;
 };
 
-export function GenerationHistory({
+function GenerationHistoryImpl({
   selectedModel,
   pendingJobs,
   onJobResolved,
@@ -217,6 +217,11 @@ export function GenerationHistory({
     </section>
   );
 }
+
+// memo: пропсы (selectedModel/pendingJobs + стабильные колбэки из useCallback в
+// GenerateScene) не зависят от промпта, поэтому при наборе текста родитель
+// ререндерится, а история со всеми плитками — нет.
+export const GenerationHistory = memo(GenerationHistoryImpl);
 
 // ── Tile renderer ────────────────────────────────────────────────────────────
 

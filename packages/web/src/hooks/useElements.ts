@@ -7,7 +7,15 @@ import {
   uploadElementMedia,
   deleteElementMedia,
   elementKeys,
+  type Element,
 } from "@/api/elements";
+
+// Стабильная ссылка на пустой список. Без неё `query.data ?? []` отдавал бы НОВЫЙ
+// `[]` на каждый рендер, когда запрос выключен/не загружен (на страницах генерации
+// он обычно `enabled=false`). Новый identity протекал в зависимости useMemo
+// (`activeMentions`/`cappedMentions`) и далее в debounce-эффект preview, который
+// из-за этого перезапускался каждый рендер и заспамливал бэкенд запросами.
+const EMPTY_ELEMENTS: Element[] = [];
 
 /**
  * Список Element'ов пользователя (именованные наборы референсных изображений).
@@ -22,7 +30,7 @@ export function useElements(enabled = true) {
   });
 
   return {
-    elements: query.data ?? [],
+    elements: query.data ?? EMPTY_ELEMENTS,
     isLoading: query.isLoading,
     error: query.error,
   };

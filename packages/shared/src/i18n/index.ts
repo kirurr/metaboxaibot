@@ -102,6 +102,7 @@ export interface Translations {
     photoCreateStepPhoto: string;
     photoCreateStepPrompt: string;
     photoCreateStepAr: string;
+    photoCreateStepRes: string;
     photoCreatePromptUpdated: string;
     photoCreateNotPhoto: string;
     photoCreatePhotoTooLarge: string;
@@ -111,6 +112,7 @@ export interface Translations {
     photoCreateBufferLost: string;
     photoCreateGenerating: string;
     photoCreateAwaitArHint: string;
+    photoCreateAwaitResHint: string;
     imageDecodeFailed: string;
   };
   gpt: {

@@ -95,6 +95,11 @@ export type WebModelDto = {
   supportsWeb: boolean;
   isAsync: boolean;
   isLLM: boolean;
+  /**
+   * Модель скрыта из дефолтных списков (дропдаун секции, мега-меню). true только у
+   * preset-exposed моделей, которые веб активирует через URL-пресет (см. presets.ts).
+   */
+  hiddenFromCarousel: boolean;
   supportedAspectRatios: string[] | null;
   supportedDurations: number[] | null;
   durationRange: { min: number; max: number } | null;

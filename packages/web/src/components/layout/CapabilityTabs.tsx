@@ -68,34 +68,61 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       glyph: "▢",
     },
     {
-      nameKey: "capabilities.features.image.product.name",
-      descKey: "capabilities.features.image.product.desc",
-      glyph: "◈",
+      nameKey: "capabilities.features.image.photoCreate.name",
+      descKey: "capabilities.features.image.photoCreate.desc",
+      glyph: "❂",
+      link: "photo-create",
     },
-    {
-      nameKey: "capabilities.features.image.edit.name",
-      descKey: "capabilities.features.image.edit.desc",
-      glyph: "◯",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
+    // {
+    //   nameKey: "capabilities.features.image.product.name",
+    //   descKey: "capabilities.features.image.product.desc",
+    //   glyph: "◈",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.edit.name",
+    //   descKey: "capabilities.features.image.edit.desc",
+    //   glyph: "◯",
+    // },
     {
       nameKey: "capabilities.features.image.upscale.name",
       descKey: "capabilities.features.image.upscale.desc",
       glyph: "▲",
+      link: "upscale",
     },
-    {
-      nameKey: "capabilities.features.image.lora.name",
-      descKey: "capabilities.features.image.lora.desc",
-      glyph: "✪",
-    },
-    {
-      nameKey: "capabilities.features.image.style.name",
-      descKey: "capabilities.features.image.style.desc",
-      glyph: "◇",
-    },
+    // {
+    //   nameKey: "capabilities.features.image.lora.name",
+    //   descKey: "capabilities.features.image.lora.desc",
+    //   glyph: "✪",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.style.name",
+    //   descKey: "capabilities.features.image.style.desc",
+    //   glyph: "◇",
+    // },
     {
       nameKey: "capabilities.features.image.background.name",
       descKey: "capabilities.features.image.background.desc",
       glyph: "▦",
+      link: "bg-removal",
+    },
+    {
+      nameKey: "capabilities.features.image.faceSwap.name",
+      descKey: "capabilities.features.image.faceSwap.desc",
+      glyph: "◑",
+      link: "face-swap",
+    },
+    {
+      nameKey: "capabilities.features.image.clothingTryon.name",
+      descKey: "capabilities.features.image.clothingTryon.desc",
+      glyph: "❖",
+      link: "clothing-tryon",
+    },
+    {
+      nameKey: "capabilities.features.image.objectRemoval.name",
+      descKey: "capabilities.features.image.objectRemoval.desc",
+      glyph: "⊘",
+      link: "object-removal",
     },
   ],
   video: [
@@ -105,42 +132,50 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       glyph: "▷",
     },
     {
-      nameKey: "capabilities.features.video.cinema.name",
-      descKey: "capabilities.features.video.cinema.desc",
-      glyph: "▣",
-      badge: "TOP",
+      nameKey: "capabilities.features.video.animate.name",
+      descKey: "capabilities.features.video.animate.desc",
+      glyph: "◉",
+      link: "photo-animate",
     },
-    {
-      nameKey: "capabilities.features.video.mixed.name",
-      descKey: "capabilities.features.video.mixed.desc",
-      glyph: "◫",
-    },
-    {
-      nameKey: "capabilities.features.video.edit.name",
-      descKey: "capabilities.features.video.edit.desc",
-      glyph: "▥",
-    },
-    {
-      nameKey: "capabilities.features.video.lipsync.name",
-      descKey: "capabilities.features.video.lipsync.desc",
-      glyph: "◎",
-    },
-    {
-      nameKey: "capabilities.features.video.sketch.name",
-      descKey: "capabilities.features.video.sketch.desc",
-      glyph: "✏",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /video).
+    // {
+    //   nameKey: "capabilities.features.video.cinema.name",
+    //   descKey: "capabilities.features.video.cinema.desc",
+    //   glyph: "▣",
+    //   badge: "TOP",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.mixed.name",
+    //   descKey: "capabilities.features.video.mixed.desc",
+    //   glyph: "◫",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.edit.name",
+    //   descKey: "capabilities.features.video.edit.desc",
+    //   glyph: "▥",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.lipsync.name",
+    //   descKey: "capabilities.features.video.lipsync.desc",
+    //   glyph: "◎",
+    // },
+    // {
+    //   nameKey: "capabilities.features.video.sketch.name",
+    //   descKey: "capabilities.features.video.sketch.desc",
+    //   glyph: "✏",
+    // },
     {
       nameKey: "capabilities.features.video.upscale.name",
       descKey: "capabilities.features.video.upscale.desc",
       glyph: "▱",
+      link: "video-upscale",
     },
-    {
-      nameKey: "capabilities.features.video.avatar.name",
-      descKey: "capabilities.features.video.avatar.desc",
-      glyph: "◍",
-      badge: "NEW",
-    },
+    // {
+    //   nameKey: "capabilities.features.video.avatar.name",
+    //   descKey: "capabilities.features.video.avatar.desc",
+    //   glyph: "◍",
+    //   badge: "NEW",
+    // },
   ],
   audio: [
     {
@@ -163,25 +198,32 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       link: "music",
     },
     {
-      nameKey: "capabilities.features.audio.dubbing.name",
-      descKey: "capabilities.features.audio.dubbing.desc",
-      glyph: "◯",
+      nameKey: "capabilities.features.audio.sounds.name",
+      descKey: "capabilities.features.audio.sounds.desc",
+      glyph: "≋",
+      link: "sounds",
     },
-    {
-      nameKey: "capabilities.features.audio.transcribe.name",
-      descKey: "capabilities.features.audio.transcribe.desc",
-      glyph: "▤",
-    },
-    {
-      nameKey: "capabilities.features.audio.cleanup.name",
-      descKey: "capabilities.features.audio.cleanup.desc",
-      glyph: "△",
-    },
-    {
-      nameKey: "capabilities.features.audio.library.name",
-      descKey: "capabilities.features.audio.library.desc",
-      glyph: "▼",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /audio).
+    // {
+    //   nameKey: "capabilities.features.audio.dubbing.name",
+    //   descKey: "capabilities.features.audio.dubbing.desc",
+    //   glyph: "◯",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.transcribe.name",
+    //   descKey: "capabilities.features.audio.transcribe.desc",
+    //   glyph: "▤",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.cleanup.name",
+    //   descKey: "capabilities.features.audio.cleanup.desc",
+    //   glyph: "△",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.library.name",
+    //   descKey: "capabilities.features.audio.library.desc",
+    //   glyph: "▼",
+    // },
   ],
 };
 
@@ -205,7 +247,9 @@ export function CapabilityTabs() {
   // утопала: семейство — это бренд, варианты выбираются уже внутри страницы.
   const modelsByCap = useMemo(() => {
     const dedup = (cap: Capability["id"]): WebModelDto[] => {
-      const list = modelsForCapability(allModels, cap);
+      // Preset-only модели (hiddenFromCarousel) в мега-меню не показываем —
+      // они доступны только через свой URL-пресет.
+      const list = modelsForCapability(allModels, cap).filter((m) => !m.hiddenFromCarousel);
       const seenFamilies = new Set<string>();
       const out: WebModelDto[] = [];
       for (const m of list) {
