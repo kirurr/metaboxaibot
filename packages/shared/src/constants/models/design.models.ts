@@ -451,10 +451,16 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   "photo-create": {
     id: "photo-create",
     name: "📸 Создать фотографию",
-    description: "Генерирует реалистичное фото по референсу и описанию в качестве 2K.",
+    description: "Генерирует реалистичное фото по референсу и описанию в качестве 2K или 4K.",
     section: "design",
     provider: "kie",
-    costUsdPerRequest: 0.09, // nano-banana-pro @ 2K
+    // Юзер выбирает 2K/4K на инлайн-клавиатуре после AR (см. `photo-create.ts`,
+    // `PHOTO_CREATE_RES_OPTIONS`). Цены 1-в-1 с nano-banana-pro.costVariants —
+    // под капотом та же модель, маппинг alias→nano-banana-pro в kie.adapter.ts.
+    // 1K не показываем юзеру (одинакова с 2K по цене у KIE), поэтому и в map'е
+    // её нет — если когда-нибудь добавим в опции, дописать сюда.
+    costUsdPerRequest: 0.09,
+    costVariants: { settingKey: "resolution", map: { "2K": 0.09, "4K": 0.12 } },
     inputCostUsdPerMToken: 0,
     outputCostUsdPerMToken: 0,
     supportsImages: true,
