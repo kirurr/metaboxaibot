@@ -5,7 +5,9 @@ import {
   s3Service,
   translatePromptIfNeeded,
   ImageDecodeError,
+  calculateCost,
 } from "@metabox/api/services";
+import type { AIModel, Translations } from "@metabox/shared";
 import {
   AI_MODELS,
   config,
@@ -22,7 +24,6 @@ import {
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
 import { logger } from "../logger.js";
-import { buildCostLine } from "../utils/cost-line.js";
 import { resolveMediaInputUrls } from "../utils/media-input-state.js";
 import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-error.js";
 import { isImageDocument } from "./upscale.js";
@@ -90,6 +91,25 @@ function buildResKeyboard(): InlineKeyboard {
   return kb;
 }
 
+/**
+ * Цена для welcome — диапазон по фактически выбираемым опциям из
+ * `PHOTO_CREATE_RES_OPTIONS` (не по всем ключам model.costVariants, потому что
+ * 1K мы не показываем). Если все опции стоят одинаково — single, иначе range.
+ */
+function buildPhotoCreateCostLine(model: AIModel, t: Translations): string {
+  const costs = PHOTO_CREATE_RES_OPTIONS.map((opt) =>
+    calculateCost(model, 0, 0, undefined, undefined, { resolution: opt.value }),
+  );
+  const min = Math.min(...costs);
+  const max = Math.max(...costs);
+  if (min < max) {
+    return t.common.costRangePerRequest
+      .replace("{min}", min.toFixed(2))
+      .replace("{max}", max.toFixed(2));
+  }
+  return t.common.costPerRequest.replace("{cost}", min.toFixed(2));
+}
+
 /** Entry — user tapped «📸 Создать фотографию» in the Scenarios submenu. */
 export async function handlePhotoCreateEnter(ctx: BotContext): Promise<void> {
   if (!ctx.user) return;
@@ -97,7 +117,7 @@ export async function handlePhotoCreateEnter(ctx: BotContext): Promise<void> {
   await userStateService.setState(ctx.user.id, "PHOTO_CREATE_AWAIT_PHOTO", null);
 
   const model = AI_MODELS[PHOTO_CREATE_MODEL_ID];
-  const costLine = model ? buildCostLine(model, PHOTO_CREATE_EXTRA_SETTINGS, ctx.t) : "";
+  const costLine = model ? buildPhotoCreateCostLine(model, ctx.t) : "";
   const welcome = [
     `<b>${ctx.t.scenarios.photoCreate}</b>`,
     ctx.t.scenarios.photoCreateWelcome,
