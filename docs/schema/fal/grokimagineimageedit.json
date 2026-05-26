@@ -1,0 +1,404 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Queue OpenAPI for xai/grok-imagine-image/edit",
+    "version": "1.0.0",
+    "description": "The OpenAPI schema for the xai/grok-imagine-image/edit queue.",
+    "x-fal-metadata": {
+      "endpointId": "xai/grok-imagine-image/edit",
+      "category": "image-to-image",
+      "thumbnailUrl": "https://v3b.fal.media/files/b/0a8a0dc7/kv2XmZ5em8Kb2-7oXZndp_b897f79cbc564e1d8f4e5d5c71710c2b.jpg",
+      "playgroundUrl": "https://fal.ai/models/xai/grok-imagine-image/edit",
+      "documentationUrl": "https://fal.ai/models/xai/grok-imagine-image/edit/api",
+      "about": "Edit an image based on a text description using Grok Imagine."
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Fal Key"
+      }
+    },
+    "schemas": {
+      "QueueStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"]
+          },
+          "request_id": {
+            "type": "string",
+            "description": "The request id."
+          },
+          "response_url": {
+            "type": "string",
+            "description": "The response url."
+          },
+          "status_url": {
+            "type": "string",
+            "description": "The status url."
+          },
+          "cancel_url": {
+            "type": "string",
+            "description": "The cancel url."
+          },
+          "logs": {
+            "type": "object",
+            "description": "The logs.",
+            "additionalProperties": true
+          },
+          "metrics": {
+            "type": "object",
+            "description": "The metrics.",
+            "additionalProperties": true
+          },
+          "queue_position": {
+            "type": "integer",
+            "description": "The queue position."
+          }
+        },
+        "required": ["status", "request_id"]
+      },
+      "GrokImagineImageEditInput": {
+        "properties": {
+          "resolution": {
+            "description": "Resolution of the generated image. `1k` for standard resolution, `2k` for high resolution.",
+            "type": "string",
+            "title": "Resolution",
+            "enum": ["1k", "2k"],
+            "default": "1k"
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "description": "List of URLs of the images to edit. A maximum of 3 images are supported.",
+            "type": "array",
+            "title": "Image URLs",
+            "examples": [
+              ["https://v3b.fal.media/files/b/0a8b911d/Abk8vStrvmSPlzUqI_NN3_image_043.png"]
+            ]
+          },
+          "num_images": {
+            "description": "Number of images to generate.",
+            "type": "integer",
+            "maximum": 4,
+            "minimum": 1,
+            "default": 1,
+            "title": "Number of Images"
+          },
+          "prompt": {
+            "description": "Text description of the desired image.",
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Prompt",
+            "examples": ["Make this scene more realistic but still keep the game vibes"]
+          },
+          "aspect_ratio": {
+            "description": "Aspect ratio of the edited image. When set to `auto` (the default), the output preserves the aspect ratio of the first input image.",
+            "type": "string",
+            "title": "Aspect Ratio",
+            "enum": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ],
+            "default": "auto"
+          },
+          "sync_mode": {
+            "description": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+            "type": "boolean",
+            "title": "Sync Mode",
+            "default": false
+          },
+          "output_format": {
+            "description": "The format of the generated image.",
+            "type": "string",
+            "title": "Output Format",
+            "enum": ["jpeg", "png", "webp"],
+            "default": "jpeg"
+          }
+        },
+        "type": "object",
+        "title": "XAIImageEditInput",
+        "required": ["prompt"],
+        "x-fal-order-properties": [
+          "prompt",
+          "num_images",
+          "aspect_ratio",
+          "resolution",
+          "output_format",
+          "sync_mode",
+          "image_urls"
+        ]
+      },
+      "GrokImagineImageEditOutput": {
+        "properties": {
+          "revised_prompt": {
+            "description": "The enhanced prompt that was used to generate the image.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revised Prompt"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ImageFile"
+            },
+            "description": "The URL of the edited image.",
+            "type": "array",
+            "title": "Images",
+            "examples": [
+              [
+                {
+                  "url": "https://v3b.fal.media/files/b/0a8b911d/XMqiVoO2ECXUZEUYmPl2l.jpg"
+                }
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "title": "XAIImageEditOutput",
+        "required": ["images"],
+        "x-fal-order-properties": ["images", "revised_prompt"]
+      },
+      "ImageFile": {
+        "properties": {
+          "width": {
+            "description": "The width of the image",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "url": {
+            "description": "The URL where the file can be downloaded from.",
+            "type": "string",
+            "title": "Url"
+          },
+          "height": {
+            "description": "The height of the image",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "file_name": {
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "examples": ["z9RV14K95DvU.png"]
+          },
+          "content_type": {
+            "description": "The mime type of the file.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "examples": ["image/png"]
+          },
+          "file_size": {
+            "description": "The size of the file in bytes.",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size",
+            "examples": [4404019]
+          }
+        },
+        "type": "object",
+        "title": "ImageFile",
+        "required": ["url"],
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/xai/grok-imagine-image/edit/requests/{request_id}/status": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Request ID"
+            }
+          },
+          {
+            "name": "logs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Whether to include logs (`1`) in the response or not (`0`)."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/xai/grok-imagine-image/edit/requests/{request_id}/cancel": {
+      "put": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Request ID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request was cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the request was cancelled successfully."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/xai/grok-imagine-image/edit": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrokImagineImageEditInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/xai/grok-imagine-image/edit/requests/{request_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Request ID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result of the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrokImagineImageEditOutput"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://queue.fal.run"
+    }
+  ],
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ]
+}

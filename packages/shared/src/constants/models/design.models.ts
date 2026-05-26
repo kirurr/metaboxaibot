@@ -2758,4 +2758,60 @@ export const FALLBACK_DESIGN_MODELS: AIModel[] = [
     supportedAspectRatios: ["auto"],
     mediaInputs: [{ slotKey: "edit", mode: "edit", labelKey: "multiple_edit", maxImages: 1 }],
   },
+  // ── Grok Imagine fallback (fal xai/grok-imagine-image) ──────────────────────
+  // Primary `grok-imagine-image` — на KIE; при недоступности роутимся на fal,
+  // где у Grok 4 endpoint'а:
+  //   enable_pro=false + t2i  → xai/grok-imagine-image                 ($0.02/img)
+  //   enable_pro=false + edit → xai/grok-imagine-image/edit            ($0.022/img: $0.02 output + $0.002 input)
+  //   enable_pro=true  + t2i  → xai/grok-imagine-image/quality/text-to-image ($0.05/img @ 1K)
+  //   enable_pro=true  + edit → xai/grok-imagine-image/quality/edit    ($0.05/img output @ 1K + $0.01/img input)
+  // Выбор между ними делает FalAdapter (`submitGrokImagine`) по setting'у
+  // `enable_pro` + наличию media inputs.
+  //
+  // Биллинг с ЮЗЕРА — по primary KIE (Speed $0.02, Quality $0.025). Цены fal
+  // здесь в `costUsdPerRequest` / `costVariants` — реальные fal-расценки для
+  // audit-метаданных `actualCostUsd` (Quality на fal дороже primary, считаем
+  // это допустимой fallback-наценкой).
+  {
+    id: "grok-imagine-image",
+    name: "🔮 Grok Imagine (fal fallback)",
+    description: "Fallback на fal xai/grok-imagine-image при недоступности KIE.",
+    section: "design",
+    provider: "fal",
+    costUsdPerRequest: 0.02, // Speed t2i baseline
+    costVariants: {
+      settingKey: "enable_pro",
+      map: { false: 0.02, true: 0.05 },
+    },
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    mediaInputs: [MI_EDIT],
+    supportsVoice: false,
+    supportsWeb: false,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    // Совпадает с primary'ем — fal Grok поддерживает шире (вкл. "auto"/"21:9"/
+    // "2:1" и т.п.), но юзер выбирал в UI primary'я, расширение здесь смысла
+    // не имеет (UI всё равно фильтрует по primary).
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9", "9:16"],
+    // Settings — копия primary. Реально UI ими не управляет (FALLBACK_*
+    // не сериализуется через /models route), но держим для plug-and-play
+    // promotion + чтобы adapter знал значение `enable_pro` из ms.
+    settings: [
+      mkAspectRatio(["1:1", "2:3", "3:2", "16:9", "9:16"]),
+      {
+        key: "enable_pro",
+        label: "Режим",
+        description: "Speed — быстрая (Grok speed), Quality — повышенное качество (Grok quality).",
+        type: "select",
+        options: [
+          { value: false, label: "Speed" },
+          { value: true, label: "Quality" },
+        ],
+        default: false,
+      },
+    ],
+  },
 ];
