@@ -17,6 +17,7 @@ import {
   PHOTO_CREATE_PROMPT_MAX_CHARS,
   PHOTO_CREATE_RESOLUTION,
   PHOTO_CREATE_AR_OPTIONS,
+  PHOTO_CREATE_RES_OPTIONS,
   snapPhotoCreateAr,
 } from "@metabox/shared";
 import { InlineKeyboard } from "grammy";
@@ -27,11 +28,12 @@ import { replyNoSubscription, replyInsufficientTokens } from "../utils/reply-err
 import { isImageDocument } from "./upscale.js";
 
 /**
- * Сценарий «📸 Создать фотографию». Под капотом — `nano-banana-pro` @ 2K.
- * Три шага:
+ * Сценарий «📸 Создать фотографию». Под капотом — `nano-banana-pro`.
+ * Четыре шага:
  *  1) фото-референс,
  *  2) текстовое описание (auto-translate ru→en silent),
- *  3) выбор aspect_ratio из инлайн-клавиатуры (Авто / 1:1 / 16:9 / 9:16 / 4:3 / 3:4).
+ *  3) выбор aspect_ratio из инлайн-клавиатуры (Авто / 1:1 / 16:9 / 9:16 / 4:3 / 3:4),
+ *  4) выбор resolution из инлайн-клавиатуры (2K / 4K).
  * «Авто» snap'ится к ближайшему из supported по размеру исходника. Модель
  * замаскирована: displayName = «📸 Создать фотографию», без refine-кнопки.
  */
@@ -43,6 +45,7 @@ const PHOTO_CREATE_SRC_SLOT = "src";
 const PHOTO_CREATE_W_SLOT = "w";
 const PHOTO_CREATE_H_SLOT = "h";
 const PHOTO_CREATE_PROMPT_SLOT = "prompt";
+const PHOTO_CREATE_AR_SLOT = "ar";
 
 const PHOTO_CREATE_EXTRA_SETTINGS: Record<string, string> = {
   resolution: PHOTO_CREATE_RESOLUTION,
@@ -74,6 +77,15 @@ function buildArKeyboard(): InlineKeyboard {
     kb.text(left.label, `photo_create:ar:${left.value}`);
     if (right) kb.text(right.label, `photo_create:ar:${right.value}`);
     kb.row();
+  }
+  return kb;
+}
+
+/** Inline-клавиатура выбора resolution: 2K / 4K в один ряд. */
+function buildResKeyboard(): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const opt of PHOTO_CREATE_RES_OPTIONS) {
+    kb.text(opt.label, `photo_create:res:${opt.value}`);
   }
   return kb;
 }
@@ -226,9 +238,9 @@ export async function handlePhotoCreatePrompt(ctx: BotContext): Promise<void> {
 }
 
 /**
- * Handles `photo_create:ar:<value>` callback. Достаёт фото+промпт из буфера,
- * резолвит AR ("auto" → snap из w/h исходника), переводит промпт (silent),
- * сабмитит nano-banana-pro @ 2K.
+ * Handles `photo_create:ar:<value>` callback. Резолвит AR ("auto" → snap из
+ * w/h исходника), складывает результат в буфер и показывает клавиатуру выбора
+ * resolution. Сабмит — в `handlePhotoCreateResSelect`.
  */
 export async function handlePhotoCreateArSelect(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.callbackQuery?.data) return;
@@ -244,7 +256,7 @@ export async function handlePhotoCreateArSelect(ctx: BotContext): Promise<void> 
     return;
   }
   await ctx.answerCallbackQuery();
-  // Гасим клавиатуру выбора, чтобы юзер не запустил повторный сабмит.
+  // Гасим клавиатуру выбора, чтобы юзер не отправил тот же AR ещё раз.
   await ctx.editMessageReplyMarkup().catch(() => void 0);
 
   const userId = ctx.user.id;
@@ -268,6 +280,58 @@ export async function handlePhotoCreateArSelect(ctx: BotContext): Promise<void> 
           Number(slots[PHOTO_CREATE_H_SLOT]?.[0]) || 0,
         )
       : option.value;
+
+  await userStateService.addMediaInput(
+    userId,
+    PHOTO_CREATE_BUFFER_MODEL_ID,
+    PHOTO_CREATE_AR_SLOT,
+    aspectRatio,
+    true,
+  );
+  await userStateService.setState(userId, "PHOTO_CREATE_AWAIT_RES", null);
+  await ctx.reply(ctx.t.scenarios.photoCreateStepRes, {
+    parse_mode: "HTML",
+    reply_markup: buildResKeyboard(),
+  });
+}
+
+/**
+ * Handles `photo_create:res:<value>` callback. Достаёт фото+промпт+AR из
+ * буфера, переводит промпт (silent), сабмитит nano-banana-pro с выбранными
+ * aspect_ratio + resolution.
+ */
+export async function handlePhotoCreateResSelect(ctx: BotContext): Promise<void> {
+  if (!ctx.user || !ctx.callbackQuery?.data) return;
+  const parts = ctx.callbackQuery.data.split(":");
+  const value = parts.slice(2).join(":");
+  if (parts[0] !== "photo_create" || parts[1] !== "res" || !value) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  const option = PHOTO_CREATE_RES_OPTIONS.find((o) => o.value === value);
+  if (!option) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  // Гасим клавиатуру выбора, чтобы юзер не запустил повторный сабмит.
+  await ctx.editMessageReplyMarkup().catch(() => void 0);
+
+  const userId = ctx.user.id;
+  const slots = await userStateService.getMediaInputs(userId, PHOTO_CREATE_BUFFER_MODEL_ID);
+  const srcKey = slots[PHOTO_CREATE_SRC_SLOT]?.[0];
+  const userText = slots[PHOTO_CREATE_PROMPT_SLOT]?.[0];
+  const aspectRatio = slots[PHOTO_CREATE_AR_SLOT]?.[0];
+  if (!srcKey || !userText || !aspectRatio) {
+    await userStateService.clearMediaInputs(userId, PHOTO_CREATE_BUFFER_MODEL_ID);
+    await userStateService.setState(userId, "PHOTO_CREATE_AWAIT_PHOTO", null);
+    await ctx.reply(
+      `${ctx.t.scenarios.photoCreateBufferLost}\n\n${ctx.t.scenarios.photoCreateStepPhoto}`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+  const resolution = option.value;
 
   const telegramId = ctx.user.telegramId;
   const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
@@ -316,7 +380,11 @@ export async function handlePhotoCreateArSelect(ctx: BotContext): Promise<void> 
       modelId: PHOTO_CREATE_MODEL_ID,
       prompt: translatedPrompt,
       mediaInputs: resolved,
-      extraModelSettings: { ...PHOTO_CREATE_EXTRA_SETTINGS, aspect_ratio: aspectRatio },
+      extraModelSettings: {
+        ...PHOTO_CREATE_EXTRA_SETTINGS,
+        aspect_ratio: aspectRatio,
+        resolution,
+      },
       telegramChatId: chatId,
       sendOriginalLabel: ctx.t.common.sendOriginal,
       // Маскируем модель: подпись «📸 Создать фотографию», без refine

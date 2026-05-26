@@ -82,9 +82,10 @@ export {
   PHOTO_CREATE_PROMPT_MAX_CHARS,
   PHOTO_CREATE_RESOLUTION,
   PHOTO_CREATE_AR_OPTIONS,
+  PHOTO_CREATE_RES_OPTIONS,
   snapPhotoCreateAr,
 } from "./constants/photo-create.js";
-export type { PhotoCreateArOption } from "./constants/photo-create.js";
+export type { PhotoCreateArOption, PhotoCreateResOption } from "./constants/photo-create.js";
 export { PLANS } from "./constants/plans.js";
 export type { Plan } from "./constants/plans.js";
 export { ONE_SHOT_SETTING_KEYS } from "./constants/model-settings-keys.js";

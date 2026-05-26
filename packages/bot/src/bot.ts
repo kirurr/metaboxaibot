@@ -36,6 +36,7 @@ import {
   handlePhotoCreatePhoto,
   handlePhotoCreatePrompt,
   handlePhotoCreateArSelect,
+  handlePhotoCreateResSelect,
 } from "./scenes/photo-create.js";
 import {
   handlePhotoUpscaleEnter,
@@ -356,6 +357,7 @@ export function createBot(token: string): Bot<BotContext> {
   });
   bot.callbackQuery(/^upscale:/, handleUpscaleFactorSelect);
   bot.callbackQuery(/^photo_create:ar:/, handlePhotoCreateArSelect);
+  bot.callbackQuery(/^photo_create:res:/, handlePhotoCreateResSelect);
 
   // ── HeyGen avatar creation cancel ────────────────────────────────────────
   bot.callbackQuery("heygen_avatar_cancel", handleHeygenAvatarCancel);
@@ -607,6 +609,17 @@ export function createBot(token: string): Bot<BotContext> {
         return handlePhotoCreatePhoto(ctx);
       if (ctx.message?.text) return handlePhotoCreatePrompt(ctx);
       await ctx.reply(ctx.t.scenarios.photoCreateAwaitArHint);
+      return;
+    }
+    if (state?.state === "PHOTO_CREATE_AWAIT_RES") {
+      // Аналогично AWAIT_AR: ждём callback клавиатуры разрешения. Фото →
+      // перезапуск flow, текст → перезапись промпта (handlePhotoCreatePrompt
+      // вернёт state в AWAIT_AR). Прочее — мягкая подсказка.
+      if (ctx.message?.photo) return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handlePhotoCreatePhoto(ctx);
+      if (ctx.message?.text) return handlePhotoCreatePrompt(ctx);
+      await ctx.reply(ctx.t.scenarios.photoCreateAwaitResHint);
       return;
     }
     if (state?.state === "VIDEO_UPSCALE_AWAIT_VIDEO") {

@@ -123,12 +123,15 @@ export default {
     photoAnimateGenerating: "🎞️ Starting animation...",
     photoCreate: "📸 Create photo",
     photoCreateWelcome: "I make realistic stylish portraits from your photo and description.",
-    photoCreateStepPhoto: "<b>Step 1 of 3.</b> Send <b>your photo</b>. Max 20 MB.",
-    photoCreateStepPrompt: "<b>Step 2 of 3.</b> Describe what photo you want to get.",
-    photoCreateStepAr: "<b>Step 3 of 3.</b> Choose the aspect ratio:",
+    photoCreateStepPhoto: "<b>Step 1 of 4.</b> Send <b>your photo</b>. Max 20 MB.",
+    photoCreateStepPrompt: "<b>Step 2 of 4.</b> Describe what photo you want to get.",
+    photoCreateStepAr: "<b>Step 3 of 4.</b> Choose the aspect ratio:",
+    photoCreateStepRes: "<b>Step 4 of 4.</b> Choose the resolution:",
     photoCreatePromptUpdated: "✍️ Description updated. Choose the aspect ratio:",
     photoCreateAwaitArHint:
       "👇 Choose an aspect ratio on the keyboard below, or send a new photo / description.",
+    photoCreateAwaitResHint:
+      "👇 Choose a resolution on the keyboard below, or send a new photo / description.",
     photoCreateNotPhoto: "📷 That's not a photo. Please send an image.",
     photoCreatePhotoTooLarge: "📷 Photo is too large. Max 20 MB.",
     photoCreateAlbumNotice:

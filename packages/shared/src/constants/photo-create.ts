@@ -22,8 +22,31 @@ export const PHOTO_CREATE_BUFFER_MODEL_ID = "photo_create";
 /** Hard cap on user prompt length (pre-validated in scene). */
 export const PHOTO_CREATE_PROMPT_MAX_CHARS = 2000;
 
-/** Фикс-разрешение сценария — 2K (стоимость = nano-banana-pro.costVariants["2K"]). */
+/**
+ * Дефолтное разрешение сценария — 2K (стоимость = nano-banana-pro.costVariants["2K"]).
+ * Перед сабмитом перекрывается значением, выбранным юзером на шаге Res
+ * (см. `PHOTO_CREATE_RES_OPTIONS`).
+ */
 export const PHOTO_CREATE_RESOLUTION = "2K";
+
+/**
+ * Resolution варианты, показываемые на инлайн-клавиатуре после AR.
+ * 1K не показываем — у nano-banana-pro 1K и 2K стоят одинаково
+ * (см. design.models.ts → nano-banana-pro.costVariants), смысла выбирать 1K
+ * нет. Значения 1-в-1 соответствуют enum'у KIE API
+ * (docs/schema/kie/bananapro.md → resolution).
+ */
+export interface PhotoCreateResOption {
+  /** Значение, уходящее в `extraModelSettings.resolution`. */
+  value: "2K" | "4K";
+  /** Подпись на кнопке. */
+  label: string;
+}
+
+export const PHOTO_CREATE_RES_OPTIONS: readonly PhotoCreateResOption[] = [
+  { value: "2K", label: "2K" },
+  { value: "4K", label: "4K" },
+] as const;
 
 /**
  * Aspect-ratio варианты, показываемые на инлайн-клавиатуре после промпта.
