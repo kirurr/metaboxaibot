@@ -348,14 +348,24 @@ export class KieVideoAdapter implements VideoAdapter {
       inputPayload.resolution = resolution;
 
       inputPayload.generate_audio = ms.generate_audio !== undefined ? ms.generate_audio : true;
-      // Primary evolink seedance-2 экспонирует enable_web_search setting (только t2v).
-      // Когда KIE — fallback, прокидываем выбор юзера (вместо хардкода false).
-      inputPayload.web_search = !!ms.enable_web_search;
       inputPayload.nsfw_checker = false;
 
       // first_frame / last_frame
       const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
       const lastFrame = mi.last_frame?.[0];
+
+      // web_search принимается KIE только в чистой t2v-сцене. Передача `true`
+      // при наличии first/last_frame или reference media даёт 422 "Web search
+      // only can be used in the scene of t2v". Зеркало гарда evolink (см.
+      // [evolink.adapter.ts]). Когда не t2v — просто не выставляем поле.
+      const refImagesT2V = (mi.ref_images ?? []).length;
+      const refVideosT2V = (mi.ref_videos ?? []).length;
+      const refAudiosT2V = (mi.ref_audios ?? []).length;
+      const isPureT2V =
+        !firstFrame && !lastFrame && refImagesT2V === 0 && refVideosT2V === 0 && refAudiosT2V === 0;
+      if (isPureT2V && ms.enable_web_search) {
+        inputPayload.web_search = true;
+      }
       if (firstFrame)
         inputPayload.first_frame_url = await uploadFileUrl(
           this.apiKey,
