@@ -397,6 +397,8 @@ export default {
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
     kieImageAspectRatioOutOfRange:
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    kieKlingMissingElement:
+      "❌ Your prompt references @Element{element}, but no image is uploaded for that slot. Upload a photo to the «Element {element}» slot or remove the reference from the prompt.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
     imageFormatUnsupported:

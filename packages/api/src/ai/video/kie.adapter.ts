@@ -4,7 +4,13 @@ import type {
   VideoValidationError,
   VideoResult,
 } from "./base.adapter.js";
-import { AI_MODELS, config, UserFacingError, PHOTO_ANIMATE_PROMPT } from "@metabox/shared";
+import {
+  AI_MODELS,
+  config,
+  UserFacingError,
+  PHOTO_ANIMATE_PROMPT,
+  ELEMENT_CI_RE,
+} from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
   buildKieUploadName,
@@ -293,6 +299,7 @@ export class KieVideoAdapter implements VideoAdapter {
         element_input_urls: string[];
       }> = [];
       let placeholderSourceUrl: string | undefined;
+      const filledElementSlots = new Set<number>();
       for (let i = 1; i <= 3; i++) {
         const urls = mi[`ref_element_${i}`] ?? [];
         if (urls.length === 0) continue;
@@ -302,6 +309,8 @@ export class KieVideoAdapter implements VideoAdapter {
         // placeholderSourceUrl, иначе финальный if (!hasFrame && placeholder)
         // увидит "" как falsy и пропустит push → KIE 422 на @elementN.
         if (slice[0] && !placeholderSourceUrl) placeholderSourceUrl = slice[0];
+        if (!slice[0]) continue;
+        filledElementSlots.add(i);
         const uploaded = await Promise.all(
           slice.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
@@ -312,6 +321,25 @@ export class KieVideoAdapter implements VideoAdapter {
           description: `reference element ${i}`,
           element_input_urls: elementUrls,
         });
+      }
+      // Валидация: prompt не должен ссылаться на @ElementN, для которого нет
+      // загруженного референса. Иначе KIE возвращает 422 "kling_elements must
+      // contain an element with name 'ElementN' referenced in prompt", и юзер
+      // получает generic "модель устала" + refund вместо понятного сообщения.
+      if (input.prompt) {
+        const referencedElements = new Set<number>();
+        for (const match of input.prompt.matchAll(ELEMENT_CI_RE)) {
+          const n = Number(match[1]);
+          if (Number.isFinite(n)) referencedElements.add(n);
+        }
+        for (const n of referencedElements) {
+          if (!filledElementSlots.has(n)) {
+            throw new UserFacingError(`Kling: @Element${n} referenced but slot is empty`, {
+              key: "kieKlingMissingElement",
+              params: { element: n },
+            });
+          }
+        }
       }
       // Заглушка для KIE: если frame нет, но есть elements — кладём ОДНУ
       // картинку (первого элемента) в image_urls. KIE требует non-empty

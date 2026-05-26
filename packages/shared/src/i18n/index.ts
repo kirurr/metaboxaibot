@@ -283,6 +283,7 @@ export interface Translations {
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
+    kieKlingMissingElement: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
     imageDimensionOutOfRange: string;
