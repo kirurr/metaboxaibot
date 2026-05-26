@@ -32,6 +32,7 @@ export type {
   ModelSettingDef,
   ModelSettingOption,
   ModelSettingType,
+  VideoShot,
   ChatInput,
   ChatOutput,
   GenerationInput,
@@ -79,6 +80,16 @@ export {
   PHOTO_ANIMATE_PROMPT,
   snapAspectRatio,
 } from "./constants/photo-animate.js";
+export {
+  MULTISHOT_MAX_SHOTS,
+  MULTISHOT_SHOT_DURATION_MIN,
+  MULTISHOT_SHOT_DURATION_MAX,
+  MULTISHOT_TOTAL_DURATION_MIN,
+  MULTISHOT_TOTAL_DURATION_MAX,
+  MULTISHOT_PROMPT_MAX_LENGTH,
+  parseVideoShots,
+  sumShotDuration,
+} from "./constants/multishot.js";
 export {
   PHOTO_CREATE_MODEL_ID,
   PHOTO_CREATE_BUFFER_MODEL_ID,

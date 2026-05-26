@@ -335,7 +335,23 @@
     "audioTitle": "Create audio.",
     "audioSubtitle": "TTS, voice cloning, music — pick a model and describe the scene.",
     "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…",
-    "openPromptExamples": "Prompt examples"
+    "openPromptExamples": "Prompt examples",
+    "multishot": {
+      "shotN": "Shot {{n}}",
+      "shotPlaceholder": "Describe this shot",
+      "duration": "Duration",
+      "durationMinus": "Decrease duration",
+      "durationPlus": "Increase duration",
+      "seconds": "{{value}}s",
+      "addShot": "Add shot",
+      "removeShot": "Remove shot",
+      "maxShotsHint": "No more than {{max}} shots",
+      "total": "Total: {{total}}s (need {{min}}–{{max}})",
+      "errEmpty": "Add at least one shot",
+      "errTooMany": "Too many shots",
+      "errEmptyPrompt": "Fill in the prompt for every shot",
+      "errTotal": "Total duration must be 3–15s"
+    }
   },
   "chat": {
     "newDialog": "New dialog",

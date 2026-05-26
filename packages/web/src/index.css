@@ -4529,6 +4529,133 @@ select {
   color: var(--text-hint);
 }
 
+/* ── Мультишот: inline-редактор списка шотов ─────────────────────────────── */
+.gen-shotlist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gen-shot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated, var(--bg));
+}
+.gen-shot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.gen-shot-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+.gen-shot-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  transition:
+    color 150ms var(--ease),
+    background 150ms var(--ease);
+}
+.gen-shot-remove:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+.gen-shot-prompt {
+  min-height: 64px;
+}
+.gen-shot-dur {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.gen-shot-dur-label {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.gen-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+}
+.gen-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  transition:
+    color 150ms var(--ease),
+    background 150ms var(--ease);
+}
+.gen-stepper-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg);
+}
+.gen-stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.gen-stepper-val {
+  min-width: 56px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.gen-shotlist-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gen-shot-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong, var(--border));
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+.gen-shot-add:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.gen-shot-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.gen-shot-total {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.gen-shot-total.is-invalid {
+  color: var(--danger, #e5484d);
+}
+
 .gen-chips {
   display: flex;
   flex-wrap: wrap;

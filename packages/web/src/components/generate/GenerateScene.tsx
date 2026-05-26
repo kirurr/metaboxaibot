@@ -61,6 +61,8 @@ import {
   type ActiveMention,
 } from "@/utils/elementMentions";
 import { CreateAvatarModal } from "./CreateAvatarModal";
+import { ShotListEditor } from "./ShotListEditor";
+import { multishotBlocker, parseShots, type ShotEntry } from "@/utils/multishot";
 import { GenerationHistory, type PendingJob, type TrackedJobOutput } from "./GenerationHistory";
 import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
@@ -1188,12 +1190,49 @@ export function GenerateScene({
   ]);
 
   // Список доступных settings — выкидываем unsupported types и применяем dependsOn.
+  // `shot-list` не рисуем чипом: у него собственный inline-редактор в области
+  // промпта (см. ShotListEditor ниже).
   const visibleSettings = useMemo(() => {
     if (!selectedModel) return [];
     return selectedModel.settings.filter(
-      (s) => !UNSUPPORTED_TYPES.has(s.type) && isSettingVisible(s, settingValues),
+      (s) =>
+        s.type !== "shot-list" &&
+        !UNSUPPORTED_TYPES.has(s.type) &&
+        isSettingVisible(s, settingValues, selectedModel.settings),
     );
   }, [selectedModel, settingValues]);
+
+  // ── Мультишот (Kling) ──────────────────────────────────────────────────────
+  // Модель поддерживает мультишот, если объявляет настройку типа `shot-list`.
+  const multishotSetting = useMemo(
+    () => selectedModel?.settings.find((s) => s.type === "shot-list"),
+    [selectedModel],
+  );
+  const multishotOn = !!multishotSetting && settingValues["multishot"] === true;
+  const shots = useMemo<ShotEntry[]>(
+    () => (multishotOn ? parseShots(settingValues[multishotSetting!.key]) : []),
+    [multishotOn, multishotSetting, settingValues],
+  );
+  const setShots = useCallback(
+    (next: ShotEntry[]) => {
+      if (!multishotSetting) return;
+      setSettingValues((prev) => ({ ...prev, [multishotSetting.key]: next }));
+    },
+    [multishotSetting],
+  );
+
+  // При включении мультишота сразу материализуем первый пустой шот в state,
+  // чтобы отображаемый редактор, валидация (blockerReason) и preview сходились:
+  // иначе ShotListEditor рисует виртуальный шот, а `shots` остаётся пустым и
+  // кнопка говорит «добавьте шот», хотя он уже виден. Сидим только если пусто
+  // (функциональный setState без settingValues в deps → без циклов).
+  useEffect(() => {
+    if (!multishotOn || !multishotSetting) return;
+    setSettingValues((prev) => {
+      if (parseShots(prev[multishotSetting.key]).length > 0) return prev;
+      return { ...prev, [multishotSetting.key]: [{ prompt: "", duration: 5 }] };
+    });
+  }, [multishotOn, multishotSetting]);
 
   // Юзер расходится с применённым пресет-снимком? Показ кнопки «Сбросить»
   // на пресетных страницах. Сравниваем только то, что снимок описывает —
@@ -1684,6 +1723,14 @@ export function GenerateScene({
     const hasReadyMedia = Object.values(slotFiles).some((arr) =>
       arr.some((f) => f.status === "ready"),
     );
+    // Мультишот: вместо одиночного промпта валидируем список шотов
+    // (1–5 шотов, у каждого непустой промпт, сумма длительностей 3–15с).
+    if (multishotOn) {
+      const errKey = multishotBlocker(shots);
+      if (errKey) return t(errKey);
+      return null;
+    }
+
     const promptIsEmpty = prompt.trim().length === 0;
     if (hidePrompt) {
       // hidePrompt-пресеты (апскейл/удаление фона/замена лица…): промпт скрыт и
@@ -1715,6 +1762,8 @@ export function GenerateScene({
     prompt,
     elementsCap,
     activeMentions,
+    multishotOn,
+    shots,
     t,
   ]);
 
@@ -1822,6 +1871,8 @@ export function GenerateScene({
   // fixedPrompt (hidePrompt-пресеты) авторитетнее изменяемого стейта — защищает от
   // гонки с восстановлением черновика при SPA-навигации (см. проп fixedPrompt).
   function buildSubmitPrompt(): string {
+    // В мультишоте промпты едут в settings.shots, top-level prompt пустой.
+    if (multishotOn) return "";
     const base = fixedPrompt != null ? fixedPrompt : prompt;
     return elementsCap ? translateMentionsToCanonical(base, cappedMentions) : base;
   }
@@ -2216,7 +2267,11 @@ export function GenerateScene({
               нижнем углу инпута; textarea авторастёт и резервирует место снизу.
               hidePrompt прячет блок целиком (пресет апскейла и т.п.) — значение
               prompt при этом остаётся в state и уходит в сабмит. */}
-          {!hidePrompt && (
+          {/* Мультишот: одиночный промпт заменяется inline-редактором списка
+              шотов (промпт + длительность каждого, кнопка «+»). */}
+          {!hidePrompt && multishotOn && <ShotListEditor shots={shots} onChange={setShots} />}
+
+          {!hidePrompt && !multishotOn && (
             <div
               className={clsx(
                 "gen-prompt-wrap",
@@ -2327,8 +2382,10 @@ export function GenerateScene({
           )}
 
           {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
-              картинок элемента. Кнопка «Элементы» живёт внутри textarea выше. */}
-          {elementsFeatureOn && activeMentions.length > 0 && (
+              картинок элемента. Кнопка «Элементы» живёт внутри textarea выше.
+              В мультишоте одиночный промпт скрыт — прячем и его чипы, чтобы не
+              висели под редактором шотов от прежнего текста. */}
+          {elementsFeatureOn && !multishotOn && activeMentions.length > 0 && (
             <div
               style={{
                 display: "flex",

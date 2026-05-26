@@ -34,6 +34,7 @@ import {
   VIDEO_UPSCALE_MODEL_ID,
   videoResolutionTier,
   videoFpsTier,
+  parseVideoShots,
 } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { badRequestResponse, constructOpenAPIonRouteHook } from "../utils/openapi.js";
@@ -496,7 +497,13 @@ export const webGenerationRoutes: FastifyPluginAsync = async (fastify) => {
       if (!model) {
         return reply.code(400).send({ code: "BAD_REQUEST", error: "Unknown model" });
       }
-      if (!prompt.trim() && !model.promptOptional) {
+      // В мультишоте промпты живут в settings.shots, top-level prompt пустой —
+      // не считаем это ошибкой, если есть хотя бы один непустой шот-промпт.
+      // Сами границы шотов валидирует адаптер (validateVideoRequest ниже).
+      const hasMultishotPrompts =
+        settings?.multishot === true &&
+        parseVideoShots(settings.shots).some((s) => s.prompt.trim().length > 0);
+      if (!prompt.trim() && !model.promptOptional && !hasMultishotPrompts) {
         return reply.code(400).send({ code: "BAD_REQUEST", error: "Prompt is required" });
       }
 
