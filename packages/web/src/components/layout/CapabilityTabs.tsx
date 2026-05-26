@@ -192,25 +192,32 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       link: "music",
     },
     {
-      nameKey: "capabilities.features.audio.dubbing.name",
-      descKey: "capabilities.features.audio.dubbing.desc",
-      glyph: "◯",
+      nameKey: "capabilities.features.audio.sounds.name",
+      descKey: "capabilities.features.audio.sounds.desc",
+      glyph: "≋",
+      link: "sounds",
     },
-    {
-      nameKey: "capabilities.features.audio.transcribe.name",
-      descKey: "capabilities.features.audio.transcribe.desc",
-      glyph: "▤",
-    },
-    {
-      nameKey: "capabilities.features.audio.cleanup.name",
-      descKey: "capabilities.features.audio.cleanup.desc",
-      glyph: "△",
-    },
-    {
-      nameKey: "capabilities.features.audio.library.name",
-      descKey: "capabilities.features.audio.library.desc",
-      glyph: "▼",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /audio).
+    // {
+    //   nameKey: "capabilities.features.audio.dubbing.name",
+    //   descKey: "capabilities.features.audio.dubbing.desc",
+    //   glyph: "◯",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.transcribe.name",
+    //   descKey: "capabilities.features.audio.transcribe.desc",
+    //   glyph: "▤",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.cleanup.name",
+    //   descKey: "capabilities.features.audio.cleanup.desc",
+    //   glyph: "△",
+    // },
+    // {
+    //   nameKey: "capabilities.features.audio.library.name",
+    //   descKey: "capabilities.features.audio.library.desc",
+    //   glyph: "▼",
+    // },
   ],
 };
 

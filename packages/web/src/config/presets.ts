@@ -80,8 +80,8 @@ export const imagePresets: PresetMap = {
         output_format: "png",
       },
     },
-    title: "Апскейл фото",
-    subtitle: "Увеличивает разрешение и чёткость фотографии до 4K",
+    title: "presets.image.upscale.title",
+    subtitle: "presets.image.upscale.subtitle",
   },
   // Перенос бот-сценария «✂️ Удаление фона» (scenes/background-removal.ts).
   // Модель bg-removal (fal Ideogram remove-background). Промпт не нужен —
@@ -92,8 +92,8 @@ export const imagePresets: PresetMap = {
     hideModelPicker: true,
     hidePrompt: true,
     prompt: "",
-    title: "Удаление фона",
-    subtitle: "Удаляет фон с фотографии, оставляя объект на прозрачном фоне",
+    title: "presets.image.bg-removal.title",
+    subtitle: "presets.image.bg-removal.subtitle",
   },
   // Перенос бот-сценария «🔄 Замена лица» (scenes/face-swap.ts). Модель
   // face-swap-classic. Фикс-промпт, поле скрыто. Слот edit принимает 2 фото —
@@ -105,8 +105,8 @@ export const imagePresets: PresetMap = {
     hidePrompt: true,
     prompt:
       "Take image 1 as a reference and transfer the face from image 2 to image 1, maintaining the proportions, emotion, and light in image 1.",
-    title: "Замена лица",
-    subtitle: "Загрузите 2 фото: 1-е — куда вставить лицо, 2-е — чьё лицо взять",
+    title: "presets.image.face-swap.title",
+    subtitle: "presets.image.face-swap.subtitle",
   },
   // Перенос бот-сценария «👗 Примерка одежды» (scenes/clothing-tryon.ts). Модель
   // clothing-tryon. Фикс-промпт, поле скрыто. Слот edit принимает 2 фото —
@@ -118,8 +118,8 @@ export const imagePresets: PresetMap = {
     hidePrompt: true,
     prompt:
       "Take image 1 as a reference and transfer the clothing from image 2 to image 1, maintaining the body, pose, and light in image 1. Keep the person's face and don't change anything else.",
-    title: "Примерка одежды",
-    subtitle: "Загрузите 2 фото: 1-е — человек, 2-е — одежда",
+    title: "presets.image.clothing-tryon.title",
+    subtitle: "presets.image.clothing-tryon.subtitle",
   },
   // Перенос бот-сценария «🪄 Убрать объект» (scenes/object-removal.ts). Модель
   // object-removal (gpt-image-2 i2i). Поле промпта ПОКАЗЫВАЕМ — юзер пишет, что
@@ -131,15 +131,15 @@ export const imagePresets: PresetMap = {
     hideModelPicker: true,
     hidePrompt: false,
     prompt: "",
-    promptPlaceholder: "Что убрать? Напр.: человек на заднем плане",
+    promptPlaceholder: "presets.image.object-removal.promptPlaceholder",
     settings: {
       "object-removal": {
         resolution: "1K",
         aspect_ratio: "auto",
       },
     },
-    title: "Убрать объект",
-    subtitle: "Удаляет указанный объект с фото, дорисовывая фон на его месте",
+    title: "presets.image.object-removal.title",
+    subtitle: "presets.image.object-removal.subtitle",
   },
 };
 
@@ -161,8 +161,8 @@ export const videoPresets: PresetMap = {
         duration: 6,
       },
     },
-    title: "Оживить фото",
-    subtitle: "Создаёт короткое видео-оживление из одной фотографии",
+    title: "presets.video.photo-animate.title",
+    subtitle: "presets.video.photo-animate.subtitle",
   },
   // Перенос бот-сценария «🎬 Апскейл видео» (scenes/upscale.ts). Модель
   // video-upscale (KIE Topaz, replicate fallback). Промпт не нужен — модель
@@ -180,17 +180,18 @@ export const videoPresets: PresetMap = {
         upscale_factor: "2",
       },
     },
-    title: "Апскейл видео",
-    subtitle: "Увеличивает разрешение и чёткость видео с помощью Topaz AI",
+    title: "presets.video.video-upscale.title",
+    subtitle: "presets.video.video-upscale.subtitle",
   },
 };
 
 export const audioPresets: PresetMap = {
+  // Озвучка текста: tts-openai / tts-cartesia / tts-el. sounds-el (звуковые
+  // эффекты) сюда НЕ входит — это отдельный пресет `sounds` (как и в боте).
   tts: {
-    allowedModelIds: ["tts-openai", "tts-cartesia", "tts-el", "sounds-el"],
+    allowedModelIds: ["tts-openai", "tts-cartesia", "tts-el"],
     prompt: "",
     modelId: "tts-openai",
-    // i18n-ключи, но просто текст тоже сработает
     title: "presets.audio.tts.title",
     subtitle: "presets.audio.tts.subtitle",
   },
@@ -199,7 +200,6 @@ export const audioPresets: PresetMap = {
     prompt: "",
     modelId: "voice-clone",
     hideModelPicker: true,
-    // i18n-ключи, но просто текст тоже сработает
     title: "presets.audio.clone.title",
     subtitle: "presets.audio.clone.subtitle",
   },
@@ -207,9 +207,20 @@ export const audioPresets: PresetMap = {
     allowedModelIds: ["suno", "music-el"],
     prompt: "",
     modelId: "suno",
-    // i18n-ключи, но просто текст тоже сработает
     title: "presets.audio.music.title",
     subtitle: "presets.audio.music.subtitle",
+  },
+  // Перенос бот-сценария «🔔 Звуковые эффекты» (audio sub-section soundsActivated).
+  // Модель sounds-el (ElevenLabs SFX через KIE). Промпт ПОКАЗЫВАЕМ — юзер описывает
+  // звук; модель не promptOptional. Длительность/влияние — селекты из model.settings.
+  sounds: {
+    allowedModelIds: ["sounds-el"],
+    prompt: "",
+    modelId: "sounds-el",
+    hideModelPicker: true,
+    promptPlaceholder: "presets.audio.sounds.promptPlaceholder",
+    title: "presets.audio.sounds.title",
+    subtitle: "presets.audio.sounds.subtitle",
   },
 };
 
