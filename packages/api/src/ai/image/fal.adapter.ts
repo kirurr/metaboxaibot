@@ -12,6 +12,25 @@ import { logCall } from "../../utils/fetch.js";
 const VIRTUAL_TRYON_ENDPOINT = "fal-ai/image-apps-v2/virtual-try-on";
 
 /**
+ * fal Grok Imagine — четыре отдельных endpoint'а: speed/quality × tti/edit.
+ * Выбор endpoint'а зависит от `modelSettings.enable_pro` (Speed=false,
+ * Quality=true) и наличия input-картинок. Используется как fallback на KIE
+ * primary `grok-imagine-image`. Шейп тела отличается от generic FAL submit'а
+ * (нет `image_size` / `negative_prompt`, есть raw `aspect_ratio` + опциональный
+ * `resolution` "1k"|"2k"), поэтому диспатчится в отдельный submit-метод.
+ */
+const GROK_IMAGINE_ENDPOINTS = {
+  speedT2i: "xai/grok-imagine-image",
+  speedEdit: "xai/grok-imagine-image/edit",
+  qualityT2i: "xai/grok-imagine-image/quality/text-to-image",
+  qualityEdit: "xai/grok-imagine-image/quality/edit",
+} as const;
+/** Cap на `num_images` в Grok endpoint'ах (одинаков для всех 4 вариантов). */
+const GROK_IMAGINE_MAX_IMAGES = 4;
+/** Cap на `image_urls` в edit endpoint'ах (по схеме fal). */
+const GROK_IMAGINE_MAX_EDIT_IMAGES = 3;
+
+/**
  * Models routed through the fal Ideogram remove-background endpoint. Input is
  * a single `image_url` (no prompt / image_size); output is a single `image`
  * object (not an `images` array). Dispatched by modelId — the endpoint URL
@@ -179,6 +198,59 @@ export class FalAdapter implements ImageAdapter {
   }
 
   /**
+   * Dedicated submit for fal Grok Imagine — выбирает 1 из 4 endpoint'ов
+   * (speed/quality × tti/edit) по `modelSettings.enable_pro` и наличию input-
+   * картинок. Тело Grok-endpoint'ов несовместимо с generic FAL submit'ом
+   * (нет `image_size`, нет `negative_prompt`, есть `resolution` "1k"|"2k").
+   *
+   * Биллинг — по primary (KIE grok-imagine-image), `costUsdPerRequest` на
+   * fallback-записи используется только для audit-метаданных.
+   */
+  private async submitGrokImagine(input: ImageInput, editUrls: string[]): Promise<string> {
+    const ms = input.modelSettings ?? {};
+    const enablePro = ms.enable_pro === true;
+    const isEdit = editUrls.length > 0;
+    const endpoint = enablePro
+      ? isEdit
+        ? GROK_IMAGINE_ENDPOINTS.qualityEdit
+        : GROK_IMAGINE_ENDPOINTS.qualityT2i
+      : isEdit
+        ? GROK_IMAGINE_ENDPOINTS.speedEdit
+        : GROK_IMAGINE_ENDPOINTS.speedT2i;
+
+    const aspectRatio =
+      (ms.aspect_ratio as string | undefined) ?? input.aspectRatio ?? (isEdit ? "auto" : "1:1");
+
+    const falInput: Record<string, unknown> = {
+      prompt: input.prompt,
+      aspect_ratio: aspectRatio,
+    };
+
+    if (ms.num_images !== undefined) {
+      const n = Math.max(1, Math.min(GROK_IMAGINE_MAX_IMAGES, Number(ms.num_images) || 1));
+      if (n > 1) falInput.num_images = n;
+    }
+    // Grok принимает только "1k" / "2k" (lowercase). Нормализуем популярные
+    // варианты UI ("1K" / "2K") к ожидаемому формату; неизвестные значения
+    // не передаём — endpoint возьмёт дефолт "1k".
+    const rawRes = ms.resolution;
+    if (typeof rawRes === "string") {
+      const normalized = rawRes.toLowerCase();
+      if (normalized === "1k" || normalized === "2k") {
+        falInput.resolution = normalized;
+      }
+    }
+    if (ms.output_format) falInput.output_format = ms.output_format;
+    if (isEdit) {
+      falInput.image_urls = editUrls.slice(0, GROK_IMAGINE_MAX_EDIT_IMAGES);
+    }
+
+    logCall(endpoint, "submit", falInput);
+    const { request_id } = await fal.queue.submit(endpoint, { input: falInput });
+    return `${endpoint}${SEP}${request_id}`;
+  }
+
+  /**
    * Dedicated submit for fal Ideogram remove-background — input is only
    * `image_url` (no prompt / image_size). mediaInputs.edit: [0] = source photo.
    */
@@ -198,6 +270,14 @@ export class FalAdapter implements ImageAdapter {
   async submit(input: ImageInput): Promise<string> {
     const editUrls = input.mediaInputs?.edit ?? (input.imageUrl ? [input.imageUrl] : []);
     const imageUrl = editUrls[0];
+
+    // Grok Imagine: 4 endpoint'а зависят от `enable_pro` + наличия input-фото.
+    // Диспатч ДО selectEndpoint, потому что generic select не умеет выбирать
+    // между speed/quality вариантами по setting'у.
+    if (this.modelId === "grok-imagine-image") {
+      return this.submitGrokImagine(input, editUrls);
+    }
+
     const endpoint = this.selectEndpoint(input);
 
     if (endpoint === VIRTUAL_TRYON_ENDPOINT) {
