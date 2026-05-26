@@ -250,3 +250,31 @@ export const presetsBySection: Record<GenerateSection, PresetMap> = {
   video: videoPresets,
   audio: audioPresets,
 };
+
+/**
+ * Реверс-лукап «модель → ключ её выделенного пресета» по секциям. Включаем только
+ * пресеты с `hideModelPicker && modelId` (выделенные одно-модельные сценарии:
+ * upscale / photo-create / face-swap / clone / ...), т.к. именно их модели надо
+ * открывать на странице-пресете, а не на голой секции. Пресеты с пикером (swap,
+ * tts, music) сюда НЕ попадают — их модели доступны и на голой странице.
+ */
+const dedicatedPresetByModel: Record<GenerateSection, Record<string, string>> = (
+  Object.entries(presetsBySection) as [GenerateSection, PresetMap][]
+).reduce(
+  (acc, [section, map]) => {
+    acc[section] = {};
+    for (const [key, preset] of Object.entries(map)) {
+      if (preset.hideModelPicker && preset.modelId) {
+        // первый матч выигрывает (коллизий нет — у hideModelPicker-пресетов modelId уникальны)
+        acc[section][preset.modelId] ??= key;
+      }
+    }
+    return acc;
+  },
+  { image: {}, video: {}, audio: {} } as Record<GenerateSection, Record<string, string>>,
+);
+
+/** Ключ выделенного пресета для модели, либо null (модель доступна на голой странице). */
+export function findPresetKeyForModel(section: GenerateSection, modelId: string): string | null {
+  return dedicatedPresetByModel[section][modelId] ?? null;
+}
