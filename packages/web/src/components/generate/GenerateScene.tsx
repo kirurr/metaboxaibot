@@ -94,6 +94,12 @@ export type GenerateSceneProps = {
    */
   hideModelPicker?: boolean;
   /**
+   * Скрыть поле промпта целиком. Значение `prompt` (из пресета) остаётся в state и
+   * уходит в сабмит, поэтому модели с обязательным промптом не блокируются. Для
+   * сценариев, где юзер только грузит медиа — например, апскейл фото (/image/upscale).
+   */
+  hidePrompt?: boolean;
+  /**
    * Если задан — пресетный режим: показываем кнопку «Сбросить», когда юзер
    * вручную изменил modelId / prompt / settings относительно пресет-снимка.
    * Слот-файлы НЕ сбрасываются. Callback должен запустить повторное
@@ -608,6 +614,7 @@ export function GenerateScene({
   promptPlaceholder,
   models,
   hideModelPicker = false,
+  hidePrompt = false,
   onReset,
   presetSettingsByModel,
   ambientSection,
@@ -2164,7 +2171,10 @@ export function GenerateScene({
           )}
 
           {/* Prompt. Кнопки «Готовые промпты» + «Элементы» — панелью в левом
-              нижнем углу инпута; textarea авторастёт и резервирует место снизу. */}
+              нижнем углу инпута; textarea авторастёт и резервирует место снизу.
+              hidePrompt прячет блок целиком (пресет апскейла и т.п.) — значение
+              prompt при этом остаётся в state и уходит в сабмит. */}
+          {!hidePrompt && (
           <div
             className={clsx(
               "gen-prompt-wrap",
@@ -2272,6 +2282,7 @@ export function GenerateScene({
               </ul>
             )}
           </div>
+          )}
 
           {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
               картинок элемента. Кнопка «Элементы» живёт внутри textarea выше. */}

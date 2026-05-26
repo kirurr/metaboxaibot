@@ -24,6 +24,12 @@ export type GeneratePreset = {
   modelId?: string;
   settings?: Record<string, Record<string, unknown>>;
   hideModelPicker?: boolean;
+  /**
+   * Полностью скрывает поле промпта. `prompt` пресета всё равно уходит в сабмит
+   * (значение остаётся в state), поэтому модели с обязательным промптом не блокируются.
+   * Для сценариев, где юзер ничего не пишет — только грузит медиа (напр. апскейл фото).
+   */
+  hidePrompt?: boolean;
   allowedModelIds?: readonly string[];
   title?: string;
   subtitle?: string;
@@ -54,6 +60,28 @@ export const imagePresets: PresetMap = {
     // i18n-ключи, но просто текст тоже сработает
     title: "presets.image.swap.title",
     subtitle: "presets.image.swap.subtitle",
+  },
+  // Перенос бот-сценария «📷 Апскейл фото» (см. packages/bot/src/scenes/upscale.ts).
+  // Под капотом — модель image-upscale (nano-banana-pro @ KIE, evolink fallback).
+  // Юзер ничего не настраивает: только грузит фото в слот `edit`. Промт и настройки
+  // (resolution 4K, aspect_ratio auto, output_format png) зашиты и уходят автоматически.
+  // Модель hiddenFromCarousel — видна только через этот пресет.
+  upscale: {
+    allowedModelIds: ["image-upscale"],
+    modelId: "image-upscale",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt:
+      "High-resolution 4K enhancement, photorealistic, hyper-detailed, crystal clear texture, sharp focus, professionally restored, maintaining exact original features and composition, no distortion, cinematic lighting.",
+    settings: {
+      "image-upscale": {
+        resolution: "4K",
+        aspect_ratio: "auto",
+        output_format: "png",
+      },
+    },
+    title: "Апскейл фото",
+    subtitle: "Увеличивает разрешение и чёткость фотографии до 4K",
   },
 };
 

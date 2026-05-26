@@ -81,6 +81,7 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       nameKey: "capabilities.features.image.upscale.name",
       descKey: "capabilities.features.image.upscale.desc",
       glyph: "▲",
+      link: "upscale",
     },
     {
       nameKey: "capabilities.features.image.lora.name",
@@ -205,7 +206,9 @@ export function CapabilityTabs() {
   // утопала: семейство — это бренд, варианты выбираются уже внутри страницы.
   const modelsByCap = useMemo(() => {
     const dedup = (cap: Capability["id"]): WebModelDto[] => {
-      const list = modelsForCapability(allModels, cap);
+      // Preset-only модели (hiddenFromCarousel) в мега-меню не показываем —
+      // они доступны только через свой URL-пресет.
+      const list = modelsForCapability(allModels, cap).filter((m) => !m.hiddenFromCarousel);
       const seenFamilies = new Set<string>();
       const out: WebModelDto[] = [];
       for (const m of list) {
