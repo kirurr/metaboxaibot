@@ -233,7 +233,7 @@ export async function handlePhotoCreatePrompt(ctx: BotContext): Promise<void> {
 export async function handlePhotoCreateArSelect(ctx: BotContext): Promise<void> {
   if (!ctx.user || !ctx.callbackQuery?.data) return;
   const parts = ctx.callbackQuery.data.split(":");
-  const value = parts[2];
+  const value = parts.slice(2).join(":");
   if (parts[0] !== "photo_create" || parts[1] !== "ar" || !value) {
     await ctx.answerCallbackQuery();
     return;
