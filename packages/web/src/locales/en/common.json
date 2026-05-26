@@ -44,7 +44,10 @@
           "desc": "Removes the background, leaving the subject on transparency."
         },
         "faceSwap": { "name": "Face Swap", "desc": "Transfer a face from one photo to another." },
-        "clothingTryon": { "name": "Clothing Try-On", "desc": "Virtually try clothing on a photo." },
+        "clothingTryon": {
+          "name": "Clothing Try-On",
+          "desc": "Virtually try clothing on a photo."
+        },
         "objectRemoval": {
           "name": "Remove Object",
           "desc": "Removes an object and inpaints the background."

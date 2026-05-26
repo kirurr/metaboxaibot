@@ -67,32 +67,33 @@ const FEATURE_MENUS: Record<string, MenuItem[]> = {
       descKey: "capabilities.features.image.generate.desc",
       glyph: "▢",
     },
-    {
-      nameKey: "capabilities.features.image.product.name",
-      descKey: "capabilities.features.image.product.desc",
-      glyph: "◈",
-    },
-    {
-      nameKey: "capabilities.features.image.edit.name",
-      descKey: "capabilities.features.image.edit.desc",
-      glyph: "◯",
-    },
+    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
+    // {
+    //   nameKey: "capabilities.features.image.product.name",
+    //   descKey: "capabilities.features.image.product.desc",
+    //   glyph: "◈",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.edit.name",
+    //   descKey: "capabilities.features.image.edit.desc",
+    //   glyph: "◯",
+    // },
     {
       nameKey: "capabilities.features.image.upscale.name",
       descKey: "capabilities.features.image.upscale.desc",
       glyph: "▲",
       link: "upscale",
     },
-    {
-      nameKey: "capabilities.features.image.lora.name",
-      descKey: "capabilities.features.image.lora.desc",
-      glyph: "✪",
-    },
-    {
-      nameKey: "capabilities.features.image.style.name",
-      descKey: "capabilities.features.image.style.desc",
-      glyph: "◇",
-    },
+    // {
+    //   nameKey: "capabilities.features.image.lora.name",
+    //   descKey: "capabilities.features.image.lora.desc",
+    //   glyph: "✪",
+    // },
+    // {
+    //   nameKey: "capabilities.features.image.style.name",
+    //   descKey: "capabilities.features.image.style.desc",
+    //   glyph: "◇",
+    // },
     {
       nameKey: "capabilities.features.image.background.name",
       descKey: "capabilities.features.image.background.desc",

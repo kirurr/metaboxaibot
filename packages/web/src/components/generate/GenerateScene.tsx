@@ -2191,113 +2191,113 @@ export function GenerateScene({
               hidePrompt прячет блок целиком (пресет апскейла и т.п.) — значение
               prompt при этом остаётся в state и уходит в сабмит. */}
           {!hidePrompt && (
-          <div
-            className={clsx(
-              "gen-prompt-wrap",
-              (promptSection || elementsFeatureOn) && "has-inline-tools",
-            )}
-            style={{ position: "relative" }}
-          >
-            <textarea
-              ref={taRef}
-              className="gen-prompt"
-              placeholder={promptPlaceholder}
-              value={prompt}
-              onChange={onPromptChange}
-              // Перемещение каретки мышью/стрелками не триггерит onChange —
-              // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
-              onClick={(e) => detectMention(e.currentTarget)}
-              onKeyDown={onPromptKeyDown}
-              onKeyUp={(e) => {
-                // Навигационные клавиши обрабатывает onPromptKeyDown; здесь их
-                // пропускаем, иначе detectMention переоткрыл бы dropdown (Esc)
-                // и сбрасывал бы подсветку (↑/↓).
-                if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) return;
-                detectMention(e.currentTarget);
-              }}
-              onBlur={() => {
-                // Закрываем dropdown после клика по подсказке (mousedown успевает
-                // отработать раньше blur), иначе — при уходе фокуса.
-                window.setTimeout(() => setMentionQuery(null), 150);
-              }}
-            />
-            {(promptSection || elementsFeatureOn) && (
-              <div className="gen-prompt-tools">
-                {promptSection && (
-                  <button
-                    type="button"
-                    className="gen-prompt-examples-btn"
-                    onClick={openPromptsDialog}
-                    title={t("generate.openPromptExamples")}
-                    aria-label={t("generate.openPromptExamples")}
-                  >
-                    <Wand2 size={14} />
-                    <span>{t("generate.openPromptExamples")}</span>
-                  </button>
-                )}
-                {elementsFeatureOn && (
-                  <button
-                    type="button"
-                    className="gen-prompt-examples-btn"
-                    onClick={() => setMentionPickerOpen(true)}
-                    title={t("generate.elementsButton")}
-                    aria-label={t("generate.elementsButton")}
-                  >
-                    <AtSign size={14} />
-                    <span>{t("generate.elementsButton")}</span>
-                  </button>
-                )}
-              </div>
-            )}
-            {/* Inline-`@` dropdown подсказок элементов. */}
-            {mentionQuery && mentionMatches.length > 0 && (
-              <ul
-                className="card"
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: "100%",
-                  marginTop: 4,
-                  zIndex: 50,
-                  maxHeight: 240,
-                  overflowY: "auto",
-                  padding: 4,
-                  listStyle: "none",
+            <div
+              className={clsx(
+                "gen-prompt-wrap",
+                (promptSection || elementsFeatureOn) && "has-inline-tools",
+              )}
+              style={{ position: "relative" }}
+            >
+              <textarea
+                ref={taRef}
+                className="gen-prompt"
+                placeholder={promptPlaceholder}
+                value={prompt}
+                onChange={onPromptChange}
+                // Перемещение каретки мышью/стрелками не триггерит onChange —
+                // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
+                onClick={(e) => detectMention(e.currentTarget)}
+                onKeyDown={onPromptKeyDown}
+                onKeyUp={(e) => {
+                  // Навигационные клавиши обрабатывает onPromptKeyDown; здесь их
+                  // пропускаем, иначе detectMention переоткрыл бы dropdown (Esc)
+                  // и сбрасывал бы подсветку (↑/↓).
+                  if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) return;
+                  detectMention(e.currentTarget);
                 }}
-              >
-                {mentionMatches.map((el, i) => (
-                  <li key={el.id}>
+                onBlur={() => {
+                  // Закрываем dropdown после клика по подсказке (mousedown успевает
+                  // отработать раньше blur), иначе — при уходе фокуса.
+                  window.setTimeout(() => setMentionQuery(null), 150);
+                }}
+              />
+              {(promptSection || elementsFeatureOn) && (
+                <div className="gen-prompt-tools">
+                  {promptSection && (
                     <button
                       type="button"
-                      // mousedown (не click): срабатывает до blur textarea.
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        handlePickElement(el);
-                      }}
-                      // Синхронизируем подсветку с мышью, чтобы ↑/↓ и hover не расходились.
-                      onMouseEnter={() => setMentionActiveIndex(i)}
-                      className={clsx(
-                        "flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text",
-                        i === Math.min(mentionActiveIndex, mentionMatches.length - 1)
-                          ? "bg-bg-elevated"
-                          : "hover:bg-bg-elevated",
-                      )}
+                      className="gen-prompt-examples-btn"
+                      onClick={openPromptsDialog}
+                      title={t("generate.openPromptExamples")}
+                      aria-label={t("generate.openPromptExamples")}
                     >
-                      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
-                        {el.media[0]?.url ? (
-                          <img src={el.media[0].url} alt="" className="size-full object-cover" />
-                        ) : (
-                          <AtSign size={14} className="text-text-secondary" />
-                        )}
-                      </span>
-                      <span className="truncate">@{el.name}</span>
+                      <Wand2 size={14} />
+                      <span>{t("generate.openPromptExamples")}</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                  )}
+                  {elementsFeatureOn && (
+                    <button
+                      type="button"
+                      className="gen-prompt-examples-btn"
+                      onClick={() => setMentionPickerOpen(true)}
+                      title={t("generate.elementsButton")}
+                      aria-label={t("generate.elementsButton")}
+                    >
+                      <AtSign size={14} />
+                      <span>{t("generate.elementsButton")}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* Inline-`@` dropdown подсказок элементов. */}
+              {mentionQuery && mentionMatches.length > 0 && (
+                <ul
+                  className="card"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    marginTop: 4,
+                    zIndex: 50,
+                    maxHeight: 240,
+                    overflowY: "auto",
+                    padding: 4,
+                    listStyle: "none",
+                  }}
+                >
+                  {mentionMatches.map((el, i) => (
+                    <li key={el.id}>
+                      <button
+                        type="button"
+                        // mousedown (не click): срабатывает до blur textarea.
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handlePickElement(el);
+                        }}
+                        // Синхронизируем подсветку с мышью, чтобы ↑/↓ и hover не расходились.
+                        onMouseEnter={() => setMentionActiveIndex(i)}
+                        className={clsx(
+                          "flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text",
+                          i === Math.min(mentionActiveIndex, mentionMatches.length - 1)
+                            ? "bg-bg-elevated"
+                            : "hover:bg-bg-elevated",
+                        )}
+                      >
+                        <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
+                          {el.media[0]?.url ? (
+                            <img src={el.media[0].url} alt="" className="size-full object-cover" />
+                          ) : (
+                            <AtSign size={14} className="text-text-secondary" />
+                          )}
+                        </span>
+                        <span className="truncate">@{el.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
