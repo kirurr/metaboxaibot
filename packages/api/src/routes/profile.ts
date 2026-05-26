@@ -889,4 +889,112 @@ export const profileRoutes: FastifyPluginAsync = async (fastify) => {
       }
     },
   );
+
+  /**
+   * POST /profile/metabox-confirm-merge — пользователь выбрал ментора в
+   * MENTOR_CONFLICT-диалоге webapp'a после неудачного metabox-login/register.
+   * Body: { token, chosenMentor: "site" | "bot" }
+   *
+   * Token приходит из MENTOR_CONFLICT-ответа login-and-link/register
+   * (Metabox создал его специально под этот конфликт). После confirm-merge
+   * на Metabox-стороне дёргаем issue-sso-token, чтобы webapp смог сразу
+   * открыть SSO как при успешном логине.
+   */
+  fastify.post(
+    "/profile/metabox-confirm-merge",
+    {
+      schema: {
+        description: "Resolve mentor conflict after metabox-login/register",
+        body: {
+          type: "object",
+          properties: {
+            token: { type: "string" },
+            chosenMentor: { type: "string", enum: ["site", "bot"] },
+          },
+          required: ["token", "chosenMentor"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              ssoUrl: { type: "string" },
+              mergedFrom: { type: "string", nullable: true },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { userId, telegramId } = request as AuthRequest;
+      const { token, chosenMentor } = request.body as {
+        token: string;
+        chosenMentor: "site" | "bot";
+      };
+      if (!token || (chosenMentor !== "site" && chosenMentor !== "bot")) {
+        return reply.code(400).send({ error: "token and chosenMentor are required" });
+      }
+
+      const { confirmMerge, issueSsoTokenRemote } =
+        await import("../services/metabox-bridge.service.js");
+      try {
+        const result = await confirmMerge({ token, telegramId, chosenMentor });
+
+        // Возможный merge web-only AI Box user с тем же metaboxUserId
+        // (как в metabox-login). После confirm-merge primary может стать
+        // bot-юзер, для которого уже есть отдельная web-only запись.
+        const existingWebUser = await db.user.findFirst({
+          where: { metaboxUserId: result.metaboxUserId, id: { not: userId } },
+          select: { id: true },
+        });
+        if (existingWebUser) {
+          try {
+            await mergeWebUserIntoBotUser(existingWebUser.id, userId);
+          } catch (mergeErr) {
+            logger.error(
+              {
+                err: mergeErr,
+                userId: userId.toString(),
+                sourceId: existingWebUser.id.toString(),
+                metaboxUserId: result.metaboxUserId,
+              },
+              "[profile/metabox-confirm-merge] merge with web-only user failed",
+            );
+            // @ts-expect-error status number — schema declares 200/400 only
+            return reply.code(500).send({
+              error: "Не удалось объединить аккаунты. Напишите в поддержку.",
+            });
+          }
+        }
+
+        await db.user.update({
+          where: { id: userId },
+          data: {
+            metaboxUserId: result.metaboxUserId,
+            metaboxReferralCode: result.referralCode,
+          },
+        });
+
+        // confirm-merge не отдаёт ssoToken — берём через отдельный bridge-call.
+        const ssoResult = await issueSsoTokenRemote(result.metaboxUserId);
+        const metaboxUrl = config.metabox.apiUrl ?? "https://app.meta-box.ru";
+        return {
+          ssoUrl: `${metaboxUrl}/auth/sso?token=${ssoResult.ssoToken}`,
+          mergedFrom: result.mergedFrom ?? null,
+        };
+      } catch (err) {
+        if (err instanceof MetaboxApiError) {
+          const responseData = err.data ?? {};
+          return (
+            reply
+              // @ts-expect-error status number
+              .code(err.status)
+              .send({ ...responseData, code: err.code ?? responseData.code })
+          );
+        }
+        throw err;
+      }
+    },
+  );
 };

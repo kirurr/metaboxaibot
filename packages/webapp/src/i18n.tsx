@@ -548,6 +548,13 @@ const translations = {
     "linkMetabox.merge.support": "If you have any questions, contact support:",
     "linkMetabox.merge.ok": "Got it",
     "linkMetabox.merge.unknown": "Unknown",
+    "linkMetabox.merge.conflictTitle": "Mentor conflict",
+    "linkMetabox.merge.conflictText":
+      "Your site account and Telegram account have different mentors. Choose which one to keep — this action is irreversible.",
+    "linkMetabox.merge.chooseSite": "Keep site mentor",
+    "linkMetabox.merge.chooseBot": "Keep bot mentor",
+    "linkMetabox.merge.conflictIrreversible":
+      "After confirmation, accounts will be merged and the MLM tree updated.",
     "linkMetabox.error.mentorConflict":
       "Mentor conflict. Site: {site}, Bot: {bot}. To merge, use the AI Box button on the Metabox website.",
     "linkMetabox.error.telegramMismatch":
@@ -1095,6 +1102,13 @@ const translations = {
     "linkMetabox.merge.support": "Если у вас есть вопросы — обратитесь в поддержку:",
     "linkMetabox.merge.ok": "Понятно",
     "linkMetabox.merge.unknown": "Неизвестен",
+    "linkMetabox.merge.conflictTitle": "Конфликт наставников",
+    "linkMetabox.merge.conflictText":
+      "У вашего сайт-аккаунта и Telegram-аккаунта разные наставники. Выберите, под кем остаться — это действие необратимо.",
+    "linkMetabox.merge.chooseSite": "Оставить наставника с сайта",
+    "linkMetabox.merge.chooseBot": "Оставить наставника из бота",
+    "linkMetabox.merge.conflictIrreversible":
+      "После подтверждения аккаунты будут объединены, MLM-структура обновится.",
     "linkMetabox.error.mentorConflict":
       "Конфликт наставников. На сайте: {site}, в боте: {bot}. Для объединения перейдите по кнопке AI Box на сайте Metabox.",
     "linkMetabox.error.telegramMismatch":

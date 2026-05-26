@@ -69,6 +69,81 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
+   * POST /lookup-bot-user-by-tg
+   *
+   * Called by Metabox when its `findFirst({telegramId})` returns null but
+   * Metabox needs to know whether bot-side already has data for this TG.
+   * Used to "wake up" the link flow after the user deleted their Metabox
+   * account and re-registered — they may have a live bot-User with
+   * subscription/tokens but no Metabox stub. With the response Metabox can
+   * lazy-create the stub and run the regular merge logic.
+   *
+   * NOT a public endpoint, no rate-limit, no caching.
+   */
+  fastify.post(
+    "/lookup-bot-user-by-tg",
+    {
+      schema: {
+        description:
+          "Lookup bot-User by Telegram ID (returns shallow info for Metabox stub recreation)",
+        body: {
+          type: "object",
+          properties: {
+            telegramId: { type: "string", description: "Telegram user ID" },
+          },
+          required: ["telegramId"],
+        },
+      },
+    },
+    async (request, reply) => {
+      const { telegramId } = request.body as { telegramId: string };
+      if (!telegramId) {
+        return reply.code(400).send({ error: "telegramId is required" });
+      }
+
+      const user = await db.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        select: {
+          id: true,
+          telegramId: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          referredById: true,
+          // Реферер - bot-User; нам нужен его telegramId, чтобы Metabox
+          // мог найти соответствующего сайт-юзера и установить referredById.
+          referredBy: { select: { telegramId: true } },
+          localSubscription: { select: { id: true } },
+          metaboxUserId: true,
+        },
+      });
+
+      if (!user) {
+        return reply.send({ exists: false });
+      }
+
+      return reply.send({
+        exists: true,
+        id: user.id.toString(),
+        telegramId: user.telegramId?.toString() ?? null,
+        username: user.username ?? null,
+        firstName: user.firstName ?? null,
+        lastName: user.lastName ?? null,
+        referredById: user.referredById?.toString() ?? null,
+        referrerTelegramId: user.referredBy?.telegramId?.toString() ?? null,
+        // Maps to "siteHasPurchase" semantics — has paid subscription on bot
+        // side. Metabox not strictly needs this (it'll see purchases via
+        // mergeAccounts step 5/6 on the freshly-created stub which has
+        // none), but ok to surface for diagnostics.
+        hasSubscription: !!user.localSubscription,
+        // Если bot уже знает metaboxUserId — отдаём (Metabox может проверить,
+        // не указывает ли он на frozen-secondary, и follow-merge до live).
+        currentMetaboxUserId: user.metaboxUserId,
+      });
+    },
+  );
+
+  /**
    * POST /internal/grant-tokens
    * Called by Metabox when an AI bot token package or subscription is purchased on the Metabox site.
    * grantType "subscription": credits to subscriptionTokenBalance + sets endDate / planName.
@@ -376,7 +451,7 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
           where: { orderId: { in: orderGrants.map((g) => g.orderId) } },
           select: { orderId: true },
         });
-        const grantedSet = new Set(existing.map((e) => e.orderId));
+        const grantedSet = new Set(existing.map((e: { orderId: string }) => e.orderId));
         const newGrants = orderGrants.filter((g) => !grantedSet.has(g.orderId));
         // Override legacy `tokenBalance` суммой новых orderGrants — источник
         // истины смещается на AiBotOrder list, чтобы pendingBotTokens-расхождения
