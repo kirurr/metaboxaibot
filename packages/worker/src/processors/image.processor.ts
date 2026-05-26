@@ -913,9 +913,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               continue;
             }
 
+            // gpt-image-1.5: inverted priority (low-priority ключ first) —
+            // см. submitWithFallback для подробностей. Тут virtual-batch
+            // ветка, симметрично основной.
             let subAcquired: Awaited<ReturnType<typeof acquireKey>>;
             try {
-              subAcquired = await acquireKey(candidateKeyProvider);
+              subAcquired =
+                candidate.id === "gpt-image-1.5"
+                  ? await acquireKey(candidateKeyProvider, { inverted: true })
+                  : await acquireKey(candidateKeyProvider);
             } catch (e) {
               if (isPoolExhaustedError(e)) {
                 lastSubError = `${candidateProvider} pool exhausted`;

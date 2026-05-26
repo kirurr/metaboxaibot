@@ -216,9 +216,17 @@ export async function submitWithFallback<T, D extends object>(
     }
 
     // 2. acquireKey
+    // Для gpt-image-1.5 берём ключ из low-priority группы первым делом
+    // (модель раз в месяц юзается → иначе холодный ключ никогда не получит
+    // трафика и tier у OpenAI не растёт). Fallback на high-priority встроен
+    // в acquireKey, если все low-priority throttled — возьмёт обычным
+    // порядком.
     let acquired: AcquiredKey;
     try {
-      acquired = await acquireKey(keyProvider);
+      acquired =
+        candidate.id === "gpt-image-1.5"
+          ? await acquireKey(keyProvider, { inverted: true })
+          : await acquireKey(keyProvider);
     } catch (err) {
       if (isPoolExhaustedError(err)) {
         attempts.push({ provider: candidateProvider, outcome: "pool_exhausted" });
