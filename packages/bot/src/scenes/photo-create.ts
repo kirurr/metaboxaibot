@@ -215,9 +215,9 @@ export async function handlePhotoCreatePrompt(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Если промпт уже был в буфере — это перезапись на шаге AWAIT_AR (юзер
-  // прислал новый текст вместо тапа по кнопке). Отдаём отдельную строку-
-  // подтверждение, чтобы юзер видел что промпт принят, а не повтор «Шаг 2 из 3».
+  // Если промпт уже был в буфере — это перезапись на шаге AWAIT_AR/AWAIT_RES
+  // (юзер прислал новый текст вместо тапа по кнопке). Отдаём отдельную строку-
+  // подтверждение, чтобы юзер видел что промпт принят, а не повтор «Шаг 2 из 4».
   const isUpdate = !!slots[PHOTO_CREATE_PROMPT_SLOT]?.[0];
   await userStateService.addMediaInput(
     userId,
@@ -332,6 +332,13 @@ export async function handlePhotoCreateResSelect(ctx: BotContext): Promise<void>
     return;
   }
   const resolution = option.value;
+
+  // Anti-double-submit: чистим буфер ДО translate/resolve/submit, чтобы второй
+  // тап по той же RES-кнопке (если успел проскочить мимо editMessageReplyMarkup)
+  // увидел пустой буфер и ушёл по ветке bufferLost вместо повторной оплаченной
+  // генерации. На конце функции clear/setState вызываются повторно — idempotent.
+  await userStateService.clearMediaInputs(userId, PHOTO_CREATE_BUFFER_MODEL_ID);
+  await userStateService.setState(userId, "PHOTO_CREATE_AWAIT_PHOTO", null);
 
   const telegramId = ctx.user.telegramId;
   const chatId = ctx.chat?.id ?? (telegramId ? Number(telegramId) : undefined);
