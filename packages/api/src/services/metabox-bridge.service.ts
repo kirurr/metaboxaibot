@@ -717,6 +717,10 @@ export async function registerBotUser(params: {
   username?: string;
   referrerTelegramId?: bigint | null;
   referrerUserId?: string;
+  /** Сырой `ref_<code>`-параметр из `/start`, без префикса. Metabox использует
+   *  его как резервный путь резолва реферера, если bot-side `resolveReferralCode`
+   *  упал silently (HTTP 5xx → null) и referrerUserId/Telegram пришли пустыми. */
+  referrerReferralCode?: string;
   /** AI Box User.id для двусторонней связи (см. metabox.User.aiboxUserId). */
   aiboxUserId?: bigint | string;
 }): Promise<{
@@ -734,6 +738,7 @@ export async function registerBotUser(params: {
     username: params.username,
     referrerTelegramId: params.referrerTelegramId?.toString(),
     referrerUserId: params.referrerUserId,
+    referrerReferralCode: params.referrerReferralCode,
     aiboxUserId:
       typeof params.aiboxUserId === "bigint" ? params.aiboxUserId.toString() : params.aiboxUserId,
   });
