@@ -1,11 +1,19 @@
 import { db } from "../db.js";
 import { getVideoQueue } from "../queues/video.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
+import {
+  AI_MODELS,
+  COPY_MOTION_VIDEO_MAX_SEC,
+  COPY_MOTION_VIDEO_MIN_SEC,
+  ONE_SHOT_SETTING_KEYS,
+  UserFacingError,
+} from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
 import { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 import { createVideoAdapter } from "../ai/video/factory.js";
 import { validatePromptRefs } from "./prompt-ref.service.js";
+import { getFileUrl } from "./s3.service.js";
+import { probeVideoMetadata } from "../utils/mp4-duration.js";
 import type {
   VideoInput,
   VideoValidationContext,
@@ -149,6 +157,37 @@ export const videoGenerationService = {
   async submitVideo(params: SubmitVideoParams): Promise<SubmitVideoResult> {
     const model = AI_MODELS[params.modelId];
     if (!model) throw new Error(`Unknown model: ${params.modelId}`);
+
+    // Pre-flight длительности motion_video для kling-motion-pro / copy-motion.
+    // Bot scene `copy-motion.ts` уже валидирует на upload, но web-route и
+    // универсальная video-карусель идут мимо неё → ловим в service-layer.
+    // Зеркало логики из copy-motion.ts:200-222.
+    if (params.modelId === "kling-motion-pro" || params.modelId === "copy-motion") {
+      const motionVideoKey = params.mediaInputs?.motion_video?.[0];
+      if (motionVideoKey) {
+        const s3Url = await getFileUrl(motionVideoKey).catch(() => null);
+        const probe = s3Url ? await probeVideoMetadata(s3Url).catch(() => null) : null;
+        const durationSec = probe?.durationSec;
+        if (!durationSec || durationSec <= 0) {
+          throw new UserFacingError(`copy-motion: video duration unreadable (${motionVideoKey})`, {
+            key: "copyMotionVideoUnreadable",
+            section: "video",
+          });
+        }
+        if (durationSec < COPY_MOTION_VIDEO_MIN_SEC) {
+          throw new UserFacingError(
+            `copy-motion: video ${durationSec}s < min ${COPY_MOTION_VIDEO_MIN_SEC}s`,
+            { key: "copyMotionVideoTooShort", section: "video" },
+          );
+        }
+        if (durationSec > COPY_MOTION_VIDEO_MAX_SEC) {
+          throw new UserFacingError(
+            `copy-motion: video ${durationSec}s > max ${COPY_MOTION_VIDEO_MAX_SEC}s`,
+            { key: "copyMotionVideoTooLong", section: "video" },
+          );
+        }
+      }
+    }
 
     // HeyGen native voice (без EL/Cartesia и без юзерского аудио): синтезим
     // речь у себя ДО `previewVideo`, чтобы probe увидел реальную длительность
