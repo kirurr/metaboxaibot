@@ -21,23 +21,32 @@ interface SunoModelLimits {
 }
 
 /**
- * V5_5 в доке отдельно не упомянут — относим к группе V4_5+ (та же архитектура,
- * подтверждено практикой работы провайдера).
+ * UI (audio.models.ts → settings:model_version) выставляет юзеру V4 / V4_5 /
+ * V4_5PLUS / V5 / V5_5. V3_5 и V4_5ALL из доки в UI не предлагаются, но
+ * перечислены здесь pessimistic-safe на случай прихода кастомного значения с
+ * web-route. V5_5 в доке отдельно не упомянут — по той же архитектуре что V4_5+.
+ *
+ * Дефолт `undefined` -> V4 (минимальные лимиты 3000/200). Это safety net: если
+ * `model_version` придёт с typo или новым значением, валидируем по САМОМУ
+ * строгому профилю. Лучше показать юзеру ошибку «слишком длинно» по строгой
+ * мерке, чем пропустить запрос, который провайдер всё равно отвергнет.
  */
 const SUNO_MODEL_LIMITS: Record<string, SunoModelLimits> = {
+  V3_5: { customPrompt: 3000, style: 200 },
   V4: { customPrompt: 3000, style: 200 },
   V4_5: { customPrompt: 5000, style: 1000 },
   V4_5PLUS: { customPrompt: 5000, style: 1000 },
+  V4_5ALL: { customPrompt: 5000, style: 1000 },
   V5: { customPrompt: 5000, style: 1000 },
   V5_5: { customPrompt: 5000, style: 1000 },
 };
 
-const SUNO_DEFAULT_MODEL = "V4_5";
+/** Pessimistic fallback — наименьшие лимиты из всех моделей. См. комментарий к таблице. */
+const SUNO_PESSIMISTIC_LIMITS: SunoModelLimits = { customPrompt: 3000, style: 200 };
 
 export function getSunoLimits(modelVersion: string | undefined): SunoModelLimits {
-  return (
-    SUNO_MODEL_LIMITS[modelVersion ?? SUNO_DEFAULT_MODEL] ?? SUNO_MODEL_LIMITS[SUNO_DEFAULT_MODEL]
-  );
+  if (!modelVersion) return SUNO_PESSIMISTIC_LIMITS;
+  return SUNO_MODEL_LIMITS[modelVersion] ?? SUNO_PESSIMISTIC_LIMITS;
 }
 
 export interface SunoValidationInput {
@@ -94,15 +103,19 @@ export const NANO_BANANA_PROMPT_MAX = 2000;
 
 /**
  * Pre-flight валидация nano-banana-pro prompt'а. Лимит провайдер-агностический —
- * единый backend, fallback на другой ключ не лечит. Бросает UserFacingError.
+ * единый backend, fallback на другой ключ не лечит. Бросает UserFacingError с
+ * тем же ключом и теми же params, что использует адаптерный `validateNanoBananaInput`
+ * в evolink.adapter.ts — юзер видит одинаковое сообщение независимо от точки
+ * входа (service-layer pre-flight или адаптер-direct через alias-сценарии вроде
+ * image-upscale/photo-create, маппящиеся на nano-banana-pro).
  */
 export function validateNanoBananaPromptLength(prompt: string): void {
   if (prompt.length > NANO_BANANA_PROMPT_MAX) {
     throw new UserFacingError(
       `Nano Banana Pro: prompt ${prompt.length} > ${NANO_BANANA_PROMPT_MAX} chars`,
       {
-        key: "nanoBananaPromptTooLong",
-        params: { max: NANO_BANANA_PROMPT_MAX, current: prompt.length },
+        key: "promptTooLong",
+        params: { limit: NANO_BANANA_PROMPT_MAX },
       },
     );
   }
