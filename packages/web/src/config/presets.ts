@@ -184,6 +184,22 @@ export const videoPresets: PresetMap = {
     title: "presets.video.photo-animate.title",
     subtitle: "presets.video.photo-animate.subtitle",
   },
+  // Перенос бот-сценария «🎬 Копировать движение» (scenes/copy-motion.ts).
+  // Под капотом — виртуальная модель copy-motion (kling-3.0/motion-control
+  // @ 1080p Pro в KIE primary). Юзер ничего не настраивает: грузит 1 фото в
+  // слот first_frame и 1 референс-видео (3-30 с) в слот motion_video. Адаптер
+  // сам форсит character_orientation="video" + background_source="input_image".
+  // Длительность результата = длительность референс-видео. hiddenFromCarousel
+  // — модель видна юзеру только через этот пресет.
+  "copy-motion": {
+    allowedModelIds: ["copy-motion"],
+    modelId: "copy-motion",
+    hideModelPicker: true,
+    hidePrompt: true,
+    prompt: "",
+    title: "Копировать движение",
+    subtitle: "Переносит движение из референсного видео на персонажа с вашей фотографии",
+  },
   // Перенос бот-сценария «🎬 Апскейл видео» (scenes/upscale.ts). Модель
   // video-upscale (KIE Topaz, replicate fallback). Промпт не нужен — модель
   // promptOptional, поле скрыто. Юзер грузит 1 видео в слот motion_video и

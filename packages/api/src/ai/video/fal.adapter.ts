@@ -126,10 +126,13 @@ const FAL_R2V_ENDPOINTS: Record<string, string> = {
   "kling-pro": "fal-ai/kling-video/o3/pro/reference-to-video",
 };
 
-/** Kling Motion Control endpoints — dedicated, no T2V/I2V split. */
+/** Kling Motion Control endpoints — dedicated, no T2V/I2V split.
+ *  `copy-motion` — alias на Pro endpoint для готового сценария «Копировать
+ *  движение»; preset-параметры зашиваются ниже в ветке submit'а. */
 const FAL_MOTION_ENDPOINTS: Record<string, string> = {
   "kling-motion": "fal-ai/kling-video/v3/standard/motion-control",
   "kling-motion-pro": "fal-ai/kling-video/v3/pro/motion-control",
+  "copy-motion": "fal-ai/kling-video/v3/pro/motion-control",
 };
 
 /** True если modelId — это kling-o3 семейство (kling или kling-pro). */
@@ -424,7 +427,13 @@ export class FalVideoAdapter implements VideoAdapter {
     if (FAL_MOTION_ENDPOINTS[this.modelId]) {
       const motionImageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
       const motionVideoUrl = input.mediaInputs?.motion_video?.[0];
-      const orientation = (ms.character_orientation as string) ?? "video";
+      // Готовый сценарий «Копировать движение»: ориентация зашита. FAL endpoint
+      // не принимает background_source — фон в этом fallback'е придёт из видео,
+      // а не из изображения. Деградация приемлема (KIE primary держит инвариант).
+      const isCopyMotionPreset = this.modelId === "copy-motion";
+      const orientation = isCopyMotionPreset
+        ? "video"
+        : ((ms.character_orientation as string) ?? "video");
       const keepSound = ms.keep_original_sound !== undefined ? ms.keep_original_sound : true;
 
       const motionInput: Record<string, unknown> = {
