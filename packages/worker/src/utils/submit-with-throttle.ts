@@ -30,7 +30,8 @@ import {
 import { classifyRateLimit, LONG_WINDOW_THRESHOLD_MS } from "@metabox/api/utils/rate-limit-error";
 import { markRateLimited, recordSuccess, recordError } from "@metabox/api/services/key-pool";
 import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
-import { notifyRateLimit } from "./notify-error.js";
+import { UserFacingError } from "@metabox/shared";
+import { notifyRateLimit, notifyTechErrorThrottled } from "./notify-error.js";
 import { delayJob } from "./delay-job.js";
 import { logger } from "../logger.js";
 
@@ -114,9 +115,27 @@ export async function submitWithThrottle<T, D extends object>(
     if (keyId) void recordSuccess(keyId);
     return result;
   } catch (err) {
+    // OpenAI billing-исчерпание (`billing_hard_limit_reached` 400 или
+    // `insufficient_quota` 429) — account-wide состояние. НЕ recordError'им
+    // ключ (это не сбой ключа, кончились деньги org/project), не пенализим
+    // markRateLimited (для 429 он бы прибил ключ на 1ч из-за паттерна
+    // /exceeded your current quota/). Дедуп'ный алерт в balance-тему +
+    // throw наверх — processor покажет user-facing "временно недоступна".
+    if (isOpenAiBillingExhaustion(err)) {
+      void notifyTechErrorThrottled(
+        err instanceof Error ? err : new Error(String(err)),
+        { section, modelId, jobId: job.id },
+        "openai-billing-exhaustion",
+        { channel: "balance" },
+      );
+      throw err;
+    }
+
     const cls = classifyRateLimit(err, provider);
     if (!cls.isRateLimit) {
-      if (keyId) {
+      // UserFacingError (адаптер отказался обрабатывать ввод: пустой
+      // transcript, content policy и т.п.) — НЕ штрафуем ключ, он здоров.
+      if (keyId && !(err instanceof UserFacingError)) {
         void recordError(keyId, err instanceof Error ? err.message : String(err));
       }
       throw err;
