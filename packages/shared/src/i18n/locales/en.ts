@@ -399,6 +399,8 @@ export default {
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     kieKlingMissingElement:
       "❌ Your prompt references @Element{element}, but no image is uploaded for that slot. Upload a photo to the «Element {element}» slot or remove the reference from the prompt.",
+    ttsTranscriptEmpty:
+      "❌ The text to synthesize is empty or contains only punctuation. Please enter actual text and try again.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
     imageFormatUnsupported:

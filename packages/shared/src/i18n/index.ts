@@ -284,6 +284,7 @@ export interface Translations {
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
     kieKlingMissingElement: string;
+    ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
     imageDimensionOutOfRange: string;

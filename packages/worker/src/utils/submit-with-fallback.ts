@@ -29,7 +29,7 @@
 
 import type { Job } from "bullmq";
 import type { AIModel } from "@metabox/shared";
-import { ProviderInputIncompatibleError } from "@metabox/shared";
+import { ProviderInputIncompatibleError, UserFacingError } from "@metabox/shared";
 import {
   acquireKey,
   markRateLimited,
@@ -470,7 +470,15 @@ export async function submitWithFallback<T, D extends object>(
       // Другая ошибка (4xx non-429, validation, content policy, transient 5xx
       // на attempt 1-2, etc.) — НЕ fallback'имся. Пробрасываем наверх:
       // BullMQ ретраит, либо processor превратит в user-facing failure.
-      if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
+      //
+      // UserFacingError — пользовательская ошибка (пустой ввод, content
+      // policy, невалидный формат). НЕ штрафуем ключ: ключ работал исправно,
+      // отказался обрабатывать сам провайдер на уровне content'а запроса.
+      // Без этого guard'а адаптеры, бросающие UserFacingError (Cartesia на
+      // пустом transcript'е и т.п.), помечают здоровые ключи как сбойные.
+      if (acquired.keyId && !(err instanceof UserFacingError)) {
+        void recordError(acquired.keyId, message.slice(0, 500));
+      }
       throw err;
     }
   }
