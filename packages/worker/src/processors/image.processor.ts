@@ -78,6 +78,7 @@ import {
 } from "@metabox/api/services/key-pool";
 import { isProviderInLongCooldown, markProviderLongCooldown } from "@metabox/api/services/throttle";
 import { isPoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import {
   classifyRateLimit,
   isFiveXxError,
@@ -971,8 +972,32 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               break;
             } catch (err) {
               lastSubErr = err;
-              const cls = classifyRateLimit(err, candidateKeyProvider);
               const message = err instanceof Error ? err.message : String(err);
+
+              // OpenAI billing exhaustion (`billing_hard_limit_reached` 400 /
+              // `insufficient_quota` 429) — account-wide состояние одного ключа.
+              // НЕ markRateLimited (ключ не виноват, кончились деньги org) и
+              // НЕ markProviderLongCooldown (иначе sub-job[1] увидит маркер и
+              // упадёт с "openai in long cooldown", хотя у соседних ключей
+              // деньги есть). Дедуп'нутый алерт в balance тему + continue к
+              // следующему кандидату. Зеркало логики из submit-with-throttle
+              // и submit-with-fallback (которые этот код обходит — virtual
+              // batch идёт своим путём).
+              if (isOpenAiBillingExhaustion(err)) {
+                const billingDedupKey = subAcquired.keyId
+                  ? `openai-billing-exhaustion:${subAcquired.keyId}`
+                  : "openai-billing-exhaustion";
+                void notifyTechErrorThrottled(
+                  err instanceof Error ? err : new Error(message),
+                  { section: "image", modelId, jobId: dbJobId },
+                  billingDedupKey,
+                  { channel: "balance" },
+                );
+                lastSubError = `openai billing exhausted: ${message.slice(0, 200)}`;
+                continue;
+              }
+
+              const cls = classifyRateLimit(err, candidateKeyProvider);
               if (cls.isRateLimit) {
                 if (subAcquired.keyId) {
                   void markRateLimited(subAcquired.keyId, cls.cooldownMs, cls.reason);
