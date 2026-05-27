@@ -338,11 +338,11 @@ async function streamGptResponse(
               { retryMs, attempts: attempt },
               "GPT finalize: send still 429 after max attempts, dropping chunk",
             );
-            // Best-effort UX-маркер: после ~30-90s sleep'ов cooldown может уже
-            // истечь, и юзер увидит понятный текст вместо обрыва. Если 429 ещё
-            // активен — catch проглотит, юзер всё равно ничего не получит, но
-            // в большинстве случаев маркер пройдёт. Шлём не больше одного раза
-            // на запрос, иначе на multi-chunk ответе будет N одинаковых маркеров.
+            // Best-effort UX-маркер: пробуем сразу (без доп. sleep'а) — если
+            // retry_after короткий, маркер дойдёт. Если 429 ещё активен,
+            // catch проглотит — для юзера это просто немой обрыв, как и было
+            // без фикса. Шлём не больше одного раза на запрос, иначе на
+            // multi-chunk ответе будет N одинаковых маркеров.
             if (!dropMarkerSent) {
               dropMarkerSent = true;
               await trySendRaw(ctx.t.gpt.chunkDroppedTelegramLimit, false).catch(() => void 0);
