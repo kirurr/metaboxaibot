@@ -979,3 +979,70 @@ describe("submitWithFallback — UserFacingError early-throw (validation)", () =
     expect(submit).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — transient network error", () => {
+  // ENOTFOUND / ECONNRESET / ETIMEDOUT и т.п. — DNS/socket лёг у провайдера.
+  // Ключ не виноват → НЕ recordError. Пробуем следующего кандидата (у него
+  // может быть другой хост). Если все упали — caller (processor catch) защемит
+  // через deferIfTransientNetworkError (до 3 раундов).
+
+  test("ENOTFOUND на primary → пробует fallback, без recordError, без штрафа", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND kieai.redpandaai.co"), {
+        code: "ENOTFOUND",
+      }),
+    });
+    const submit = vi.fn().mockRejectedValueOnce(dnsErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+      fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Дедуп-алерт ушёл per-candidate (key network-transient:provider:code).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      dnsErr,
+      expect.any(Object),
+      "network-transient:kie:ENOTFOUND",
+    );
+    // Primary key не штрафуется на DNS-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+
+  test("ENOTFOUND на всех кандидатах → throw lastError (caller сделает defer-transient)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND example.com"), { code: "ENOTFOUND" }),
+    });
+    const submit = vi.fn().mockRejectedValue(dnsErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+        fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+        section: "image",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(dnsErr);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    // Notify per-candidate (2 алерта с разными provider в dedup-ключе).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(2);
+  });
+});

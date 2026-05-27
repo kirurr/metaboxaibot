@@ -53,6 +53,7 @@ import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
 import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
@@ -96,6 +97,7 @@ export type FallbackReason =
   | "provider_long_cooldown_marker"
   | "kie_credits_exhausted"
   | "openai_billing_exhausted"
+  | "network_transient"
   | "unknown_error";
 
 export interface FallbackCandidateAttempt {
@@ -110,6 +112,7 @@ export interface FallbackCandidateAttempt {
     | "incompatible_input"
     | "kie_credits_exhausted"
     | "openai_billing_exhausted"
+    | "network_transient"
     | "unknown_error";
   error?: string;
 }
@@ -385,6 +388,45 @@ export async function submitWithFallback<T, D extends object>(
         continue;
       }
 
+      // Transient network failure (ENOTFOUND, ECONNRESET, ETIMEDOUT и т.п.) —
+      // DNS/socket лёг у провайдера или у нашего инфра-upstream'а. Ключ не
+      // виноват → НЕ recordError. Дедуп'нутый tech-alert (5 алертов / 30 мин
+      // на пару provider:code — defaults у notifyTechErrorThrottled). Пробуем
+      // следующего кандидата — у него может быть другой хост. Если все упали
+      // (lastError остаётся network-transient), processor catch вызовет
+      // `deferIfTransientNetworkError` — defer'ит job на 30-60s, до 3 раундов.
+      if (isTransientNetworkError(err)) {
+        attempts.push({
+          provider: candidateProvider,
+          outcome: "network_transient",
+          error: message.slice(0, 200),
+        });
+        // Извлекаем code из cause-chain для дедуп-ключа (ENOTFOUND и т.п.).
+        // Если не нашли — используем provider'а без code.
+        let code = "unknown";
+        let cur: unknown = err;
+        for (let i = 0; i < 5 && cur; i++) {
+          if (typeof cur === "object" && cur !== null) {
+            const c = (cur as { code?: unknown }).code;
+            if (typeof c === "string") {
+              code = c;
+              break;
+            }
+            cur = (cur as { cause?: unknown }).cause;
+          } else break;
+        }
+        void notifyTechErrorThrottled(
+          err instanceof Error ? err : new Error(message),
+          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+          `network-transient:${candidateProvider}:${code}`,
+        );
+        logger.warn(
+          { jobId: opts.jobId, provider: candidateProvider, code },
+          "submitWithFallback: transient network error — trying next candidate",
+        );
+        continue;
+      }
+
       if (cls.isRateLimit) {
         // Per-key throttle: bad key карантинится, остальные ключи провайдера
         // продолжают работу. notifyRateLimit вызываем всегда per-key (как делал
@@ -651,6 +693,7 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
   if (primaryOutcome === "kie_credits_exhausted") return "kie_credits_exhausted";
   if (primaryOutcome === "openai_billing_exhausted") return "openai_billing_exhausted";
+  if (primaryOutcome === "network_transient") return "network_transient";
   if (primaryOutcome === "unknown_error") return "unknown_error";
   return "pool_exhausted";
 }
