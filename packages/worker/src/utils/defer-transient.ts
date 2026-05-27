@@ -19,7 +19,11 @@ import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 import { delayJob } from "./delay-job.js";
 import { logger } from "../logger.js";
 
-const MAX_TRANSIENT_RETRIES = 5;
+// 3 раунда retry с базовой паузой 30s + jitter до 30s даёт ~3-5 минут общего
+// окна на восстановление сетевой связности (DNS, transient TLS). После исчерпания
+// юзер увидит «не получилось». Раньше было 5 — на длинных outage'ах юзер ждал
+// до 10 минут placeholder'а без обратной связи, что хуже честного fail.
+const MAX_TRANSIENT_RETRIES = 3;
 const BASE_DELAY_MS = 30_000;
 const JITTER_MS = 30_000;
 
