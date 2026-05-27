@@ -1184,16 +1184,18 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     // 5xx-сигнал текущего провайдера, который ретраи на нём не починят.
     // Покрываются ДВА класса ошибок (взаимно дополняющие, не пересекаются):
     //
-    //  1. `isKieTransientError` — KIE 5xx + 422 task-id-blank + "client closed
-    //     request". KIE-адаптер бросает plain Error БЕЗ `err.status`, поэтому
-    //     детектится по тексту message ("KIE …").
+    //  1. `isKieTransientError` — KIE 422 task-id-blank, "playground failed",
+    //     "client closed request" и 400 internal-retry. Эти KIE-специфичные
+    //     non-5xx сигналы детектятся по тексту message ("KIE …"). KIE 5xx
+    //     также покрывается через isFiveXxError ниже (после миграции адаптеров
+    //     на providerHttpError, err.status выставляется для 5xx).
     //
-    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. Покрывает прочие
-    //     адаптеры, которые выставляют numeric status на throw'е (например
-    //     evolink: 524 от Cloudflare; fal/replicate: 502/503). Эта ветка
-    //     прицельно закрывает дыру кие→evolink→fal: раньше evolink-овые 5xx
-    //     на poll-стадии не каскадировались на fal, и юзер получал generic
-    //     "model is resting" + refund, хотя следующий fallback был свободен.
+    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. Покрывает все
+    //     адаптеры через providerHttpError (KIE/Alibaba/MiniMax/Recraft/evolink:
+    //     524 от Cloudflare; fal/replicate: 502/503). Эта ветка прицельно
+    //     закрывает дыру кие→evolink→fal: раньше evolink-овые 5xx на poll-стадии
+    //     не каскадировались на fal, и юзер получал generic "model is resting" +
+    //     refund, хотя следующий fallback был свободен.
     //
     // Защита от поспешного каскада на ПЕРВОМ провайдере: `isLastAttempt` —
     // поодиночные 5xx-блипы (например Cloudflare 524 за одну poll-итерацию)

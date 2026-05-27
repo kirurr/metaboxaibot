@@ -57,7 +57,7 @@ export function isProviderTemporaryUnavailable(err: unknown): boolean {
   // ответа парсится как plain text, status=530. providerHttpError() поднимает
   // 530 в `err.status` → isFiveXxError ловит. Дублирующая text-проверка здесь —
   // safety net на случай если новый адаптер забудет про providerHttpError.
-  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed|Cloudflare Tunnel error|error 1033|Argo Tunnel/i.test(
+  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed|Cloudflare Tunnel error|\berror 1033\b|Argo Tunnel/i.test(
     msg,
   );
 }
