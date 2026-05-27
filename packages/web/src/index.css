@@ -4530,6 +4530,82 @@ select {
 }
 
 /* ── Мультишот: inline-редактор списка шотов ─────────────────────────────── */
+/* Свитч «Мультишот» над промптом (заменяет toggle-чип в ряду настроек). */
+.gen-multishot-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated, var(--bg));
+}
+.gen-multishot-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.gen-multishot-switch-info {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-hint);
+  cursor: help;
+}
+.gen-multishot-switch-info:hover {
+  color: var(--text-secondary);
+}
+
+/* Кастомный тултип (наведение/фокус) — заменяет нативный title. */
+.gen-tip {
+  position: relative;
+  outline: none;
+}
+.gen-tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-elevated, #1c1c1e);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(2px);
+  transition:
+    opacity 120ms var(--ease),
+    transform 120ms var(--ease);
+  pointer-events: none;
+}
+.gen-tip-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  border: 5px solid transparent;
+  border-top-color: var(--border);
+}
+.gen-tip:hover .gen-tip-bubble,
+.gen-tip:focus-visible .gen-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 .gen-shotlist {
   display: flex;
   flex-direction: column;

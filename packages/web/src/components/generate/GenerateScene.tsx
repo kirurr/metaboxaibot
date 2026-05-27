@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Image as ImageIcon,
+  Info,
   Loader2,
   Plus,
   RotateCcw,
@@ -1163,10 +1164,18 @@ export function GenerateScene({
     [activeMentions],
   );
   // Слоты без reference_element — их карточки рендерим, элементные прячем.
-  const visibleSlots = useMemo(
-    () => activeSlots.filter((s) => s.mode !== "reference_element"),
-    [activeSlots],
-  );
+  // В мультишоте дополнительно прячем слот последнего кадра: не все адаптеры
+  // поддерживают last_frame в multishot — вернём, когда будут (см. memory
+  // project-multishot-video). buildSubmitMediaInputs тоже его не отправляет.
+  const visibleSlots = useMemo(() => {
+    const multishotActive =
+      !!selectedModel?.settings.some((s) => s.type === "shot-list") &&
+      settingValues["multishot"] === true;
+    return activeSlots.filter(
+      (s) =>
+        s.mode !== "reference_element" && !(multishotActive && s.slotKey === "last_frame"),
+    );
+  }, [activeSlots, selectedModel, settingValues]);
   // Меншены в пределах лимита модели — только они едут в слоты/трансляцию.
   const cappedMentions = useMemo(
     () => (elementsCap ? activeMentions.slice(0, elementsCap.max) : []),
@@ -1194,9 +1203,14 @@ export function GenerateScene({
   // промпта (см. ShotListEditor ниже).
   const visibleSettings = useMemo(() => {
     if (!selectedModel) return [];
+    // Контроллер мультишота (toggle, от которого зависит shot-list) рисуем не
+    // чипом, а отдельным свитчем над промптом — выкидываем его ключ из чипов.
+    const multishotToggleKey = selectedModel.settings.find((s) => s.type === "shot-list")?.dependsOn
+      ?.key;
     return selectedModel.settings.filter(
       (s) =>
         s.type !== "shot-list" &&
+        s.key !== multishotToggleKey &&
         !UNSUPPORTED_TYPES.has(s.type) &&
         isSettingVisible(s, settingValues, selectedModel.settings),
     );
@@ -1220,6 +1234,22 @@ export function GenerateScene({
     },
     [multishotSetting],
   );
+  // Сам toggle-контроллер мультишота (его label/описание показываем в свитче
+  // над промптом; ключ — dependsOn.key у shot-list-настройки).
+  const multishotToggle = useMemo(
+    () =>
+      multishotSetting?.dependsOn
+        ? selectedModel?.settings.find((s) => s.key === multishotSetting.dependsOn!.key)
+        : undefined,
+    [selectedModel, multishotSetting],
+  );
+  const toggleMultishot = useCallback(() => {
+    if (!multishotToggle) return;
+    setSettingValues((prev) => ({
+      ...prev,
+      [multishotToggle.key]: prev[multishotToggle.key] !== true,
+    }));
+  }, [multishotToggle]);
 
   // При включении мультишота сразу материализуем первый пустой шот в state,
   // чтобы отображаемый редактор, валидация (blockerReason) и preview сходились:
@@ -1855,6 +1885,10 @@ export function GenerateScene({
     const out: Record<string, string[]> = {};
     for (const [slotKey, files] of Object.entries(slotFiles)) {
       if (slotKey.startsWith("ref_element_")) continue;
+      // В мультишоте last_frame скрыт и не отправляется (вернём, когда все
+      // адаптеры будут поддерживать). Файл остаётся в state — восстановится при
+      // выключении мультишота.
+      if (multishotOn && slotKey === "last_frame") continue;
       const keys = files.flatMap((f) => (f.status === "ready" ? [f.dto.s3Key] : []));
       if (keys.length > 0) out[slotKey] = keys;
     }
@@ -2267,8 +2301,38 @@ export function GenerateScene({
               нижнем углу инпута; textarea авторастёт и резервирует место снизу.
               hidePrompt прячет блок целиком (пресет апскейла и т.п.) — значение
               prompt при этом остаётся в state и уходит в сабмит. */}
-          {/* Мультишот: одиночный промпт заменяется inline-редактором списка
-              шотов (промпт + длительность каждого, кнопка «+»). */}
+          {/* Мультишот: свитч над промптом включает режим. ON → одиночный промпт
+              заменяется inline-редактором списка шотов (промпт + длительность,
+              кнопка «+»). */}
+          {!hidePrompt && multishotToggle && (
+            <div className="gen-multishot-switch">
+              <div className="gen-multishot-switch-label">
+                <span>{multishotToggle.label}</span>
+                {multishotToggle.description && (
+                  <span
+                    className="gen-tip gen-multishot-switch-info"
+                    tabIndex={0}
+                    aria-label={multishotToggle.description}
+                  >
+                    <Info size={13} />
+                    <span className="gen-tip-bubble" role="tooltip">
+                      {multishotToggle.description}
+                    </span>
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={multishotOn}
+                className={clsx("gen-toggle", multishotOn && "on")}
+                onClick={toggleMultishot}
+              >
+                <span className="gen-toggle-knob" />
+              </button>
+            </div>
+          )}
+
           {!hidePrompt && multishotOn && <ShotListEditor shots={shots} onChange={setShots} />}
 
           {!hidePrompt && !multishotOn && (
