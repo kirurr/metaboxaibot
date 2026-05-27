@@ -140,8 +140,19 @@ const TRANSIENT_NETWORK_CODES = new Set([
  * Returns true if the given error represents a transient network failure
  * (DNS hiccup, connection reset, etc.) rather than a logical/HTTP error.
  * Walks the `cause` chain because undici wraps the original libuv error.
+ *
+ * Принимает и Error-like объект (обычный путь из fetch'а), и сырую строку
+ * (символика `s.errorRaw` в virtual-batch sub-job'ах — там message сохранён
+ * в БД как plain string без code/cause). Без string-ветки batch не
+ * классифицировал ENOTFOUND и не запускал fallback на evolink.
  */
 export function isTransientNetworkError(err: unknown): boolean {
+  if (typeof err === "string") {
+    for (const code of TRANSIENT_NETWORK_CODES) {
+      if (err.includes(code)) return true;
+    }
+    return false;
+  }
   let cur: unknown = err;
   for (let i = 0; i < 5 && cur; i++) {
     if (typeof cur === "object" && cur !== null) {
