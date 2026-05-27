@@ -2059,13 +2059,21 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
     const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
 
-    // ── Poll-stage fallback на KIE 5xx (single-shot path) ───────────────
+    // ── Poll-stage fallback на KIE 5xx / network-transient (single-shot path) ──
     // KIE при 5xx terminal не перезапускает генерацию у себя. Если retry'и
     // BullMQ исчерпаны и есть неиспользованный fallback — пере-enqueue:
     // stage→generate, providerJobId→null, attemptedProviders ← +effective.
     // Virtual batch path тут не покрыт (там per-sub-job state'ы — отдельная
-    // задача).
-    if (stage === "poll" && isLastAttempt && isKieTransientError(err) && modelMeta) {
+    // задача, см. tryVirtualBatchFallbackResubmit).
+    //
+    // isTransientNetworkError покрывает DNS/socket-outage'и (например, когда у
+    // KIE лёг file-upload хост) — fallback на evolink имеет другой backend.
+    if (
+      stage === "poll" &&
+      isLastAttempt &&
+      (isKieTransientError(err) || isTransientNetworkError(err)) &&
+      modelMeta
+    ) {
       const requestedN = job.data.numImages ?? 1;
       const isVirtualBatchNow = requestedN > 1 && (modelMeta?.nativeBatchMax ?? 1) === 1;
       // Virtual batch не покрыт — там per-sub-job state'ы, отдельная задача.
@@ -2163,7 +2171,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           { dbJobId, modelId },
           "Image fallback skipped: modelMeta missing (model not in AI_MODELS)",
         );
-      } else if (!isKieTransientError(err) && !isProviderTemporaryUnavailable(err)) {
+      } else if (
+        !isKieTransientError(err) &&
+        !isProviderTemporaryUnavailable(err) &&
+        !isTransientNetworkError(err)
+      ) {
         logger.warn(
           {
             dbJobId,
@@ -2172,7 +2184,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             registeredFallbacks: fallbackCandidates.map((m) => m.provider),
             errMessage: err instanceof Error ? err.message : String(err),
           },
-          "Image fallback skipped: error type not eligible (need KIE transient or provider-unavailable)",
+          "Image fallback skipped: error type not eligible (need KIE transient / provider-unavailable / network-transient)",
         );
       } else if (fallbackCandidates.length === 0) {
         logger.warn(
