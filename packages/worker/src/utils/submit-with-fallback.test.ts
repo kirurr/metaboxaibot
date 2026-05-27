@@ -1044,5 +1044,9 @@ describe("submitWithFallback — transient network error", () => {
     expect(mocks.recordError).not.toHaveBeenCalled();
     // Notify per-candidate (2 алерта с разными provider в dedup-ключе).
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(2);
+    // notifyFallback(all_candidates_failed) НЕ должен звать на transient — иначе
+    // на каждом retry-раунде (×3) был бы лишний алерт без дедупа в fallback-канал.
+    // Per-candidate notifyTechErrorThrottled уже дедуп'нут (5/30мин), этого хватит.
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
   });
 });

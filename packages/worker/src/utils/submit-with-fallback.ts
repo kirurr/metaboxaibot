@@ -612,6 +612,21 @@ export async function submitWithFallback<T, D extends object>(
     },
     "submitWithFallback: all candidates exhausted",
   );
+
+  // Transient network outage (DNS лёг у провайдера/upstream'а) — пропускаем
+  // и all_candidates_failed-алерт, и circuit-breaker-defer. Per-candidate
+  // дедуп'нутые алерты (`network-transient:provider:code`) уже отправлены
+  // выше — этого достаточно. all_candidates_failed без дедупа спамил бы
+  // fallback-канал на каждом retry-раунде (×3 раундов defer-transient'а).
+  // Circuit-breaker (MAX_FALLBACK_DEFERS=6, cap 10 мин) тут вреден: DNS-флап
+  // должен лечиться deferIfTransientNetworkError в processor catch'е (30-60s),
+  // а не съедать fallbackDeferCount-budget из-за чужой DNS-проблемы. Бросаем
+  // lastError напрямую — processor подхватит и сделает свой defer-transient.
+  if (isTransientNetworkError(lastError)) {
+    if (lastError) throw lastError;
+    throw new Error(`submitWithFallback: transient network — no candidates available`);
+  }
+
   // Если последняя ошибка — OpenAI billing-исчерпание, шлём all_candidates_failed
   // в balance тему (а не в fallback тему). Иначе при пустом OpenAI billing'е
   // эти алерты спамят общий fallback-канал вперемешку с обычными fallback'ами.
