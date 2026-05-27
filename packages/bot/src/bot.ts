@@ -32,6 +32,11 @@ import {
 } from "./scenes/object-removal.js";
 import { handlePhotoAnimateEnter, handlePhotoAnimatePhoto } from "./scenes/photo-animate.js";
 import {
+  handleCopyMotionEnter,
+  handleCopyMotionPhoto,
+  handleCopyMotionVideo,
+} from "./scenes/copy-motion.js";
+import {
   handlePhotoCreateEnter,
   handlePhotoCreatePhoto,
   handlePhotoCreatePrompt,
@@ -351,6 +356,7 @@ export function createBot(token: string): Bot<BotContext> {
     if (which === "bg_removal") return handleBackgroundRemovalEnter(ctx);
     if (which === "object_removal") return handleObjectRemovalEnter(ctx);
     if (which === "photo_animate") return handlePhotoAnimateEnter(ctx);
+    if (which === "copy_motion") return handleCopyMotionEnter(ctx);
     if (which === "photo_upscale") return handlePhotoUpscaleEnter(ctx);
     if (which === "video_upscale") return handleVideoUpscaleEnter(ctx);
     if (which === "photo_create") return handlePhotoCreateEnter(ctx);
@@ -560,6 +566,20 @@ export function createBot(token: string): Bot<BotContext> {
       if (ctx.message?.document && isImageDocument(ctx.message.document))
         return handlePhotoAnimatePhoto(ctx);
       await ctx.reply(ctx.t.scenarios.photoAnimateNotPhoto);
+      return;
+    }
+    if (state?.state === "COPY_MOTION_AWAIT_PHOTO") {
+      if (ctx.message?.photo) return handleCopyMotionPhoto(ctx);
+      if (ctx.message?.document && isImageDocument(ctx.message.document))
+        return handleCopyMotionPhoto(ctx);
+      await ctx.reply(ctx.t.scenarios.copyMotionNotPhoto);
+      return;
+    }
+    if (state?.state === "COPY_MOTION_AWAIT_VIDEO") {
+      if (ctx.message?.video) return handleCopyMotionVideo(ctx);
+      if (ctx.message?.document && isVideoDocument(ctx.message.document))
+        return handleCopyMotionVideo(ctx);
+      await ctx.reply(ctx.t.scenarios.copyMotionNotVideo);
       return;
     }
     if (state?.state === "OBJECT_REMOVAL_AWAIT_PROMPT") {

@@ -98,10 +98,13 @@ const KLING_MODEL_MAP: Record<string, "std" | "pro"> = {
   "kling-pro": "pro",
 };
 
-/** Kling 3.0 motion-control: std vs pro selected via modelId → `mode` param. */
+/** Kling 3.0 motion-control: std vs pro selected via modelId → `mode` param.
+ *  `copy-motion` — alias на Pro для готового сценария «Копировать движение»
+ *  (фикс-параметры выставляются ниже по `isCopyMotionPreset`). */
 const KLING_MOTION_MODEL_MAP: Record<string, "720p" | "1080p"> = {
   "kling-motion": "720p",
   "kling-motion-pro": "1080p",
+  "copy-motion": "1080p",
 };
 
 /**
@@ -207,11 +210,16 @@ export class KieVideoAdapter implements VideoAdapter {
       inputPayload.video_urls = [uploadedVideo];
       inputPayload.mode = klingMotionMode;
 
-      const orientation = (ms.character_orientation as string | undefined) ?? "video";
-      inputPayload.character_orientation = orientation;
-
-      const backgroundSource = (ms.background_source as string | undefined) ?? "input_video";
-      inputPayload.background_source = backgroundSource;
+      // Готовый сценарий «Копировать движение»: параметры зашиты, даже если
+      // ms приходит с пустыми/чужими значениями. Для обычных kling-motion[-pro]
+      // — берём выбор юзера из настроек модели.
+      const isCopyMotionPreset = this.modelId === "copy-motion";
+      inputPayload.character_orientation = isCopyMotionPreset
+        ? "video"
+        : ((ms.character_orientation as string | undefined) ?? "video");
+      inputPayload.background_source = isCopyMotionPreset
+        ? "input_image"
+        : ((ms.background_source as string | undefined) ?? "input_video");
 
       if (!input.prompt) delete inputPayload.prompt;
     } else if (klingMode) {

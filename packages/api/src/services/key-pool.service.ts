@@ -134,27 +134,43 @@ function decodeProxy(rec: PoolKeyRecord["proxy"]): ProxyConfig | null {
  * (никакого env-fallback'а: админка должна быть единственным источником правды,
  * иначе деактивация ключа не отключает трафик). Если все ключи throttled —
  * также `PoolExhaustedError` с минимальным `retryAfterMs`.
+ *
+ * `opts.inverted = true` — инвертирует приоритеты (от низкого к высокому).
+ * Нужно для "холодных" ключей которые мы хотим намеренно прогревать через
+ * редкие модели (например gpt-image-1.5 — раз в месяц юзается, низкоприори-
+ * тетный ключ иначе никогда не получит трафик → tier у OpenAI не растёт).
+ * Fallback всё равно работает: если все low-priority throttled, дойдёт до
+ * high-priority.
  */
-export async function acquireKey(provider: string): Promise<AcquiredKey> {
+export async function acquireKey(
+  provider: string,
+  opts?: { inverted?: boolean },
+): Promise<AcquiredKey> {
   const keys = await loadKeysForProvider(provider);
   if (keys.length === 0) throw new PoolExhaustedError(provider, 0);
 
-  // Группируем по приоритету (по убыванию).
+  // Группируем по приоритету.
   const byPriority = new Map<number, PoolKeyRecord[]>();
   for (const k of keys) {
     const arr = byPriority.get(k.priority) ?? [];
     arr.push(k);
     byPriority.set(k.priority, arr);
   }
-  const priorities = [...byPriority.keys()].sort((a, b) => b - a);
+  // По умолчанию — высокий приоритет первым (DESC). При inverted=true —
+  // низкий первым (ASC), чтобы целенаправленно нагружать холодные ключи.
+  const priorities = [...byPriority.keys()].sort((a, b) => (opts?.inverted ? a - b : b - a));
 
   let minThrottleMs = Number.POSITIVE_INFINITY;
 
   const redis = getRedis();
   for (const p of priorities) {
     const group = byPriority.get(p)!;
-    // Round-robin внутри группы: атомарный INCR Redis.
-    const counter = await redis.incr(`${RR_PREFIX}${provider}:${p}`);
+    // Round-robin внутри группы: атомарный INCR Redis. Inverted-режим
+    // юзает отдельный counter (`:inv:`), чтобы не сбивать порядок обычного RR.
+    const counterKey = opts?.inverted
+      ? `${RR_PREFIX}${provider}:inv:${p}`
+      : `${RR_PREFIX}${provider}:${p}`;
+    const counter = await redis.incr(counterKey);
     const startIdx = (counter - 1) % group.length;
     // Проходим всю группу с этой стартовой точки, чтобы попробовать все ключи.
     for (let offset = 0; offset < group.length; offset++) {

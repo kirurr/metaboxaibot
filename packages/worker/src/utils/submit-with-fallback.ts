@@ -95,7 +95,8 @@ export type FallbackReason =
   | "persistent_5xx"
   | "provider_long_cooldown_marker"
   | "kie_credits_exhausted"
-  | "openai_billing_exhausted";
+  | "openai_billing_exhausted"
+  | "unknown_error";
 
 export interface FallbackCandidateAttempt {
   provider: string;
@@ -108,7 +109,8 @@ export interface FallbackCandidateAttempt {
     | "provider_unavailable"
     | "incompatible_input"
     | "kie_credits_exhausted"
-    | "openai_billing_exhausted";
+    | "openai_billing_exhausted"
+    | "unknown_error";
   error?: string;
 }
 
@@ -219,9 +221,17 @@ export async function submitWithFallback<T, D extends object>(
     }
 
     // 2. acquireKey
+    // Для gpt-image-1.5 берём ключ из low-priority группы первым делом
+    // (модель раз в месяц юзается → иначе холодный ключ никогда не получит
+    // трафика и tier у OpenAI не растёт). Fallback на high-priority встроен
+    // в acquireKey, если все low-priority throttled — возьмёт обычным
+    // порядком.
     let acquired: AcquiredKey;
     try {
-      acquired = await acquireKey(keyProvider);
+      acquired =
+        candidate.id === "gpt-image-1.5"
+          ? await acquireKey(keyProvider, { inverted: true })
+          : await acquireKey(keyProvider);
     } catch (err) {
       if (isPoolExhaustedError(err)) {
         attempts.push({ provider: candidateProvider, outcome: "pool_exhausted" });
@@ -472,19 +482,63 @@ export async function submitWithFallback<T, D extends object>(
         continue;
       }
 
-      // Другая ошибка (4xx non-429, validation, content policy, transient 5xx
-      // на attempt 1-2, etc.) — НЕ fallback'имся. Пробрасываем наверх:
-      // BullMQ ретраит, либо processor превратит в user-facing failure.
+      // 5xx на ранних попытках (allowFiveXxFallback=false) — известная категория,
+      // НЕ fallback. Пробрасываем наверх, чтобы BullMQ ретраил job с другим ключом
+      // того же провайдера. На attemptsMade >= threshold ветка выше уже даст
+      // fallback'у шанс.
       //
-      // UserFacingError — пользовательская ошибка (пустой ввод, content
-      // policy, невалидный формат). НЕ штрафуем ключ: ключ работал исправно,
+      // UserFacingError-guard на recordError: пользовательская ошибка (пустой
+      // ввод, content policy, невалидный формат) — ключ работал исправно,
       // отказался обрабатывать сам провайдер на уровне content'а запроса.
-      // Без этого guard'а адаптеры, бросающие UserFacingError (Cartesia на
-      // пустом transcript'е и т.п.), помечают здоровые ключи как сбойные.
+      // Без guard'а здоровые ключи помечались бы как сбойные на каждом таком
+      // запросе.
+      if (isFiveXxError(err)) {
+        if (acquired.keyId && !(err instanceof UserFacingError)) {
+          void recordError(acquired.keyId, message.slice(0, 500));
+        }
+        throw err;
+      }
+
+      // Unknown / unclassified error (4xx non-429, validation, content policy,
+      // network reset, неизвестные строки в теле ответа, etc.). Раньше throw'или
+      // сразу — пользователь получал failure, даже если соседний провайдер мог бы
+      // справиться. Теперь best-effort: пробуем следующего кандидата, плюс шлём
+      // burst-throttled алерт в tech-чат (дедуп по provider + первым 80 символам
+      // сообщения) — чтобы ops видели «фактически неклассифицированную» категорию
+      // и могли добавить classifier при повторении паттерна. Если все кандидаты
+      // упали так же — lastError пробросится наверх ниже (`throw lastError`),
+      // юзер получит обычную failure-кнопку, processor добавит свой top-level
+      // notifyTechError.
+      //
+      // UserFacingError-guard на recordError — см. комментарий в 5xx-ветке выше.
       if (acquired.keyId && !(err instanceof UserFacingError)) {
         void recordError(acquired.keyId, message.slice(0, 500));
       }
-      throw err;
+      attempts.push({
+        provider: candidateProvider,
+        outcome: "unknown_error",
+        error: message.slice(0, 200),
+      });
+      void notifyTechErrorThrottled(
+        err instanceof Error ? err : new Error(message),
+        {
+          section: opts.section,
+          modelId: opts.primaryModel.id,
+          jobId: opts.jobId,
+          userId: opts.userId,
+        },
+        `unknown-error:${candidateProvider}:${message.slice(0, 80)}`,
+      );
+      logger.warn(
+        {
+          jobId: opts.jobId,
+          provider: candidateProvider,
+          modelId: opts.primaryModel.id,
+          err: message.slice(0, 200),
+        },
+        "submitWithFallback: unknown error — trying next candidate",
+      );
+      continue;
     }
   }
 
@@ -581,6 +635,7 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
   if (primaryOutcome === "kie_credits_exhausted") return "kie_credits_exhausted";
   if (primaryOutcome === "openai_billing_exhausted") return "openai_billing_exhausted";
+  if (primaryOutcome === "unknown_error") return "unknown_error";
   return "pool_exhausted";
 }
 

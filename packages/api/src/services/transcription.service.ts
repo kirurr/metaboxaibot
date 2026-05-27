@@ -1,9 +1,8 @@
 import OpenAI, { type ClientOptions as OpenAIClientOptions } from "openai";
 import { transcodeToMp3 } from "../utils/audio-transcode.js";
 import { logger } from "../logger.js";
-import { acquireKey, recordSuccess, recordError, markRateLimited } from "./key-pool.service.js";
-import { classifyRateLimit } from "../utils/rate-limit-error.js";
 import { buildProxyFetch } from "../ai/transport/proxy-fetch.js";
+import { withKeyRetry } from "../utils/with-key-retry.js";
 
 /**
  * Whisper API принимает только эти расширения. Любое другое → 400
@@ -29,8 +28,10 @@ const WHISPER_SUPPORTED_EXTS = new Set([
  * (Telegram voice = OGG/Opus всегда транскодим; обычные audio с экзотическим
  * mime типа application/quicktime / video/* — тоже).
  *
- * Ключ берётся из пула (provider="openai"). PoolExhaustedError всплывает наверх —
- * caller (бот) должен показать пользователю сообщение об ошибке.
+ * Ключ берётся из пула (provider="openai") через `withKeyRetry`: на 429 /
+ * billing-error ключ помечается throttled и пробуется следующий. Без этого
+ * первый юзер, попавший на ключ-только-что-сдох, словил бы «не удалось
+ * распознать речь» — хотя в пуле есть живые ключи.
  */
 export async function transcribeAudio(
   audioBuffer: Buffer,
@@ -44,31 +45,18 @@ export async function transcribeAudio(
 
   const file = new File([buffer], `voice.${ext}`, { type: `audio/${ext}` });
 
-  const acquired = await acquireKey("openai");
-  const fetchFn = buildProxyFetch(acquired.proxy) ?? undefined;
-  const client = new OpenAI({
-    apiKey: acquired.apiKey,
-    ...(fetchFn ? { fetch: fetchFn as unknown as OpenAIClientOptions["fetch"] } : {}),
-  });
-
-  try {
+  return withKeyRetry("openai", async (acquired) => {
+    const fetchFn = buildProxyFetch(acquired.proxy) ?? undefined;
+    const client = new OpenAI({
+      apiKey: acquired.apiKey,
+      ...(fetchFn ? { fetch: fetchFn as unknown as OpenAIClientOptions["fetch"] } : {}),
+    });
     const result = await client.audio.transcriptions.create({
       model: "whisper-1",
       file,
       ...(language ? { language } : {}),
     });
-    if (acquired.keyId) void recordSuccess(acquired.keyId);
     logger.debug({ language, textLength: result.text.length }, "transcribeAudio: done");
     return result.text;
-  } catch (err) {
-    if (acquired.keyId) {
-      const cls = classifyRateLimit(err, "openai");
-      if (cls.isRateLimit) {
-        void markRateLimited(acquired.keyId, cls.cooldownMs, cls.reason);
-      } else {
-        void recordError(acquired.keyId, err instanceof Error ? err.message : String(err));
-      }
-    }
-    throw err;
-  }
+  });
 }

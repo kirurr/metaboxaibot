@@ -366,10 +366,44 @@ describe("submitWithFallback — trigger conditions", () => {
     );
   });
 
-  test("non-rate-limit non-5xx error → throws (не fallback)", async () => {
-    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+  test("non-rate-limit non-5xx error (primary) → пробует fallback + шлёт tech-alert", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
     const validationErr = Object.assign(new Error("bad request"), { status: 400 });
-    const submit = vi.fn().mockRejectedValueOnce(validationErr);
+    const submit = vi.fn().mockRejectedValueOnce(validationErr).mockResolvedValueOnce("ok");
+
+    const res = await submitWithFallback({
+      primaryModel: PRIMARY,
+      fallbacks: [FALLBACK_1],
+      section: "design",
+      job: makeJob(),
+      allowFiveXxFallback: true,
+      submit,
+    });
+
+    expect(res.usedFallback).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(2);
+    // Tech-alert ушёл per-candidate (даже если fallback успел спасти запрос).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(1);
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      validationErr,
+      expect.objectContaining({ section: "design", modelId: PRIMARY.id }),
+      expect.stringMatching(/^unknown-error:/),
+    );
+    // notifyFallback (success switch) — с reason unknown_error.
+    expect(mocks.notifyFallback).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "unknown_error" }),
+    );
+  });
+
+  test("non-rate-limit non-5xx error везде → throws lastError + per-candidate tech-alerts", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const err1 = Object.assign(new Error("primary boom"), { status: 400 });
+    const err2 = Object.assign(new Error("fallback boom"), { status: 400 });
+    const submit = vi.fn().mockRejectedValueOnce(err1).mockRejectedValueOnce(err2);
 
     await expect(
       submitWithFallback({
@@ -380,10 +414,14 @@ describe("submitWithFallback — trigger conditions", () => {
         allowFiveXxFallback: true,
         submit,
       }),
-    ).rejects.toBe(validationErr);
+    ).rejects.toBe(err2);
 
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(2);
+    // notifyFallback (all_candidates_failed) тоже улетел.
+    expect(mocks.notifyFallback).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "all_candidates_failed" }),
+    );
   });
 });
 
