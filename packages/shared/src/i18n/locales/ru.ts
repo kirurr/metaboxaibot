@@ -180,6 +180,8 @@ export default {
     },
     reasoningHeader: "🧠 Размышления модели",
     reasoningPartLabel: "часть {index}/{total}",
+    chunkDroppedTelegramLimit:
+      "⚠️ Часть ответа не доставлена из-за лимитов Telegram. Попробуйте повторить запрос через минуту.",
   },
   design: {
     sectionTitle: "🎨 Дизайн с ИИ",

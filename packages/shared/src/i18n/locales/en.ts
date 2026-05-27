@@ -179,6 +179,8 @@ export default {
     },
     reasoningHeader: "🧠 Model reasoning",
     reasoningPartLabel: "part {index}/{total}",
+    chunkDroppedTelegramLimit:
+      "⚠️ Part of the reply was not delivered due to Telegram rate limits. Please retry in a minute.",
   },
   design: {
     sectionTitle: "🎨 AI Design",

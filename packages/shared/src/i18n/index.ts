@@ -143,6 +143,7 @@ export interface Translations {
     };
     reasoningHeader: string;
     reasoningPartLabel: string;
+    chunkDroppedTelegramLimit: string;
   };
   design: {
     sectionTitle: string;

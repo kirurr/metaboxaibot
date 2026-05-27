@@ -315,7 +315,8 @@ async function streamGptResponse(
     // sendMessage с уважением 429 retry_after и общего per-chat cooldown'а
     // (editBlockedUntil). Telegram 429 на отправку нельзя обойти plain-text'ом —
     // throttle per-chat. До MAX_ATTEMPTS попыток с sleep'ом между, дальше
-    // сдаёмся (логируем). Non-429 ошибки (parse-fail и т.п.) бросаем наверх,
+    // сдаёмся (логируем + best-effort plain-text-маркер юзеру, чтобы не выглядел
+    // как «бот недописал»). Non-429 ошибки (parse-fail и т.п.) бросаем наверх,
     // чтобы caller мог фолбэкнуться на plain text.
     const SEND_MAX_ATTEMPTS = 3;
     const trySend = async (text: string, withMarkdown: boolean): Promise<void> => {
@@ -334,6 +335,11 @@ async function streamGptResponse(
               { retryMs, attempts: attempt },
               "GPT finalize: send still 429 after max attempts, dropping chunk",
             );
+            // Best-effort UX-маркер: после ~30-90s sleep'ов cooldown может уже
+            // истечь, и юзер увидит понятный текст вместо обрыва. Если 429 ещё
+            // активен — catch проглотит, юзер всё равно ничего не получит, но
+            // в большинстве случаев маркер пройдёт.
+            await trySendRaw(ctx.t.gpt.chunkDroppedTelegramLimit, false).catch(() => void 0);
             return;
           }
         }
