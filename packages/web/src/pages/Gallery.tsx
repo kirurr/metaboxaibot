@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -13,8 +14,10 @@ import {
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  Calendar,
   ChevronLeft,
   ChevronRight,
+  Coins,
   Download,
   FolderPlus,
   Heart,
@@ -55,6 +58,7 @@ import { Input } from "@/components/common/Input";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
+import { formatTokens } from "@/utils/format";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -116,9 +120,16 @@ function ModelFilterChips({
     return m;
   }, [models]);
 
+  // Мобилка: два ряда с горизонтальным скроллом (моделей бывает много);
+  // на md+ возвращаемся к привычному flex-wrap (grid-* утилиты инертны под flex).
+  const containerClass =
+    "grid grid-flow-col grid-rows-2 auto-cols-max items-center gap-2 overflow-x-auto pb-1 " +
+    "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden " +
+    "md:flex md:flex-wrap md:overflow-visible md:pb-0";
+
   if (countsQuery.isPending) {
     return (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={containerClass}>
         <div className="skeleton h-7 w-24 rounded" />
         <div className="skeleton h-7 w-28 rounded" />
       </div>
@@ -127,7 +138,7 @@ function ModelFilterChips({
   if (counts.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className={containerClass}>
       {counts.map((c) => {
         const label = modelNameById.get(c.modelId) ?? c.modelId;
         const active = modelId === c.modelId;
@@ -136,7 +147,7 @@ function ModelFilterChips({
             key={c.modelId}
             type="button"
             onClick={() => onChange(active ? undefined : c.modelId)}
-            className={chipClass(active)}
+            className={`${chipClass(active)} shrink-0 whitespace-nowrap`}
           >
             {label} <span className="text-text-hint ml-1">({c.count})</span>
           </button>
@@ -448,11 +459,11 @@ function ThumbnailPlaceholder({ section }: { section: string }) {
 
 function JobCardThumbnail({ job }: { job: GalleryJob }) {
   const first = job.outputs[0];
-  const src = first?.thumbnailUrl ?? (job.section === "image" ? first?.previewUrl : null);
-  if (src) {
+  const imgSrc = first?.thumbnailUrl ?? (job.section === "image" ? first?.previewUrl : null);
+  if (imgSrc) {
     return (
       <img
-        src={src}
+        src={imgSrc}
         alt=""
         loading="lazy"
         className="w-full h-full object-cover"
@@ -461,6 +472,29 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
         }}
       />
     );
+  }
+  if (job.section === "video") {
+    // Кадр-превью бэк не отдал — рендерим само видео без controls и без
+    // возможности запустить (pointer-events:none пробрасывает клик на карточку,
+    // которая открывает Lightbox). `#t=0.001` гарантирует, что Safari/Firefox
+    // отобразят первый кадр, а не чёрный poster.
+    const videoSrc = first?.previewUrl ?? first?.outputUrl ?? null;
+    if (videoSrc) {
+      return (
+        <video
+          src={`${videoSrc}#t=0.001`}
+          muted
+          playsInline
+          preload="metadata"
+          disablePictureInPicture
+          controlsList="nodownload nofullscreen noremoteplayback"
+          className="w-full h-full object-cover pointer-events-none"
+          onError={(e) => {
+            (e.currentTarget as HTMLVideoElement).style.display = "none";
+          }}
+        />
+      );
+    }
   }
   return <ThumbnailPlaceholder section={job.section} />;
 }
@@ -745,11 +779,30 @@ function LightboxMedia({ section, output }: { section: string; output: GalleryOu
   return <img src={src} alt="" className="max-h-[70vh] max-w-full object-contain rounded" />;
 }
 
+function formatLightboxDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs"
+      style={{ background: "var(--accent-lighter)", color: "var(--accent-light)" }}
+    >
+      {icon}
+      {label}
+    </span>
+  );
+}
+
 function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const pushToast = useUIStore((s) => s.pushToast);
   const navigate = useNavigate();
   const active = job.outputs[activeIdx] ?? job.outputs[0];
+  const hasMultiple = job.outputs.length > 1;
 
   const handleRepeat = () => {
     const section = normalizeSection(job.section);
@@ -765,13 +818,23 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
     });
   };
 
+  const goNext = useCallback(() => {
+    setActiveIdx((i) => (i + 1) % job.outputs.length);
+  }, [job.outputs.length]);
+
+  const goPrev = useCallback(() => {
+    setActiveIdx((i) => (i - 1 + job.outputs.length) % job.outputs.length);
+  }, [job.outputs.length]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && hasMultiple) goPrev();
+      else if (e.key === "ArrowRight" && hasMultiple) goNext();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, goPrev, goNext, hasMultiple]);
 
   const handleDownload = async () => {
     if (!active) return;
@@ -785,6 +848,10 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
 
   if (!active) return null;
 
+  const tokensValue =
+    job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
+  const hasMeta = Boolean(job.completedAt || tokensValue);
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 anim-page-in"
@@ -792,10 +859,10 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
     >
       <div
         className="fixed inset-0"
-        style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
+        style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
       />
       <div
-        className="relative card w-full max-w-4xl p-4 z-10"
+        className="relative card w-full max-w-6xl max-h-[90vh] z-10 overflow-hidden flex flex-col md:grid md:grid-cols-[minmax(0,1fr)_340px]"
         style={{ background: "var(--bg-elevated)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -803,67 +870,153 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
           type="button"
           onClick={onClose}
           aria-label="Закрыть"
-          className="absolute top-3 right-3 text-text-hint hover:text-text"
+          className="absolute top-3 right-3 z-20 h-9 w-9 rounded-full flex items-center justify-center border transition-colors"
+          style={{
+            background: "rgba(0,0,0,0.45)",
+            backdropFilter: "blur(8px)",
+            borderColor: "var(--border-strong)",
+            color: "var(--text-secondary)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "var(--text)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "var(--text-secondary)";
+          }}
         >
-          <X size={20} />
+          <X size={16} />
         </button>
 
-        <div className="flex items-center justify-center min-h-[40vh]">
-          <LightboxMedia section={job.section} output={active} />
+        {/* Media column */}
+        <div className="relative flex flex-col min-w-0" style={{ background: "rgba(0,0,0,0.25)" }}>
+          <div className="relative flex-1 flex items-center justify-center min-h-[40vh] md:min-h-[60vh] p-4">
+            <LightboxMedia section={job.section} output={active} />
+
+            {hasMultiple && (
+              <>
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  aria-label="Предыдущий"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full flex items-center justify-center border transition-opacity opacity-70 hover:opacity-100"
+                  style={{
+                    background: "rgba(0,0,0,0.5)",
+                    backdropFilter: "blur(8px)",
+                    borderColor: "var(--border-strong)",
+                    color: "var(--text)",
+                  }}
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  aria-label="Следующий"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full flex items-center justify-center border transition-opacity opacity-70 hover:opacity-100"
+                  style={{
+                    background: "rgba(0,0,0,0.5)",
+                    backdropFilter: "blur(8px)",
+                    borderColor: "var(--border-strong)",
+                    color: "var(--text)",
+                  }}
+                >
+                  <ChevronRight size={20} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {hasMultiple && (
+            <div className="flex items-center gap-2 px-4 pb-4 overflow-x-auto [scrollbar-width:thin]">
+              {job.outputs.map((o, i) => {
+                const thumb = o.thumbnailUrl ?? (job.section === "image" ? o.previewUrl : null);
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setActiveIdx(i)}
+                    className={`shrink-0 w-16 h-16 rounded overflow-hidden border-2 transition-colors ${
+                      i === activeIdx
+                        ? "border-[var(--accent)]"
+                        : "border-transparent hover:border-[var(--border-strong)]"
+                    }`}
+                  >
+                    {thumb ? (
+                      <img src={thumb} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <ThumbnailPlaceholder section={job.section} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {job.outputs.length > 1 && (
-          <div className="flex items-center gap-2 mt-3 overflow-x-auto">
-            {job.outputs.map((o, i) => {
-              const thumb = o.thumbnailUrl ?? (job.section === "image" ? o.previewUrl : null);
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => setActiveIdx(i)}
-                  className={`shrink-0 w-16 h-16 rounded overflow-hidden border-2 ${
-                    i === activeIdx ? "border-accent" : "border-transparent"
-                  }`}
-                >
-                  {thumb ? (
-                    <img src={thumb} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <ThumbnailPlaceholder section={job.section} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* Info sidebar */}
+        <aside
+          className="flex flex-col border-t md:border-t-0 md:border-l overflow-hidden"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <h2 className="text-base font-semibold leading-snug" style={{ color: "var(--text)" }}>
+              {job.modelName}
+            </h2>
 
-        <div className="mt-4 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold">{job.modelName}</div>
+            {hasMeta && (
+              <div className="flex flex-wrap gap-1.5">
+                {job.completedAt && (
+                  <MetaChip
+                    icon={<Calendar size={14} />}
+                    label={formatLightboxDate(job.completedAt)}
+                  />
+                )}
+                {tokensValue && (
+                  <MetaChip icon={<Coins size={14} />} label={`${tokensValue} токенов`} />
+                )}
+              </div>
+            )}
+
             {job.prompt && (
-              <div className="text-xs text-text-secondary mt-1 whitespace-pre-wrap break-words">
-                {job.prompt}
+              <div>
+                <div
+                  className="text-xs uppercase tracking-wide mb-1.5"
+                  style={{ color: "var(--text-hint)" }}
+                >
+                  Промпт
+                </div>
+                <p
+                  className="text-sm leading-relaxed whitespace-pre-wrap break-words"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {job.prompt}
+                </p>
               </div>
             )}
           </div>
-          <div className="flex-shrink-0 flex items-center gap-2">
+
+          <div
+            className="border-t p-4 flex flex-col gap-2"
+            style={{ borderColor: "var(--border)", background: "var(--bg-elevated)" }}
+          >
             <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={<RotateCcw size={14} />}
+              variant="secondary"
+              leftIcon={<RotateCcw size={16} />}
               onClick={handleRepeat}
+              fullWidth
             >
               Повторить
             </Button>
             <Button
-              variant="secondary"
-              size="sm"
-              leftIcon={<Download size={14} />}
+              variant="ghost"
+              leftIcon={<Download size={16} />}
               onClick={handleDownload}
+              fullWidth
             >
               Скачать оригинал
             </Button>
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );

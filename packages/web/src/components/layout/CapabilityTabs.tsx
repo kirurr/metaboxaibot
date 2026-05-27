@@ -4,6 +4,16 @@ import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { modelsForCapability, useModelsStore } from "@/stores/modelsStore";
 import type { WebModelDto } from "@/api/models";
+import {
+  CAPABILITIES,
+  type Capability,
+  FEATURE_MENUS,
+  MAX_MODELS_IN_MENU,
+  dedupByFamily,
+  displayModelDesc,
+  displayModelName,
+  modelLetter,
+} from "@/components/layout/capabilityData";
 
 /**
  * Капабилити-табы в TopNav: «Chat / Image / Video / Audio».
@@ -14,218 +24,11 @@ import type { WebModelDto } from "@/api/models";
  * Колонка «Features» — статичная (use-case ярлыки, не настоящие модели).
  * Колонка «Models» — динамическая из `useModelsStore` (`/web/models`).
  *
+ * Конфиг (`CAPABILITIES`, `FEATURE_MENUS`, хелперы моделей) вынесен в
+ * `capabilityData.ts` и переиспользуется мобильным `GenerateSheet`-ом.
+ *
  * Источник дизайна: `aibox_template/ai-box-pre-tilted.html` (CapabilityTabs).
  */
-
-type Capability = {
-  id: "text" | "image" | "video" | "audio";
-  /** i18n-ключ для подписи капабилити (резолвится в рендере). */
-  labelKey: string;
-  route: string;
-};
-
-const CAPABILITIES: readonly Capability[] = [
-  { id: "text", labelKey: "capabilities.chat", route: "/chat" },
-  { id: "image", labelKey: "capabilities.image", route: "/image" },
-  { id: "video", labelKey: "capabilities.video", route: "/video" },
-  { id: "audio", labelKey: "capabilities.audio", route: "/audio" },
-] as const;
-
-type MenuItem = {
-  /** i18n-ключи для name/desc. */
-  nameKey: string;
-  descKey: string;
-  glyph?: string;
-  letter?: string;
-  badge?: "TOP" | "NEW";
-  /** Индивидуальные ссылки */
-  link?: string;
-};
-
-// Сколько моделей показываем в mega-menu максимум — чтобы не утопить колонку.
-const MAX_MODELS_IN_MENU = 6;
-
-/** Имя моделей в UI: для family-моделей подставляем familyName, иначе берём `name` как есть. */
-function displayModelName(m: WebModelDto): string {
-  return m.familyName ?? m.name;
-}
-
-/** Короткое описание для строки в mega-menu (приоритет: описание варианта → общее описание). */
-function displayModelDesc(m: WebModelDto): string {
-  return m.descriptionOverride ?? m.description;
-}
-
-/** Берём первую букву family или name — для квадратного «letter» аватара слева. */
-function modelLetter(m: WebModelDto): string {
-  return displayModelName(m).trim().slice(0, 1).toUpperCase() || "·";
-}
-
-const FEATURE_MENUS: Record<string, MenuItem[]> = {
-  image: [
-    {
-      nameKey: "capabilities.features.image.generate.name",
-      descKey: "capabilities.features.image.generate.desc",
-      glyph: "▢",
-    },
-    {
-      nameKey: "capabilities.features.image.photoCreate.name",
-      descKey: "capabilities.features.image.photoCreate.desc",
-      glyph: "❂",
-      link: "photo-create",
-    },
-    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
-    // {
-    //   nameKey: "capabilities.features.image.product.name",
-    //   descKey: "capabilities.features.image.product.desc",
-    //   glyph: "◈",
-    // },
-    // {
-    //   nameKey: "capabilities.features.image.edit.name",
-    //   descKey: "capabilities.features.image.edit.desc",
-    //   glyph: "◯",
-    // },
-    {
-      nameKey: "capabilities.features.image.upscale.name",
-      descKey: "capabilities.features.image.upscale.desc",
-      glyph: "▲",
-      link: "upscale",
-    },
-    // {
-    //   nameKey: "capabilities.features.image.lora.name",
-    //   descKey: "capabilities.features.image.lora.desc",
-    //   glyph: "✪",
-    // },
-    // {
-    //   nameKey: "capabilities.features.image.style.name",
-    //   descKey: "capabilities.features.image.style.desc",
-    //   glyph: "◇",
-    // },
-    {
-      nameKey: "capabilities.features.image.background.name",
-      descKey: "capabilities.features.image.background.desc",
-      glyph: "▦",
-      link: "bg-removal",
-    },
-    {
-      nameKey: "capabilities.features.image.faceSwap.name",
-      descKey: "capabilities.features.image.faceSwap.desc",
-      glyph: "◑",
-      link: "face-swap",
-    },
-    {
-      nameKey: "capabilities.features.image.clothingTryon.name",
-      descKey: "capabilities.features.image.clothingTryon.desc",
-      glyph: "❖",
-      link: "clothing-tryon",
-    },
-    {
-      nameKey: "capabilities.features.image.objectRemoval.name",
-      descKey: "capabilities.features.image.objectRemoval.desc",
-      glyph: "⊘",
-      link: "object-removal",
-    },
-  ],
-  video: [
-    {
-      nameKey: "capabilities.features.video.create.name",
-      descKey: "capabilities.features.video.create.desc",
-      glyph: "▷",
-    },
-    {
-      nameKey: "capabilities.features.video.animate.name",
-      descKey: "capabilities.features.video.animate.desc",
-      glyph: "◉",
-      link: "photo-animate",
-    },
-    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /video).
-    // {
-    //   nameKey: "capabilities.features.video.cinema.name",
-    //   descKey: "capabilities.features.video.cinema.desc",
-    //   glyph: "▣",
-    //   badge: "TOP",
-    // },
-    // {
-    //   nameKey: "capabilities.features.video.mixed.name",
-    //   descKey: "capabilities.features.video.mixed.desc",
-    //   glyph: "◫",
-    // },
-    // {
-    //   nameKey: "capabilities.features.video.edit.name",
-    //   descKey: "capabilities.features.video.edit.desc",
-    //   glyph: "▥",
-    // },
-    // {
-    //   nameKey: "capabilities.features.video.lipsync.name",
-    //   descKey: "capabilities.features.video.lipsync.desc",
-    //   glyph: "◎",
-    // },
-    // {
-    //   nameKey: "capabilities.features.video.sketch.name",
-    //   descKey: "capabilities.features.video.sketch.desc",
-    //   glyph: "✏",
-    // },
-    {
-      nameKey: "capabilities.features.video.upscale.name",
-      descKey: "capabilities.features.video.upscale.desc",
-      glyph: "▱",
-      link: "video-upscale",
-    },
-    // {
-    //   nameKey: "capabilities.features.video.avatar.name",
-    //   descKey: "capabilities.features.video.avatar.desc",
-    //   glyph: "◍",
-    //   badge: "NEW",
-    // },
-  ],
-  audio: [
-    {
-      nameKey: "capabilities.features.audio.tts.name",
-      descKey: "capabilities.features.audio.tts.desc",
-      glyph: "◀",
-      link: "tts",
-    },
-    {
-      nameKey: "capabilities.features.audio.clone.name",
-      descKey: "capabilities.features.audio.clone.desc",
-      glyph: "○",
-      badge: "TOP",
-      link: "clone",
-    },
-    {
-      nameKey: "capabilities.features.audio.music.name",
-      descKey: "capabilities.features.audio.music.desc",
-      glyph: "♫",
-      link: "music",
-    },
-    {
-      nameKey: "capabilities.features.audio.sounds.name",
-      descKey: "capabilities.features.audio.sounds.desc",
-      glyph: "≋",
-      link: "sounds",
-    },
-    // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /audio).
-    // {
-    //   nameKey: "capabilities.features.audio.dubbing.name",
-    //   descKey: "capabilities.features.audio.dubbing.desc",
-    //   glyph: "◯",
-    // },
-    // {
-    //   nameKey: "capabilities.features.audio.transcribe.name",
-    //   descKey: "capabilities.features.audio.transcribe.desc",
-    //   glyph: "▤",
-    // },
-    // {
-    //   nameKey: "capabilities.features.audio.cleanup.name",
-    //   descKey: "capabilities.features.audio.cleanup.desc",
-    //   glyph: "△",
-    // },
-    // {
-    //   nameKey: "capabilities.features.audio.library.name",
-    //   descKey: "capabilities.features.audio.library.desc",
-    //   glyph: "▼",
-    // },
-  ],
-};
 
 function isActiveRoute(capRoute: string, currentPath: string): boolean {
   if (capRoute === "/chat") return currentPath.startsWith("/chat");
@@ -245,27 +48,16 @@ export function CapabilityTabs() {
   // даже если для секции каталог пока пустой (загрузка не завершена). Семейства
   // дедупим (Flux Pro/LoRA/etc. → одна строка с familyName), чтобы колонка не
   // утопала: семейство — это бренд, варианты выбираются уже внутри страницы.
+  // Preset-only модели (hiddenFromCarousel) в мега-меню не показываем — они
+  // доступны только через свой URL-пресет.
   const modelsByCap = useMemo(() => {
-    const dedup = (cap: Capability["id"]): WebModelDto[] => {
-      // Preset-only модели (hiddenFromCarousel) в мега-меню не показываем —
-      // они доступны только через свой URL-пресет.
-      const list = modelsForCapability(allModels, cap).filter((m) => !m.hiddenFromCarousel);
-      const seenFamilies = new Set<string>();
-      const out: WebModelDto[] = [];
-      for (const m of list) {
-        if (m.familyId) {
-          if (seenFamilies.has(m.familyId)) continue;
-          seenFamilies.add(m.familyId);
-        }
-        out.push(m);
-      }
-      return out;
-    };
+    const pick = (cap: Capability["id"]): WebModelDto[] =>
+      dedupByFamily(modelsForCapability(allModels, cap).filter((m) => !m.hiddenFromCarousel));
     return {
-      text: dedup("text"),
-      image: dedup("image"),
-      video: dedup("video"),
-      audio: dedup("audio"),
+      text: pick("text"),
+      image: pick("image"),
+      video: pick("video"),
+      audio: pick("audio"),
     } satisfies Record<Capability["id"], WebModelDto[]>;
   }, [allModels]);
 

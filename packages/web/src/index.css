@@ -60,6 +60,10 @@
   --sidebar-w-collapsed: 72px;
   --topbar-h: 64px;
   --mobile-nav-h: 72px;
+  /* Полная высота BottomNav с учётом home-indicator / жестовой зоны iOS.
+     Использовать в any-where, где нужно зарезервировать место под мобильную
+     нав-бар (height-calc, padding-bottom, inset). */
+  --mobile-nav-total-h: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px));
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 
@@ -1030,7 +1034,7 @@ select {
 
 /* ===== Mobile adjustments ===== */
 .app.mobile .page {
-  padding: 22px 18px calc(100px + env(safe-area-inset-bottom));
+  padding: 22px 18px calc(var(--mobile-nav-total-h) + 20px);
 }
 .app.mobile .page-head .h1 {
   font-size: 34px;
@@ -1314,7 +1318,7 @@ select {
 }
 .app.mobile .chat-shell {
   grid-template-columns: 1fr;
-  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-h));
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h));
 }
 
 .chat-side {
@@ -1326,7 +1330,7 @@ select {
 }
 .app.mobile .chat-side {
   position: fixed;
-  inset: var(--topbar-h) 0 var(--mobile-nav-h) 0;
+  inset: var(--topbar-h) 0 var(--mobile-nav-total-h) 0;
   z-index: 70;
   width: min(320px, 86vw);
   right: auto;
@@ -1336,7 +1340,7 @@ select {
   /* Полупрозрачный backdrop за мобильным drawer'ом. */
   content: "";
   position: fixed;
-  inset: var(--topbar-h) 0 var(--mobile-nav-h) 0;
+  inset: var(--topbar-h) 0 var(--mobile-nav-total-h) 0;
   background: rgba(0, 0, 0, 0.5);
   z-index: -1;
 }
@@ -2656,6 +2660,27 @@ select {
   background: var(--bg-elevated);
   border-radius: 6px;
 }
+/* Mobile: строка истории стекается в карточку — title, preview, мета снизу. */
+.app.mobile .history-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.app.mobile .history-row .meta {
+  margin-left: 0;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.app.mobile .history-row .meta .h-model {
+  margin-right: auto; /* разводит модель и время+стрелку по краям */
+}
+/* Поиск на всю ширину, чтобы не переполнял экран при flex: 1 1 320px. */
+.app.mobile .input-group {
+  flex: 1 1 100% !important;
+  max-width: 100% !important;
+}
 
 /* Plans */
 .plans {
@@ -3448,7 +3473,7 @@ select {
   padding-top: env(safe-area-inset-top, 0);
 }
 .pad-safe-bottom {
-  padding-bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0));
+  padding-bottom: var(--mobile-nav-total-h);
 }
 
 @keyframes page-in {
@@ -3949,7 +3974,7 @@ select {
   pointer-events: none;
 }
 .app.mobile .hf-dock {
-  bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0) + 12px);
+  bottom: calc(var(--mobile-nav-total-h) + 12px);
   padding: 0 12px;
 }
 .hf-dock .hf-bar {
@@ -4458,7 +4483,7 @@ select {
 }
 .app.mobile .gen-page {
   grid-template-columns: 1fr;
-  padding: 16px 14px calc(var(--mobile-nav-h) + 24px);
+  padding: 16px 14px calc(var(--mobile-nav-total-h) + 24px);
   gap: 14px;
 }
 
@@ -4654,15 +4679,23 @@ select {
 .gen-shot-dur {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 8px;
 }
 .gen-shot-dur-label {
   font-size: 12.5px;
   color: var(--text-secondary);
 }
-/* Кнопка «Элементы» прижата к правому краю строки длительности. */
+/* Кнопка «Элементы» прижата к правому краю строки длительности.
+   На мобиле margin отключаем — кнопка переезжает на следующую строку
+   через flex-wrap и должна оставаться слева (естественно следующей за
+   степпером), а не уезжать вправо за пределы карточки. */
 .gen-shot-elements-btn {
   margin-left: auto;
+}
+.app.mobile .gen-shot-elements-btn {
+  margin-left: 0;
 }
 .gen-stepper {
   display: inline-flex;
@@ -4879,7 +4912,10 @@ select {
   gap: 24px;
 }
 .app.mobile .gen-scene {
-  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-h));
+  /* Высоту считаем с учётом полной нав-бары (включая safe-area). Снизу даём
+     дополнительный воздух 16px, чтобы кнопка «Генерировать» / поле «Введите
+     запрос» не прилегали впритык к BottomNav и оставалось видимое пространство. */
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 16px);
   padding: 14px;
   /* Mobile: панель растягивается на всю ширину, gap не нужен. */
   gap: 0;
@@ -5039,6 +5075,13 @@ select {
   gap: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
+}
+/* На мобиле добавляем воздух снизу под CTA, чтобы кнопка «Генерировать» не
+   прилегала впритык к фиксированной BottomNav. Это применяется независимо от
+   того, в какой layout-обёртке (.gen-scene / .gen-page / preset-specific)
+   находится панель. */
+.app.mobile .gen-panel-footer {
+  padding-bottom: 20px;
 }
 
 .gen-head {
