@@ -1,4 +1,5 @@
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { AtSign, Minus, Plus, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,8 +12,24 @@ import {
   sumShotDuration,
   type ShotEntry,
 } from "@/utils/multishot";
+import { MentionTextarea, type MentionTextareaHandle } from "./MentionTextarea";
+import { ElementMentionPicker } from "./ElementMentionPicker";
+import type { Element } from "@/api/elements";
 
 const DEFAULT_SHOT_DURATION = 5;
+
+/**
+ * Бандл для @-меншенов элементов в шот-полях. Передаётся, когда модель
+ * поддерживает элементы (promptRefs.elements) — тогда каждое поле шота умеет
+ * `@элемент` так же, как главный промпт. Без него — обычный textarea.
+ */
+export interface ShotMentionProps {
+  elementsFeatureOn: boolean;
+  candidates: Element[];
+  activeElementIds: Set<string>;
+  atCap: boolean;
+  onSelectElement: (el: Element) => void;
+}
 
 /**
  * Inline-редактор мультишота (Kling): список блоков «промпт + длительность»,
@@ -23,11 +40,17 @@ const DEFAULT_SHOT_DURATION = 5;
 export function ShotListEditor({
   shots,
   onChange,
+  mention,
 }: {
   shots: ShotEntry[];
   onChange: (next: ShotEntry[]) => void;
+  mention?: ShotMentionProps;
 }) {
   const { t } = useTranslation();
+  // Хэндлы шот-полей — для вставки меншена из модального @-пикера в нужный шот.
+  const shotRefs = useRef<Array<MentionTextareaHandle | null>>([]);
+  // Для какого шота открыт модальный пикер «Элементы» (null — закрыт).
+  const [pickerForShot, setPickerForShot] = useState<number | null>(null);
 
   // Гарантируем хотя бы один шот для редактирования (пустой список бессмыслен).
   const list = shots.length > 0 ? shots : [{ prompt: "", duration: DEFAULT_SHOT_DURATION }];
@@ -51,6 +74,15 @@ export function ShotListEditor({
   function removeShot(i: number) {
     onChange(list.filter((_, idx) => idx !== i));
   }
+  // Выбор элемента в модальном пикере: вставляем меншен в поле целевого шота
+  // (императивно, как у главного промпта) и открываем выбор картинок элемента.
+  function pickElementForShot(el: Element) {
+    if (pickerForShot != null) {
+      shotRefs.current[pickerForShot]?.insertMention(el.name);
+      mention?.onSelectElement(el);
+    }
+    setPickerForShot(null);
+  }
 
   return (
     <div className="gen-shotlist">
@@ -70,13 +102,31 @@ export function ShotListEditor({
               </button>
             )}
           </div>
-          <textarea
-            className="gen-prompt gen-shot-prompt"
-            placeholder={t("generate.multishot.shotPlaceholder")}
-            value={shot.prompt}
-            maxLength={MULTISHOT_PROMPT_MAX_LENGTH}
-            onChange={(e) => patchShot(i, { prompt: e.target.value })}
-          />
+          {mention?.elementsFeatureOn ? (
+            <MentionTextarea
+              ref={(h) => {
+                shotRefs.current[i] = h;
+              }}
+              className="gen-prompt gen-shot-prompt"
+              placeholder={t("generate.multishot.shotPlaceholder")}
+              value={shot.prompt}
+              maxLength={MULTISHOT_PROMPT_MAX_LENGTH}
+              onChange={(next) => patchShot(i, { prompt: next })}
+              elementsFeatureOn={mention.elementsFeatureOn}
+              candidates={mention.candidates}
+              activeElementIds={mention.activeElementIds}
+              atCap={mention.atCap}
+              onSelectElement={mention.onSelectElement}
+            />
+          ) : (
+            <textarea
+              className="gen-prompt gen-shot-prompt"
+              placeholder={t("generate.multishot.shotPlaceholder")}
+              value={shot.prompt}
+              maxLength={MULTISHOT_PROMPT_MAX_LENGTH}
+              onChange={(e) => patchShot(i, { prompt: e.target.value })}
+            />
+          )}
           <div className="gen-shot-dur">
             <span className="gen-shot-dur-label">{t("generate.multishot.duration")}</span>
             <div className="gen-stepper">
@@ -102,9 +152,33 @@ export function ShotListEditor({
                 <Plus size={14} />
               </button>
             </div>
+            {/* Кнопка «Элементы» для этого шота — справа от длительности. Открывает
+                модальный пикер; выбор вставляет @меншен в промпт именно этого шота. */}
+            {mention?.elementsFeatureOn && (
+              <button
+                type="button"
+                className="gen-prompt-examples-btn gen-shot-elements-btn"
+                onClick={() => setPickerForShot(i)}
+                title={t("generate.elementsButton")}
+                aria-label={t("generate.elementsButton")}
+              >
+                <AtSign size={14} />
+                <span>{t("generate.elementsButton")}</span>
+              </button>
+            )}
           </div>
         </div>
       ))}
+
+      {/* Модальный @-пикер: открыт для конкретного шота (pickerForShot). */}
+      {mention && pickerForShot != null && (
+        <ElementMentionPicker
+          activeElementIds={mention.activeElementIds}
+          atLimit={mention.atCap}
+          onPick={pickElementForShot}
+          onClose={() => setPickerForShot(null)}
+        />
+      )}
 
       <div className="gen-shotlist-footer">
         <button

@@ -62,6 +62,7 @@ import {
   type ActiveMention,
 } from "@/utils/elementMentions";
 import { CreateAvatarModal } from "./CreateAvatarModal";
+import { MentionTextarea, type MentionTextareaHandle } from "./MentionTextarea";
 import { ShotListEditor } from "./ShotListEditor";
 import { multishotBlocker, parseShots, type ShotEntry } from "@/utils/multishot";
 import { GenerationHistory, type PendingJob, type TrackedJobOutput } from "./GenerationHistory";
@@ -684,13 +685,10 @@ export function GenerateScene({
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   // Для какого элемента открыт попап выбора картинок (null — закрыт).
   const [imageSelectFor, setImageSelectFor] = useState<Element | null>(null);
-  // Активный inline-`@`-токен у курсора (для dropdown'а подсказок).
-  const [mentionQuery, setMentionQuery] = useState<{ query: string; start: number } | null>(null);
-  // Подсвеченный пункт dropdown'а (клавиатурная навигация ↑/↓/Enter).
-  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   // Выбор картинок per-element: elementId → s3Key[] (персист в draft-store).
   const [elementSelections, setElementSelections] = useState<Record<string, string[]>>({});
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  // Императивный хэндл главного промпта — вставка меншена из модального @-пикера.
+  const mainPromptRef = useRef<MentionTextareaHandle | null>(null);
   // Активный mode-tab — чтобы доскроллить к нему при переключении режима.
   const activeModeTabRef = useRef<HTMLButtonElement | null>(null);
   const queryClient = useQueryClient();
@@ -1000,15 +998,6 @@ export function GenerateScene({
     useGenerationDraftStore.getState().setPrompt(key, prompt);
   }, [selectedModel, prompt]);
 
-  // Авто-рост textarea промпта под контент (в пределах CSS min/max-height).
-  // Реагирует и на ввод, и на программную подстановку (restore / @-меншены).
-  useEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
-  }, [prompt]);
-
   // ── Prefill из location.state (Gallery «Повторить» / PromptsPage «Попробовать») ──
   // Источник кладёт payload через `navigateToGenerate(...)`. Применяем один раз
   // на каждый navigate (страж — `location.key`, не булевый флаг — иначе
@@ -1142,6 +1131,27 @@ export function GenerateScene({
     [selectedModel, activeMode],
   );
 
+  // ── Мультишот (Kling) — детект ──────────────────────────────────────────────
+  // Объявлен ДО блока @-меншенов: в мультишоте меншены парсятся из объединения
+  // промптов всех шотов (главный промпт скрыт), поэтому источник зависит от
+  // multishotOn/shots. Сам редактор/свитч/чипы — ниже по дереву.
+  const multishotSetting = useMemo(
+    () => selectedModel?.settings.find((s) => s.type === "shot-list"),
+    [selectedModel],
+  );
+  const multishotOn = !!multishotSetting && settingValues["multishot"] === true;
+  const shots = useMemo<ShotEntry[]>(
+    () => (multishotOn ? parseShots(settingValues[multishotSetting!.key]) : []),
+    [multishotOn, multishotSetting, settingValues],
+  );
+  const setShots = useCallback(
+    (next: ShotEntry[]) => {
+      if (!multishotSetting) return;
+      setSettingValues((prev) => ({ ...prev, [multishotSetting.key]: next }));
+    },
+    [multishotSetting],
+  );
+
   // ── @-меншены элементов: capability + активные меншены ──────────────────────
   // Модель поддерживает @-элементы, если в promptRefs задан `elements`. Картинки
   // элемента кладутся в слоты ref_element_N — их карточки в UI прячем (juзер
@@ -1154,10 +1164,18 @@ export function GenerateScene({
   );
   // Список грузим только когда фича включена (enabled toggle в useElements).
   const { elements: userElements } = useElements(elementsFeatureOn);
-  // Активные элементы выводятся из текста промпта (порядок = первое появление).
+  // Источник меншенов: в мультишоте — объединение промптов всех шотов (главный
+  // промпт скрыт), иначе — главный промпт. Порядок первого появления → стабильный
+  // глобальный slotIndex (один @элемент = один слот ref_element_N на всю заявку,
+  // общий для всех шотов).
+  const mentionSource = useMemo(
+    () => (multishotOn ? shots.map((s) => s.prompt).join("\n") : prompt),
+    [multishotOn, shots, prompt],
+  );
+  // Активные элементы выводятся из текста (порядок = первое появление).
   const activeMentions = useMemo(
-    () => (elementsFeatureOn ? parseActiveMentions(prompt, userElements) : EMPTY_MENTIONS),
-    [elementsFeatureOn, prompt, userElements],
+    () => (elementsFeatureOn ? parseActiveMentions(mentionSource, userElements) : EMPTY_MENTIONS),
+    [elementsFeatureOn, mentionSource, userElements],
   );
   const activeElementIds = useMemo(
     () => new Set(activeMentions.map((m) => m.element.id)),
@@ -1172,8 +1190,7 @@ export function GenerateScene({
       !!selectedModel?.settings.some((s) => s.type === "shot-list") &&
       settingValues["multishot"] === true;
     return activeSlots.filter(
-      (s) =>
-        s.mode !== "reference_element" && !(multishotActive && s.slotKey === "last_frame"),
+      (s) => s.mode !== "reference_element" && !(multishotActive && s.slotKey === "last_frame"),
     );
   }, [activeSlots, selectedModel, settingValues]);
   // Меншены в пределах лимита модели — только они едут в слоты/трансляцию.
@@ -1181,22 +1198,8 @@ export function GenerateScene({
     () => (elementsCap ? activeMentions.slice(0, elementsCap.max) : []),
     [elementsCap, activeMentions],
   );
-  // Подсказки inline-`@`: элементы по фильтру, без уже активных, при не-лимите.
-  const mentionMatches = useMemo(() => {
-    if (!mentionQuery || !elementsFeatureOn) return [];
-    if (elementsCap && activeMentions.length >= elementsCap.max) return [];
-    const q = mentionQuery.query.toLowerCase();
-    return userElements
-      .filter((el) => !activeElementIds.has(el.id) && el.name.toLowerCase().includes(q))
-      .slice(0, 6);
-  }, [
-    mentionQuery,
-    elementsFeatureOn,
-    elementsCap,
-    activeMentions,
-    userElements,
-    activeElementIds,
-  ]);
+  // Достигнут лимит элементов модели — inline-подсказки не показываем.
+  const mentionsAtCap = !!elementsCap && activeMentions.length >= elementsCap.max;
 
   // Список доступных settings — выкидываем unsupported types и применяем dependsOn.
   // `shot-list` не рисуем чипом: у него собственный inline-редактор в области
@@ -1216,24 +1219,8 @@ export function GenerateScene({
     );
   }, [selectedModel, settingValues]);
 
-  // ── Мультишот (Kling) ──────────────────────────────────────────────────────
-  // Модель поддерживает мультишот, если объявляет настройку типа `shot-list`.
-  const multishotSetting = useMemo(
-    () => selectedModel?.settings.find((s) => s.type === "shot-list"),
-    [selectedModel],
-  );
-  const multishotOn = !!multishotSetting && settingValues["multishot"] === true;
-  const shots = useMemo<ShotEntry[]>(
-    () => (multishotOn ? parseShots(settingValues[multishotSetting!.key]) : []),
-    [multishotOn, multishotSetting, settingValues],
-  );
-  const setShots = useCallback(
-    (next: ShotEntry[]) => {
-      if (!multishotSetting) return;
-      setSettingValues((prev) => ({ ...prev, [multishotSetting.key]: next }));
-    },
-    [multishotSetting],
-  );
+  // ── Мультишот (Kling) — контроллер ──────────────────────────────────────────
+  // multishotSetting/multishotOn/shots/setShots объявлены выше (до @-меншенов).
   // Сам toggle-контроллер мультишота (его label/описание показываем в свитче
   // над промптом; ключ — dependsOn.key у shot-list-настройки).
   const multishotToggle = useMemo(
@@ -1799,84 +1786,30 @@ export function GenerateScene({
 
   const canGenerate = blockerReason === null;
 
-  // ── @-меншены: ввод/вставка/выбор ───────────────────────────────────────────
-  // Детект незакрытого `@<word>` слева от курсора. Вызываем не только на вводе,
-  // но и при перемещении каретки (клик/стрелки) — иначе stale-позиция привела бы
-  // к вырезанию чужого куска текста при выборе подсказки.
-  function detectMention(ta: HTMLTextAreaElement) {
-    if (!elementsFeatureOn) {
-      setMentionQuery(null);
-      return;
-    }
-    const caret = ta.selectionStart ?? ta.value.length;
-    const m = ta.value.slice(0, caret).match(/(?:^|[^\w])@(\w*)$/);
-    if (m) {
-      setMentionQuery({ query: m[1], start: caret - m[1].length - 1 });
-      setMentionActiveIndex(0);
-    } else {
-      setMentionQuery(null);
-    }
-  }
+  // ── @-меншены: выбор элемента ────────────────────────────────────────────────
+  // Inline-детект/вставка/dropdown живут в MentionTextarea. Здесь — только общий
+  // сайд-эффект выбора элемента: открыть попап выбора картинок (если они есть).
+  const handleSelectElement = useCallback((el: Element) => {
+    if (el.media.length > 0) setImageSelectFor(el);
+  }, []);
 
-  // onChange промпта: обновляем текст и пересчитываем меншен у курсора.
-  function onPromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setPrompt(e.target.value);
-    detectMention(e.target);
-  }
-
-  // Клавиатура в inline-`@` dropdown: ↑/↓ — навигация, Enter — выбор, Esc —
-  // закрытие. Активно только пока dropdown открыт; иначе клавиши идут в textarea.
-  function onPromptKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (!mentionQuery || mentionMatches.length === 0) return;
-    const len = mentionMatches.length;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setMentionActiveIndex((i) => (i + 1) % len);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setMentionActiveIndex((i) => (i - 1 + len) % len);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const el = mentionMatches[Math.min(mentionActiveIndex, len - 1)];
-      if (el) handlePickElement(el);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setMentionQuery(null);
-    }
-  }
-
-  // Вставляет `@name ` в промпт: заменяет набранный inline-`@`-токен (если есть),
-  // иначе вставляет в позицию курсора. Возвращает фокус и каретку после вставки.
-  function insertMentionText(name: string) {
-    const ta = taRef.current;
-    const insert = `@${name} `;
-    const caret = ta?.selectionStart ?? prompt.length;
-    let next: string;
-    let newCaret: number;
-    if (mentionQuery) {
-      const before = prompt.slice(0, mentionQuery.start);
-      const after = prompt.slice(caret);
-      next = before + insert + after;
-      newCaret = before.length + insert.length;
-    } else {
-      next = prompt.slice(0, caret) + insert + prompt.slice(caret);
-      newCaret = caret + insert.length;
-    }
-    setPrompt(next);
-    setMentionQuery(null);
-    requestAnimationFrame(() => {
-      ta?.focus();
-      ta?.setSelectionRange(newCaret, newCaret);
-    });
-  }
-
-  // Выбор элемента (из @Elements-пикера или inline-dropdown'а): вставляем меншен
-  // и сразу открываем выбор картинок (если у элемента они есть).
+  // Выбор из модального @-пикера: вставляем меншен в главный промпт (императивно),
+  // закрываем пикер и открываем выбор картинок.
   function handlePickElement(el: Element) {
-    insertMentionText(el.name);
+    mainPromptRef.current?.insertMention(el.name);
     setMentionPickerOpen(false);
     if (el.media.length > 0) setImageSelectFor(el);
   }
+
+  // Общий набор @-mention-пропов для главного промпта и полей шотов — один
+  // источник, чтобы лимит/список/коллбэк не разъезжались между ними.
+  const mentionProps = {
+    elementsFeatureOn,
+    candidates: userElements,
+    activeElementIds,
+    atCap: mentionsAtCap,
+    onSelectElement: handleSelectElement,
+  };
 
   // ── Сборка payload для submit/preview ───────────────────────────────────────
   // mediaInputs: слоты-кадры (без ref_element_*, ими управляют @-меншены) +
@@ -1911,6 +1844,20 @@ export function GenerateScene({
     return elementsCap ? translateMentionsToCanonical(base, cappedMentions) : base;
   }
 
+  // Settings для отправки: в мультишоте с @-элементами канонизируем промпты шотов
+  // (@имя → @ElementN) тем же глобальным маппингом, что и слоты ref_element_N —
+  // иначе адаптер не свяжет токены шотов с картинками. Иначе — settingValues как есть.
+  function buildSubmitSettings(): Record<string, unknown> {
+    if (!multishotOn || !elementsCap || !multishotSetting) return settingValues;
+    return {
+      ...settingValues,
+      [multishotSetting.key]: shots.map((s) => ({
+        prompt: translateMentionsToCanonical(s.prompt, cappedMentions),
+        duration: s.duration,
+      })),
+    };
+  }
+
   // ── Debounced cost preview ─────────────────────────────────────────────────
   // Зовём `/web/generation/preview` после каждого изменения инпутов с 350ms
   // дебаунсом. На последовательные изменения отменяем предыдущий запрос через
@@ -1923,6 +1870,7 @@ export function GenerateScene({
 
     const mediaInputs = buildSubmitMediaInputs();
     const submitPrompt = buildSubmitPrompt();
+    const submitSettings = buildSubmitSettings();
 
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -1934,7 +1882,7 @@ export function GenerateScene({
           modelId: selectedModel.id,
           ...(modeId ? { modeId } : {}),
           prompt: submitPrompt,
-          ...(Object.keys(settingValues).length > 0 ? { settings: settingValues } : {}),
+          ...(Object.keys(submitSettings).length > 0 ? { settings: submitSettings } : {}),
           ...(Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {}),
         },
         { signal: controller.signal },
@@ -1990,8 +1938,9 @@ export function GenerateScene({
       const submitPrompt = buildSubmitPrompt();
 
       const section = selectedModel.section;
+      const submitSettings = buildSubmitSettings();
       const settingsField =
-        Object.keys(settingValues).length > 0 ? { settings: settingValues } : {};
+        Object.keys(submitSettings).length > 0 ? { settings: submitSettings } : {};
       const mediaField = Object.keys(mediaInputs).length > 0 ? { mediaInputs } : {};
 
       let result: SubmitGenerationResponse;
@@ -2333,39 +2282,27 @@ export function GenerateScene({
             </div>
           )}
 
-          {!hidePrompt && multishotOn && <ShotListEditor shots={shots} onChange={setShots} />}
+          {!hidePrompt && multishotOn && (
+            <ShotListEditor
+              shots={shots}
+              onChange={setShots}
+              mention={elementsFeatureOn ? mentionProps : undefined}
+            />
+          )}
 
           {!hidePrompt && !multishotOn && (
-            <div
-              className={clsx(
+            <MentionTextarea
+              ref={mainPromptRef}
+              className="gen-prompt"
+              wrapClassName={clsx(
                 "gen-prompt-wrap",
                 (promptSection || elementsFeatureOn) && "has-inline-tools",
               )}
-              style={{ position: "relative" }}
+              placeholder={promptPlaceholder}
+              value={prompt}
+              onChange={setPrompt}
+              {...mentionProps}
             >
-              <textarea
-                ref={taRef}
-                className="gen-prompt"
-                placeholder={promptPlaceholder}
-                value={prompt}
-                onChange={onPromptChange}
-                // Перемещение каретки мышью/стрелками не триггерит onChange —
-                // ловим отдельно, чтобы mentionQuery не «залип» на старой позиции.
-                onClick={(e) => detectMention(e.currentTarget)}
-                onKeyDown={onPromptKeyDown}
-                onKeyUp={(e) => {
-                  // Навигационные клавиши обрабатывает onPromptKeyDown; здесь их
-                  // пропускаем, иначе detectMention переоткрыл бы dropdown (Esc)
-                  // и сбрасывал бы подсветку (↑/↓).
-                  if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) return;
-                  detectMention(e.currentTarget);
-                }}
-                onBlur={() => {
-                  // Закрываем dropdown после клика по подсказке (mousedown успевает
-                  // отработать раньше blur), иначе — при уходе фокуса.
-                  window.setTimeout(() => setMentionQuery(null), 150);
-                }}
-              />
               {(promptSection || elementsFeatureOn) && (
                 <div className="gen-prompt-tools">
                   {promptSection && (
@@ -2394,62 +2331,13 @@ export function GenerateScene({
                   )}
                 </div>
               )}
-              {/* Inline-`@` dropdown подсказок элементов. */}
-              {mentionQuery && mentionMatches.length > 0 && (
-                <ul
-                  className="card"
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 4,
-                    zIndex: 50,
-                    maxHeight: 240,
-                    overflowY: "auto",
-                    padding: 4,
-                    listStyle: "none",
-                  }}
-                >
-                  {mentionMatches.map((el, i) => (
-                    <li key={el.id}>
-                      <button
-                        type="button"
-                        // mousedown (не click): срабатывает до blur textarea.
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          handlePickElement(el);
-                        }}
-                        // Синхронизируем подсветку с мышью, чтобы ↑/↓ и hover не расходились.
-                        onMouseEnter={() => setMentionActiveIndex(i)}
-                        className={clsx(
-                          "flex w-full items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-left text-sm text-text",
-                          i === Math.min(mentionActiveIndex, mentionMatches.length - 1)
-                            ? "bg-bg-elevated"
-                            : "hover:bg-bg-elevated",
-                        )}
-                      >
-                        <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded bg-bg-elevated">
-                          {el.media[0]?.url ? (
-                            <img src={el.media[0].url} alt="" className="size-full object-cover" />
-                          ) : (
-                            <AtSign size={14} className="text-text-secondary" />
-                          )}
-                        </span>
-                        <span className="truncate">@{el.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            </MentionTextarea>
           )}
 
-          {/* Чипы активных @-элементов (распознанных в промпте). Клик — выбор
-              картинок элемента. Кнопка «Элементы» живёт внутри textarea выше.
-              В мультишоте одиночный промпт скрыт — прячем и его чипы, чтобы не
-              висели под редактором шотов от прежнего текста. */}
-          {elementsFeatureOn && !multishotOn && activeMentions.length > 0 && (
+          {/* Чипы активных @-элементов (распознанных в промпте — или в промптах
+              всех шотов в мультишоте). Клик — выбор картинок элемента. В мультишоте
+              рендерятся под ShotListEditor: элементы там объявляются через @ в шотах. */}
+          {elementsFeatureOn && activeMentions.length > 0 && (
             <div
               style={{
                 display: "flex",

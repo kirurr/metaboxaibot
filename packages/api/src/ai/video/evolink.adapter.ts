@@ -179,7 +179,10 @@ export class EvolinkVideoAdapter implements VideoAdapter {
           return { key: "multishotEmptyShotPrompt" };
         }
         if (shot.prompt.length > MULTISHOT_PROMPT_MAX_LENGTH) {
-          return { key: "multishotShotPromptTooLong", params: { limit: MULTISHOT_PROMPT_MAX_LENGTH } };
+          return {
+            key: "multishotShotPromptTooLong",
+            params: { limit: MULTISHOT_PROMPT_MAX_LENGTH },
+          };
         }
         if (
           !Number.isInteger(shot.duration) ||

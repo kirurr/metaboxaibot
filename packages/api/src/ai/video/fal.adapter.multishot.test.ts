@@ -33,7 +33,10 @@ const baseInput = (overrides: Partial<VideoInput> = {}): VideoInput => ({
 function lastSubmit(): { endpoint: string; input: Record<string, unknown> } {
   const call = submitMock.mock.calls.at(-1);
   if (!call) throw new Error("fal.queue.submit was not called");
-  return { endpoint: call[0] as string, input: (call[1] as { input: Record<string, unknown> }).input };
+  return {
+    endpoint: call[0] as string,
+    input: (call[1] as { input: Record<string, unknown> }).input,
+  };
 }
 
 beforeEach(() => {

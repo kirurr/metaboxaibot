@@ -4660,6 +4660,10 @@ select {
   font-size: 12.5px;
   color: var(--text-secondary);
 }
+/* Кнопка «Элементы» прижата к правому краю строки длительности. */
+.gen-shot-elements-btn {
+  margin-left: auto;
+}
 .gen-stepper {
   display: inline-flex;
   align-items: center;
