@@ -17,15 +17,15 @@ function parseAtToken(raw: string): ParsedToken {
     return { raw, kind: "word_element" };
   }
 
-  const elemMatch = name.match(/^[Ee]lement(\d+)$/);
+  const elemMatch = name.match(/^element(\d+)$/i);
   if (elemMatch) return { raw, kind: "element", index: Number(elemMatch[1]) };
 
-  const imgMatch = name.match(/^[Ii]mage(\d+)$/);
+  const imgMatch = name.match(/^image(\d+)$/i);
   if (imgMatch) return { raw, kind: "image", index: Number(imgMatch[1]) };
 
-  if (/^[Vv]ideo\d+$/.test(name)) return { raw, kind: "indexed_video" };
+  if (/^video\d+$/i.test(name)) return { raw, kind: "indexed_video" };
 
-  if (/^[Vv]ideo$/.test(name)) return { raw, kind: "video" };
+  if (/^video$/i.test(name)) return { raw, kind: "video" };
 
   return { raw, kind: "unknown" };
 }

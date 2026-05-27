@@ -43,7 +43,13 @@ export async function uploadFileToOpenAI(
   fetchFn?: typeof globalThis.fetch,
 ): Promise<string> {
   const client = makeClient(apiKey, fetchFn);
-  const fileObj = await toFile(bytes, filename);
+  // OpenAI валидирует extension case-sensitive: `.pdf` принимает, `.PDF` 400-ит.
+  // Юзер из Telegram присылает файл как есть; нормализуем последнее расширение.
+  const normalizedFilename = filename.replace(
+    /\.([A-Za-z0-9]+)$/,
+    (_, ext) => `.${ext.toLowerCase()}`,
+  );
+  const fileObj = await toFile(bytes, normalizedFilename);
   const result = await client.files.create({
     file: fileObj,
     purpose: "user_data",

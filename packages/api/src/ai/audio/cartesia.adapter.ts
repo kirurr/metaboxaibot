@@ -102,9 +102,27 @@ export class CartesiaAdapter implements AudioAdapter {
       if (emotion) generationConfig.emotion = emotion;
     }
 
+    // Cartesia 400 "Your transcript is empty or contains only punctuation" —
+    // ловим до API, чтобы не шумел в логах (особенно из pre-TTS HeyGen-флоу,
+    // где prompt мог обнулиться после translatePromptIfNeeded). Бросаем
+    // UserFacingError, чтобы submit-with-fallback НЕ recordError'ил здоровый
+    // ключ (пустой текст — не сбой ключа), и юзер получил конкретный текст
+    // вместо generic «модель устала».
+    // Considered «meaningful» = есть хотя бы один letter (`\p{L}`) или digit
+    // (`\p{N}`). Иначе всё что осталось — punctuation / whitespace / emoji
+    // (`\p{S}`) / zero-width format-chars (`\p{Cf}`) → Cartesia 400 на пустом
+    // / только-non-speech transcript'е.
+    const trimmedTranscript = (input.prompt ?? "").trim();
+    if (!trimmedTranscript || !/[\p{L}\p{N}]/u.test(trimmedTranscript)) {
+      throw new UserFacingError("Cartesia TTS: empty or non-speech transcript", {
+        key: "ttsTranscriptEmpty",
+        section: "audio",
+      });
+    }
+
     const body: Record<string, unknown> = {
       model_id: modelId,
-      transcript: input.prompt,
+      transcript: trimmedTranscript,
       voice: { mode: "id", id: voiceId },
       output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
     };

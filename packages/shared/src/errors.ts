@@ -111,7 +111,7 @@ export function resolveUserFacingError(
     const template = errorStrings[err.key];
     if (template) {
       return Object.entries(err.params ?? {}).reduce(
-        (s, [k, v]) => s.replace(`{${k}}`, String(v)),
+        (s, [k, v]) => s.replaceAll(`{${k}}`, String(v)),
         template,
       );
     }

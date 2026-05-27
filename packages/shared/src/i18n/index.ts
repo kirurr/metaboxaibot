@@ -157,6 +157,7 @@ export interface Translations {
     };
     reasoningHeader: string;
     reasoningPartLabel: string;
+    chunkDroppedTelegramLimit: string;
   };
   design: {
     sectionTitle: string;
@@ -297,6 +298,8 @@ export interface Translations {
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
+    kieKlingMissingElement: string;
+    ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
     imageDimensionOutOfRange: string;

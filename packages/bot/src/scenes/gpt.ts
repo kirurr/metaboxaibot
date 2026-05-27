@@ -286,6 +286,9 @@ async function streamGptResponse(
   // 429 на edit означает per-chat rate-limit. Пока wall-clock < editBlockedUntil
   // не пытаемся делать preview-edit'ы — иначе только усугубляем cooldown.
   let editBlockedUntil = 0;
+  // UX-маркер про дропнутый чанк шлём максимум один раз на запрос — иначе
+  // на длинном ответе с N частями юзер получит N одинаковых сообщений подряд.
+  let dropMarkerSent = false;
 
   /**
    * Доставка одного finalize-чанка. Для первого чанка пробуем edit плейсхолдера;
@@ -309,8 +312,45 @@ async function streamGptResponse(
         withMarkdown ? { parse_mode: "MarkdownV2" } : {},
       );
     };
-    const trySend = async (text: string, withMarkdown: boolean): Promise<void> => {
+    const trySendRaw = async (text: string, withMarkdown: boolean): Promise<void> => {
       await ctx.api.sendMessage(chatId, text, withMarkdown ? { parse_mode: "MarkdownV2" } : {});
+    };
+    // sendMessage с уважением 429 retry_after и общего per-chat cooldown'а
+    // (editBlockedUntil). Telegram 429 на отправку нельзя обойти plain-text'ом —
+    // throttle per-chat. До MAX_ATTEMPTS попыток с sleep'ом между, дальше
+    // сдаёмся (логируем + best-effort plain-text-маркер юзеру, чтобы не выглядел
+    // как «бот недописал»). Non-429 ошибки (parse-fail и т.п.) бросаем наверх,
+    // чтобы caller мог фолбэкнуться на plain text.
+    const SEND_MAX_ATTEMPTS = 3;
+    const trySend = async (text: string, withMarkdown: boolean): Promise<void> => {
+      for (let attempt = 1; attempt <= SEND_MAX_ATTEMPTS; attempt++) {
+        const waitMs = editBlockedUntil - Date.now();
+        if (waitMs > 0) await sleep(waitMs);
+        try {
+          await trySendRaw(text, withMarkdown);
+          return;
+        } catch (err) {
+          const retryMs = parseRetryAfterMs(err);
+          if (retryMs === null) throw err;
+          editBlockedUntil = Date.now() + retryMs + 100;
+          if (attempt === SEND_MAX_ATTEMPTS) {
+            logger.warn(
+              { retryMs, attempts: attempt },
+              "GPT finalize: send still 429 after max attempts, dropping chunk",
+            );
+            // Best-effort UX-маркер: пробуем сразу (без доп. sleep'а) — если
+            // retry_after короткий, маркер дойдёт. Если 429 ещё активен,
+            // catch проглотит — для юзера это просто немой обрыв, как и было
+            // без фикса. Шлём не больше одного раза на запрос, иначе на
+            // multi-chunk ответе будет N одинаковых маркеров.
+            if (!dropMarkerSent) {
+              dropMarkerSent = true;
+              await trySendRaw(ctx.t.gpt.chunkDroppedTelegramLimit, false).catch(() => void 0);
+            }
+            return;
+          }
+        }
+      }
     };
 
     if (!isFirst) {
