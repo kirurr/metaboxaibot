@@ -54,6 +54,11 @@ const LONG_WINDOW_PATTERNS: RegExp[] = [
   // billing details." Это per-account/project лимит — другие наши ключи
   // могут быть ещё в порядке, поэтому per-key throttle (а не provider-wide).
   /exceeded your (current )?quota/i,
+  // OpenAI billing hard-limit: status 400, code "billing_hard_limit_reached",
+  // message "Billing hard limit has been reached." Это per-project hard-cap,
+  // юзер выставил в дашборде. Семантически — мёртвый ключ до ручного
+  // вмешательства, ведём как long-window квоту (1h throttle, per-key).
+  /billing hard limit/i,
 ];
 
 /**
@@ -319,12 +324,19 @@ export function classifyRateLimit(err: unknown, provider?: string): RateLimitCla
   const message = getMessage(e);
   const code = typeof e.code === "string" ? e.code : undefined;
 
-  const matchesPattern = RATE_LIMIT_PATTERNS.some((p) => p.test(message));
+  const matchesPattern =
+    RATE_LIMIT_PATTERNS.some((p) => p.test(message)) ||
+    LONG_WINDOW_PATTERNS.some((p) => p.test(message));
   const isRateLimit =
     status === 429 ||
     code === "RESOURCE_EXHAUSTED" ||
     code === "rate_limit_exceeded" ||
     code === "TOO_MANY_REQUESTS" ||
+    // OpenAI billing hard-limit идёт как 400, не 429 — ловим по code, чтобы
+    // помечать ключ throttled и переходить к следующему (вместо throw в лицо
+    // юзеру). См. также LONG_WINDOW_PATTERNS — /billing hard limit/i для
+    // случаев когда code отсутствует, а есть только message.
+    code === "billing_hard_limit_reached" ||
     matchesPattern;
 
   if (!isRateLimit) {

@@ -15,12 +15,17 @@ export const AT_TOKEN_RE = /(?<!\w)@([A-Za-z_]\w*)/g;
 
 // ── Provider-specific output patterns (used by translators) ──────────────────
 
-/** Matches any @ElementN or @elementN (case-insensitive) for translation. */
-export const ELEMENT_CI_RE = /(?<!\w)@[Ee]lement(\d+)/g;
-/** Matches any @ImageN or @imageN (case-insensitive) for translation. */
-export const IMAGE_CI_RE = /(?<!\w)@[Ii]mage(\d+)/g;
-/** Matches @Video or @video (case-insensitive, no trailing number) for translation. */
-export const VIDEO_CI_RE = /(?<!\w)@[Vv]ideo\b(?!\d)/g;
+/**
+ * Matches @ElementN в любом регистре (`@Element3`, `@element3`, `@ELEMENT3`,
+ * `@eLeMeNt3` …) для трансляции. `/i`-флаг ловит весь спектр case-вариантов,
+ * не только первую букву — без него юзер с CapsLock или typo проходит мимо
+ * валидатора, потом ловит generic 422 от провайдера.
+ */
+export const ELEMENT_CI_RE = /(?<!\w)@element(\d+)/gi;
+/** Matches @ImageN в любом регистре для трансляции. См. ELEMENT_CI_RE. */
+export const IMAGE_CI_RE = /(?<!\w)@image(\d+)/gi;
+/** Matches @Video в любом регистре (без trailing числа). См. ELEMENT_CI_RE. */
+export const VIDEO_CI_RE = /(?<!\w)@video\b(?!\d)/gi;
 
 // ── Capabilities type (embedded in AIModel.promptRefs) ───────────────────────
 

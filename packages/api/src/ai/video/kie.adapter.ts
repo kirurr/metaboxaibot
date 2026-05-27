@@ -17,6 +17,7 @@ import {
   MULTISHOT_TOTAL_DURATION_MIN,
   MULTISHOT_TOTAL_DURATION_MAX,
   MULTISHOT_PROMPT_MAX_LENGTH,
+  ELEMENT_CI_RE,
 } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import {
@@ -105,10 +106,13 @@ const KLING_MODEL_MAP: Record<string, "std" | "pro"> = {
   "kling-pro": "pro",
 };
 
-/** Kling 3.0 motion-control: std vs pro selected via modelId → `mode` param. */
+/** Kling 3.0 motion-control: std vs pro selected via modelId → `mode` param.
+ *  `copy-motion` — alias на Pro для готового сценария «Копировать движение»
+ *  (фикс-параметры выставляются ниже по `isCopyMotionPreset`). */
 const KLING_MOTION_MODEL_MAP: Record<string, "720p" | "1080p"> = {
   "kling-motion": "720p",
   "kling-motion-pro": "1080p",
+  "copy-motion": "1080p",
 };
 
 /**
@@ -257,11 +261,16 @@ export class KieVideoAdapter implements VideoAdapter {
       inputPayload.video_urls = [uploadedVideo];
       inputPayload.mode = klingMotionMode;
 
-      const orientation = (ms.character_orientation as string | undefined) ?? "video";
-      inputPayload.character_orientation = orientation;
-
-      const backgroundSource = (ms.background_source as string | undefined) ?? "input_video";
-      inputPayload.background_source = backgroundSource;
+      // Готовый сценарий «Копировать движение»: параметры зашиты, даже если
+      // ms приходит с пустыми/чужими значениями. Для обычных kling-motion[-pro]
+      // — берём выбор юзера из настроек модели.
+      const isCopyMotionPreset = this.modelId === "copy-motion";
+      inputPayload.character_orientation = isCopyMotionPreset
+        ? "video"
+        : ((ms.character_orientation as string | undefined) ?? "video");
+      inputPayload.background_source = isCopyMotionPreset
+        ? "input_image"
+        : ((ms.background_source as string | undefined) ?? "input_video");
 
       if (!input.prompt) delete inputPayload.prompt;
     } else if (klingMode) {
@@ -359,6 +368,7 @@ export class KieVideoAdapter implements VideoAdapter {
         element_input_urls: string[];
       }> = [];
       let placeholderSourceUrl: string | undefined;
+      const filledElementSlots = new Set<number>();
       for (let i = 1; i <= 3; i++) {
         const urls = mi[`ref_element_${i}`] ?? [];
         if (urls.length === 0) continue;
@@ -368,6 +378,8 @@ export class KieVideoAdapter implements VideoAdapter {
         // placeholderSourceUrl, иначе финальный if (!hasFrame && placeholder)
         // увидит "" как falsy и пропустит push → KIE 422 на @elementN.
         if (slice[0] && !placeholderSourceUrl) placeholderSourceUrl = slice[0];
+        if (!slice[0]) continue;
+        filledElementSlots.add(i);
         const uploaded = await Promise.all(
           slice.map((url) => uploadFileUrl(this.apiKey, url, buildKieUploadName(url))),
         );
@@ -378,6 +390,25 @@ export class KieVideoAdapter implements VideoAdapter {
           description: `reference element ${i}`,
           element_input_urls: elementUrls,
         });
+      }
+      // Валидация: prompt не должен ссылаться на @ElementN, для которого нет
+      // загруженного референса. Иначе KIE возвращает 422 "kling_elements must
+      // contain an element with name 'ElementN' referenced in prompt", и юзер
+      // получает generic "модель устала" + refund вместо понятного сообщения.
+      if (input.prompt) {
+        const referencedElements = new Set<number>();
+        for (const match of input.prompt.matchAll(ELEMENT_CI_RE)) {
+          const n = Number(match[1]);
+          if (Number.isFinite(n)) referencedElements.add(n);
+        }
+        for (const n of referencedElements) {
+          if (!filledElementSlots.has(n)) {
+            throw new UserFacingError(`Kling: @Element${n} referenced but slot is empty`, {
+              key: "kieKlingMissingElement",
+              params: { element: n },
+            });
+          }
+        }
       }
       // Заглушка для KIE: если frame нет, но есть elements — кладём ОДНУ
       // картинку (первого элемента) в image_urls. KIE требует non-empty
@@ -423,14 +454,24 @@ export class KieVideoAdapter implements VideoAdapter {
       inputPayload.resolution = resolution;
 
       inputPayload.generate_audio = ms.generate_audio !== undefined ? ms.generate_audio : true;
-      // Primary evolink seedance-2 экспонирует enable_web_search setting (только t2v).
-      // Когда KIE — fallback, прокидываем выбор юзера (вместо хардкода false).
-      inputPayload.web_search = !!ms.enable_web_search;
       inputPayload.nsfw_checker = false;
 
       // first_frame / last_frame
       const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
       const lastFrame = mi.last_frame?.[0];
+
+      // web_search принимается KIE только в чистой t2v-сцене. Передача `true`
+      // при наличии first/last_frame или reference media даёт 422 "Web search
+      // only can be used in the scene of t2v". Зеркало гарда evolink (см.
+      // [evolink.adapter.ts]). Когда не t2v — просто не выставляем поле.
+      const refImagesT2V = (mi.ref_images ?? []).length;
+      const refVideosT2V = (mi.ref_videos ?? []).length;
+      const refAudiosT2V = (mi.ref_audios ?? []).length;
+      const isPureT2V =
+        !firstFrame && !lastFrame && refImagesT2V === 0 && refVideosT2V === 0 && refAudiosT2V === 0;
+      if (isPureT2V && ms.enable_web_search) {
+        inputPayload.web_search = true;
+      }
       if (firstFrame)
         inputPayload.first_frame_url = await uploadFileUrl(
           this.apiKey,

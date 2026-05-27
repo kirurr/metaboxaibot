@@ -194,6 +194,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ email, password }),
       }),
+    /**
+     * Закрывает MENTOR_CONFLICT, который возник в metaboxLogin/metaboxRegister.
+     * Принимает `token` из ответа (Metabox прокинул его наружу) + выбор юзера.
+     * Бот-эндпоинт делает confirm-merge на Metabox и обновляет связь.
+     */
+    metaboxConfirmMerge: (token: string, chosenMentor: "site" | "bot") =>
+      request<{ ssoUrl: string }>("/profile/metabox-confirm-merge", {
+        method: "POST",
+        body: JSON.stringify({ token, chosenMentor }),
+      }),
   },
 
   dialogs: {

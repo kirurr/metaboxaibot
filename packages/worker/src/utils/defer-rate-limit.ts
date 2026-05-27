@@ -25,8 +25,9 @@
 import type { Job } from "bullmq";
 import { classifyRateLimit } from "@metabox/api/utils/rate-limit-error";
 import { markRateLimited } from "@metabox/api/services/key-pool";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { delayJob } from "./delay-job.js";
-import { notifyRateLimit } from "./notify-error.js";
+import { notifyRateLimit, notifyTechErrorThrottled } from "./notify-error.js";
 import { logger } from "../logger.js";
 
 const MAX_RATE_LIMIT_DEFERS = 5;
@@ -50,6 +51,24 @@ export async function deferIfRateLimitOverload<
   D extends { transientRetries?: number; stage?: string },
 >(opts: DeferIfRateLimitOpts<D>): Promise<void> {
   const { err, job, token, section, modelId, provider, keyId } = opts;
+
+  // OpenAI billing-исчерпание (`billing_hard_limit_reached` 400 или
+  // `insufficient_quota` 429) — account-wide состояние. Симметрично с
+  // submitWithThrottle / submitWithFallback: НЕ markRateLimited (это не сбой
+  // ключа, кончились деньги org) и НЕ defer (биллинг не «отойдёт» через
+  // cooldown). Дедуп'ный алерт в balance-тему + silent return — caller
+  // покажет юзеру user-facing «временно недоступна».
+  if (isOpenAiBillingExhaustion(err)) {
+    const dedupKey = keyId ? `openai-billing-exhaustion:${keyId}` : "openai-billing-exhaustion";
+    void notifyTechErrorThrottled(
+      err instanceof Error ? err : new Error(String(err)),
+      { section, modelId, jobId: job.id },
+      dedupKey,
+      { channel: "balance" },
+    );
+    return;
+  }
+
   const cls = classifyRateLimit(err, provider);
   if (!cls.isRateLimit) return;
 

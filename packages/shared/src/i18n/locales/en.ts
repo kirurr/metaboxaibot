@@ -121,6 +121,24 @@ export default {
       "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
     photoAnimateBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
     photoAnimateGenerating: "🎞️ Starting animation...",
+    copyMotion: "🎬 Copy motion",
+    copyMotionWelcome:
+      "Transfers motion from a reference video onto the character in your photo. Result duration = reference video duration.",
+    copyMotionStepPhoto:
+      "<b>Step 1 of 2.</b> Send the <b>photo</b> the motion should be transferred onto. Max — 20 MB.",
+    copyMotionStepVideo:
+      "<b>Step 2 of 2.</b> Send the <b>reference video</b> (3–30 sec) whose motion you want to copy. Max — 20 MB.",
+    copyMotionNotPhoto: "📷 That's not a photo. Please send an image.",
+    copyMotionNotVideo: "🎬 That's not a video. Please send a video file.",
+    copyMotionPhotoTooLarge: "📷 The photo is too large. Max — 20 MB.",
+    copyMotionVideoTooLarge: "🎬 The video is too large. Max — 20 MB.",
+    copyMotionVideoTooShort: "🎬 The video is too short. Minimum — 3 sec.",
+    copyMotionVideoTooLong: "🎬 The video is too long. Maximum — 30 sec.",
+    copyMotionVideoUnreadable: "🎬 Couldn't read the video. Please send it as an MP4 file.",
+    copyMotionAlbumNotice:
+      "📷 Only the first photo from the album is used. To use a different one — send it as a separate message.",
+    copyMotionBufferLost: "📷 I couldn't find your uploaded photo — please send it again.",
+    copyMotionGenerating: "🎬 Starting motion transfer...",
     photoCreate: "📸 Create photo",
     photoCreateWelcome: "I make realistic stylish portraits from your photo and description.",
     photoCreateStepPhoto: "<b>Step 1 of 4.</b> Send <b>your photo</b>. Max 20 MB.",
@@ -179,6 +197,8 @@ export default {
     },
     reasoningHeader: "🧠 Model reasoning",
     reasoningPartLabel: "part {index}/{total}",
+    chunkDroppedTelegramLimit:
+      "⚠️ Part of the reply was not delivered due to Telegram rate limits. Please retry in a minute.",
   },
   design: {
     sectionTitle: "🎨 AI Design",
@@ -404,6 +424,10 @@ export default {
       "❌ The image is too small — both sides must be at least {min} px. Please send a larger photo.",
     kieImageAspectRatioOutOfRange:
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
+    kieKlingMissingElement:
+      "❌ Your prompt references @Element{element}, but no image is uploaded for that slot. Upload a photo to the «Element {element}» slot or remove the reference from the prompt.",
+    ttsTranscriptEmpty:
+      "❌ The text to synthesize is empty or contains only punctuation. Please enter actual text and try again.",
     imageTooLarge:
       "❌ The image is too large for this model. Please resize it or upload a lower-resolution version and try again.",
     imageFormatUnsupported:

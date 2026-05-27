@@ -55,6 +55,11 @@ type EvolinkVideoMapping =
 const EVOLINK_VIDEO_MAP: Record<string, EvolinkVideoMapping> = {
   "kling-motion": { family: "kling-v3-motion-control", quality: "720p" },
   "kling-motion-pro": { family: "kling-v3-motion-control", quality: "1080p" },
+  // `copy-motion` — fallback evolink-канал для готового сценария «Копировать
+  // движение». Параметры зашиваются в `buildMotionControlBody` по modelId;
+  // evolink endpoint `kling-v3-motion-control` не принимает background_source,
+  // поэтому фон в этом fallback'е придёт из видео, а не из изображения.
+  "copy-motion": { family: "kling-v3-motion-control", quality: "1080p" },
   kling: { family: "kling-o3", quality: "720p" },
   "kling-pro": { family: "kling-o3", quality: "1080p" },
   "seedance-2": { family: "seedance-2.0", speed: "standard" },
@@ -322,7 +327,11 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       });
     }
 
-    const orientation = (ms.character_orientation as string | undefined) ?? "video";
+    // Готовый сценарий «Копировать движение»: ориентация зашита по дизайну.
+    const isCopyMotionPreset = this.modelId === "copy-motion";
+    const orientation = isCopyMotionPreset
+      ? "video"
+      : ((ms.character_orientation as string | undefined) ?? "video");
     const keepSound = ms.keep_sound !== undefined ? !!ms.keep_sound : true;
 
     const body: Record<string, unknown> = {

@@ -110,6 +110,10 @@
       "types": "./src/utils/kie-error.ts",
       "default": "./dist/utils/kie-error.js"
     },
+    "./utils/openai-billing-error": {
+      "types": "./src/utils/openai-billing-error.ts",
+      "default": "./dist/utils/openai-billing-error.js"
+    },
     "./utils/provider-unavailable-error": {
       "types": "./src/utils/provider-unavailable-error.ts",
       "default": "./dist/utils/provider-unavailable-error.js"

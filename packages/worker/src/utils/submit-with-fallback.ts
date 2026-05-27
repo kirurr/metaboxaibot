@@ -29,7 +29,7 @@
 
 import type { Job } from "bullmq";
 import type { AIModel } from "@metabox/shared";
-import { ProviderInputIncompatibleError } from "@metabox/shared";
+import { ProviderInputIncompatibleError, UserFacingError } from "@metabox/shared";
 import {
   acquireKey,
   markRateLimited,
@@ -52,6 +52,7 @@ import {
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
@@ -93,7 +94,9 @@ export type FallbackReason =
   | "long_window_rate_limit"
   | "persistent_5xx"
   | "provider_long_cooldown_marker"
-  | "kie_credits_exhausted";
+  | "kie_credits_exhausted"
+  | "openai_billing_exhausted"
+  | "unknown_error";
 
 export interface FallbackCandidateAttempt {
   provider: string;
@@ -105,7 +108,9 @@ export interface FallbackCandidateAttempt {
     | "persistent_5xx"
     | "provider_unavailable"
     | "incompatible_input"
-    | "credits_exhausted";
+    | "kie_credits_exhausted"
+    | "openai_billing_exhausted"
+    | "unknown_error";
   error?: string;
 }
 
@@ -216,9 +221,17 @@ export async function submitWithFallback<T, D extends object>(
     }
 
     // 2. acquireKey
+    // Для gpt-image-1.5 берём ключ из low-priority группы первым делом
+    // (модель раз в месяц юзается → иначе холодный ключ никогда не получит
+    // трафика и tier у OpenAI не растёт). Fallback на high-priority встроен
+    // в acquireKey, если все low-priority throttled — возьмёт обычным
+    // порядком.
     let acquired: AcquiredKey;
     try {
-      acquired = await acquireKey(keyProvider);
+      acquired =
+        candidate.id === "gpt-image-1.5"
+          ? await acquireKey(keyProvider, { inverted: true })
+          : await acquireKey(keyProvider);
     } catch (err) {
       if (isPoolExhaustedError(err)) {
         attempts.push({ provider: candidateProvider, outcome: "pool_exhausted" });
@@ -313,7 +326,7 @@ export async function submitWithFallback<T, D extends object>(
         // (кончились кредиты), а не сбой конкретного ключа.
         attempts.push({
           provider: candidateProvider,
-          outcome: "credits_exhausted",
+          outcome: "kie_credits_exhausted",
           error: message.slice(0, 200),
         });
         void notifyTechErrorThrottled(
@@ -325,6 +338,33 @@ export async function submitWithFallback<T, D extends object>(
         logger.warn(
           { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
           "submitWithFallback: KIE credits exhausted — trying next candidate",
+        );
+        continue;
+      }
+
+      // OpenAI billing исчерпан — `billing_hard_limit_reached` (400) или
+      // `insufficient_quota` (429). Симметрично KIE credits: org/project-wide
+      // состояние, ни retry на том же ключе, ни смена ключа в той же org
+      // не помогут. Не recordError'им ключ (это не сбой ключа), пробуем
+      // следующего кандидата, шлём дедуп'нутый алерт в balance-тему.
+      if (isOpenAiBillingExhaustion(err)) {
+        attempts.push({
+          provider: candidateProvider,
+          outcome: "openai_billing_exhausted",
+          error: message.slice(0, 200),
+        });
+        const billingDedupKey = acquired.keyId
+          ? `openai-billing-exhaustion:${acquired.keyId}`
+          : "openai-billing-exhaustion";
+        void notifyTechErrorThrottled(
+          err instanceof Error ? err : new Error(message),
+          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+          billingDedupKey,
+          { channel: "balance" },
+        );
+        logger.warn(
+          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
+          "submitWithFallback: OpenAI billing exhausted — trying next candidate",
         );
         continue;
       }
@@ -442,11 +482,63 @@ export async function submitWithFallback<T, D extends object>(
         continue;
       }
 
-      // Другая ошибка (4xx non-429, validation, content policy, transient 5xx
-      // на attempt 1-2, etc.) — НЕ fallback'имся. Пробрасываем наверх:
-      // BullMQ ретраит, либо processor превратит в user-facing failure.
-      if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
-      throw err;
+      // 5xx на ранних попытках (allowFiveXxFallback=false) — известная категория,
+      // НЕ fallback. Пробрасываем наверх, чтобы BullMQ ретраил job с другим ключом
+      // того же провайдера. На attemptsMade >= threshold ветка выше уже даст
+      // fallback'у шанс.
+      //
+      // UserFacingError-guard на recordError: пользовательская ошибка (пустой
+      // ввод, content policy, невалидный формат) — ключ работал исправно,
+      // отказался обрабатывать сам провайдер на уровне content'а запроса.
+      // Без guard'а здоровые ключи помечались бы как сбойные на каждом таком
+      // запросе.
+      if (isFiveXxError(err)) {
+        if (acquired.keyId && !(err instanceof UserFacingError)) {
+          void recordError(acquired.keyId, message.slice(0, 500));
+        }
+        throw err;
+      }
+
+      // Unknown / unclassified error (4xx non-429, validation, content policy,
+      // network reset, неизвестные строки в теле ответа, etc.). Раньше throw'или
+      // сразу — пользователь получал failure, даже если соседний провайдер мог бы
+      // справиться. Теперь best-effort: пробуем следующего кандидата, плюс шлём
+      // burst-throttled алерт в tech-чат (дедуп по provider + первым 80 символам
+      // сообщения) — чтобы ops видели «фактически неклассифицированную» категорию
+      // и могли добавить classifier при повторении паттерна. Если все кандидаты
+      // упали так же — lastError пробросится наверх ниже (`throw lastError`),
+      // юзер получит обычную failure-кнопку, processor добавит свой top-level
+      // notifyTechError.
+      //
+      // UserFacingError-guard на recordError — см. комментарий в 5xx-ветке выше.
+      if (acquired.keyId && !(err instanceof UserFacingError)) {
+        void recordError(acquired.keyId, message.slice(0, 500));
+      }
+      attempts.push({
+        provider: candidateProvider,
+        outcome: "unknown_error",
+        error: message.slice(0, 200),
+      });
+      void notifyTechErrorThrottled(
+        err instanceof Error ? err : new Error(message),
+        {
+          section: opts.section,
+          modelId: opts.primaryModel.id,
+          jobId: opts.jobId,
+          userId: opts.userId,
+        },
+        `unknown-error:${candidateProvider}:${message.slice(0, 80)}`,
+      );
+      logger.warn(
+        {
+          jobId: opts.jobId,
+          provider: candidateProvider,
+          modelId: opts.primaryModel.id,
+          err: message.slice(0, 200),
+        },
+        "submitWithFallback: unknown error — trying next candidate",
+      );
+      continue;
     }
   }
 
@@ -462,6 +554,13 @@ export async function submitWithFallback<T, D extends object>(
     },
     "submitWithFallback: all candidates exhausted",
   );
+  // Если последняя ошибка — OpenAI billing-исчерпание, шлём all_candidates_failed
+  // в balance тему (а не в fallback тему). Иначе при пустом OpenAI billing'е
+  // эти алерты спамят общий fallback-канал вперемешку с обычными fallback'ами.
+  // Дополнительно к этому per-attempt дедуп выше через notifyTechErrorThrottled
+  // ("openai-billing-exhaustion") уже подавит большую часть шума, но здесь
+  // алерт фокусируется на «все кандидаты упали».
+  const allCandidatesChannel = isOpenAiBillingExhaustion(lastError) ? "balance" : undefined;
   void notifyFallback({
     section: opts.section,
     modelId: opts.primaryModel.id,
@@ -470,6 +569,7 @@ export async function submitWithFallback<T, D extends object>(
     reason: "all_candidates_failed",
     jobId: opts.jobId,
     userId: opts.userId,
+    channel: allCandidatesChannel,
   });
 
   // Если хоть один кандидат указал, что готов defer'нуть (PoolExhausted /
@@ -533,7 +633,9 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "pool_exhausted") return "pool_exhausted";
   if (primaryOutcome === "long_window") return "long_window_rate_limit";
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
-  if (primaryOutcome === "credits_exhausted") return "kie_credits_exhausted";
+  if (primaryOutcome === "kie_credits_exhausted") return "kie_credits_exhausted";
+  if (primaryOutcome === "openai_billing_exhausted") return "openai_billing_exhausted";
+  if (primaryOutcome === "unknown_error") return "unknown_error";
   return "pool_exhausted";
 }
 
