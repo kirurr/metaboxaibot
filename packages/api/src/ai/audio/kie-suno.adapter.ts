@@ -1,5 +1,5 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { config, UserFacingError, validateSunoInput } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { providerHttpError } from "../../utils/rate-limit-error.js";
 
@@ -12,24 +12,6 @@ const MODEL_MAP: Record<string, string> = {
   V4_5PLUS: "V4_5PLUS",
   V5: "V5",
   V5_5: "V5_5",
-};
-
-/**
- * Лимиты длины полей по модели (из docs/schema/kie/suno-quickstart.md).
- * `prompt` в Non-Custom режиме всегда 500 chars независимо от модели.
- * V5_5 в доке отдельно не упомянут — относим к группе V4_5+ (та же архитектура).
- */
-interface ModelLimits {
-  customPrompt: number;
-  style: number;
-}
-const NON_CUSTOM_PROMPT_MAX = 500;
-const MODEL_LIMITS: Record<string, ModelLimits> = {
-  V4: { customPrompt: 3000, style: 200 },
-  V4_5: { customPrompt: 5000, style: 1000 },
-  V4_5PLUS: { customPrompt: 5000, style: 1000 },
-  V5: { customPrompt: 5000, style: 1000 },
-  V5_5: { customPrompt: 5000, style: 1000 },
 };
 
 interface SunoGenerateResponse {
@@ -95,43 +77,13 @@ export class KieSunoAdapter implements AudioAdapter {
     const instrumental = (ms.make_instrumental as boolean | undefined) ?? false;
     const modelVersion = (ms.model_version as string | undefined) ?? "V4_5";
     const model = MODEL_MAP[modelVersion] ?? "V4_5";
-    const limits = MODEL_LIMITS[model] ?? MODEL_LIMITS.V4_5;
     const customMode = !instrumental && Boolean(lyrics);
 
-    // Pre-flight валидация длины — формулировки серверных ошибок у kie не
-    // зафиксированы, regex-матчинг постфактум хрупкий. Лимиты из доки —
-    // единственный надёжный источник истины.
-    if (customMode && lyrics) {
-      if (lyrics.length > limits.customPrompt) {
-        throw new UserFacingError(
-          `Kie Suno: lyrics ${lyrics.length} > ${limits.customPrompt} chars`,
-          {
-            key: "sunoPromptTooLong",
-            params: { max: limits.customPrompt, current: lyrics.length },
-          },
-        );
-      }
-      if (input.prompt.length > limits.style) {
-        throw new UserFacingError(
-          `Kie Suno: style ${input.prompt.length} > ${limits.style} chars`,
-          {
-            key: "sunoPromptTooLong",
-            params: { max: limits.style, current: input.prompt.length },
-          },
-        );
-      }
-    } else if (input.prompt.length > NON_CUSTOM_PROMPT_MAX) {
-      // Non-custom режим (без своих lyrics) — у Suno жёсткий лимит 500. Отдельный
-      // ключ нужен чтобы показать юзеру выход: вписать свой текст в Управление,
-      // тогда лимит на сам текст вырастает до 5000, а описание в чате — до 1000.
-      throw new UserFacingError(
-        `Kie Suno: prompt ${input.prompt.length} > ${NON_CUSTOM_PROMPT_MAX} chars`,
-        {
-          key: "sunoPromptTooLongNoLyrics",
-          params: { current: input.prompt.length },
-        },
-      );
-    }
+    // Pre-flight длины через shared-валидатор. Service-layer уже валидирует
+    // до acquireKey, тут — safety net на случай прямого вызова или будущих
+    // путей. KIE/Apipass используют один и тот же валидатор → одинаковый
+    // user-facing текст вне зависимости от того, кто из адаптеров поймал.
+    validateSunoInput({ prompt: input.prompt, lyrics, instrumental, modelVersion });
 
     // callBackUrl у kie обязателен.
     const callBackUrl = config.api.publicUrl
