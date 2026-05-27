@@ -40,6 +40,13 @@ function optFloat(name: string, fallback: number): number {
   return n;
 }
 
+function optBool(name: string, fallback = false): boolean {
+  const v = process.env[name];
+  if (v === undefined) return fallback;
+  const norm = v.trim().toLowerCase();
+  return norm === "true" || norm === "1" || norm === "yes" || norm === "on";
+}
+
 export const config = {
   /** Runtime environment */
   env: optDefault("NODE_ENV", "development") as "development" | "production" | "test",
@@ -280,6 +287,21 @@ export const config = {
     minimax: opt("MINIMAX_API_KEY"),
     kie: opt("KIE_API_KEY"),
     evolink: opt("EVOLINK_API_KEY"),
+  },
+
+  /**
+   * Feature flags. Все по умолчанию выключены (false), включаются env-переменными.
+   */
+  flags: {
+    /**
+     * Когда `true` — `expireSubscription` НЕ обнуляет `subscriptionTokenBalance`
+     * для не-Trial подписок при истечении; LocalSubscription всё равно удаляется.
+     * Trial-подписки обнуляются всегда, независимо от флага.
+     *
+     * Зачем: бизнес-решение сохранять накопленные подписочные токены после
+     * окончания периода у платных тарифов.
+     */
+    disableAiboxExpiryTokenRevoke: optBool("DISABLE_AIBOX_EXPIRY_TOKEN_REVOKE"),
   },
 } as const;
 
