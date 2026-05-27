@@ -3,6 +3,7 @@ import { config } from "@metabox/shared";
 import { fetchWithLog, isTransientNetworkError } from "../../utils/fetch.js";
 import { parseMinimaxBaseResp } from "../../utils/minimax-error.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const MINIMAX_API_BASE = "https://api.minimax.io/v1";
 
@@ -117,7 +118,7 @@ export class MinimaxVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`MiniMax API error ${resp.status}: ${txt}`);
+      throw providerHttpError(`MiniMax API error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as MinimaxSubmitResponse;
@@ -137,7 +138,7 @@ export class MinimaxVideoAdapter implements VideoAdapter {
         this.fetchFn,
       );
 
-      if (!resp.ok) throw new Error(`MiniMax poll error ${resp.status}`);
+      if (!resp.ok) throw providerHttpError(`MiniMax poll error ${resp.status}`, resp.status);
 
       const data = (await resp.json()) as MinimaxPollResponse;
       const status = data.status?.toLowerCase();

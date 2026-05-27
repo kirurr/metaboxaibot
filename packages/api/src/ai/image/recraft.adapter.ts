@@ -2,6 +2,7 @@ import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { resolveImageMimeType } from "../../utils/mime-detect.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const RECRAFT_API_BASE = "https://external.api.recraft.ai/v1";
 
@@ -237,7 +238,7 @@ export class RecraftAdapter implements ImageAdapter {
       );
       if (!resp.ok) {
         const txt = await resp.text();
-        throw new Error(`Recraft API error ${resp.status}: ${txt}`);
+        throw providerHttpError(`Recraft API error ${resp.status}: ${txt}`, resp.status);
       }
       const data = (await resp.json()) as { data: Array<{ url: string }> };
       urls = data.data.map((d) => d.url).filter(Boolean);
@@ -274,7 +275,7 @@ export class RecraftAdapter implements ImageAdapter {
       );
       if (!resp.ok) {
         const txt = await resp.text();
-        throw new Error(`Recraft API error ${resp.status}: ${txt}`);
+        throw providerHttpError(`Recraft API error ${resp.status}: ${txt}`, resp.status);
       }
       const data = (await resp.json()) as { data: Array<{ url: string }> };
       urls = data.data.map((d) => d.url).filter(Boolean);

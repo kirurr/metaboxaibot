@@ -3,6 +3,7 @@ import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -233,7 +234,7 @@ export class KieImageAdapter implements ImageAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`KIE image submit error ${resp.status}: ${txt}`);
+      throw providerHttpError(`KIE image submit error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as KieSubmitResponse;
@@ -287,7 +288,7 @@ export class KieImageAdapter implements ImageAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`KIE image poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`KIE image poll error ${resp.status}`, resp.status);
 
     const data = (await resp.json()) as KieTaskResponse;
     if (data.code !== 200 || !data.data) {

@@ -3,6 +3,7 @@ import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { probeVideoMetadata } from "../../utils/mp4-duration.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 /**
  * Бросает UserFacingError "model temporarily unavailable" с роутингом ops-алёрта
@@ -220,7 +221,7 @@ export class AlibabaVideoAdapter implements VideoAdapter {
       // Account-in-arrears (400 + code:"Arrearage") — provider-wide billing,
       // не ретраим, алёртим в balance-тему с дедупом.
       throwIfArrearage(this.modelId, undefined, txt);
-      throw new Error(`Alibaba DashScope error ${resp.status}: ${txt}`);
+      throw providerHttpError(`Alibaba DashScope error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as DashScopeSubmitResponse;
@@ -246,7 +247,10 @@ export class AlibabaVideoAdapter implements VideoAdapter {
       // поллим часами. Без этой проверки 400+Arrearage летел бы как generic
       // 5xx-эквивалент: BullMQ ретраит, alert в общий канал, юзер ждёт.
       throwIfArrearage(this.modelId, undefined, txt);
-      throw new Error(`Alibaba poll error ${resp.status}${txt ? `: ${txt.slice(0, 200)}` : ""}`);
+      throw providerHttpError(
+        `Alibaba poll error ${resp.status}${txt ? `: ${txt.slice(0, 200)}` : ""}`,
+        resp.status,
+      );
     }
 
     const data = (await resp.json()) as DashScopePollResponse;
