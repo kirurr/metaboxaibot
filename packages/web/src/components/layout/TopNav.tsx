@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CreditCard,
   History as HistoryIcon,
+  Image as ImageIcon,
   Layers,
   LogOut,
   Plus,
@@ -108,6 +109,13 @@ export function TopNav() {
                 onSelect={() => setOpen(false)}
               >
                 {t("nav.history")}
+              </MenuLink>
+              <MenuLink
+                to="/gallery"
+                icon={<ImageIcon size={16} />}
+                onSelect={() => setOpen(false)}
+              >
+                {t("nav.gallery")}
               </MenuLink>
               <div className="menu-sep" />
               <MenuLink

@@ -97,11 +97,6 @@ export async function transcodeToMp3(input: Buffer, inputFormat?: string): Promi
   }
 }
 
-/** @deprecated Use `transcodeToMp3(input)` — input format is auto-detected. */
-export async function transcodeOggToMp3(input: Buffer): Promise<Buffer> {
-  return transcodeToMp3(input);
-}
-
 /**
  * Returns the duration in seconds of an audio buffer using ffprobe.
  * Auto-detects format (mp3/ogg/m4a/wav/webm/…). Returns `null` on failure

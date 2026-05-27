@@ -519,6 +519,9 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     min: 3,
     max: 15,
     step: 1,
+    // В мультишоте общая длительность выводится из суммы длительностей шотов,
+    // поэтому одиночный слайдер скрываем.
+    dependsOn: { key: "multishot", value: false },
   },
   {
     key: "generate_audio",
@@ -526,6 +529,21 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     description: "Включить автоматическую генерацию звукового сопровождения к видео.",
     type: "toggle",
     default: true,
+  },
+  {
+    key: "multishot",
+    label: "Мультишот",
+    description:
+      "Собрать видео из нескольких шотов: у каждого свой промпт и длительность. До 5 шотов, сумма длительностей 3–15 секунд.",
+    type: "toggle",
+    default: false,
+  },
+  {
+    key: "shots",
+    label: "Шоты",
+    type: "shot-list",
+    default: null,
+    dependsOn: { key: "multishot", value: true },
   },
 ];
 
@@ -662,6 +680,37 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
     contextMaxMessages: 0,
     mediaInputs: KLING_MOTION_MEDIA_INPUTS,
     settings: [...KLING_MOTION_SETTINGS],
+  },
+  // Готовый сценарий «🎬 Копировать движение». Под капотом — kling-3.0/motion-
+  // control @ 1080p Pro (KIE primary, Evolink — fallback; зеркалит fallback-
+  // топологию kling-motion-pro). Юзер не настраивает ничего: грузит фото +
+  // референс-видео, KIE-адаптер форсит character_orientation="video" и
+  // background_source="input_image". Evolink endpoint не принимает
+  // background_source — на fallback'е фон придёт из видео, известная
+  // деградация инварианта (см. FALLBACK_VIDEO_MODELS-запись ниже). Длительность
+  // результата = длительность референс-видео (3-30 с). Pricing идентичен
+  // kling-motion-pro 1080p: $0.135/с с подкачкой по фактической длительности.
+  // hiddenFromCarousel — юзеру модель видна только как «🎬 Копировать движение»,
+  // kling-motion-pro нигде не светится.
+  "copy-motion": {
+    id: "copy-motion",
+    name: "🎬 Копировать движение",
+    description: "Переносит движения из референсного видео на персонажа с вашей фотографии.",
+    section: "video",
+    provider: "kie",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.135,
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    hiddenFromCarousel: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: KLING_MOTION_MEDIA_INPUTS,
   },
   // KIE Topaz Video Upscaler. Доступна ТОЛЬКО через готовый сценарий «Апскейл
   // видео» — hiddenFromCarousel убирает её из карусели выбора видеомоделей.
@@ -2063,6 +2112,31 @@ export const FALLBACK_VIDEO_MODELS: AIModel[] = [
         default: true,
       },
     ],
+  },
+  // ── copy-motion via evolink — fallback готового сценария «Копировать
+  // движение». Endpoint и mediaInputs совпадают с kling-motion-pro fallback'ом
+  // выше; адаптер форсит character_orientation="video" по `isCopyMotionPreset`.
+  // background_source="input_image" на evolink не передаётся (endpoint
+  // `kling-v3-motion-control` параметр не принимает) — фон при fallback'е
+  // придёт из видео, известная деградация инварианта пресета.
+  {
+    id: "copy-motion",
+    name: "Copy motion (evolink fallback)",
+    description: "Fallback на evolink при недоступности KIE.",
+    section: "video",
+    provider: "evolink",
+    costUsdPerRequest: 0,
+    costUsdPerSecond: 0.16, // 1080p quality, как у kling-motion-pro fallback
+    inputCostUsdPerMToken: 0,
+    outputCostUsdPerMToken: 0,
+    supportsImages: true,
+    supportsVoice: false,
+    supportsWeb: false,
+    promptOptional: true,
+    isAsync: true,
+    contextStrategy: "db_history",
+    contextMaxMessages: 0,
+    mediaInputs: KLING_MOTION_MEDIA_INPUTS,
   },
   // ── Kling 3.0 / 3.0 Pro via evolink (kling-o3-image-to-video) ──────────────
   // Routed на эту модель потому что kling-v3-image-to-video требует image_start

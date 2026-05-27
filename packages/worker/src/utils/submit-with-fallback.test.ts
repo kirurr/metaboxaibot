@@ -808,3 +808,112 @@ describe("submitWithFallback — return values & attempts tracking", () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — OpenAI billing exhaustion", () => {
+  // Симметрия с KIE credits-exhausted веткой: не штрафуем ключ (это
+  // account-wide состояние), шлём дедуп'ный алерт в balance-тему, идём к
+  // следующему кандидату. При отсутствии fallback'а — all_candidates_failed
+  // тоже летит в balance (а не в общий fallback-канал).
+
+  test("400 billing_hard_limit_reached → openai_billing_exhausted, balance alert, NO recordError", async () => {
+    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
+      code: "billing_hard_limit_reached",
+      status: 400,
+    });
+    const submit = vi.fn().mockRejectedValue(billingErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "gpt-image-1.5", provider: "openai" }),
+        fallbacks: [],
+        section: "image",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(billingErr);
+
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      billingErr,
+      expect.objectContaining({ section: "image", modelId: "gpt-image-1.5" }),
+      "openai-billing-exhaustion:k1",
+      { channel: "balance" },
+    );
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    expect(mocks.notifyFallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "all_candidates_failed",
+        channel: "balance",
+      }),
+    );
+  });
+
+  test("429 insufficient_quota → ловится billing-веткой, не rate-limit'ом", async () => {
+    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    const quotaErr = Object.assign(new Error("429 You exceeded your current quota"), {
+      code: "insufficient_quota",
+      status: 429,
+    });
+    const submit = vi.fn().mockRejectedValue(quotaErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "tts-openai", provider: "openai" }),
+        fallbacks: [],
+        section: "audio",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(quotaErr);
+
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      quotaErr,
+      expect.any(Object),
+      "openai-billing-exhaustion:k1",
+      { channel: "balance" },
+    );
+    // Билинг-ветка интерсептит до rate-limit классификатора — ни ключ-throttle,
+    // ни recordError не должны сработать.
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    expect(mocks.notifyRateLimit).not.toHaveBeenCalled();
+  });
+
+  test("billing на primary + успешный fallback → fallback используется, billing alert всё равно летит", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
+      code: "billing_hard_limit_reached",
+      status: 400,
+    });
+    const submit = vi.fn().mockRejectedValueOnce(billingErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "gpt-image-1.5", provider: "openai" }),
+      fallbacks: [makeModel({ id: "gpt-image-1.5", provider: "evolink" })],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // billing alert летит даже при успешном fallback'е — оператор должен
+    // увидеть что у primary биллинг пуст независимо от того, спас ли fallback.
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      billingErr,
+      expect.any(Object),
+      "openai-billing-exhaustion:k-primary",
+      { channel: "balance" },
+    );
+    // Primary key не штрафуется
+    expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+});

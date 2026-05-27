@@ -206,6 +206,13 @@ export interface RateLimitNotificationContext {
    * указан — dedup по `modelId:reason-hash` (более грубо, но всё равно гасит).
    */
   jobId?: string;
+  /**
+   * Куда слать алерт: `"alerts"` (default — общая on-call тема) или
+   * `"balance"` (BALANCE_ALERT_CHAT_ID — отдельная тема про баланс/кредиты).
+   * Caller'ы передают `"balance"` для OpenAI billing-исчерпания (см.
+   * `isOpenAiBillingExhaustion`), чтобы не смешивать с обычными rate-limit'ами.
+   */
+  channel?: "alerts" | "balance";
 }
 
 /** Минимум на сколько душим повторы алертов за один rate-limit эпизод. */
@@ -228,20 +235,24 @@ function shortHash(s: string): string {
  * cooldownMs) генерировал отдельный alert.
  */
 export async function notifyRateLimit(ctx: RateLimitNotificationContext): Promise<void> {
-  const chatId = config.alerts.chatId;
+  const dest = ctx.channel === "balance" ? config.balanceAlerts : config.alerts;
+  const chatId = dest.chatId;
   if (!chatId) return;
 
   // Dedup. Ключ включает jobId если есть — иначе по modelId+reason-hash чтобы
   // одинаковые rate-limit'ы разных задач на одной модели всё-таки гасились.
+  // Channel в ключе тоже учитываем: одна и та же модель может слать в разные
+  // темы (rate-limit vs billing) — пусть оба класса дедуплятся независимо.
   const dedupSuffix = ctx.jobId ?? shortHash(ctx.reason);
-  const dedupKey = `alert:ratelimit:${ctx.modelId}:${dedupSuffix}`;
+  const channelTag = ctx.channel ?? "alerts";
+  const dedupKey = `alert:ratelimit:${channelTag}:${ctx.modelId}:${dedupSuffix}`;
   const ttl = Math.max(ctx.cooldownMs * 6, RATE_LIMIT_ALERT_MIN_TTL_MS);
   const setResult = await getRedis()
     .set(dedupKey, ctx.reason.slice(0, 80), "PX", ttl, "NX")
     .catch(() => null);
   if (setResult !== "OK") return;
 
-  const threadId = config.alerts.threadId;
+  const threadId = dest.threadId;
 
   const icon = ctx.isLongWindow ? "⛔" : "⏳";
   const kind = ctx.isLongWindow ? "Long-window quota" : "Rate limit";
@@ -290,6 +301,7 @@ export interface FallbackNotificationContext {
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
     | "kie_credits_exhausted"
+    | "openai_billing_exhausted"
     | "all_candidates_failed"
     /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
     | "primary_failed"
@@ -302,6 +314,14 @@ export interface FallbackNotificationContext {
   jobId?: string;
   /** Internal user ID, если доступен. */
   userId?: string;
+  /**
+   * Куда слать алерт: default `"fallback"` (config.fallbackAlerts — может
+   * быть отдельная тема, см. FALLBACK_ALERT_CHAT_ID) или `"balance"`
+   * (config.balanceAlerts — тема про баланс/кредиты). Caller'ы из
+   * submit-with-fallback передают `"balance"` когда all_candidates_failed
+   * случился из-за OpenAI billing.
+   */
+  channel?: "fallback" | "balance";
 }
 
 /**
@@ -317,10 +337,11 @@ export interface FallbackNotificationContext {
  * отдельный канал/тему, не засоряя основной on-call alert.
  */
 export async function notifyFallback(ctx: FallbackNotificationContext): Promise<void> {
-  const chatId = config.fallbackAlerts.chatId;
+  const dest = ctx.channel === "balance" ? config.balanceAlerts : config.fallbackAlerts;
+  const chatId = dest.chatId;
   if (!chatId) return;
 
-  const threadId = config.fallbackAlerts.threadId;
+  const threadId = dest.threadId;
   const allFailed = ctx.fallbackProvider === null;
   const header = allFailed
     ? `❌ <b>Fallback FAILED</b> [${ctx.section}/${ctx.modelId}]`

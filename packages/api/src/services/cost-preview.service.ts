@@ -1,4 +1,9 @@
-import { AI_MODELS, getModelDefaultDuration } from "@metabox/shared";
+import {
+  AI_MODELS,
+  getModelDefaultDuration,
+  parseVideoShots,
+  sumShotDuration,
+} from "@metabox/shared";
 import { calculateCost, computeVideoTokens } from "./token.service.js";
 import { userStateService } from "./user-state.service.js";
 import { probeAudioDurationSec } from "../utils/audio-transcode.js";
@@ -114,6 +119,16 @@ export const costPreviewService = {
       5;
     let pricingMode: VideoPricingMode = "total";
 
+    // Multi-shot (Kling): итоговая длительность = сумма длительностей шотов
+    // (клампится в 3–15). Биллинг по той же per-second ставке + costVariants
+    // (`generate_audio`), что и single-shot.
+    if (modelSettings.multishot === true) {
+      const shots = parseVideoShots(modelSettings.shots);
+      if (shots.length > 0) {
+        effectiveDuration = sumShotDuration(shots);
+      }
+    }
+
     if (modelId === "heygen") {
       // HeyGen биллится посекундно, длина видео = длине аудио. Если аудио есть —
       // probe'аем и показываем точную предварительную цену. Если аудио нет
@@ -144,6 +159,17 @@ export const costPreviewService = {
           "HeyGen pre-flight: per-second pricing (no input audio to probe)",
         );
       }
+    }
+
+    // Готовый сценарий «Копировать движение»: длительность результата =
+    // длительность референс-видео (юзер не настраивает), заранее неизвестна.
+    // Без этой ветки веб-пресет показывал бы цену за дефолтные 5с — а реальное
+    // списание считается по фактической длительности из mp4-probe в воркере
+    // (см. video.processor.ts:682-816). Per-second режим даёт фронту флаг,
+    // чтобы он отрисовал «X.XX ✦ / сек» вместо «X.XX ✦ за запрос».
+    if (modelId === "copy-motion") {
+      pricingMode = "per_second";
+      effectiveDuration = 1;
     }
 
     // Runway gen4.5 принимает только 5/10s; в userState у части юзеров остались

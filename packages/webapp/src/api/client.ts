@@ -87,6 +87,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (err.botMentor) error.botMentor = err.botMentor;
     if (err.linkedEmail) error.linkedEmail = err.linkedEmail;
     if (err.linkedUsername) error.linkedUsername = err.linkedUsername;
+    // MENTOR_CONFLICT прокидывает token (+ userIds) для последующего
+    // confirm-merge'а через модалку выбора в LinkMetaboxPage.
+    if (err.token) error.token = err.token;
+    if (err.siteUserId) error.siteUserId = err.siteUserId;
+    if (err.botUserId) error.botUserId = err.botUserId;
     console.error(`[api] ${method} ${path} → ${res.status}`, err);
     throw error;
   }
@@ -193,6 +198,16 @@ export const api = {
       request<{ ssoUrl: string }>("/profile/metabox-login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
+      }),
+    /**
+     * Закрывает MENTOR_CONFLICT, который возник в metaboxLogin/metaboxRegister.
+     * Принимает `token` из ответа (Metabox прокинул его наружу) + выбор юзера.
+     * Бот-эндпоинт делает confirm-merge на Metabox и обновляет связь.
+     */
+    metaboxConfirmMerge: (token: string, chosenMentor: "site" | "bot") =>
+      request<{ ssoUrl: string }>("/profile/metabox-confirm-merge", {
+        method: "POST",
+        body: JSON.stringify({ token, chosenMentor }),
       }),
   },
 

@@ -137,6 +137,14 @@ export function LinkMetaboxPage({
     siteMentor: { name: string; contact: string };
     botMentor: { name: string; contact: string };
   } | null>(null);
+  // Modal выбора при MENTOR_CONFLICT — теперь юзер видит карточки и нажимает кнопку.
+  // Раньше тут показывался просто текст ошибки и юзер был заблокирован.
+  const [mentorConflictModal, setMentorConflictModal] = useState<{
+    token: string;
+    siteMentor: { name: string; contact: string };
+    botMentor: { name: string; contact: string };
+  } | null>(null);
+  const [resolvingConflict, setResolvingConflict] = useState<"site" | "bot" | null>(null);
   // pending = аккаунт уже привязан, но email НЕ подтверждён. Показываем
   // экран «Проверьте почту» с кнопками «Отправить повторно» / «Изменить».
   const [pending, setPending] = useState<PendingState | null>(null);
@@ -182,6 +190,27 @@ export function LinkMetaboxPage({
       cancelled = true;
     };
   }, []);
+
+  const handleResolveConflict = async (chosen: "site" | "bot") => {
+    if (!mentorConflictModal || resolvingConflict) return;
+    setResolvingConflict(chosen);
+    try {
+      const result = await api.profile.metaboxConfirmMerge(mentorConflictModal.token, chosen);
+      if (result.ssoUrl) {
+        openSso(result.ssoUrl);
+        setMentorConflictModal(null);
+        onSuccess?.();
+        onBack();
+      }
+    } catch (err: any) {
+      // На сетевой/серверной ошибке — оставляем модалку открытой, ставим
+      // raw-сообщение об ошибке. Юзер может попробовать ещё раз.
+      const msg = err?.error || t("linkMetabox.error");
+      setError({ kind: "raw", text: typeof msg === "string" ? msg : t("linkMetabox.error") });
+    } finally {
+      setResolvingConflict(null);
+    }
+  };
 
   const submit = async () => {
     if (!email.trim() || !password) return;
@@ -233,29 +262,18 @@ export function LinkMetaboxPage({
           siteMentor: { name: sm.name || unknown, contact: sm.contact || "" },
           botMentor: { name: bm.name || unknown, contact: bm.contact || "" },
         });
-      } else if (code === "MENTOR_CONFLICT") {
-        // Здесь нельзя просто хранить уже сформированную строку — сами
-        // mentor-name'ы динамические, но шаблон вокруг них надо переводить
-        // при смене языка. Поэтому передаём mentor info в vars, а ключ
-        // template'a резолвится в render time.
-        const sm = err?.siteMentor || {};
-        const bm = err?.botMentor || {};
-        const siteInfoFn = (unknown: string) =>
-          sm.contact ? `${sm.name} (${sm.contact})` : sm.name || unknown;
-        const botInfoFn = (unknown: string) =>
-          bm.contact ? `${bm.name} (${bm.contact})` : bm.name || unknown;
-        setError({
-          kind: "template",
-          key: "linkMetabox.error.mentorConflict",
-          // Имена наставников вшиваем "как есть" — они языко-нейтральны,
-          // unknown-плейсхолдер берём в render-time через separate key,
-          // но для простоты подставляем сейчас текущим переводом — при
-          // смене языка наставник останется тем же текстом, но шаблон
-          // переведётся. Это компромисс: 99% сценариев имеется реальное имя.
-          vars: {
-            site: siteInfoFn(t("linkMetabox.merge.unknown")),
-            bot: botInfoFn(t("linkMetabox.merge.unknown")),
-          },
+      } else if (code === "MENTOR_CONFLICT" && err?.token) {
+        // Раньше тут setError(...) с текстовым шаблоном и юзер был
+        // заблокирован. Теперь Metabox отдаёт `token` (специально под этот
+        // конфликт) — открываем модалку выбора, юзер кликает наставника,
+        // вызываем /profile/metabox-confirm-merge.
+        const sm = err.siteMentor || {};
+        const bm = err.botMentor || {};
+        const unknown = t("linkMetabox.merge.unknown");
+        setMentorConflictModal({
+          token: String(err.token),
+          siteMentor: { name: sm.name || unknown, contact: sm.contact || "" },
+          botMentor: { name: bm.name || unknown, contact: bm.contact || "" },
         });
       } else if (code === "TELEGRAM_MISMATCH" && err?.linkedTo) {
         const lt = err.linkedTo;
@@ -718,6 +736,55 @@ export function LinkMetaboxPage({
             <button className="primary-btn" onClick={() => setMergeBlockedModal(null)}>
               {t("linkMetabox.merge.ok")}
             </button>
+          </div>
+        </div>
+      )}
+      {/* MENTOR_CONFLICT modal — юзер выбирает наставника */}
+      {mentorConflictModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => !resolvingConflict && setMentorConflictModal(null)}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close"
+              disabled={!!resolvingConflict}
+              onClick={() => setMentorConflictModal(null)}
+            >
+              ✕
+            </button>
+            <h3 className="modal-title">{t("linkMetabox.merge.conflictTitle")}</h3>
+            <p className="modal-text">{t("linkMetabox.merge.conflictText")}</p>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={!!resolvingConflict}
+              onClick={() => handleResolveConflict("site")}
+              style={{ marginBottom: 8 }}
+            >
+              {resolvingConflict === "site" ? "…" : t("linkMetabox.merge.chooseSite")}
+              {": "}
+              <b>{mentorConflictModal.siteMentor.name}</b>
+              {mentorConflictModal.siteMentor.contact && (
+                <> ({mentorConflictModal.siteMentor.contact})</>
+              )}
+            </button>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={!!resolvingConflict}
+              onClick={() => handleResolveConflict("bot")}
+            >
+              {resolvingConflict === "bot" ? "…" : t("linkMetabox.merge.chooseBot")}
+              {": "}
+              <b>{mentorConflictModal.botMentor.name}</b>
+              {mentorConflictModal.botMentor.contact && (
+                <> ({mentorConflictModal.botMentor.contact})</>
+              )}
+            </button>
+            <p className="modal-support" style={{ marginTop: 12 }}>
+              {t("linkMetabox.merge.conflictIrreversible")}
+            </p>
           </div>
         </div>
       )}

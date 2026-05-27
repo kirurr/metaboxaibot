@@ -1,6 +1,23 @@
 import { fal } from "@fal-ai/client";
-import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
-import { config, UserFacingError, PHOTO_ANIMATE_PROMPT } from "@metabox/shared";
+import type {
+  VideoAdapter,
+  VideoInput,
+  VideoResult,
+  VideoValidationError,
+} from "./base.adapter.js";
+import {
+  config,
+  UserFacingError,
+  PHOTO_ANIMATE_PROMPT,
+  parseVideoShots,
+  sumShotDuration,
+  MULTISHOT_MAX_SHOTS,
+  MULTISHOT_PROMPT_MAX_LENGTH,
+  MULTISHOT_SHOT_DURATION_MIN,
+  MULTISHOT_SHOT_DURATION_MAX,
+  MULTISHOT_TOTAL_DURATION_MIN,
+  MULTISHOT_TOTAL_DURATION_MAX,
+} from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
 import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
@@ -126,10 +143,13 @@ const FAL_R2V_ENDPOINTS: Record<string, string> = {
   "kling-pro": "fal-ai/kling-video/o3/pro/reference-to-video",
 };
 
-/** Kling Motion Control endpoints — dedicated, no T2V/I2V split. */
+/** Kling Motion Control endpoints — dedicated, no T2V/I2V split.
+ *  `copy-motion` — alias на Pro endpoint для готового сценария «Копировать
+ *  движение»; preset-параметры зашиваются ниже в ветке submit'а. */
 const FAL_MOTION_ENDPOINTS: Record<string, string> = {
   "kling-motion": "fal-ai/kling-video/v3/standard/motion-control",
   "kling-motion-pro": "fal-ai/kling-video/v3/pro/motion-control",
+  "copy-motion": "fal-ai/kling-video/v3/pro/motion-control",
 };
 
 /** True если modelId — это kling-o3 семейство (kling или kling-pro). */
@@ -198,6 +218,54 @@ export class FalVideoAdapter implements VideoAdapter {
     return hasMedia
       ? FAL_I2V_ENDPOINTS[this.modelId]
       : (FAL_ENDPOINTS[this.modelId] ?? `fal-ai/${this.modelId}`);
+  }
+
+  /**
+   * Backstop-валидация multishot для kling-o3. Фронт (`multishotBlocker`) и роут
+   * уже блокируют невалидное, но этот путь защищает прямой fal-вызов (и fallback,
+   * где фронт-проверка не повторяется). Границы — те же общие `MULTISHOT_*`, что
+   * и у kie. Для non-multishot / не-kling возвращаем null (поведение без изменений).
+   */
+  validateRequest(input: VideoInput): VideoValidationError | null {
+    const ms = input.modelSettings ?? {};
+    if (!isKlingO3(this.modelId) || ms.multishot !== true) return null;
+
+    const shots = parseVideoShots(ms.shots);
+    if (shots.length === 0) {
+      return { key: "multishotEmpty" };
+    }
+    if (shots.length > MULTISHOT_MAX_SHOTS) {
+      return { key: "multishotTooManyShots", params: { max: MULTISHOT_MAX_SHOTS } };
+    }
+    for (const shot of shots) {
+      if (!shot.prompt.trim()) {
+        return { key: "multishotEmptyShotPrompt" };
+      }
+      if (shot.prompt.length > MULTISHOT_PROMPT_MAX_LENGTH) {
+        return {
+          key: "multishotShotPromptTooLong",
+          params: { limit: MULTISHOT_PROMPT_MAX_LENGTH },
+        };
+      }
+      if (
+        !Number.isInteger(shot.duration) ||
+        shot.duration < MULTISHOT_SHOT_DURATION_MIN ||
+        shot.duration > MULTISHOT_SHOT_DURATION_MAX
+      ) {
+        return {
+          key: "multishotShotDurationOutOfRange",
+          params: { min: MULTISHOT_SHOT_DURATION_MIN, max: MULTISHOT_SHOT_DURATION_MAX },
+        };
+      }
+    }
+    const total = shots.reduce((acc, s) => acc + s.duration, 0);
+    if (total < MULTISHOT_TOTAL_DURATION_MIN || total > MULTISHOT_TOTAL_DURATION_MAX) {
+      return {
+        key: "multishotTotalDurationOutOfRange",
+        params: { min: MULTISHOT_TOTAL_DURATION_MIN, max: MULTISHOT_TOTAL_DURATION_MAX },
+      };
+    }
+    return null;
   }
 
   async submit(input: VideoInput): Promise<string> {
@@ -359,12 +427,32 @@ export class FalVideoAdapter implements VideoAdapter {
         endUrl = croppedEnd;
       }
 
-      const klingBody: Record<string, unknown> = {};
-      if (input.prompt) klingBody.prompt = translatePromptRefs(input.prompt, { dialect: "fal" });
+      // Multi-shot: список {prompt,duration} полностью заменяет одиночный
+      // prompt. FAL Kling-o3 принимает `multi_prompt` (duration шота — СТРОКА)
+      // во всех трёх режимах (t2v/i2v/r2v) и требует `shot_type:"customize"`.
+      // Правило схемы: «either prompt or multi_prompt, not both» — в multishot
+      // top-level prompt НЕ ставим.
+      const multishot = ms.multishot === true;
+      const shots = multishot ? parseVideoShots(ms.shots) : [];
+      const isMulti = multishot && shots.length > 0;
 
-      // duration: STRING enum "3"-"15" по схеме FAL.
+      const klingBody: Record<string, unknown> = {};
+      if (isMulti) {
+        klingBody.multi_prompt = shots.map((s) => ({
+          prompt: translatePromptRefs(s.prompt, { dialect: "fal" }),
+          duration: String(s.duration),
+        }));
+        klingBody.shot_type = "customize";
+      } else if (input.prompt) {
+        klingBody.prompt = translatePromptRefs(input.prompt, { dialect: "fal" });
+      }
+
+      // duration: STRING enum "3"-"15" по схеме FAL. В multishot = сумме
+      // длительностей шотов (sumShotDuration клампит в [3,15]).
       const rawDuration = (ms.duration as number | undefined) ?? input.duration ?? 5;
-      const dur = Math.max(3, Math.min(15, Math.round(Number(rawDuration) || 5)));
+      const dur = isMulti
+        ? sumShotDuration(shots)
+        : Math.max(3, Math.min(15, Math.round(Number(rawDuration) || 5)));
       klingBody.duration = String(dur);
 
       // generate_audio передаём только если задан в settings (default schema = false,
@@ -424,7 +512,13 @@ export class FalVideoAdapter implements VideoAdapter {
     if (FAL_MOTION_ENDPOINTS[this.modelId]) {
       const motionImageUrl = input.mediaInputs?.first_frame?.[0] ?? input.imageUrl;
       const motionVideoUrl = input.mediaInputs?.motion_video?.[0];
-      const orientation = (ms.character_orientation as string) ?? "video";
+      // Готовый сценарий «Копировать движение»: ориентация зашита. FAL endpoint
+      // не принимает background_source — фон в этом fallback'е придёт из видео,
+      // а не из изображения. Деградация приемлема (KIE primary держит инвариант).
+      const isCopyMotionPreset = this.modelId === "copy-motion";
+      const orientation = isCopyMotionPreset
+        ? "video"
+        : ((ms.character_orientation as string) ?? "video");
       const keepSound = ms.keep_original_sound !== undefined ? ms.keep_original_sound : true;
 
       const motionInput: Record<string, unknown> = {

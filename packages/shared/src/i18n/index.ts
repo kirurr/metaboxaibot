@@ -97,6 +97,20 @@ export interface Translations {
     photoAnimateAlbumNotice: string;
     photoAnimateBufferLost: string;
     photoAnimateGenerating: string;
+    copyMotion: string;
+    copyMotionWelcome: string;
+    copyMotionStepPhoto: string;
+    copyMotionStepVideo: string;
+    copyMotionNotPhoto: string;
+    copyMotionNotVideo: string;
+    copyMotionPhotoTooLarge: string;
+    copyMotionVideoTooLarge: string;
+    copyMotionVideoTooShort: string;
+    copyMotionVideoTooLong: string;
+    copyMotionVideoUnreadable: string;
+    copyMotionAlbumNotice: string;
+    copyMotionBufferLost: string;
+    copyMotionGenerating: string;
     photoCreate: string;
     photoCreateWelcome: string;
     photoCreateStepPhoto: string;
@@ -143,6 +157,7 @@ export interface Translations {
     };
     reasoningHeader: string;
     reasoningPartLabel: string;
+    chunkDroppedTelegramLimit: string;
   };
   design: {
     sectionTitle: string;
@@ -283,6 +298,8 @@ export interface Translations {
     kieVideoDurationOutOfRange: string;
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
+    kieKlingMissingElement: string;
+    ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
     imageDimensionOutOfRange: string;

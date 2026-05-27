@@ -4,7 +4,19 @@ import type {
   VideoResult,
   VideoValidationError,
 } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import {
+  config,
+  UserFacingError,
+  parseVideoShots,
+  sumShotDuration,
+  MULTISHOT_MAX_SHOTS,
+  MULTISHOT_PROMPT_MAX_LENGTH,
+  MULTISHOT_SHOT_DURATION_MIN,
+  MULTISHOT_SHOT_DURATION_MAX,
+  MULTISHOT_TOTAL_DURATION_MIN,
+  MULTISHOT_TOTAL_DURATION_MAX,
+} from "@metabox/shared";
+import type { VideoShot } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { cropImageUrlAndMaterialize, KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
@@ -43,6 +55,11 @@ type EvolinkVideoMapping =
 const EVOLINK_VIDEO_MAP: Record<string, EvolinkVideoMapping> = {
   "kling-motion": { family: "kling-v3-motion-control", quality: "720p" },
   "kling-motion-pro": { family: "kling-v3-motion-control", quality: "1080p" },
+  // `copy-motion` — fallback evolink-канал для готового сценария «Копировать
+  // движение». Параметры зашиваются в `buildMotionControlBody` по modelId;
+  // evolink endpoint `kling-v3-motion-control` не принимает background_source,
+  // поэтому фон в этом fallback'е придёт из видео, а не из изображения.
+  "copy-motion": { family: "kling-v3-motion-control", quality: "1080p" },
   kling: { family: "kling-o3", quality: "720p" },
   "kling-pro": { family: "kling-o3", quality: "1080p" },
   "seedance-2": { family: "seedance-2.0", speed: "standard" },
@@ -150,6 +167,49 @@ export class EvolinkVideoAdapter implements VideoAdapter {
   }
 
   validateRequest(input: VideoInput): VideoValidationError | null {
+    const ms = input.modelSettings ?? {};
+
+    // Kling-o3 multi-shot: список {prompt,duration} заменяет одиночный промпт,
+    // валидируем его границы (общие MULTISHOT_*, строже evolink'овых 6/512).
+    if (EVOLINK_VIDEO_MAP[this.modelId]?.family === "kling-o3" && ms.multishot === true) {
+      const shots = parseVideoShots(ms.shots);
+      if (shots.length === 0) {
+        return { key: "multishotEmpty" };
+      }
+      if (shots.length > MULTISHOT_MAX_SHOTS) {
+        return { key: "multishotTooManyShots", params: { max: MULTISHOT_MAX_SHOTS } };
+      }
+      for (const shot of shots) {
+        if (!shot.prompt.trim()) {
+          return { key: "multishotEmptyShotPrompt" };
+        }
+        if (shot.prompt.length > MULTISHOT_PROMPT_MAX_LENGTH) {
+          return {
+            key: "multishotShotPromptTooLong",
+            params: { limit: MULTISHOT_PROMPT_MAX_LENGTH },
+          };
+        }
+        if (
+          !Number.isInteger(shot.duration) ||
+          shot.duration < MULTISHOT_SHOT_DURATION_MIN ||
+          shot.duration > MULTISHOT_SHOT_DURATION_MAX
+        ) {
+          return {
+            key: "multishotShotDurationOutOfRange",
+            params: { min: MULTISHOT_SHOT_DURATION_MIN, max: MULTISHOT_SHOT_DURATION_MAX },
+          };
+        }
+      }
+      const total = shots.reduce((acc, s) => acc + s.duration, 0);
+      if (total < MULTISHOT_TOTAL_DURATION_MIN || total > MULTISHOT_TOTAL_DURATION_MAX) {
+        return {
+          key: "multishotTotalDurationOutOfRange",
+          params: { min: MULTISHOT_TOTAL_DURATION_MIN, max: MULTISHOT_TOTAL_DURATION_MAX },
+        };
+      }
+      return null;
+    }
+
     const limit = this.promptMaxLength;
     if (limit !== null && input.prompt && input.prompt.length > limit) {
       return { key: "promptTooLong", params: { limit } };
@@ -267,7 +327,11 @@ export class EvolinkVideoAdapter implements VideoAdapter {
       });
     }
 
-    const orientation = (ms.character_orientation as string | undefined) ?? "video";
+    // Готовый сценарий «Копировать движение»: ориентация зашита по дизайну.
+    const isCopyMotionPreset = this.modelId === "copy-motion";
+    const orientation = isCopyMotionPreset
+      ? "video"
+      : ((ms.character_orientation as string | undefined) ?? "video");
     const keepSound = ms.keep_sound !== undefined ? !!ms.keep_sound : true;
 
     const body: Record<string, unknown> = {
@@ -300,6 +364,36 @@ export class EvolinkVideoAdapter implements VideoAdapter {
    * kling-custom-element flow (10+ минут на создание). Для fallback'а
    * реализуем degraded режим через image_urls — см. doc strings flattenRefElementsFirstOnly.
    */
+  /**
+   * Собирает multishot-параметры kling-o3 (общие для t2v и i2v).
+   * evolink кладёт их в `model_params` (не top-level): `multi_shot:true`,
+   * `shot_type:"customize"`, `multi_prompt:[{index,prompt,duration:string}]`.
+   * Сумма `duration` шотов обязана равняться top-level `duration` —
+   * возвращаем её же через `sumShotDuration` (клампится в [3,15]).
+   * Промпт шота гоняем через evolink-диалект (no-op для plain-текста без refs).
+   */
+  private buildKlingO3MultiShotParams(
+    shots: VideoShot[],
+    mi: Record<string, string[]>,
+  ): { duration: number; modelParams: Record<string, unknown> } {
+    const elementPositions = buildEvolinkElementPositions(mi);
+    return {
+      duration: sumShotDuration(shots),
+      modelParams: {
+        multi_shot: true,
+        shot_type: "customize",
+        multi_prompt: shots.map((s, i) => ({
+          index: i + 1,
+          prompt: translatePromptRefs(s.prompt, { dialect: "evolink", elementPositions }).slice(
+            0,
+            512,
+          ),
+          duration: String(s.duration),
+        })),
+      },
+    };
+  }
+
   private async buildKlingO3I2VBody(
     input: VideoInput,
     mapping: Extract<EvolinkVideoMapping, { family: "kling-o3" }>,
@@ -364,12 +458,26 @@ export class EvolinkVideoAdapter implements VideoAdapter {
     // evolink: sound enum "on"|"off", default "off". Маппим явно по ms-значению.
     const sound = ms.generate_audio === false ? "off" : "on";
 
+    // Multi-shot: список {prompt,duration} заменяет одиночный промпт. evolink
+    // кладёт его в model_params; top-level prompt игнорируется (шлём ""),
+    // duration = сумме длительностей шотов. Кадры/image_urls — как в single-shot.
+    const multishot = ms.multishot === true;
+    const shots = multishot ? parseVideoShots(ms.shots) : [];
+    const isMulti = multishot && shots.length > 0;
+
     const body: Record<string, unknown> = {
       model: "kling-o3-image-to-video",
       duration,
       sound,
     };
-    if (remappedPrompt) body.prompt = remappedPrompt.slice(0, 2500);
+    if (isMulti) {
+      const { duration: msDur, modelParams } = this.buildKlingO3MultiShotParams(shots, mi);
+      body.duration = msDur;
+      body.prompt = "";
+      body.model_params = modelParams;
+    } else if (remappedPrompt) {
+      body.prompt = remappedPrompt.slice(0, 2500);
+    }
     if (imageStart) body.image_start = imageStart;
     if (useImageEndField && imageEnd) body.image_end = imageEnd;
     if (effectiveRefImages.length > 0) body.image_urls = effectiveRefImages;
@@ -403,12 +511,28 @@ export class EvolinkVideoAdapter implements VideoAdapter {
     const duration = Math.max(3, Math.min(15, Math.round(Number(rawDuration) || 5)));
     const sound = ms.generate_audio === false ? "off" : "on";
 
+    // Multi-shot (см. buildKlingO3MultiShotParams): model_params + duration=сумма,
+    // top-level prompt игнорируется evolink'ом (шлём "").
+    const multishot = ms.multishot === true;
+    const shots = multishot ? parseVideoShots(ms.shots) : [];
+    const isMulti = multishot && shots.length > 0;
+
     const body: Record<string, unknown> = {
       model: "kling-o3-text-to-video",
       duration,
       sound,
     };
-    if (input.prompt) body.prompt = input.prompt.slice(0, 2500);
+    if (isMulti) {
+      const { duration: msDur, modelParams } = this.buildKlingO3MultiShotParams(
+        shots,
+        input.mediaInputs ?? {},
+      );
+      body.duration = msDur;
+      body.prompt = "";
+      body.model_params = modelParams;
+    } else if (input.prompt) {
+      body.prompt = input.prompt.slice(0, 2500);
+    }
     // t2v требует aspect_ratio из enum {16:9, 9:16, 1:1}; если "auto" или не
     // задан — fall back на 16:9 (default по доке).
     body.aspect_ratio = aspectRatio && aspectRatio !== "auto" ? aspectRatio : "16:9";

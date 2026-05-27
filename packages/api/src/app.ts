@@ -199,7 +199,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
         status,
         userId: (request as FastifyRequest & { userId?: bigint }).userId?.toString(),
         code: error.code,
-        err: { message: error.message, stack: error.stack, name: error.name },
+        // Передаём сам Error, а не plain object. Pino auto-сериализатор по
+        // ключу `err` ожидает Error instance; plain object (даже с {message,
+        // stack, name}) даёт {} в логе — теряем все детали 500-ок.
+        err: error,
       };
       if (status >= 500) {
         logger.error(ctx, "api handler error");
