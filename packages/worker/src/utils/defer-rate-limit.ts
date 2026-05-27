@@ -25,6 +25,7 @@
 import type { Job } from "bullmq";
 import { classifyRateLimit } from "@metabox/api/utils/rate-limit-error";
 import { markRateLimited } from "@metabox/api/services/key-pool";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit } from "./notify-error.js";
 import { logger } from "../logger.js";
@@ -77,6 +78,8 @@ export async function deferIfRateLimitOverload<
     isLongWindow: cls.isLongWindow,
     err,
     jobId: job.id,
+    // OpenAI billing-исчерпание шлём в balance тему (см. submit-with-throttle).
+    channel: isOpenAiBillingExhaustion(err) ? "balance" : undefined,
   });
 
   const delay = cls.cooldownMs + Math.floor(Math.random() * JITTER_MS);

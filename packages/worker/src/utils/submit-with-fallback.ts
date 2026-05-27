@@ -52,6 +52,7 @@ import {
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
@@ -329,6 +330,30 @@ export async function submitWithFallback<T, D extends object>(
         continue;
       }
 
+      // OpenAI billing исчерпан — `billing_hard_limit_reached` (400) или
+      // `insufficient_quota` (429). Симметрично KIE credits: org/project-wide
+      // состояние, ни retry на том же ключе, ни смена ключа в той же org
+      // не помогут. Не recordError'им ключ (это не сбой ключа), пробуем
+      // следующего кандидата, шлём дедуп'нутый алерт в balance-тему.
+      if (isOpenAiBillingExhaustion(err)) {
+        attempts.push({
+          provider: candidateProvider,
+          outcome: "credits_exhausted",
+          error: message.slice(0, 200),
+        });
+        void notifyTechErrorThrottled(
+          err instanceof Error ? err : new Error(message),
+          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+          "openai-billing-exhaustion",
+          { channel: "balance" },
+        );
+        logger.warn(
+          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
+          "submitWithFallback: OpenAI billing exhausted — trying next candidate",
+        );
+        continue;
+      }
+
       if (cls.isRateLimit) {
         // Per-key throttle: bad key карантинится, остальные ключи провайдера
         // продолжают работу. notifyRateLimit вызываем всегда per-key (как делал
@@ -462,6 +487,13 @@ export async function submitWithFallback<T, D extends object>(
     },
     "submitWithFallback: all candidates exhausted",
   );
+  // Если последняя ошибка — OpenAI billing-исчерпание, шлём all_candidates_failed
+  // в balance тему (а не в fallback тему). Иначе при пустом OpenAI billing'е
+  // эти алерты спамят общий fallback-канал вперемешку с обычными fallback'ами.
+  // Дополнительно к этому per-attempt дедуп выше через notifyTechErrorThrottled
+  // ("openai-billing-exhaustion") уже подавит большую часть шума, но здесь
+  // алерт фокусируется на «все кандидаты упали».
+  const allCandidatesChannel = isOpenAiBillingExhaustion(lastError) ? "balance" : undefined;
   void notifyFallback({
     section: opts.section,
     modelId: opts.primaryModel.id,
@@ -470,6 +502,7 @@ export async function submitWithFallback<T, D extends object>(
     reason: "all_candidates_failed",
     jobId: opts.jobId,
     userId: opts.userId,
+    channel: allCandidatesChannel,
   });
 
   // Если хоть один кандидат указал, что готов defer'нуть (PoolExhausted /

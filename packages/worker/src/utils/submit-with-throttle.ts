@@ -29,6 +29,7 @@ import {
 } from "@metabox/api/services/throttle";
 import { classifyRateLimit, LONG_WINDOW_THRESHOLD_MS } from "@metabox/api/utils/rate-limit-error";
 import { markRateLimited, recordSuccess, recordError } from "@metabox/api/services/key-pool";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { notifyRateLimit } from "./notify-error.js";
 import { delayJob } from "./delay-job.js";
 import { logger } from "../logger.js";
@@ -132,6 +133,10 @@ export async function submitWithThrottle<T, D extends object>(
     }
 
     if (tripped) {
+      // OpenAI billing-исчерпание (insufficient_quota / billing_hard_limit) —
+      // не транзиентный rate-limit, а исчерпан баланс org/project. Шлём в
+      // balance тему чтобы не смешивать с обычными rate-limit-инцидентами.
+      const channel = isOpenAiBillingExhaustion(err) ? "balance" : undefined;
       await notifyRateLimit({
         section,
         modelId,
@@ -139,6 +144,7 @@ export async function submitWithThrottle<T, D extends object>(
         reason: cls.reason,
         isLongWindow: cls.isLongWindow,
         err,
+        channel,
       });
     }
 
