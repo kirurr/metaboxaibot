@@ -56,6 +56,14 @@ export {
 } from "./constants/model-families.js";
 export { BOT_STATES, SECTION_BY_STATE, WELCOME_BONUS_TOKENS } from "./constants/states.js";
 export { FACE_SWAP_BUFFER_MODEL_ID } from "./constants/face-swap.js";
+export {
+  SUNO_NON_CUSTOM_PROMPT_MAX,
+  NANO_BANANA_PROMPT_MAX,
+  getSunoLimits,
+  validateSunoInput,
+  validateNanoBananaPromptLength,
+} from "./constants/model-limits.js";
+export type { SunoValidationInput } from "./constants/model-limits.js";
 export { CLOTHING_TRYON_BUFFER_MODEL_ID } from "./constants/clothing-tryon.js";
 export {
   PHOTO_UPSCALE_BUFFER_MODEL_ID,

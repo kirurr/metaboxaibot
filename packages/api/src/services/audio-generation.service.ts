@@ -5,6 +5,7 @@ import {
   KIE_ELEVENLABS_VOICE_IDS,
   ONE_SHOT_SETTING_KEYS,
   UserFacingError,
+  validateSunoInput,
 } from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
@@ -99,6 +100,25 @@ export const audioGenerationService = {
           });
         }
       }
+    } else if (modelId === "suno") {
+      // Лимиты Suno зависят от модели + режима (custom/non-custom). Адаптеры
+      // (KIE/Apipass) тоже валидируют как safety net, но в service-layer
+      // ловим раньше — без acquireKey, без списания токенов, без шума в
+      // tech-канал. Бросает UserFacingError с уже корректным i18n key.
+      //
+      // Runtime typeof check: settings могут прийти из legacy DB-снапшота или
+      // частичной миграции с неправильными типами. Без проверки validateSunoInput
+      // упал бы 500 (TypeError на .trim() от не-string). Тип-assertion → undefined
+      // если поле не string/boolean — валидатор обработает как «поле не задано».
+      const rawLyrics = modelSettings.lyrics;
+      const rawInstrumental = modelSettings.make_instrumental;
+      const rawModelVersion = modelSettings.model_version;
+      validateSunoInput({
+        prompt,
+        lyrics: typeof rawLyrics === "string" ? rawLyrics : undefined,
+        instrumental: typeof rawInstrumental === "boolean" ? rawInstrumental : undefined,
+        modelVersion: typeof rawModelVersion === "string" ? rawModelVersion : undefined,
+      });
     }
 
     await checkBalance(userId, preview.cost);

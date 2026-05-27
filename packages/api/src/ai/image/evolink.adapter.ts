@@ -1,5 +1,5 @@
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { config, UserFacingError, NANO_BANANA_PROMPT_MAX } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 
@@ -72,8 +72,6 @@ interface EvolinkTaskResponse {
   error?: { code?: string; message?: string; type?: string };
 }
 
-/** Per Evolink docs for Gemini-3 family — prompt token limit (treat as char limit). */
-const NANO_BANANA_PROMPT_MAX_CHARS = 2000;
 /** Per Evolink errors.md — invalid_parameters "file size exceeds 10MB". */
 const NANO_BANANA_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 /** Per nanobanana{2,pro}.md image_urls notes — JPG/PNG/WebP supported (+ GIF tolerated). */
@@ -101,11 +99,11 @@ async function validateNanoBananaInput(
   imageUrls: string[],
   fetchFn: typeof globalThis.fetch | undefined,
 ): Promise<void> {
-  if (prompt.length > NANO_BANANA_PROMPT_MAX_CHARS) {
-    throw new UserFacingError(
-      `Prompt is ${prompt.length} chars (max ${NANO_BANANA_PROMPT_MAX_CHARS})`,
-      { key: "promptTooLong", params: { limit: NANO_BANANA_PROMPT_MAX_CHARS } },
-    );
+  if (prompt.length > NANO_BANANA_PROMPT_MAX) {
+    throw new UserFacingError(`Prompt is ${prompt.length} chars (max ${NANO_BANANA_PROMPT_MAX})`, {
+      key: "promptTooLong",
+      params: { limit: NANO_BANANA_PROMPT_MAX },
+    });
   }
   if (imageUrls.length === 0) return;
 
