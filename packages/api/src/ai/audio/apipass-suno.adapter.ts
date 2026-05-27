@@ -1,5 +1,5 @@
 import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
-import { config, UserFacingError } from "@metabox/shared";
+import { config, UserFacingError, validateSunoInput } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { providerHttpError } from "../../utils/rate-limit-error.js";
 
@@ -73,6 +73,13 @@ export class ApipassSunoAdapter implements AudioAdapter {
     const instrumental = (ms.make_instrumental as boolean | undefined) ?? false;
     const modelVersion = (ms.model_version as string | undefined) ?? "V4_5";
     const model = MODEL_MAP[modelVersion] ?? "V4_5";
+
+    // Pre-flight длины: зеркало KIE-Suno. Сам провайдер также вернёт 400 на
+    // длинных полях, но обработка постфактум стоила бы лишнего HTTP. UserFacingError
+    // с тем же ключом что у KIE — юзер видит одинаковое сообщение независимо
+    // от того, кто из адаптеров его поймал. Service-layer уже валидирует до
+    // acquireKey, тут — safety net на случай fallback'а или прямого вызова.
+    validateSunoInput({ prompt: input.prompt, lyrics, instrumental, modelVersion });
 
     // sunoapi.org requires callBackUrl — we use polling so any reachable URL works
     const callBackUrl = `${config.api.publicUrl ?? "https://example.com"}/suno-callback`;
