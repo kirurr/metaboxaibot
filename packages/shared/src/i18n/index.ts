@@ -302,6 +302,7 @@ export interface Translations {
     copyMotionVideoTooShort: string;
     copyMotionVideoTooLong: string;
     copyMotionVideoUnreadable: string;
+    aspectRatioNotSupported: string;
     ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
