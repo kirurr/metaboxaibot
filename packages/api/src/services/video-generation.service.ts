@@ -161,7 +161,18 @@ export const videoGenerationService = {
     // Bot scene `copy-motion.ts` уже валидирует на upload, но web-route и
     // универсальная video-карусель идут мимо неё → ловим в service-layer.
     // Зеркало логики из copy-motion.ts:200-222.
-    if (params.modelId === "kling-motion-pro" || params.modelId === "copy-motion") {
+    // Все три modelId в kling-v3-motion-control family имеют один и тот же
+    // 3-30 сек лимит провайдера. kling-motion (Standard) и kling-motion-pro
+    // (Pro) доступны напрямую через универсальную video-карусель, copy-motion —
+    // готовый сценарий «Копировать движение» (alias на kling-motion-pro).
+    // `section` в UserFacingError не нужен: resolveUserFacingErrorVariant
+    // смотрит section только для modelTemporarilyUnavailable, для наших ключей
+    // идёт прямой lookup в t.errors[key].
+    if (
+      params.modelId === "kling-motion" ||
+      params.modelId === "kling-motion-pro" ||
+      params.modelId === "copy-motion"
+    ) {
       // `mediaInputs.motion_video[0]` — это уже presigned URL: и web-route
       // (resolveMediaInputs → getFileUrl), и bot scene (resolveMediaInputUrls)
       // конвертят s3-keys в URL'ы ДО передачи в submitVideo. probeVideoMetadata
@@ -173,19 +184,18 @@ export const videoGenerationService = {
         if (!durationSec || durationSec <= 0) {
           throw new UserFacingError(`copy-motion: video duration unreadable`, {
             key: "copyMotionVideoUnreadable",
-            section: "video",
           });
         }
         if (durationSec < COPY_MOTION_VIDEO_MIN_SEC) {
           throw new UserFacingError(
             `copy-motion: video ${durationSec}s < min ${COPY_MOTION_VIDEO_MIN_SEC}s`,
-            { key: "copyMotionVideoTooShort", section: "video" },
+            { key: "copyMotionVideoTooShort" },
           );
         }
         if (durationSec > COPY_MOTION_VIDEO_MAX_SEC) {
           throw new UserFacingError(
             `copy-motion: video ${durationSec}s > max ${COPY_MOTION_VIDEO_MAX_SEC}s`,
-            { key: "copyMotionVideoTooLong", section: "video" },
+            { key: "copyMotionVideoTooLong" },
           );
         }
       }
