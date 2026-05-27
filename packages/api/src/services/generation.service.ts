@@ -1,6 +1,6 @@
 import { db } from "../db.js";
 import { getImageQueue } from "../queues/image.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
+import { AI_MODELS, ONE_SHOT_SETTING_KEYS, validateNanoBananaPromptLength } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
@@ -114,6 +114,15 @@ export const generationService = {
 
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
+
+    // Pre-flight промпт-длины: лимит провайдер-агностический (тот же 2000
+    // chars hard-cap у KIE и evolink для всех моделей семейства nano-banana).
+    // Адаптерный `validateNanoBananaInput` (evolink.adapter.ts:97) идёт по
+    // `modelId.startsWith("nano-banana-")` — service-layer pre-flight зеркалит
+    // тот же scope. Бросает UserFacingError до acquireKey/создания джобы/списания.
+    if (modelId.startsWith("nano-banana-")) {
+      validateNanoBananaPromptLength(prompt);
+    }
 
     // Defense-in-depth: scenes already strip image inputs for text-only models
     // and inform the user. If something still slips through (e.g. confirm-
