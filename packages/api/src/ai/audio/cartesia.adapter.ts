@@ -122,7 +122,7 @@ export class CartesiaAdapter implements AudioAdapter {
 
     const body: Record<string, unknown> = {
       model_id: modelId,
-      transcript: input.prompt,
+      transcript: trimmedTranscript,
       voice: { mode: "id", id: voiceId },
       output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
     };
