@@ -134,6 +134,15 @@ const TRANSIENT_NETWORK_CODES = new Set([
   "EPIPE",
   "UND_ERR_SOCKET", // undici socket error
   "UND_ERR_CONNECT_TIMEOUT",
+  // TLS handshake-уровень: обычно transient (провайдер обновляет cert chain,
+  // наш CA bundle обновляется при рестарте контейнера). Лучше retry/fallback,
+  // чем сразу фейлить юзеру. Если TLS-проблема постоянная (cert вообще не
+  // совпадает с hostname) — после исчерпания retry budget'а fail дойдёт.
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
 ]);
 
 /**
