@@ -1050,3 +1050,34 @@ describe("submitWithFallback — transient network error", () => {
     expect(mocks.notifyFallback).not.toHaveBeenCalled();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — provider temporarily unavailable (infra)", () => {
+  // "high demand" / "Service unavailable" / Cloudflare Tunnel error / etc. —
+  // provider-wide инфра-проблема (узел перегружен, CDN edge упал). Ключ
+  // здоровый, штрафовать его нельзя — это не его вина. Пробуем следующего
+  // кандидата.
+
+  test("high demand на primary → fallback пробуется, recordError НЕ вызван", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    // KIE-style "high demand" — matched через isProviderTemporaryUnavailable.
+    const overloadErr = new Error("KIE submit error 422: Service is currently unavailable");
+    const submit = vi.fn().mockRejectedValueOnce(overloadErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "kling", provider: "kie" }),
+      fallbacks: [makeModel({ id: "kling", provider: "evolink" })],
+      section: "video",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Главное: ключ primary НЕ штрафуется на инфра-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalled();
+  });
+});
