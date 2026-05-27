@@ -160,7 +160,9 @@ export class MinimaxVideoAdapter implements VideoAdapter {
         this.fetchFn,
       );
 
-      if (!fileResp.ok) throw new Error(`MiniMax file retrieve error ${fileResp.status}`);
+      if (!fileResp.ok) {
+        throw providerHttpError(`MiniMax file retrieve error ${fileResp.status}`, fileResp.status);
+      }
 
       const fileData = (await fileResp.json()) as MinimaxFileResponse;
       const url = fileData.file?.download_url;

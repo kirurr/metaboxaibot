@@ -2,6 +2,7 @@ import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const HIGGSFIELD_API = "https://platform.higgsfield.ai";
 
@@ -123,7 +124,7 @@ export class HiggsFieldAdapter implements VideoAdapter {
           if (e instanceof UserFacingError) throw e;
         }
       }
-      throw new Error(`Higgsfield submit failed: ${res.status} ${text}`);
+      throw providerHttpError(`Higgsfield submit failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as SubmitResponse;
@@ -147,7 +148,7 @@ export class HiggsFieldAdapter implements VideoAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Higgsfield poll failed: ${res.status} ${text}`);
+      throw providerHttpError(`Higgsfield poll failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as PollResponse;

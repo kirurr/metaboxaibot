@@ -2,6 +2,7 @@ import { config } from "@metabox/shared";
 import type { AvatarAdapter, AvatarCreateResult, AvatarPollResult } from "./base.adapter.js";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { resolveImageMimeType } from "../../utils/mime-detect.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const HEYGEN_API = "https://api.heygen.com";
 
@@ -53,7 +54,10 @@ export class HeyGenAvatarAdapter implements AvatarAdapter {
     );
     if (!uploadRes.ok) {
       const text = await uploadRes.text();
-      throw new Error(`HeyGen asset upload failed: ${uploadRes.status} ${text}`);
+      throw providerHttpError(
+        `HeyGen asset upload failed: ${uploadRes.status} ${text}`,
+        uploadRes.status,
+      );
     }
     const uploadData = (await uploadRes.json()) as { data?: { asset_id?: string } };
     const assetId = uploadData.data?.asset_id;
