@@ -292,6 +292,22 @@ export async function submitWithFallback<T, D extends object>(
       const message = err instanceof Error ? err.message : String(err);
       const cls = classifyRateLimit(err, keyProvider);
 
+      // UserFacingError без `notifyOps` — это пользовательская валидационная
+      // ошибка (длина prompt'а, формат, content policy, etc.), которую адаптер
+      // сам диагностировал и обернул в i18n key. Fallback на соседнего провайдера
+      // бессмыслен (одни и те же лимиты на бэкенде), recordError ставить нельзя
+      // (ключ исправен), tech-alert не нужен (это юзер ввёл что-то не так,
+      // не баг провайдера). Сразу throw — processor превратит в localized
+      // сообщение пользователю.
+      //
+      // UserFacingError с `notifyOps: true` (provider credit-exhausted, account
+      // suspended и т.п.) НЕ ловится этим guard'ом — попадает в обычный flow
+      // ниже (KIE credits / OpenAI billing / unknown_error) где fallback и
+      // ops-alert уместны.
+      if (err instanceof UserFacingError && !err.notifyOps) {
+        throw err;
+      }
+
       // Provider temporarily unavailable (e.g. KIE 422 "high demand") — узел
       // провайдера перегружен, retry на том же или соседнем ключе того же
       // провайдера не помогает. Пробуем следующего кандидата (другую модель/

@@ -89,6 +89,7 @@ vi.mock("@metabox/api/utils/rate-limit-error", () => ({
 import { submitWithFallback } from "./submit-with-fallback.js";
 import { PoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
 import { RateLimitLongWindowError } from "./submit-with-throttle.js";
+import { UserFacingError } from "@metabox/shared";
 
 // ── Test sentinel — delayJob throws this in tests ────────────────────────────
 class TestDelayedSentinel extends Error {
@@ -915,5 +916,66 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     );
     // Primary key не штрафуется
     expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — UserFacingError early-throw (validation)", () => {
+  // Pre-flight адаптеров (Suno length, Cartesia empty transcript, Nano Banana
+  // length и т.п.) бросает UserFacingError без notifyOps. Такие ошибки — это
+  // юзерская валидация, fallback не лечит (один backend → один лимит), tech
+  // не должен шуметь, ключ не штрафуется.
+
+  test("UserFacingError без notifyOps → throw сразу, без fallback, без tech-alert, без recordError", async () => {
+    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    const validationErr = new UserFacingError("Suno: prompt 980 > 500 chars", {
+      key: "sunoPromptTooLongNoLyrics",
+      params: { current: 980 },
+    });
+    const submit = vi.fn().mockRejectedValue(validationErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "suno", provider: "kie" }),
+        fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+        section: "audio",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(validationErr);
+
+    // Только primary попробован, fallback НЕ задействован.
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    expect(mocks.notifyTechErrorThrottled).not.toHaveBeenCalled();
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+  });
+
+  test("UserFacingError c notifyOps:true → попадает в обычный flow (fallback пробуется)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const providerErr = new UserFacingError("Suno API: credits insufficient", {
+      key: "modelTemporarilyUnavailable",
+      section: "audio",
+      notifyOps: true,
+      opsAlertDedupKey: "suno-credits-exhausted",
+    });
+    const submit = vi.fn().mockRejectedValueOnce(providerErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "suno", provider: "kie" }),
+      fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+      section: "audio",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    // Fallback задействован (это provider-side issue, имеет смысл попробовать соседа)
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(2);
   });
 });
