@@ -848,7 +848,8 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
 
   if (!active) return null;
 
-  const tokensValue = job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
+  const tokensValue =
+    job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
   const hasMeta = Boolean(job.completedAt || tokensValue);
 
   return (
@@ -970,7 +971,9 @@ function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
                     label={formatLightboxDate(job.completedAt)}
                   />
                 )}
-                {tokensValue && <MetaChip icon={<Coins size={14} />} label={`${tokensValue} токенов`} />}
+                {tokensValue && (
+                  <MetaChip icon={<Coins size={14} />} label={`${tokensValue} токенов`} />
+                )}
               </div>
             )}
 

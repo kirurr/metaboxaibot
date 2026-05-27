@@ -230,10 +230,7 @@ export function GenerateSheet({ open, onClose }: { open: boolean; onClose: () =>
                     {f.glyph}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span
-                      className="block text-sm font-medium"
-                      style={{ color: "var(--text)" }}
-                    >
+                    <span className="block text-sm font-medium" style={{ color: "var(--text)" }}>
                       {t(f.nameKey)}
                       {f.badge && (
                         <span className={"mega-badge ml-2 " + f.badge.toLowerCase()}>
