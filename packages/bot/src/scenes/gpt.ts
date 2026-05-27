@@ -286,6 +286,9 @@ async function streamGptResponse(
   // 429 на edit означает per-chat rate-limit. Пока wall-clock < editBlockedUntil
   // не пытаемся делать preview-edit'ы — иначе только усугубляем cooldown.
   let editBlockedUntil = 0;
+  // UX-маркер про дропнутый чанк шлём максимум один раз на запрос — иначе
+  // на длинном ответе с N частями юзер получит N одинаковых сообщений подряд.
+  let dropMarkerSent = false;
 
   /**
    * Доставка одного finalize-чанка. Для первого чанка пробуем edit плейсхолдера;
@@ -338,8 +341,12 @@ async function streamGptResponse(
             // Best-effort UX-маркер: после ~30-90s sleep'ов cooldown может уже
             // истечь, и юзер увидит понятный текст вместо обрыва. Если 429 ещё
             // активен — catch проглотит, юзер всё равно ничего не получит, но
-            // в большинстве случаев маркер пройдёт.
-            await trySendRaw(ctx.t.gpt.chunkDroppedTelegramLimit, false).catch(() => void 0);
+            // в большинстве случаев маркер пройдёт. Шлём не больше одного раза
+            // на запрос, иначе на multi-chunk ответе будет N одинаковых маркеров.
+            if (!dropMarkerSent) {
+              dropMarkerSent = true;
+              await trySendRaw(ctx.t.gpt.chunkDroppedTelegramLimit, false).catch(() => void 0);
+            }
             return;
           }
         }
