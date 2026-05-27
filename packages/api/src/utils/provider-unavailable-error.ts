@@ -51,7 +51,13 @@ export function isProviderTemporaryUnavailable(err: unknown): boolean {
   // failMsg "Service is temporarily unavailable. Please try again later. (E004)"
   // — провайдер явно сигналит transient через эту фразу, regex без вариаций
   // её пропускал, fallback не запускался → юзер ждал зря 3 ретрая.
-  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed/i.test(
+  //
+  // `Cloudflare Tunnel error|error 1033|Argo Tunnel`: KIE 2026-05-27 — Cloudflare
+  // вернул HTML-страницу с error 1033 (Argo Tunnel до их origin лёг). Тело
+  // ответа парсится как plain text, status=530. providerHttpError() поднимает
+  // 530 в `err.status` → isFiveXxError ловит. Дублирующая text-проверка здесь —
+  // safety net на случай если новый адаптер забудет про providerHttpError.
+  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed|Cloudflare Tunnel error|error 1033|Argo Tunnel/i.test(
     msg,
   );
 }
