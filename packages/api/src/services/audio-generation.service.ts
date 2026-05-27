@@ -105,11 +105,19 @@ export const audioGenerationService = {
       // (KIE/Apipass) тоже валидируют как safety net, но в service-layer
       // ловим раньше — без acquireKey, без списания токенов, без шума в
       // tech-канал. Бросает UserFacingError с уже корректным i18n key.
+      //
+      // Runtime typeof check: settings могут прийти из legacy DB-снапшота или
+      // частичной миграции с неправильными типами. Без проверки validateSunoInput
+      // упал бы 500 (TypeError на .trim() от не-string). Тип-assertion → undefined
+      // если поле не string/boolean — валидатор обработает как «поле не задано».
+      const rawLyrics = modelSettings.lyrics;
+      const rawInstrumental = modelSettings.make_instrumental;
+      const rawModelVersion = modelSettings.model_version;
       validateSunoInput({
         prompt,
-        lyrics: modelSettings.lyrics as string | undefined,
-        instrumental: modelSettings.make_instrumental as boolean | undefined,
-        modelVersion: modelSettings.model_version as string | undefined,
+        lyrics: typeof rawLyrics === "string" ? rawLyrics : undefined,
+        instrumental: typeof rawInstrumental === "boolean" ? rawInstrumental : undefined,
+        modelVersion: typeof rawModelVersion === "string" ? rawModelVersion : undefined,
       });
     }
 
