@@ -1232,4 +1232,109 @@ export const internalRoutes: FastifyPluginAsync = async (fastify) => {
       };
     },
   );
+
+  /**
+   * POST /sync-merged-user
+   *
+   * Зовётся Metabox после успешного mergeAccounts (notify-link-finalize /
+   * verify-link-token / login-and-link). Обновляет AiBox.User под нового
+   * primary metabox-юзера:
+   *   - metaboxUserId       — теперь указывает на primary (раньше — на stub,
+   *                           который стал secondary/frozen);
+   *   - metaboxReferralCode — primary'й код (stub'овый теперь stale).
+   *
+   * Поиск AiBox.User: сперва по aiboxUserId (если Metabox смог его поднять —
+   * canonical путь), fallback по telegramId. Если AiBox.User не найден —
+   * 200 ok, но noop: возможна гонка с упсёртом юзера, повторный sync покроет.
+   *
+   * Идемпотентно: повторный вызов с тем же payload не делает ничего.
+   *
+   * Body: { aiboxUserId?, telegramId?, metaboxUserId, metaboxReferralCode? }
+   */
+  fastify.post(
+    "/sync-merged-user",
+    {
+      schema: {
+        description: "Sync AiBox.User with new Metabox primary after merge",
+        body: {
+          type: "object",
+          properties: {
+            aiboxUserId: { type: "string" },
+            telegramId: { type: "string" },
+            metaboxUserId: { type: "string" },
+            metaboxReferralCode: { type: "string" },
+          },
+          required: ["metaboxUserId"],
+        },
+        response: {
+          200: {
+            additionalProperties: true,
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+              matched: { type: "boolean" },
+              updated: { type: "boolean" },
+            },
+          },
+          400: badRequestResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { aiboxUserId, telegramId, metaboxUserId, metaboxReferralCode } = request.body as {
+        aiboxUserId?: string;
+        telegramId?: string;
+        metaboxUserId: string;
+        metaboxReferralCode?: string;
+      };
+
+      if (!metaboxUserId) {
+        return reply.code(400).send({ error: "metaboxUserId is required" });
+      }
+      if (!aiboxUserId && !telegramId) {
+        return reply.code(400).send({ error: "Either aiboxUserId or telegramId is required" });
+      }
+
+      let user: {
+        id: bigint;
+        metaboxUserId: string | null;
+        metaboxReferralCode: string | null;
+      } | null = null;
+      if (aiboxUserId) {
+        user = await db.user.findUnique({
+          where: { id: BigInt(aiboxUserId) },
+          select: { id: true, metaboxUserId: true, metaboxReferralCode: true },
+        });
+      }
+      if (!user && telegramId) {
+        user = await db.user.findUnique({
+          where: { telegramId: BigInt(telegramId) },
+          select: { id: true, metaboxUserId: true, metaboxReferralCode: true },
+        });
+      }
+
+      if (!user) {
+        // Не ошибка — возможна гонка (AiBox.User ещё не упсерчен) или
+        // юзер удалил аккаунт. Metabox-сторона должна сама свериться позднее.
+        return { ok: true, matched: false, updated: false };
+      }
+
+      const needsMetaboxIdUpdate = user.metaboxUserId !== metaboxUserId;
+      const needsCodeUpdate =
+        !!metaboxReferralCode && user.metaboxReferralCode !== metaboxReferralCode;
+      if (!needsMetaboxIdUpdate && !needsCodeUpdate) {
+        return { ok: true, matched: true, updated: false };
+      }
+
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          ...(needsMetaboxIdUpdate ? { metaboxUserId } : {}),
+          ...(needsCodeUpdate ? { metaboxReferralCode } : {}),
+        },
+      });
+
+      return { ok: true, matched: true, updated: true };
+    },
+  );
 };

@@ -193,6 +193,10 @@ export async function finalizeStart(
   opts: {
     param?: string;
     resolvedReferrerUserId?: string | null;
+    /** Сырой `ref_<code>` (без префикса) из deep-link'а. Прокидывается в
+     *  registerBotUser как `referrerReferralCode` — Metabox-side fallback на
+     *  случай, если bot-side resolveReferralCode silently вернул null. */
+    rawReferralCode?: string | null;
     /** Подавить «Мы нашли ваш аккаунт на Metabox…» (для linkweb_/merge-callback'ов,
      *  которые уже отправили своё сообщение о привязке). */
     suppressMetaboxLinkedNotification?: boolean;
@@ -238,6 +242,7 @@ export async function finalizeStart(
           username: freshUser?.username ?? ctx.user!.username,
           referrerTelegramId,
           referrerUserId: opts.resolvedReferrerUserId ?? undefined,
+          referrerReferralCode: opts.rawReferralCode ?? undefined,
           aiboxUserId: ctx.user!.id,
         });
         if (result?.ok) {
@@ -661,9 +666,18 @@ export async function handleStart(ctx: BotContext): Promise<void> {
   // ниже (guard `!ctx.user.referredById` на line ~507) — silent skip, без
   // отдельного сообщения «у вас уже есть наставник».
   let resolvedReferrerUserId: string | null = null;
+  // Сырой `ref_<code>` (без префикса) — прокидываем в Metabox даже если
+  // bot-side resolveReferralCode выше упал silently. Metabox-side
+  // register-bot-user умеет резолвить код локально как fallback.
+  let rawReferralCode: string | null = null;
 
   if (param?.startsWith("ref_") && ctx.user && !ctx.user.referredById) {
     const refParam = param.slice("ref_".length);
+    // Numeric — legacy tgid-формат, Metabox его не резолвит через referralCode
+    // lookup; пробрасываем только не-numeric коды.
+    if (!/^\d+$/.test(refParam)) {
+      rawReferralCode = refParam;
+    }
 
     // Try as referralCode first (new format: ref_HU6PQYST)
     // Then fall back to telegramId (legacy format: ref_6186315229).
@@ -720,7 +734,7 @@ export async function handleStart(ctx: BotContext): Promise<void> {
 
   // Общий хвост любых deep-link веток: язык, FSM=IDLE, registerBotUser,
   // welcome-бонус, welcome-пакет, команды. См. finalizeStart выше.
-  await finalizeStart(ctx, { param, resolvedReferrerUserId });
+  await finalizeStart(ctx, { param, resolvedReferrerUserId, rawReferralCode });
 }
 
 /**
