@@ -2656,6 +2656,27 @@ select {
   background: var(--bg-elevated);
   border-radius: 6px;
 }
+/* Mobile: строка истории стекается в карточку — title, preview, мета снизу. */
+.app.mobile .history-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.app.mobile .history-row .meta {
+  margin-left: 0;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.app.mobile .history-row .meta .h-model {
+  margin-right: auto; /* разводит модель и время+стрелку по краям */
+}
+/* Поиск на всю ширину, чтобы не переполнял экран при flex: 1 1 320px. */
+.app.mobile .input-group {
+  flex: 1 1 100% !important;
+  max-width: 100% !important;
+}
 
 /* Plans */
 .plans {
