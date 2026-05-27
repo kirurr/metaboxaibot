@@ -120,11 +120,12 @@ export const generationService = {
     const model = AI_MODELS[modelId];
     if (!model) throw new Error(`Unknown model: ${modelId}`);
 
-    // Pre-flight промпт-длины: лимит провайдер-агностический (тот же backend
-    // у KIE и evolink), fallback на другого кандидата не лечит. Бросает
-    // UserFacingError — до acquireKey, до создания джобы, до списания токенов.
-    // Адаптер (validateNanoBananaInput) тоже валидирует как safety net.
-    if (modelId === "nano-banana-pro") {
+    // Pre-flight промпт-длины: лимит провайдер-агностический (тот же 2000
+    // chars hard-cap у KIE и evolink для всех моделей семейства nano-banana).
+    // Адаптерный `validateNanoBananaInput` (evolink.adapter.ts:97) идёт по
+    // `modelId.startsWith("nano-banana-")` — service-layer pre-flight зеркалит
+    // тот же scope. Бросает UserFacingError до acquireKey/создания джобы/списания.
+    if (modelId.startsWith("nano-banana-")) {
       validateNanoBananaPromptLength(prompt);
     }
 
