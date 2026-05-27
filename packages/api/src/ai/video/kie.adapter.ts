@@ -9,6 +9,14 @@ import {
   config,
   UserFacingError,
   PHOTO_ANIMATE_PROMPT,
+  parseVideoShots,
+  sumShotDuration,
+  MULTISHOT_MAX_SHOTS,
+  MULTISHOT_SHOT_DURATION_MIN,
+  MULTISHOT_SHOT_DURATION_MAX,
+  MULTISHOT_TOTAL_DURATION_MIN,
+  MULTISHOT_TOTAL_DURATION_MAX,
+  MULTISHOT_PROMPT_MAX_LENGTH,
   ELEMENT_CI_RE,
 } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
@@ -151,6 +159,49 @@ export class KieVideoAdapter implements VideoAdapter {
   }
 
   validateRequest(input: VideoInput): VideoValidationError | null {
+    const ms = input.modelSettings ?? {};
+
+    // Kling multi-shot: список {prompt,duration} полностью заменяет одиночный
+    // промпт, поэтому валидируем его границы здесь (а не общий prompt).
+    if (KLING_MODEL_MAP[this.modelId] && ms.multishot === true) {
+      const shots = parseVideoShots(ms.shots);
+      if (shots.length === 0) {
+        return { key: "multishotEmpty" };
+      }
+      if (shots.length > MULTISHOT_MAX_SHOTS) {
+        return { key: "multishotTooManyShots", params: { max: MULTISHOT_MAX_SHOTS } };
+      }
+      for (const shot of shots) {
+        if (!shot.prompt.trim()) {
+          return { key: "multishotEmptyShotPrompt" };
+        }
+        if (shot.prompt.length > MULTISHOT_PROMPT_MAX_LENGTH) {
+          return {
+            key: "multishotShotPromptTooLong",
+            params: { limit: MULTISHOT_PROMPT_MAX_LENGTH },
+          };
+        }
+        if (
+          !Number.isInteger(shot.duration) ||
+          shot.duration < MULTISHOT_SHOT_DURATION_MIN ||
+          shot.duration > MULTISHOT_SHOT_DURATION_MAX
+        ) {
+          return {
+            key: "multishotShotDurationOutOfRange",
+            params: { min: MULTISHOT_SHOT_DURATION_MIN, max: MULTISHOT_SHOT_DURATION_MAX },
+          };
+        }
+      }
+      const total = shots.reduce((acc, s) => acc + s.duration, 0);
+      if (total < MULTISHOT_TOTAL_DURATION_MIN || total > MULTISHOT_TOTAL_DURATION_MAX) {
+        return {
+          key: "multishotTotalDurationOutOfRange",
+          params: { min: MULTISHOT_TOTAL_DURATION_MIN, max: MULTISHOT_TOTAL_DURATION_MAX },
+        };
+      }
+      return null;
+    }
+
     const limit = this.promptMaxLength;
     if (input.prompt && input.prompt.length > limit) {
       return { key: "promptTooLong", params: { limit } };
@@ -226,8 +277,14 @@ export class KieVideoAdapter implements VideoAdapter {
       // ── Kling 3.0 video ───────────────────────────────────────────────────
       model = "kling-3.0/video";
 
+      // Multi-shot: список {prompt,duration} полностью заменяет одиночный
+      // промпт. В этом режиме KIE поддерживает только первый кадр — last_frame
+      // игнорируем (см. kling3.md §"Multi-Shot Mode").
+      const multishot = ms.multishot === true;
+      const shots = multishot ? parseVideoShots(ms.shots) : [];
+
       const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
-      const lastFrame = mi.last_frame?.[0];
+      const lastFrame = multishot ? undefined : mi.last_frame?.[0];
 
       // KIE Kling 3.0 принимает image_urls=[first] (length 1) ИЛИ
       // image_urls=[first, last] (length 2). Передать только last_frame
@@ -283,13 +340,17 @@ export class KieVideoAdapter implements VideoAdapter {
         (u): u is string => u !== undefined,
       );
 
-      const durationNum = (ms.duration as number | undefined) ?? input.duration ?? 5;
+      // В мультишоте total-длительность = сумма длительностей шотов (клампим в
+      // 3–15). В single-shot — пользовательский слайдер `duration`.
+      const durationNum = multishot
+        ? sumShotDuration(shots)
+        : ((ms.duration as number | undefined) ?? input.duration ?? 5);
       inputPayload.duration = String(durationNum);
 
       const sound = ms.generate_audio !== undefined ? !!ms.generate_audio : true;
       inputPayload.sound = sound;
 
-      inputPayload.multi_shots = false;
+      inputPayload.multi_shots = multishot;
 
       // Element references: up to 3 elements, each 2–4 images.
       // User-uploaded images in ref_element_{1..3} slots become
@@ -367,7 +428,16 @@ export class KieVideoAdapter implements VideoAdapter {
       if (klingElements.length) inputPayload.kling_elements = klingElements;
       if (imageUrls.length) inputPayload.image_urls = imageUrls;
 
-      if (input.prompt) {
+      if (multishot) {
+        // Промпты шотов едут в multi_prompt; top-level prompt не отправляем
+        // (inputPayload.prompt инициализируется в начале submit — удаляем).
+        // @elementN-референсы внутри промпта шота переводим тем же диалектом.
+        delete inputPayload.prompt;
+        inputPayload.multi_prompt = shots.map((shot) => ({
+          prompt: translatePromptRefs(shot.prompt, { dialect: "kie" }),
+          duration: shot.duration,
+        }));
+      } else if (input.prompt) {
         inputPayload.prompt = translatePromptRefs(input.prompt, { dialect: "kie" });
       }
     } else if (seedanceModel) {

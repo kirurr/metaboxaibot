@@ -91,6 +91,12 @@ const USER_FACING_KEY_TO_CODE: Record<string, GenerationErrorCode> = {
   klingLastFrameNeedsFirst: "INPUT_VALIDATION",
   klingMotionImageRequired: "INPUT_VALIDATION",
   klingMotionVideoRequired: "INPUT_VALIDATION",
+  multishotEmpty: "INPUT_VALIDATION",
+  multishotTooManyShots: "INPUT_VALIDATION",
+  multishotEmptyShotPrompt: "INPUT_VALIDATION",
+  multishotShotPromptTooLong: "INPUT_VALIDATION",
+  multishotShotDurationOutOfRange: "INPUT_VALIDATION",
+  multishotTotalDurationOutOfRange: "INPUT_VALIDATION",
   mediaSlotExpired: "INPUT_VALIDATION",
 
   // Формат входной медиа

@@ -216,7 +216,9 @@ console.log(`\n${line}\n  СОВПАВШИЕ ЗАПИСИ (по providerJobId)\n
 console.log(`Matched: ${matched.length}`);
 console.log(`  Provider USD: $${fmt(matchedProviderUsd, 2)}`);
 console.log(`  DB USD:       $${fmt(matchedDbUsd, 2)}`);
-console.log(`  Соотношение DB/Provider: ${fmt(avgRatio, 4)} (${pct(matchedDbUsd, matchedProviderUsd)})`);
+console.log(
+  `  Соотношение DB/Provider: ${fmt(avgRatio, 4)} (${pct(matchedDbUsd, matchedProviderUsd)})`,
+);
 console.log(`  Гэп на matched: $${fmt(matchedProviderUsd - matchedDbUsd, 2)}`);
 
 if (dbDuplicateIds.length > 0) {
@@ -228,17 +230,14 @@ if (dbDuplicateIds.length > 0) {
 
 console.log(`\n${line}\n  ЗАПИСИ ПРОВАЙДЕРА БЕЗ ПАРЫ В БД\n${line}`);
 console.log(`Кол-во: ${missingInDb.length}, сумма: $${fmt(missingInDbTotalUsd, 2)}`);
-console.log(
-  `Доля в общем расходе провайдера: ${pct(missingInDbTotalUsd, providerTotalUsd)}`,
-);
+console.log(`Доля в общем расходе провайдера: ${pct(missingInDbTotalUsd, providerTotalUsd)}`);
 if (missingInDb.length > 0) {
-  console.log(
-    `\nproviderJobId                      | дата                  | dur  | $`,
-  );
+  console.log(`\nproviderJobId                      | дата                  | dur  | $`);
   for (const m of missingInDb) {
     console.log(
-      `${m.providerJobId.padEnd(34)} | ${m.dateTime.padEnd(20)} | ${(m.duration ?? "")
-        .padStart(5)} | ${fmt(m.creditsUsd, 2)}`,
+      `${m.providerJobId.padEnd(34)} | ${m.dateTime.padEnd(20)} | ${(m.duration ?? "").padStart(
+        5,
+      )} | ${fmt(m.creditsUsd, 2)}`,
     );
   }
 }
@@ -258,11 +257,11 @@ if (priceMismatch.length > 0) {
     `\nproviderJobId                      | дата                  | dur  | prov $ | db $  | diff   | ratio | reason`,
   );
   for (const m of priceMismatch) {
-    const flag =
-      Math.abs(m.ratio - avgRatio) > RATIO_OUTLIER_THRESHOLD ? "*" : " ";
+    const flag = Math.abs(m.ratio - avgRatio) > RATIO_OUTLIER_THRESHOLD ? "*" : " ";
     console.log(
-      `${flag} ${m.providerJobId.padEnd(32)} | ${m.dateTime.padEnd(20)} | ${(m.duration ?? "")
-        .padStart(5)} | ${fmt(m.creditsUsd, 2).padStart(6)} | ${fmt(m.dbUsd, 2).padStart(
+      `${flag} ${m.providerJobId.padEnd(32)} | ${m.dateTime.padEnd(20)} | ${(
+        m.duration ?? ""
+      ).padStart(5)} | ${fmt(m.creditsUsd, 2).padStart(6)} | ${fmt(m.dbUsd, 2).padStart(
         5,
       )} | ${fmt(m.diff, 3).padStart(6)} | ${fmt(m.ratio, 3).padStart(5)} | ${m.reason}`,
     );
@@ -275,15 +274,13 @@ if (priceMismatch.length > 0) {
   );
 }
 
-console.log(
-  `\n${line}\n  В БД ЕСТЬ providerJobId, КОТОРОГО НЕТ В ВЫГРУЗКЕ ПРОВАЙДЕРА\n${line}`,
-);
+console.log(`\n${line}\n  В БД ЕСТЬ providerJobId, КОТОРОГО НЕТ В ВЫГРУЗКЕ ПРОВАЙДЕРА\n${line}`);
 console.log(`Кол-во: ${dbWithProviderIdNotInProvider.length}`);
 if (dbWithProviderIdNotInProvider.length > 0) {
+  console.log(`Это либо записи вне диапазона выгрузки провайдера, либо submitted-но-не-зачарджено`);
   console.log(
-    `Это либо записи вне диапазона выгрузки провайдера, либо submitted-но-не-зачарджено`,
+    `\nid                        | providerJobId                      | status | $    | createdAt`,
   );
-  console.log(`\nid                        | providerJobId                      | status | $    | createdAt`);
   for (const r of dbWithProviderIdNotInProvider) {
     console.log(
       `${r.id.padEnd(25)} | ${r.providerJobId.padEnd(34)} | ${(r.status ?? "").padEnd(6)} | ${
@@ -298,7 +295,9 @@ if (dbWithProviderIdNotInProvider.length > 0) {
 console.log(`\n${line}\n  АНАЛИЗ ГЭПА\n${line}`);
 const matchedGap = matchedProviderUsd - matchedDbUsd;
 const overallGap = providerTotalUsd - dbStats.totalUsd;
-console.log(`Общий гэп (provider - db total):  $${fmt(overallGap, 2)} (${pct(overallGap, providerTotalUsd)})`);
+console.log(
+  `Общий гэп (provider - db total):  $${fmt(overallGap, 2)} (${pct(overallGap, providerTotalUsd)})`,
+);
 console.log(`  ├─ Записи провайдера без БД:     $${fmt(missingInDbTotalUsd, 2)}`);
 console.log(`  ├─ Гэп на совпавших (price diff): $${fmt(matchedGap, 2)}`);
 const failedDbWithChargeUsd = priceMismatch
