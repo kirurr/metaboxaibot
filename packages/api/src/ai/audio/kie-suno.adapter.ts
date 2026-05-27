@@ -5,11 +5,18 @@ import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
-/** Model version mapping from internal setting values to kie.ai model names */
+/**
+ * Model version mapping from internal setting values to kie.ai model names.
+ * Должен покрывать тот же набор что и SUNO_MODEL_LIMITS в shared/model-limits.ts —
+ * иначе валидатор пропустит ввод по лимитам одной модели, а адаптер тихо
+ * отправит запрос на другую (`MODEL_MAP[X] ?? "V4_5"`).
+ */
 const MODEL_MAP: Record<string, string> = {
+  V3_5: "V3_5",
   V4: "V4",
   V4_5: "V4_5",
   V4_5PLUS: "V4_5PLUS",
+  V4_5ALL: "V4_5ALL",
   V5: "V5",
   V5_5: "V5_5",
 };
