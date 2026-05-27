@@ -301,6 +301,7 @@ export interface FallbackNotificationContext {
     | "persistent_5xx"
     | "provider_long_cooldown_marker"
     | "kie_credits_exhausted"
+    | "openai_billing_exhausted"
     | "all_candidates_failed"
     /** Primary-провайдер вернул ошибку — адаптер-внутренний фолбэк (KieElevenLabs → прямой EL). */
     | "primary_failed";

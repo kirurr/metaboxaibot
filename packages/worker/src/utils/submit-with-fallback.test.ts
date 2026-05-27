@@ -778,7 +778,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
   // следующему кандидату. При отсутствии fallback'а — all_candidates_failed
   // тоже летит в balance (а не в общий fallback-канал).
 
-  test("400 billing_hard_limit_reached → credits_exhausted, balance alert, NO recordError", async () => {
+  test("400 billing_hard_limit_reached → openai_billing_exhausted, balance alert, NO recordError", async () => {
     mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
     const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
       code: "billing_hard_limit_reached",
@@ -800,7 +800,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
       billingErr,
       expect.objectContaining({ section: "image", modelId: "gpt-image-1.5" }),
-      "openai-billing-exhaustion",
+      "openai-billing-exhaustion:k1",
       { channel: "balance" },
     );
     expect(mocks.recordError).not.toHaveBeenCalled();
@@ -835,7 +835,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
       quotaErr,
       expect.any(Object),
-      "openai-billing-exhaustion",
+      "openai-billing-exhaustion:k1",
       { channel: "balance" },
     );
     // Билинг-ветка интерсептит до rate-limit классификатора — ни ключ-throttle,
@@ -872,7 +872,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
       billingErr,
       expect.any(Object),
-      "openai-billing-exhaustion",
+      "openai-billing-exhaustion:k-primary",
       { channel: "balance" },
     );
     // Primary key не штрафуется

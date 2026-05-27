@@ -122,10 +122,11 @@ export async function submitWithThrottle<T, D extends object>(
     // /exceeded your current quota/). Дедуп'ный алерт в balance-тему +
     // throw наверх — processor покажет user-facing "временно недоступна".
     if (isOpenAiBillingExhaustion(err)) {
+      const dedupKey = keyId ? `openai-billing-exhaustion:${keyId}` : "openai-billing-exhaustion";
       void notifyTechErrorThrottled(
         err instanceof Error ? err : new Error(String(err)),
         { section, modelId, jobId: job.id },
-        "openai-billing-exhaustion",
+        dedupKey,
         { channel: "balance" },
       );
       throw err;
@@ -152,10 +153,6 @@ export async function submitWithThrottle<T, D extends object>(
     }
 
     if (tripped) {
-      // OpenAI billing-исчерпание (insufficient_quota / billing_hard_limit) —
-      // не транзиентный rate-limit, а исчерпан баланс org/project. Шлём в
-      // balance тему чтобы не смешивать с обычными rate-limit-инцидентами.
-      const channel = isOpenAiBillingExhaustion(err) ? "balance" : undefined;
       await notifyRateLimit({
         section,
         modelId,
@@ -163,7 +160,6 @@ export async function submitWithThrottle<T, D extends object>(
         reason: cls.reason,
         isLongWindow: cls.isLongWindow,
         err,
-        channel,
       });
     }
 

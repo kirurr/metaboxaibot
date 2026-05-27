@@ -94,7 +94,8 @@ export type FallbackReason =
   | "long_window_rate_limit"
   | "persistent_5xx"
   | "provider_long_cooldown_marker"
-  | "kie_credits_exhausted";
+  | "kie_credits_exhausted"
+  | "openai_billing_exhausted";
 
 export interface FallbackCandidateAttempt {
   provider: string;
@@ -106,7 +107,8 @@ export interface FallbackCandidateAttempt {
     | "persistent_5xx"
     | "provider_unavailable"
     | "incompatible_input"
-    | "credits_exhausted";
+    | "kie_credits_exhausted"
+    | "openai_billing_exhausted";
   error?: string;
 }
 
@@ -314,7 +316,7 @@ export async function submitWithFallback<T, D extends object>(
         // (кончились кредиты), а не сбой конкретного ключа.
         attempts.push({
           provider: candidateProvider,
-          outcome: "credits_exhausted",
+          outcome: "kie_credits_exhausted",
           error: message.slice(0, 200),
         });
         void notifyTechErrorThrottled(
@@ -338,13 +340,16 @@ export async function submitWithFallback<T, D extends object>(
       if (isOpenAiBillingExhaustion(err)) {
         attempts.push({
           provider: candidateProvider,
-          outcome: "credits_exhausted",
+          outcome: "openai_billing_exhausted",
           error: message.slice(0, 200),
         });
+        const billingDedupKey = acquired.keyId
+          ? `openai-billing-exhaustion:${acquired.keyId}`
+          : "openai-billing-exhaustion";
         void notifyTechErrorThrottled(
           err instanceof Error ? err : new Error(message),
           { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
-          "openai-billing-exhaustion",
+          billingDedupKey,
           { channel: "balance" },
         );
         logger.warn(
@@ -574,7 +579,8 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "pool_exhausted") return "pool_exhausted";
   if (primaryOutcome === "long_window") return "long_window_rate_limit";
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
-  if (primaryOutcome === "credits_exhausted") return "kie_credits_exhausted";
+  if (primaryOutcome === "kie_credits_exhausted") return "kie_credits_exhausted";
+  if (primaryOutcome === "openai_billing_exhausted") return "openai_billing_exhausted";
   return "pool_exhausted";
 }
 
