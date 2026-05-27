@@ -12,7 +12,6 @@ import { costPreviewService } from "./cost-preview.service.js";
 import { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 import { createVideoAdapter } from "../ai/video/factory.js";
 import { validatePromptRefs } from "./prompt-ref.service.js";
-import { getFileUrl } from "./s3.service.js";
 import { probeVideoMetadata } from "../utils/mp4-duration.js";
 import type {
   VideoInput,
@@ -163,13 +162,16 @@ export const videoGenerationService = {
     // универсальная video-карусель идут мимо неё → ловим в service-layer.
     // Зеркало логики из copy-motion.ts:200-222.
     if (params.modelId === "kling-motion-pro" || params.modelId === "copy-motion") {
-      const motionVideoKey = params.mediaInputs?.motion_video?.[0];
-      if (motionVideoKey) {
-        const s3Url = await getFileUrl(motionVideoKey).catch(() => null);
-        const probe = s3Url ? await probeVideoMetadata(s3Url).catch(() => null) : null;
+      // `mediaInputs.motion_video[0]` — это уже presigned URL: и web-route
+      // (resolveMediaInputs → getFileUrl), и bot scene (resolveMediaInputUrls)
+      // конвертят s3-keys в URL'ы ДО передачи в submitVideo. probeVideoMetadata
+      // принимает URL напрямую (он скачивает через HTTP).
+      const motionVideoUrl = params.mediaInputs?.motion_video?.[0];
+      if (motionVideoUrl) {
+        const probe = await probeVideoMetadata(motionVideoUrl).catch(() => null);
         const durationSec = probe?.durationSec;
         if (!durationSec || durationSec <= 0) {
-          throw new UserFacingError(`copy-motion: video duration unreadable (${motionVideoKey})`, {
+          throw new UserFacingError(`copy-motion: video duration unreadable`, {
             key: "copyMotionVideoUnreadable",
             section: "video",
           });
