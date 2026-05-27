@@ -311,14 +311,17 @@ export async function submitWithFallback<T, D extends object>(
         throw err;
       }
 
-      // Provider temporarily unavailable (e.g. KIE 422 "high demand") — узел
-      // провайдера перегружен, retry на том же или соседнем ключе того же
-      // провайдера не помогает. Пробуем следующего кандидата (другую модель/
-      // провайдера). Эти же паттерны матчатся и в RATE_LIMIT_PATTERNS — если
-      // следующего кандидата нет (зацикливаемся на том же primary), управление
-      // упадёт ниже в rate-limit defer-цикл и сохранится legacy behavior.
+      // Provider temporarily unavailable (e.g. KIE 422 "high demand", Cloudflare
+      // 530 Tunnel error) — узел провайдера или его CDN-edge перегружен/упал.
+      // Retry на том же или соседнем ключе того же провайдера не помогает.
+      // Пробуем следующего кандидата (другую модель/провайдера).
+      //
+      // НЕ recordError'им ключ: это инфра-проблема провайдера (Cloudflare/Argo
+      // Tunnel/CDN), а не сбой ключа. Без guard'а здоровые ключи помечались бы
+      // как сбойные на каждом таком сбое — особенно болезненно при широких
+      // outage'ах (например, KIE 530 на всех воркерах сразу), когда «всем
+      // ключам» накручивается error-counter, и пул потом ошибочно их карантинит.
       if (isProviderTemporaryUnavailable(err)) {
-        if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
         attempts.push({
           provider: candidateProvider,
           outcome: "provider_unavailable",
