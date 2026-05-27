@@ -85,6 +85,7 @@ import { UserFacingError } from "@metabox/shared";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { fetchVideoUrl } from "../utils/fetch-video.js";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
 
@@ -1231,7 +1232,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     if (
       stage === "poll" &&
       isLastAttempt &&
-      (isKieTransientError(err) || isFiveXxError(err)) &&
+      (isKieTransientError(err) || isFiveXxError(err) || isTransientNetworkError(err)) &&
       modelMeta
     ) {
       // readFallbackState/writeFallbackState — closures внутри try-блока,
@@ -1330,7 +1331,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       } else if (
         !isKieTransientError(err) &&
         !isProviderTemporaryUnavailable(err) &&
-        !isFiveXxError(err)
+        !isFiveXxError(err) &&
+        !isTransientNetworkError(err)
       ) {
         logger.warn(
           {
