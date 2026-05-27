@@ -435,6 +435,8 @@ export interface Translations {
     // Suno
     sunoPromptTooLong: string;
     sunoPromptTooLongNoLyrics: string;
+    // Nano Banana Pro
+    nanoBananaPromptTooLong: string;
     // Higgsfield
     higgsfieldTooManyMotions: string;
     alreadyGenerating: string;
