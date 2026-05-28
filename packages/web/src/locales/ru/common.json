@@ -171,7 +171,9 @@
     "actions": "Действия",
     "rename": "Переименовать",
     "expand": "Развернуть",
-    "collapse": "Свернуть"
+    "collapse": "Свернуть",
+    "downloadOriginal": "Скачать оригинал",
+    "addToFolders": "В папки"
   },
   "auth": {
     "welcomeBack": "С возвращением.",

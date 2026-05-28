@@ -168,7 +168,9 @@
     "actions": "Actions",
     "rename": "Rename",
     "expand": "Expand",
-    "collapse": "Collapse"
+    "collapse": "Collapse",
+    "downloadOriginal": "Download original",
+    "addToFolders": "Add to folders"
   },
   "auth": {
     "welcomeBack": "Welcome back.",

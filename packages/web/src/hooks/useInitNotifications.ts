@@ -20,11 +20,9 @@ export function useInitNotifications() {
     // регистрацию и пропасть.
     ws.on("notification:snapshot", (rows) => {
       setSnapshot(rows);
-      console.log("snapshot", rows);
     });
     ws.on("notification:new", (row) => {
       upsert(row);
-      console.log("new", row);
     });
     ws.connect();
 
