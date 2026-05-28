@@ -842,7 +842,10 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       { channel: "balance" },
     );
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    // Billing-dead ключ выводится из ротации через markRateLimited (per-key,
+    // 30 мин), чтобы acquireKey не возвращал его снова. НЕ recordError (ключ не
+    // сломан) и НЕ markProviderLongCooldown (провайдер не блокируем).
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyFallback).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "all_candidates_failed",
@@ -876,10 +879,11 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       "openai-billing-exhaustion:k1",
       { channel: "balance" },
     );
-    // Билинг-ветка интерсептит до rate-limit классификатора — ни ключ-throttle,
-    // ни recordError не должны сработать.
+    // Билинг-ветка интерсептит до rate-limit классификатора — recordError и
+    // notifyRateLimit не срабатывают. НО markRateLimited вызывается (per-key
+    // вывод billing-dead ключа из ротации на 30 мин).
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyRateLimit).not.toHaveBeenCalled();
   });
 

@@ -59,6 +59,7 @@ import {
 } from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
 import { computeSeedance2BillableUsd } from "../utils/seedance2-billing.js";
@@ -1110,13 +1111,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           errorCode: "PROVIDER_INSUFFICIENT_CREDIT",
         },
       });
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "video",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "video",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       } else {
@@ -1383,13 +1388,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Video failed after deduct: tokens refunded to user");
       }
 
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "video",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "video",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {
