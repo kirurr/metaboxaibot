@@ -519,6 +519,9 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     min: 3,
     max: 15,
     step: 1,
+    // В мультишоте общая длительность выводится из суммы длительностей шотов,
+    // поэтому одиночный слайдер скрываем.
+    dependsOn: { key: "multishot", value: false },
   },
   {
     key: "generate_audio",
@@ -526,6 +529,21 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     description: "Включить автоматическую генерацию звукового сопровождения к видео.",
     type: "toggle",
     default: true,
+  },
+  {
+    key: "multishot",
+    label: "Мультишот",
+    description:
+      "Собрать видео из нескольких шотов: у каждого свой промпт и длительность. До 5 шотов, сумма длительностей 3–15 секунд.",
+    type: "toggle",
+    default: false,
+  },
+  {
+    key: "shots",
+    label: "Шоты",
+    type: "shot-list",
+    default: null,
+    dependsOn: { key: "multishot", value: true },
   },
 ];
 

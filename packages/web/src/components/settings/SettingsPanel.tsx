@@ -31,7 +31,10 @@ export function SettingsPanel({
 
   // Видимые настройки = поддерживаемые + удовлетворяющие dependsOn.
   const visible = useMemo(
-    () => settings.filter((s) => !UNSUPPORTED_TYPES.has(s.type) && isSettingVisible(s, values)),
+    () =>
+      settings.filter(
+        (s) => !UNSUPPORTED_TYPES.has(s.type) && isSettingVisible(s, values, settings),
+      ),
     [settings, values],
   );
   const basic = visible.filter((s) => !s.advanced);

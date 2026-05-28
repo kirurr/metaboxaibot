@@ -372,18 +372,45 @@ export async function grantMetaboxSubscription(params: {
 }
 
 /**
- * Zero out subscription balance and clear subscription fields when a subscription expires.
+ * Обрабатывает истечение всех подписок юзера.
+ *
+ * Поведение зависит от типа подписки и флага `DISABLE_AIBOX_EXPIRY_TOKEN_REVOKE`:
+ *  - **Trial**: `subscriptionTokenBalance` обнуляется ВСЕГДА (независимо от
+ *    флага), LocalSubscription удаляются. Это защита от халявы — приветственные
+ *    подарочные токены не должны сохраняться после окончания пробного периода.
+ *  - **Платные тарифы** (не Trial):
+ *    - флаг выключен (default) → обнуление + удаление (legacy behavior);
+ *    - флаг включён → только удаление LocalSubscription, токены сохраняются
+ *      (бизнес-решение оставить накопленный subscriptionTokenBalance).
+ *
+ * Функция получает только userId, поэтому планы подтягиваются изнутри —
+ * caller'ы (scheduler / `/internal/revoke-tokens`) не зависят от детали.
+ *
+ * NB: `subscriptionTokenBalance` хранится на User (один на всех), а не
+ * per-subscription. Если у юзера один Trial + одна платная одновременно
+ * истекли (теоретический edge-case — `creditWelcomeBonus` не создаёт Trial
+ * если уже есть LocalSubscription), Trial «перебивает» флаг и обнуляет всё.
  */
 export async function expireSubscription(userId: bigint): Promise<void> {
-  await db.$transaction([
-    db.user.update({
-      where: { id: userId },
-      data: {
-        subscriptionTokenBalance: 0,
-      },
-    }),
-    db.localSubscription.deleteMany({
-      where: { userId },
-    }),
-  ]);
+  const subs = await db.localSubscription.findMany({
+    where: { userId },
+    select: { planName: true },
+  });
+
+  if (subs.length === 0) return;
+
+  const hasTrial = subs.some((s) => s.planName === "Trial");
+  const revokeTokens = hasTrial || !config.flags.disableAiboxExpiryTokenRevoke;
+
+  if (revokeTokens) {
+    await db.$transaction([
+      db.user.update({
+        where: { id: userId },
+        data: { subscriptionTokenBalance: 0 },
+      }),
+      db.localSubscription.deleteMany({ where: { userId } }),
+    ]);
+  } else {
+    await db.localSubscription.deleteMany({ where: { userId } });
+  }
 }

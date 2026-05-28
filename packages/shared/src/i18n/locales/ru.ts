@@ -302,6 +302,13 @@ export default {
       "❌ В вашем промпте есть ссылки на элементы (например @element_dog), но изображения для них не загружены. Используйте слоты элементов ниже, чтобы прикрепить референс-изображения, или уберите @element ссылки из промпта.",
     klingLastFrameNeedsFirst:
       "❌ Последний кадр работает только вместе с первым. Загрузите также первый кадр или уберите последний.",
+    multishotEmpty: "❌ Добавьте хотя бы один шот для мультишот-видео.",
+    multishotTooManyShots: "❌ В мультишоте не больше {max} шотов.",
+    multishotEmptyShotPrompt: "❌ Заполните промпт в каждом шоте.",
+    multishotShotPromptTooLong: "❌ Промпт шота не длиннее {limit} символов.",
+    multishotShotDurationOutOfRange: "❌ Длительность шота — от {min} до {max} секунд.",
+    multishotTotalDurationOutOfRange:
+      "❌ Суммарная длительность шотов должна быть от {min} до {max} секунд.",
     promptRefElementWordName:
       "❌ Именованные элементы (@{raw}) не поддерживаются. Используйте числовые ссылки: @Element1..@Element{max}.",
     promptRefElementMissing:

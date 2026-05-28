@@ -6,6 +6,7 @@
   "nav": {
     "chat": "Чат",
     "history": "История",
+    "gallery": "Галерея",
     "plans": "Тарифы",
     "tokens": "Токены",
     "profile": "Профиль",
@@ -168,7 +169,11 @@
     "search": "Поиск",
     "empty": "Ничего не найдено",
     "actions": "Действия",
-    "rename": "Переименовать"
+    "rename": "Переименовать",
+    "expand": "Развернуть",
+    "collapse": "Свернуть",
+    "downloadOriginal": "Скачать оригинал",
+    "addToFolders": "В папки"
   },
   "auth": {
     "welcomeBack": "С возвращением.",
@@ -241,7 +246,11 @@
   },
   "notifications": {
     "title": "Уведомления",
-    "empty": "Нет новых уведомлений"
+    "empty": "Нет новых уведомлений",
+    "toast": {
+      "generationStarted": "Генерация началась…",
+      "generationHint": "Статус генерации можно отследить в галерее"
+    }
   },
   "profile": {
     "title": "Профиль",
@@ -311,7 +320,7 @@
     "btnGenerating": "Генерация…",
     "btnUploading": "Загрузка файлов…",
     "btnSelectModel": "Выберите модель",
-    "btnAddToSlot": "Загрузите файл: {{slot}}",
+    "btnAddToSlot": "Загрузите файл",
     "btnEnterPrompt": "Введите запрос",
     "btnPromptOrMedia": "Введите запрос или загрузите файл",
     "btnAddMedia": "Загрузите фото",
@@ -338,7 +347,23 @@
     "audioTitle": "Создать аудио.",
     "audioSubtitle": "TTS, клонирование голоса, музыка — выберите модель и опишите сцену.",
     "audioPromptPlaceholder": "Британский мужской голос-рассказчик, тёплый тон — прочти этот скрипт…",
-    "openPromptExamples": "Готовые промпты"
+    "openPromptExamples": "Готовые промпты",
+    "multishot": {
+      "shotN": "Шот {{n}}",
+      "shotPlaceholder": "Опишите этот шот",
+      "duration": "Длительность",
+      "durationMinus": "Уменьшить длительность",
+      "durationPlus": "Увеличить длительность",
+      "seconds": "{{value}} с",
+      "addShot": "Добавить шот",
+      "removeShot": "Удалить шот",
+      "maxShotsHint": "Не более {{max}} шотов",
+      "total": "Всего: {{total}} с (нужно {{min}}–{{max}})",
+      "errEmpty": "Добавьте хотя бы один шот",
+      "errTooMany": "Слишком много шотов",
+      "errEmptyPrompt": "Заполните промпт в каждом шоте",
+      "errTotal": "Сумма длительностей должна быть 3–15 с"
+    }
   },
   "chat": {
     "newDialog": "Новый диалог",

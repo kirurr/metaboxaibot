@@ -29,7 +29,10 @@ import {
 } from "@metabox/api/services/throttle";
 import { classifyRateLimit, LONG_WINDOW_THRESHOLD_MS } from "@metabox/api/utils/rate-limit-error";
 import { markRateLimited, recordSuccess, recordError } from "@metabox/api/services/key-pool";
-import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+} from "@metabox/api/utils/openai-billing-error";
 import { UserFacingError } from "@metabox/shared";
 import { notifyRateLimit, notifyTechErrorThrottled } from "./notify-error.js";
 import { delayJob } from "./delay-job.js";
@@ -116,12 +119,20 @@ export async function submitWithThrottle<T, D extends object>(
     return result;
   } catch (err) {
     // OpenAI billing-исчерпание (`billing_hard_limit_reached` 400 или
-    // `insufficient_quota` 429) — account-wide состояние. НЕ recordError'им
-    // ключ (это не сбой ключа, кончились деньги org/project), не пенализим
-    // markRateLimited (для 429 он бы прибил ключ на 1ч из-за паттерна
-    // /exceeded your current quota/). Дедуп'ный алерт в balance-тему +
-    // throw наверх — processor покажет user-facing "временно недоступна".
+    // `insufficient_quota` 429). НЕ recordError'им (это не сбой ключа — кончились
+    // деньги org/project). НО выводим ключ из ротации через markRateLimited на
+    // OPENAI_BILLING_KEY_COOLDOWN_MS — иначе acquireKey снова и снова возвращает
+    // тот же billing-dead ключ (особенно у inverted-priority gpt-image-1.5, где
+    // dead low-priority ключ всегда первый), и здоровые ключи никогда не
+    // пробуются. Per-key, НЕ provider-wide — другие ключи продолжают работу.
+    // Дедуп'ный алерт в balance-тему + throw наверх (user-facing "временно
+    // недоступна").
     if (isOpenAiBillingExhaustion(err)) {
+      if (keyId) void markRateLimited(keyId, OPENAI_BILLING_KEY_COOLDOWN_MS, "openai billing");
+      logger.warn(
+        { section, modelId, jobId: job.id, keyId },
+        "submitWithThrottle: OpenAI billing exhausted — key quarantined",
+      );
       const dedupKey = keyId ? `openai-billing-exhaustion:${keyId}` : "openai-billing-exhaustion";
       void notifyTechErrorThrottled(
         err instanceof Error ? err : new Error(String(err)),

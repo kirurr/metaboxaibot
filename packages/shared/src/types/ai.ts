@@ -46,7 +46,8 @@ export type ModelSettingType =
   | "avatar-picker"
   | "motion-picker"
   | "soul-picker"
-  | "soul-style-picker";
+  | "soul-style-picker"
+  | "shot-list";
 
 export interface ModelSettingOption {
   value: string | number | boolean;
@@ -86,6 +87,18 @@ export interface ModelSettingDef {
    * don't see a number that has no effect until they opt in.
    */
   dependsOn?: { key: string; value: string | number | boolean };
+}
+
+/**
+ * Value stored for a `"shot-list"` setting (e.g. Kling multi-shot). The user
+ * builds a list of shots; each shot has its own prompt and duration. Persisted
+ * in `modelSettings[key]` as a generic value and cast on read by the adapter,
+ * same pattern as the motion-picker's `Array<{id,strength}>`.
+ */
+export interface VideoShot {
+  prompt: string;
+  /** Shot duration in seconds. */
+  duration: number;
 }
 
 // ── Media input slot types ───────────────────────────────────────────────────

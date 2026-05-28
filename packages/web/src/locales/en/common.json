@@ -6,6 +6,7 @@
   "nav": {
     "chat": "Chat",
     "history": "History",
+    "gallery": "Gallery",
     "plans": "Plans",
     "tokens": "Tokens",
     "profile": "Profile",
@@ -165,7 +166,11 @@
     "search": "Search",
     "empty": "Nothing found",
     "actions": "Actions",
-    "rename": "Rename"
+    "rename": "Rename",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "downloadOriginal": "Download original",
+    "addToFolders": "Add to folders"
   },
   "auth": {
     "welcomeBack": "Welcome back.",
@@ -238,7 +243,11 @@
   },
   "notifications": {
     "title": "Notifications",
-    "empty": "No new notifications"
+    "empty": "No new notifications",
+    "toast": {
+      "generationStarted": "Generation started…",
+      "generationHint": "You can track generation status in the gallery"
+    }
   },
   "profile": {
     "title": "Profile",
@@ -308,7 +317,7 @@
     "btnGenerating": "Generating…",
     "btnUploading": "Uploading files…",
     "btnSelectModel": "Select a model",
-    "btnAddToSlot": "Add file to {{slot}}",
+    "btnAddToSlot": "Add a file",
     "btnEnterPrompt": "Enter a prompt",
     "btnPromptOrMedia": "Enter a prompt or add a file",
     "btnAddMedia": "Add a photo",
@@ -335,7 +344,23 @@
     "audioTitle": "Create audio.",
     "audioSubtitle": "TTS, voice cloning, music — pick a model and describe the scene.",
     "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…",
-    "openPromptExamples": "Prompt examples"
+    "openPromptExamples": "Prompt examples",
+    "multishot": {
+      "shotN": "Shot {{n}}",
+      "shotPlaceholder": "Describe this shot",
+      "duration": "Duration",
+      "durationMinus": "Decrease duration",
+      "durationPlus": "Increase duration",
+      "seconds": "{{value}}s",
+      "addShot": "Add shot",
+      "removeShot": "Remove shot",
+      "maxShotsHint": "No more than {{max}} shots",
+      "total": "Total: {{total}}s (need {{min}}–{{max}})",
+      "errEmpty": "Add at least one shot",
+      "errTooMany": "Too many shots",
+      "errEmptyPrompt": "Fill in the prompt for every shot",
+      "errTotal": "Total duration must be 3–15s"
+    }
   },
   "chat": {
     "newDialog": "New dialog",

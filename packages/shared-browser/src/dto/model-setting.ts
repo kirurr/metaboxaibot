@@ -44,6 +44,7 @@ export const modelSettingTypeSchema = z.enum([
   "motion-picker",
   "soul-picker",
   "soul-style-picker",
+  "shot-list",
 ]);
 
 export const modelSettingDefSchema = z.object({

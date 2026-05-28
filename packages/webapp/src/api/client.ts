@@ -87,6 +87,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (err.botMentor) error.botMentor = err.botMentor;
     if (err.linkedEmail) error.linkedEmail = err.linkedEmail;
     if (err.linkedUsername) error.linkedUsername = err.linkedUsername;
+    // MENTOR_CONFLICT прокидывает token (+ userIds) для последующего
+    // confirm-merge'а через модалку выбора в LinkMetaboxPage.
+    if (err.token) error.token = err.token;
+    if (err.siteUserId) error.siteUserId = err.siteUserId;
+    if (err.botUserId) error.botUserId = err.botUserId;
     console.error(`[api] ${method} ${path} → ${res.status}`, err);
     throw error;
   }

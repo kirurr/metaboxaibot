@@ -1,4 +1,9 @@
-import { AI_MODELS, getModelDefaultDuration } from "@metabox/shared";
+import {
+  AI_MODELS,
+  getModelDefaultDuration,
+  parseVideoShots,
+  sumShotDuration,
+} from "@metabox/shared";
 import { calculateCost, computeVideoTokens } from "./token.service.js";
 import { userStateService } from "./user-state.service.js";
 import { probeAudioDurationSec } from "../utils/audio-transcode.js";
@@ -113,6 +118,16 @@ export const costPreviewService = {
       getModelDefaultDuration(model) ??
       5;
     let pricingMode: VideoPricingMode = "total";
+
+    // Multi-shot (Kling): итоговая длительность = сумма длительностей шотов
+    // (клампится в 3–15). Биллинг по той же per-second ставке + costVariants
+    // (`generate_audio`), что и single-shot.
+    if (modelSettings.multishot === true) {
+      const shots = parseVideoShots(modelSettings.shots);
+      if (shots.length > 0) {
+        effectiveDuration = sumShotDuration(shots);
+      }
+    }
 
     if (modelId === "heygen") {
       // HeyGen биллится посекундно, длина видео = длине аудио. Если аудио есть —
