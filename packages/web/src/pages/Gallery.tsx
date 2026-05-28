@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -30,7 +30,12 @@ import {
   Video as VideoIcon,
   X,
 } from "lucide-react";
-import { getGalleryOriginalUrl, type GalleryFolder, type GalleryJob } from "@/api/gallery";
+import {
+  getGalleryOriginalUrl,
+  type GalleryFolder,
+  type GalleryJob,
+  type GalleryOutput,
+} from "@/api/gallery";
 import {
   useAddJobToGalleryFolder,
   useAddToGalleryFavorites,
@@ -467,14 +472,15 @@ function ThumbnailPlaceholder({ section }: { section: string }) {
 }
 
 function JobCardThumbnail({
-  job,
+  section,
+  output,
   onAspect,
 }: {
-  job: GalleryJob;
+  section: string;
+  output: GalleryOutput;
   onAspect: (aspect: number) => void;
 }) {
-  const first = job.outputs[0];
-  const imgSrc = first?.thumbnailUrl ?? (job.section === "image" ? first?.previewUrl : null);
+  const imgSrc = output.thumbnailUrl ?? (section === "image" ? output.previewUrl : null);
   if (imgSrc) {
     return (
       <img
@@ -492,12 +498,12 @@ function JobCardThumbnail({
       />
     );
   }
-  if (job.section === "video") {
+  if (section === "video") {
     // Кадр-превью бэк не отдал — рендерим само видео без controls и без
     // возможности запустить (pointer-events:none пробрасывает клик на карточку,
     // которая открывает Lightbox). `#t=0.001` гарантирует, что Safari/Firefox
     // отобразят первый кадр, а не чёрный poster.
-    const videoSrc = first?.previewUrl ?? first?.outputUrl ?? null;
+    const videoSrc = output.previewUrl ?? output.outputUrl ?? null;
     if (videoSrc) {
       return (
         <video
@@ -519,19 +525,21 @@ function JobCardThumbnail({
       );
     }
   }
-  return <ThumbnailPlaceholder section={job.section} />;
+  return <ThumbnailPlaceholder section={section} />;
 }
 
 const MENU_WIDTH = 224;
 
 function JobCardMenu({
   job,
+  output,
   folders,
   anchorRef,
   onClose,
   onOpenLightbox,
 }: {
   job: GalleryJob;
+  output: GalleryOutput;
   folders: GalleryFolder[];
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
@@ -596,10 +604,8 @@ function JobCardMenu({
   };
 
   const handleDownload = async () => {
-    const out = job.outputs[0];
-    if (!out) return;
     try {
-      const { url } = await getGalleryOriginalUrl(out.id);
+      const { url } = await getGalleryOriginalUrl(output.id);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       pushToast({ type: "error", message: getErrorMessage(err) });
@@ -704,11 +710,13 @@ function JobCardMenu({
 
 function JobCard({
   job,
+  output,
   folders,
   favoritesFolderId,
   onOpen,
 }: {
   job: GalleryJob;
+  output: GalleryOutput;
   folders: GalleryFolder[];
   favoritesFolderId: string | undefined;
   onOpen: () => void;
@@ -742,7 +750,7 @@ function JobCard({
       className="group relative card overflow-hidden cursor-pointer"
       onClick={onOpen}
     >
-      <JobCardThumbnail job={job} onAspect={setAspect} />
+      <JobCardThumbnail section={job.section} output={output} onAspect={setAspect} />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
@@ -777,6 +785,7 @@ function JobCard({
       {menuOpen && (
         <JobCardMenu
           job={job}
+          output={output}
           folders={folders}
           anchorRef={triggerRef}
           onClose={() => setMenuOpen(false)}
@@ -797,17 +806,19 @@ function JobCard({
 function GalleryPreview({
   job,
   folders,
+  initialOutputIdx,
   onClose,
 }: {
   job: GalleryJob;
   folders: GalleryFolder[];
+  initialOutputIdx: number;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
   const addToFolder = useAddJobToGalleryFolder();
   const removeFromFolder = useRemoveJobFromGalleryFolder();
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [activeIdx, setActiveIdx] = useState(initialOutputIdx);
 
   const previewOutputs = useMemo<PreviewOutput[]>(
     () =>
@@ -908,7 +919,7 @@ function JobGrid({
   error: unknown;
   folders: GalleryFolder[];
   favoritesFolderId: string | undefined;
-  onOpen: (job: GalleryJob) => void;
+  onOpen: (job: GalleryJob, outputIdx: number) => void;
 }) {
   if (error) {
     return <div className="p-8 text-center text-danger">{getErrorMessage(error)}</div>;
@@ -927,15 +938,18 @@ function JobGrid({
   }
   return (
     <div className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3">
-      {jobs.map((j) => (
-        <JobCard
-          key={j.id}
-          job={j}
-          folders={folders}
-          favoritesFolderId={favoritesFolderId}
-          onOpen={() => onOpen(j)}
-        />
-      ))}
+      {jobs.flatMap((j) =>
+        j.outputs.map((o, idx) => (
+          <JobCard
+            key={`${j.id}-${o.id}`}
+            job={j}
+            output={o}
+            folders={folders}
+            favoritesFolderId={favoritesFolderId}
+            onOpen={() => onOpen(j, idx)}
+          />
+        )),
+      )}
     </div>
   );
 }
@@ -991,8 +1005,15 @@ export default function GalleryPage() {
   const [page, setPage] = useState(1);
 
   const { jobId } = useParams<{ jobId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
+
+  const previewOutputIdx = (() => {
+    const raw = searchParams.get("o");
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  })();
 
   const params = useMemo(
     () => ({
@@ -1039,7 +1060,11 @@ export default function GalleryPage() {
     setPage(1);
   }, []);
 
-  const handleOpen = useCallback((job: GalleryJob) => navigate(`/gallery/${job.id}`), [navigate]);
+  const handleOpen = useCallback(
+    (job: GalleryJob, outputIdx: number) =>
+      navigate(outputIdx > 0 ? `/gallery/${job.id}?o=${outputIdx}` : `/gallery/${job.id}`),
+    [navigate],
+  );
 
   // Закрытие лайтбокса всегда ведёт на /gallery — не на предыдущий URL,
   // чтобы пользователь возвращался в галерею (а не, скажем, на /image).
@@ -1088,6 +1113,7 @@ export default function GalleryPage() {
           key={detail.data.id}
           job={detail.data}
           folders={folders}
+          initialOutputIdx={previewOutputIdx}
           onClose={handleCloseLightbox}
         />
       )}

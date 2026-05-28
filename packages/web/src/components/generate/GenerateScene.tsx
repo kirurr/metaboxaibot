@@ -1012,6 +1012,7 @@ export function GenerateScene({
   const location = useLocation();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
+  const dismissToast = useUIStore((s) => s.dismissToast);
   const lastConsumedPrefillKey = useRef<string | null>(null);
   const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
   // Параллельно с pendingPrefillRef помечаем «это восстановление черновика,
@@ -1930,7 +1931,14 @@ export function GenerateScene({
     if (!canGenerate || !selectedModel) return;
     setBusy(true);
     setSubmitError(null);
+    let loadingToastId: string | null = null;
     try {
+      loadingToastId = pushToast({
+        type: "loading",
+        message: t("notifications.toast.generationStarted"),
+        description: t("notifications.toast.generationHint"),
+        durationMs: 5000,
+      });
       // В payload — только ready-файлы (uploading/error пропускаем). Передаём
       // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит. Картинки
       // @-элементов кладутся в ref_element_N, а @имя в промпте → @ElementN (MVP).
@@ -1990,6 +1998,7 @@ export function GenerateScene({
         ...prev,
       ]);
     } catch (err) {
+      if (loadingToastId) dismissToast(loadingToastId);
       const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
       setSubmitError(msg);
     } finally {

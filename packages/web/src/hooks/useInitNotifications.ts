@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { ws } from "@/utils/ws";
 import { useNotificationsStore } from "@/stores/notificationsStore";
+import { useUIStore } from "@/stores/uiStore";
 
 /**
  * Подписывается на server-push'и уведомлений:
@@ -13,6 +14,7 @@ import { useNotificationsStore } from "@/stores/notificationsStore";
 export function useInitNotifications() {
   const setSnapshot = useNotificationsStore((s) => s.setSnapshot);
   const upsert = useNotificationsStore((s) => s.upsert);
+  const pushToast = useUIStore((s) => s.pushToast);
 
   useEffect(() => {
     // Сначала регистрируем листенеры, потом коннектимся: иначе server-emit
@@ -23,6 +25,11 @@ export function useInitNotifications() {
     });
     ws.on("notification:new", (row) => {
       upsert(row);
+      const isSuccess = row.type.includes("success");
+      pushToast({
+        type: isSuccess ? "success" : "error",
+        message: row.title,
+      });
     });
     ws.connect();
 
@@ -30,5 +37,5 @@ export function useInitNotifications() {
       ws.off("notification:snapshot");
       ws.off("notification:new");
     };
-  }, [setSnapshot, upsert]);
+  }, [setSnapshot, upsert, pushToast]);
 }

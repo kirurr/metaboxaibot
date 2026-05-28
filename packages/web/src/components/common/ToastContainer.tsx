@@ -1,5 +1,5 @@
 import { useUIStore } from "@/stores/uiStore";
-import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, Info, AlertTriangle, Loader2, X } from "lucide-react";
 import clsx from "clsx";
 
 const iconMap = {
@@ -7,6 +7,7 @@ const iconMap = {
   error: AlertCircle,
   info: Info,
   warning: AlertTriangle,
+  loading: Loader2,
 };
 
 const colorMap = {
@@ -14,6 +15,7 @@ const colorMap = {
   error: "text-danger",
   info: "text-accent",
   warning: "text-[color:var(--warning)]",
+  loading: "text-accent",
 };
 
 export function ToastContainer() {
@@ -28,11 +30,26 @@ export function ToastContainer() {
         return (
           <div
             key={t.id}
-            className="card pointer-events-auto flex items-start gap-3 px-4 py-3 anim-page-in"
+            className={clsx(
+              "card pointer-events-auto flex items-start gap-3 px-4 py-3",
+              t.exiting ? "anim-toast-out" : "anim-page-in",
+            )}
             style={{ minWidth: 260 }}
           >
-            <Icon size={20} className={clsx("shrink-0 mt-0.5", colorMap[t.type])} />
-            <div className="flex-1 text-sm">{t.message}</div>
+            <Icon
+              size={20}
+              className={clsx(
+                "shrink-0 mt-0.5",
+                colorMap[t.type],
+                t.type === "loading" && "animate-spin",
+              )}
+            />
+            <div className="flex-1 text-sm min-w-0">
+              <div>{t.message}</div>
+              {t.description && (
+                <div className="text-xs text-text-secondary mt-0.5">{t.description}</div>
+              )}
+            </div>
             <button
               onClick={() => dismissToast(t.id)}
               className="shrink-0 text-text-hint hover:text-text transition-colors"

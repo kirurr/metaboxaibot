@@ -243,7 +243,11 @@
   },
   "notifications": {
     "title": "Notifications",
-    "empty": "No new notifications"
+    "empty": "No new notifications",
+    "toast": {
+      "generationStarted": "Generation started…",
+      "generationHint": "You can track generation status in the gallery"
+    }
   },
   "profile": {
     "title": "Profile",
