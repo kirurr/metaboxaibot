@@ -1318,7 +1318,9 @@ select {
 }
 .app.mobile .chat-shell {
   grid-template-columns: 1fr;
-  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h));
+  /* Снизу даём воздуха, чтобы composer не прилегал впритык к BottomNav —
+     тот же приём, что у `.gen-scene` на мобиле, только щедрее. */
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 32px);
 }
 
 .chat-side {
