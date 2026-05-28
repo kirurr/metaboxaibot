@@ -71,6 +71,19 @@ const SECTIONS: { value: Section; label: string }[] = [
   { value: "video", label: "Видео" },
 ];
 
+/**
+ * Masonry-span по aspect'у — повторяет логику из GenerationHistory.tsx, чтобы
+ * галерея визуально совпадала с лентой генерации на странице создания.
+ * Базовый ряд auto-rows-[80px] (на mobile 100px), gap 12px:
+ *   span 3 → wide (16:9 и шире), span 4 → square-дефолт, span 5 → tall (9:16 и уже).
+ */
+function spanFromAspect(aspect: number | null): number {
+  if (aspect == null) return 4;
+  if (aspect > 1.3) return 3;
+  if (aspect < 0.85) return 5;
+  return 4;
+}
+
 function chipClass(active: boolean): string {
   return active
     ? "px-3 py-1.5 rounded text-sm bg-accent text-white"
@@ -301,7 +314,7 @@ function FolderRow({
   };
 
   const baseRow =
-    "group flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit md:min-w-0";
+    "group flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit";
   const stateRow = active
     ? "bg-accent text-white"
     : "bg-bg-elevated text-text-secondary hover:text-text";
@@ -392,7 +405,7 @@ function FolderSidebar({
   };
 
   return (
-    <aside className="md:w-60 md:flex-shrink-0">
+    <aside>
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide">Папки</h2>
         <button
@@ -406,10 +419,10 @@ function FolderSidebar({
         </button>
       </div>
 
-      <div className="flex md:flex-col flex-row md:overflow-visible overflow-x-auto gap-1 pb-1 md:pb-0">
+      <div className="flex flex-row overflow-x-auto gap-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div
           onClick={() => onChange(undefined)}
-          className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit md:min-w-0 ${
+          className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit whitespace-nowrap ${
             folderId === undefined
               ? "bg-accent text-white"
               : "bg-bg-elevated text-text-secondary hover:text-text"
@@ -457,7 +470,13 @@ function ThumbnailPlaceholder({ section }: { section: string }) {
   );
 }
 
-function JobCardThumbnail({ job }: { job: GalleryJob }) {
+function JobCardThumbnail({
+  job,
+  onAspect,
+}: {
+  job: GalleryJob;
+  onAspect: (aspect: number) => void;
+}) {
   const first = job.outputs[0];
   const imgSrc = first?.thumbnailUrl ?? (job.section === "image" ? first?.previewUrl : null);
   if (imgSrc) {
@@ -467,6 +486,10 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
         alt=""
         loading="lazy"
         className="w-full h-full object-cover"
+        onLoad={(e) => {
+          const { naturalWidth, naturalHeight } = e.currentTarget;
+          if (naturalWidth && naturalHeight) onAspect(naturalWidth / naturalHeight);
+        }}
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).style.display = "none";
         }}
@@ -489,6 +512,10 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
           disablePictureInPicture
           controlsList="nodownload nofullscreen noremoteplayback"
           className="w-full h-full object-cover pointer-events-none"
+          onLoadedMetadata={(e) => {
+            const { videoWidth, videoHeight } = e.currentTarget;
+            if (videoWidth && videoHeight) onAspect(videoWidth / videoHeight);
+          }}
           onError={(e) => {
             (e.currentTarget as HTMLVideoElement).style.display = "none";
           }}
@@ -699,6 +726,11 @@ function JobCard({
   const isFav = favoritesFolderId ? job.folderIds.includes(favoritesFolderId) : false;
   const favPending = addFav.isPending || removeFav.isPending;
 
+  // Аудио — нет визуального аспекта; всегда квадрат. Для image/video подождём
+  // metadata из <img>/<video>, до этого рендерим квадрат-дефолт (span 4).
+  const [aspect, setAspect] = useState<number | null>(job.section === "audio" ? 1 : null);
+  const rowSpan = spanFromAspect(aspect);
+
   const handleToggleFav = (e: MouseEvent) => {
     e.stopPropagation();
     const opts = {
@@ -710,10 +742,11 @@ function JobCard({
 
   return (
     <div
-      className="group relative card overflow-hidden aspect-square cursor-pointer"
+      style={{ gridRow: `span ${rowSpan}` }}
+      className="group relative card overflow-hidden cursor-pointer"
       onClick={onOpen}
     >
-      <JobCardThumbnail job={job} />
+      <JobCardThumbnail job={job} onAspect={setAspect} />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
@@ -1044,9 +1077,9 @@ function JobGrid({
   }
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="skeleton aspect-square rounded" />
+      <div className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{ gridRow: "span 4" }} className="skeleton rounded" />
         ))}
       </div>
     );
@@ -1055,7 +1088,7 @@ function JobGrid({
     return <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>;
   }
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+    <div className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3">
       {jobs.map((j) => (
         <JobCard
           key={j.id}
@@ -1185,7 +1218,7 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-6 mt-4">
+      <div className="flex flex-col gap-6 mt-4">
         <FolderSidebar folderId={folderId} onChange={handleFolder} />
 
         <div className="flex-1 min-w-0">

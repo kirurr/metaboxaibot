@@ -21,7 +21,7 @@ type NavItem = {
 
 const items: NavItem[] = [
   { to: "/", labelKey: "nav.bottom.home", icon: Home },
-  { to: "/history", labelKey: "nav.bottom.gallery", icon: ImageIcon },
+  { to: "/gallery", labelKey: "nav.bottom.gallery", icon: ImageIcon },
   // Центральный пункт рендерится отдельно — см. рендер ниже.
   { to: "/plans", labelKey: "nav.bottom.learn", icon: GraduationCap },
   { to: "/profile", labelKey: "nav.bottom.profile", icon: User },
