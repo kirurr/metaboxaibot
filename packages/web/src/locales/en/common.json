@@ -166,7 +166,9 @@
     "search": "Search",
     "empty": "Nothing found",
     "actions": "Actions",
-    "rename": "Rename"
+    "rename": "Rename",
+    "expand": "Expand",
+    "collapse": "Collapse"
   },
   "auth": {
     "welcomeBack": "Welcome back.",

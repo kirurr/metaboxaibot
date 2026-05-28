@@ -1,8 +1,25 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowRight, Loader2, Music2, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowRight,
+  Calendar,
+  ChevronDown,
+  Coins,
+  Loader2,
+  Music2,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/common/Button";
@@ -13,6 +30,7 @@ import { listGenerations, type GenerationJobDto, type GenerationOutputDto } from
 import type { WebModelDto } from "@/api/models";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
+import { formatTokens } from "@/utils/format";
 
 /**
  * Лента всех генераций текущей секции (image/design/video/audio), независимо
@@ -79,10 +97,13 @@ type Tile =
   | { kind: "history-failed"; key: string; job: GenerationJobDto };
 
 /** Что показываем в lightbox'е. `job` опционален: для pending-success outputs
- *  модель/настройки/имя ещё не пришли с бэка — кнопка «Повторить» скрывается. */
+ *  модель/настройки/имя ещё не пришли с бэка — кнопка «Повторить» скрывается.
+ *  `backdropUrl` — картинка для замыленного фона (image: сам url или thumb;
+ *  video: thumb; audio: null — фон без картинки). */
 type PreviewItem = {
   url: string;
   section: string;
+  backdropUrl?: string | null;
   job?: GenerationJobDto;
 };
 
@@ -249,7 +270,7 @@ function TileRenderer({
         prompt={tile.job.prompt}
         createdAt={new Date(tile.job.startedAt).toISOString()}
         tokensSpent={null}
-        onPreview={(url, section) => onPreview({ url, section })}
+        onPreview={(url, section, backdropUrl) => onPreview({ url, section, backdropUrl })}
       />
     );
   }
@@ -261,7 +282,9 @@ function TileRenderer({
       prompt={tile.job.prompt}
       createdAt={tile.job.createdAt}
       tokensSpent={tile.job.tokensSpent}
-      onPreview={(url, section) => onPreview({ url, section, job: tile.job })}
+      onPreview={(url, section, backdropUrl) =>
+        onPreview({ url, section, backdropUrl, job: tile.job })
+      }
     />
   );
 }
@@ -351,8 +374,12 @@ function OutputTile({
   prompt: string;
   createdAt: string;
   tokensSpent: string | null;
-  onPreview: (url: string, section: string) => void;
+  onPreview: (url: string, section: string, backdropUrl: string | null) => void;
 }) {
+  // Картинка для размытого фона в лайтбоксе: для audio — нет, для video —
+  // только thumb (видео ставит сам плеер), для image — thumb или сам url.
+  const backdropUrl =
+    section === "audio" ? null : section === "video" ? thumb : (thumb ?? url);
   // Aspect-ratio картинки/видео определяется после загрузки → пересчитывается
   // span. До загрузки рендерим квадратный плейсхолдер (span 3).
   // Аудио всегда квадрат — нет визуального aspect'а.
@@ -399,7 +426,7 @@ function OutputTile({
     >
       <button
         type="button"
-        onClick={() => onPreview(url, section)}
+        onClick={() => onPreview(url, section, backdropUrl)}
         className="absolute inset-0 p-0 m-0 border-0 bg-transparent cursor-zoom-in size-full"
         aria-label={section === "video" ? "Open video" : "Open image"}
       >
@@ -471,24 +498,29 @@ function spanFromAspect(aspect: number | null): number {
   return 4;
 }
 
-// ── Lightbox с /prompts-style info-панелью и кнопкой «Повторить» ────────────
+// ── Lightbox с боковой info-панелью и кнопкой «Повторить» ───────────────────
 
 /**
- * Модалка просмотра output'а с боковой панелью «модель / промпт / повторить».
- * Layout повторяет `PromptExamplesGallery > DialogCard`: на десктопе слева
- * медиа, справа узкая карточка с моделью/промптом/CTA; на мобилке всё
- * вертикально (медиа сверху, карточка снизу). Закрытие: backdrop / X / Esc.
+ * Модалка просмотра output'а: на весь экран замыленный фон из самой картинки
+ * (для image / video-thumbnail), большой просмотрщик по центру, узкая
+ * инфо-карточка справа (дата + токены чипами, сворачиваемый промпт,
+ * большая retry-кнопка). На мобилке — медиа сверху, инфо снизу.
  *
- * Кнопка «Повторить» работает только для history-job'ов (т.е. там, где
- * `item.job` пришёл с бэка с modelSettings). Для pending-success outputs
- * кнопку скрываем — настройки берутся из формы, юзеру их повторять не нужно.
+ * Кнопка «Повторить» работает только для history-job'ов (`item.job` с
+ * `modelSettings`). Для pending-success outputs инфо-карточка не рендерится —
+ * модалка превращается в чистый просмотрщик с тем же backdrop'ом.
+ *
+ * Закрытие: backdrop / X / Esc.
  */
 function MediaPreviewModal({ item, onClose }: { item: PreviewItem; onClose: () => void }) {
   const { t } = useTranslation();
-  const isMobile = useIsMobile();
+  // Переключаемся на десктоп-layout только с lg (1024px). Планшеты в портрете
+  // получают мобильную верстку — медиа сверху, инфо-карточка снизу.
+  const isMobile = useIsMobile(1024);
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
   const job = item.job;
+  const backdropUrl = item.backdropUrl ?? null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -521,70 +553,192 @@ function MediaPreviewModal({ item, onClose }: { item: PreviewItem; onClose: () =
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-8 bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 lg:p-8 overflow-hidden"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
+      {/* Backdrop: замыленная и затемнённая копия медиа во весь экран.
+          Поверх — полупрозрачная заливка для дополнительного контраста. */}
+      {backdropUrl ? (
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none bg-center bg-cover"
+          style={{
+            backgroundImage: `url("${backdropUrl}")`,
+            filter: "blur(40px) brightness(0.4)",
+            transform: "scale(1.1)",
+          }}
+        />
+      ) : null}
+      <div
+        aria-hidden
+        className="absolute inset-0 pointer-events-none bg-black/70 backdrop-blur-sm"
+      />
+
       <button
         type="button"
         onClick={onClose}
-        aria-label="Close"
-        className="absolute top-4 right-4 md:top-6 md:right-6 z-50 btn btn-ghost btn-icon"
+        aria-label={t("common.close")}
+        className="absolute top-4 right-4 lg:top-6 lg:right-6 z-50 btn btn-ghost btn-icon"
       >
         <X size={20} />
       </button>
 
       <div
-        className="w-full h-full flex flex-col md:flex-row gap-4 overflow-hidden relative"
+        className="relative w-full h-full flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Media — слева, занимает основное пространство. */}
-        <div className="flex flex-col flex-1 min-h-0 md:flex-none w-full md:w-1/2 lg:w-2/3 items-center justify-center">
-          <div className="w-full h-full md:size-4/5 lg:size-2/3 shadow-lg rounded-[var(--radius)] overflow-hidden flex items-center justify-center bg-black/40">
-            {item.section === "video" ? (
-              <video
-                src={item.url}
-                controls
-                autoPlay
-                playsInline
-                className="max-w-full max-h-full object-contain"
-              />
-            ) : item.section === "audio" ? (
-              <div className="flex flex-col items-center gap-4 p-8">
-                <Music2 size={64} className="text-text-secondary" />
-                <audio src={item.url} controls className="w-full" />
-              </div>
-            ) : (
-              <img src={item.url} alt="" className="max-w-full max-h-full object-contain" />
-            )}
-          </div>
+        {/* Media — занимает всё свободное место. */}
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+          {item.section === "video" ? (
+            <video
+              src={item.url}
+              controls
+              autoPlay
+              playsInline
+              className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
+            />
+          ) : item.section === "audio" ? (
+            <div className="flex flex-col items-center gap-6 p-8">
+              <Music2 size={96} className="text-white/70" />
+              <audio src={item.url} controls className="w-full max-w-md" />
+            </div>
+          ) : (
+            <img
+              src={item.url}
+              alt=""
+              className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
+            />
+          )}
         </div>
 
-        {/* Info-карточка — справа, повторяет стиль /prompts DialogCard. */}
+        {/* Info-карточка — справа на десктопе, снизу на мобилке. */}
         {job && (
-          <div className="shrink-0 md:shrink w-full md:w-1/2 lg:w-1/3 card flex flex-col gap-4 text-white p-4 md:p-8 min-h-0 overflow-hidden">
-            <h2 className="h2 text-center shrink-0">{job.modelName}</h2>
-            <div className="flex flex-col gap-4 flex-1 min-h-0">
-              <h3 className="hidden md:block h3 text-center shrink-0">{t("prompts.promptUsed")}</h3>
-              <div className="text-text-secondary text-lg bg-bg-elevated p-4 rounded-[var(--radius)] overflow-y-auto whitespace-pre-wrap break-words">
-                {job.prompt || "—"}
-              </div>
-            </div>
-            <div className="mt-auto">
-              <Button
-                className="mt-4 w-full"
-                size={isMobile ? "md" : "lg"}
-                rightIcon={<ArrowRight />}
-                onClick={handleRepeat}
-              >
-                {t("common.retry")}
-              </Button>
-            </div>
-          </div>
+          <PreviewInfoCard
+            job={job}
+            isMobile={isMobile}
+            onRepeat={handleRepeat}
+            t={t}
+          />
         )}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** Локальный аналог `MetaChip` из Gallery.tsx — стиль повторён один-в-один. */
+function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs"
+      style={{ background: "var(--accent-lighter)", color: "var(--accent-light)" }}
+    >
+      {icon}
+      {label}
+    </span>
+  );
+}
+
+function formatPreviewDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function PreviewInfoCard({
+  job,
+  isMobile,
+  onRepeat,
+  t,
+}: {
+  job: GenerationJobDto;
+  isMobile: boolean;
+  onRepeat: () => void;
+  t: (key: string) => string;
+}) {
+  const [promptExpanded, setPromptExpanded] = useState(false);
+  const [isTruncated, setIsTruncated] = useState(false);
+  const promptRef = useRef<HTMLParagraphElement>(null);
+
+  // Детект «реально ли промпт обрезан line-clamp'ом». Считаем один раз после
+  // mount'а (промпт за время жизни модалки не меняется). Сравниваем
+  // scrollHeight (полная высота контента) с clientHeight (видимая высота при
+  // line-clamp-3) — если первое больше, кнопка-тогл нужна.
+  useLayoutEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    setIsTruncated(el.scrollHeight - el.clientHeight > 1);
+  }, [job.prompt]);
+
+  const dateIso = job.completedAt ?? job.createdAt;
+  const tokensValue =
+    job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
+  const hasMeta = Boolean(dateIso || tokensValue);
+
+  return (
+    <aside
+      className="relative shrink-0 w-full lg:w-[400px] card flex flex-col gap-4 text-white p-4 lg:p-6 min-h-0 overflow-hidden"
+      style={{ background: "var(--bg-elevated)" }}
+    >
+      <h2 className="h2 shrink-0 break-words">{job.modelName}</h2>
+
+      {hasMeta && (
+        <div className="flex flex-wrap gap-1.5 shrink-0">
+          {dateIso && <MetaChip icon={<Calendar size={14} />} label={formatPreviewDate(dateIso)} />}
+          {tokensValue && <MetaChip icon={<Coins size={14} />} label={`${tokensValue} ✦`} />}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <div
+          className="text-xs uppercase tracking-wide shrink-0"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {t("prompts.promptUsed")}
+        </div>
+        <div className="flex flex-col gap-2 bg-white/[0.04] rounded-[var(--radius)] p-3">
+          <p
+            ref={promptRef}
+            className={clsx(
+              "text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0",
+              // Мобилка/планшет (<lg): всегда скролл, фикс. высота — карточка
+              // не меняет размер при длинном промпте, нет кнопки «Развернуть».
+              "max-lg:overflow-y-auto max-lg:max-h-[4.5rem] max-lg:pr-1",
+              // Десктоп (lg+): line-clamp-3 в свёрнутом, max-h+scroll в раскрытом.
+              !promptExpanded && "lg:line-clamp-3",
+              promptExpanded && "lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1",
+            )}
+          >
+            {job.prompt || "—"}
+          </p>
+          {isTruncated && (
+            <button
+              type="button"
+              onClick={() => setPromptExpanded((v) => !v)}
+              aria-expanded={promptExpanded}
+              className="hidden lg:inline-flex self-start items-center gap-1 text-xs text-text-hint hover:text-text transition-colors"
+            >
+              <ChevronDown
+                size={14}
+                className={clsx("transition-transform", promptExpanded && "rotate-180")}
+              />
+              {promptExpanded ? t("common.collapse") : t("common.expand")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <Button
+        className="mt-auto"
+        size={isMobile ? "md" : "lg"}
+        rightIcon={<ArrowRight />}
+        onClick={onRepeat}
+        fullWidth
+      >
+        {t("common.retry")}
+      </Button>
+    </aside>
   );
 }
