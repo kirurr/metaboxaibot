@@ -7,6 +7,9 @@ export interface Toast {
   description?: string;
   durationMs?: number;
   exiting?: boolean;
+  /** Если задан — тело тоста становится кликабельным; X-кнопка остаётся
+   *  отдельной (закрывает без вызова onClick). */
+  onClick?: () => void;
 }
 
 const TOAST_EXIT_MS = 200;
