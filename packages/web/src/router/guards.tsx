@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { useInitNotifications } from "@/hooks/useInitNotifications";
+import { usePendingJobsSync } from "@/hooks/usePendingJobsSync";
 
 /** Пропускает только авторизованных. Остальных — на /login с redirect back. */
 export function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -25,6 +26,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
 function WSNotificationProvider({ children }: { children: ReactNode }) {
   useInitNotifications();
+  usePendingJobsSync();
   return <>{children}</>;
 }
 

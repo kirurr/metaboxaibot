@@ -1,12 +1,14 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2, Music2 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
-import { useNotificationsStore } from "@/stores/notificationsStore";
 import { useUIStore } from "@/stores/uiStore";
-import { galleryKeys } from "@/api/gallery";
+import {
+  usePendingJobsStore,
+  type PendingJob,
+  type TrackedJobOutput,
+} from "@/stores/pendingJobsStore";
 import { listGenerations, type GenerationJobDto, type GenerationOutputDto } from "@/api/generation";
 import type { WebModelDto } from "@/api/models";
 import {
@@ -24,44 +26,13 @@ import { formatTokens } from "@/utils/format";
  *
  * Источники:
  *  - `GET /web/generations?section=...` — done/failed снапшот, без фильтра по модели.
- *  - `useNotificationsStore.list` — WS-события для перехода pending → success/error
- *    и refetch'а истории на success.
+ *  - `usePendingJobsStore` — pending'и, переключаемые в success/error глобальным
+ *    хуком `usePendingJobsSync`. На success — refetch снапшота.
  */
-
-/** Output, восстановленный из WS-уведомления (`data.outputs[]`). */
-export interface TrackedJobOutput {
-  id: string;
-  url: string | null;
-  thumbnailUrl: string | null;
-}
-
-export interface PendingJob {
-  /** dbJobId, возвращённый submit-эндпоинтом. */
-  id: string;
-  modelId: string;
-  /** "image" | "video" | "audio" — фильтр по текущей секции и выбор рендера. */
-  section: string;
-  prompt: string;
-  startedAt: number;
-  /** WS-driven статус. По умолчанию `pending`, переключается на success/error через колбэки. */
-  status?: "pending" | "success" | "error";
-  /** Заполняется на success — рисуем outputs из WS-уведомления, не дожидаясь refetch'а. */
-  outputs?: TrackedJobOutput[];
-  /** Если приходит error-нотификация — переключаем сюда. */
-  errorMessage?: string;
-}
 
 interface Props {
   /** Активная модель — используется только для derive секции. */
   selectedModel: WebModelDto | undefined;
-  /** Локально-трекаемые job'ы между submit'ом и финальным WS-event'ом. */
-  pendingJobs: PendingJob[];
-  /** Колбэк дисмисса (error-плитка по кнопке закрытия). */
-  onJobResolved: (jobId: string) => void;
-  /** Колбэк когда pending получил error из WS. */
-  onJobFailed: (jobId: string, errorMessage: string) => void;
-  /** Колбэк когда pending получил success из WS — родитель апдейтит карточку. */
-  onJobSucceeded: (jobId: string, outputs: TrackedJobOutput[]) => void;
   /**
    * Сообщает родителю, есть ли вообще контент в пэйне. Используется, чтобы
    * скрыть ambient-фон при появлении первой генерации.
@@ -92,21 +63,14 @@ type PreviewItem = {
   job?: GenerationJobDto;
 };
 
-function GenerationHistoryImpl({
-  selectedModel,
-  pendingJobs,
-  onJobResolved,
-  onJobFailed,
-  onJobSucceeded,
-  onHasContentChange,
-}: Props) {
+function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
   const [history, setHistory] = useState<GenerationJobDto[]>([]);
   const [loading, setLoading] = useState(false);
-  const notifications = useNotificationsStore((s) => s.list);
-  const qc = useQueryClient();
+  const pendingJobs = usePendingJobsStore((s) => s.pendingJobs);
+  const removePending = usePendingJobsStore((s) => s.remove);
 
   const section = selectedModel?.section;
   // Pending'ы трекаются нормализованной секцией ("design" → "image"), а
@@ -133,33 +97,6 @@ function GenerationHistoryImpl({
     void refetch();
   }, [section]);
 
-  // Реакция на WS-нотификации: матчим по jobId с трекаемыми pending'ами.
-  useEffect(() => {
-    if (pendingJobs.length === 0) return;
-    for (const pending of pendingJobs) {
-      if (pending.status === "success") continue;
-      const notif = notifications.find((n) => n.jobId === pending.id);
-      if (!notif) continue;
-      if (notif.type.endsWith("_success")) {
-        const data = (notif.data ?? {}) as {
-          outputs?: Array<{ id: string; s3Key?: string; outputUrl?: string | null }>;
-        };
-        const outputs: TrackedJobOutput[] = (data.outputs ?? []).map((o) => ({
-          id: o.id,
-          url: o.outputUrl ?? null,
-          thumbnailUrl: null,
-        }));
-        onJobSucceeded(pending.id, outputs);
-        void refetch();
-        void qc.invalidateQueries({ queryKey: galleryKeys.all });
-      } else if (notif.type.endsWith("_error")) {
-        if (pending.errorMessage !== notif.message) {
-          onJobFailed(pending.id, notif.message);
-        }
-      }
-    }
-  }, [notifications, pendingJobs, onJobSucceeded, onJobFailed]);
-
   // Pending'и фильтруем по секции — страховка от чужих pending'ов при перекрёстной
   // навигации между /image и /video.
   const historyIds = useMemo(() => new Set(history.map((h) => h.id)), [history]);
@@ -167,6 +104,14 @@ function GenerationHistoryImpl({
     () => pendingJobs.filter((p) => p.section === trackedSection && !historyIds.has(p.id)),
     [pendingJobs, trackedSection, historyIds],
   );
+
+  // Когда pending переходит в success (через глобальный sync) — рефетчим
+  // снапшот: pending тайл уйдёт автоматически, как только в history появится
+  // его id (см. historyIds выше). Зависим от самого массива, не от boolean —
+  // иначе второй success подряд не триггерит refetch (boolean уже true).
+  useEffect(() => {
+    if (visiblePending.some((p) => p.status === "success")) void refetch();
+  }, [visiblePending]);
 
   // Разворачиваем job'ы в плоский массив плиток. Pending — первыми, затем
   // история (уже отсортирована по createdAt desc на бэке).
@@ -255,7 +200,7 @@ function GenerationHistoryImpl({
             key={tile.key}
             tile={tile}
             onPreview={(item) => setPreview(item)}
-            onDismiss={onJobResolved}
+            onDismiss={removePending}
           />
         ))}
       </ul>
@@ -325,7 +270,7 @@ function TileRenderer({
 
 // ── Tiles ────────────────────────────────────────────────────────────────────
 
-function PendingTile({ job, onDismiss }: { job: PendingJob; onDismiss: () => void }) {
+export function PendingTile({ job, onDismiss }: { job: PendingJob; onDismiss: () => void }) {
   const { t } = useTranslation();
   const status = job.errorMessage ? "error" : (job.status ?? "pending");
   const isError = status === "error";

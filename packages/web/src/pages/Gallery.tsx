@@ -58,6 +58,8 @@ import {
 } from "@/components/common/GenerationPreviewModal";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
+import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore";
+import { PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import { formatTokens } from "@/utils/format";
 
@@ -745,7 +747,7 @@ function JobCard({
   };
 
   return (
-    <div
+    <li
       style={{ gridRow: `span ${rowSpan}` }}
       className="group relative card overflow-hidden cursor-pointer"
       onClick={onOpen}
@@ -792,7 +794,7 @@ function JobCard({
           onOpenLightbox={onOpen}
         />
       )}
-    </div>
+    </li>
   );
 }
 
@@ -908,6 +910,8 @@ function GalleryPreview({
 
 function JobGrid({
   jobs,
+  pendingJobs,
+  onDismissPending,
   isLoading,
   error,
   folders,
@@ -915,6 +919,8 @@ function JobGrid({
   onOpen,
 }: {
   jobs: GalleryJob[];
+  pendingJobs: PendingJob[];
+  onDismissPending: (id: string) => void;
   isLoading: boolean;
   error: unknown;
   folders: GalleryFolder[];
@@ -933,11 +939,14 @@ function JobGrid({
       </div>
     );
   }
-  if (jobs.length === 0) {
+  if (jobs.length === 0 && pendingJobs.length === 0) {
     return <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>;
   }
   return (
-    <div className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3">
+    <ul className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3 list-none p-0 m-0">
+      {pendingJobs.map((p) => (
+        <PendingTile key={`p-${p.id}`} job={p} onDismiss={() => onDismissPending(p.id)} />
+      ))}
       {jobs.flatMap((j) =>
         j.outputs.map((o, idx) => (
           <JobCard
@@ -950,7 +959,7 @@ function JobGrid({
           />
         )),
       )}
-    </div>
+    </ul>
   );
 }
 
@@ -1033,6 +1042,28 @@ export default function GalleryPage() {
   const jobs = jobsData?.items ?? [];
   const total = jobsData?.total ?? 0;
 
+  const pendingJobs = usePendingJobsStore((s) => s.pendingJobs);
+  const removePending = usePendingJobsStore((s) => s.remove);
+
+  // Pending'и не привязаны к папкам и не имеют modelId-фильтрации до завершения —
+  // если активен фильтр folder, прячем pending'и (иначе бы они «вылетали» из
+  // выбранной папки). modelId сравниваем точно, section — нормализованный.
+  // Success-pending'и не показываем: gallery query инвалидируется в момент
+  // success WS и сама подхватит готовую работу (loader на success-тайле
+  // визуально вводит в заблуждение). Error-pending — показываем, чтобы юзер
+  // увидел причину и dismiss'нул.
+  const visiblePending = useMemo<PendingJob[]>(() => {
+    if (folderId) return [];
+    const jobIds = new Set(jobs.map((j) => j.id));
+    return pendingJobs.filter((p) => {
+      if (p.status === "success") return false;
+      if (jobIds.has(p.id)) return false;
+      if (section && p.section !== section) return false;
+      if (modelId && p.modelId !== modelId) return false;
+      return true;
+    });
+  }, [pendingJobs, folderId, section, modelId, jobs]);
+
   // 404 при прямом заходе на /gallery/{несуществующий-id} — toast + редирект.
   useEffect(() => {
     if (jobId && detail.isError) {
@@ -1097,6 +1128,8 @@ export default function GalleryPage() {
 
           <JobGrid
             jobs={jobs}
+            pendingJobs={visiblePending}
+            onDismissPending={removePending}
             isLoading={isLoading}
             error={error}
             folders={folders}
