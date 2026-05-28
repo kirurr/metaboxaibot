@@ -1042,6 +1042,15 @@ select {
 .app.mobile .page-head {
   align-items: flex-start;
 }
+.app.mobile .page-head .actions {
+  width: 100%;
+  flex-wrap: wrap;
+}
+.app.mobile .page-head .actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+}
 
 /* ===== Page-load entrance ===== */
 @keyframes rise {
