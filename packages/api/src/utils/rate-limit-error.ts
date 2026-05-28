@@ -13,6 +13,11 @@
  * production.
  */
 
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+} from "./openai-billing-error.js";
+
 /** Per-provider cooldown when the error doesn't carry a Retry-After hint. */
 const COOLDOWN_MS: Record<string, number> = {
   fal: 60_000,
@@ -106,6 +111,15 @@ export interface RateLimitClassification {
   cooldownMs: number;
   /** True if this looks like a long-window (daily/monthly) quota — caller should fail the job. */
   isLongWindow: boolean;
+  /**
+   * True если это OpenAI billing-исчерпание (`billing_hard_limit_reached` /
+   * `insufficient_quota` / account deactivated). Классифицируется как rate-limit
+   * (ключ карантинится), НО `isLongWindow=false` и `cooldownMs=30мин` — НИКОГДА
+   * не provider-wide cooldown (другие ключи/org могут иметь деньги). Caller'ы,
+   * делающие `markRateLimited(keyId, cls.cooldownMs)`, автоматически billing-safe.
+   * Notify-хелперы роутят billing-алерт в `balance`-тему по этому флагу.
+   */
+  isBilling: boolean;
   /** Short reason string for logs / Redis gate value. */
   reason: string;
 }
@@ -324,6 +338,23 @@ export function classifyRateLimit(err: unknown, provider?: string): RateLimitCla
   const message = getMessage(e);
   const code = typeof e.code === "string" ? e.code : undefined;
 
+  // OpenAI billing-исчерпание — единый источник правды для всех caller'ов.
+  // Классифицируем как rate-limit (ключ выводится из ротации на 30мин через
+  // markRateLimited), НО isLongWindow=false — провайдер-wide cooldown
+  // (markProviderLongCooldown) физически не сработает, даже если caller забыл
+  // отдельный billing-guard. Это закрывает корень повторяющегося бага: billing
+  // зашит и в RATE_LIMIT/LONG_WINDOW паттернах, поэтому без этой ранней ветки
+  // billing уходил в long-window (1ч + provider-wide), блокируя здоровые ключи.
+  if (isOpenAiBillingExhaustion(err)) {
+    return {
+      isRateLimit: true,
+      isBilling: true,
+      cooldownMs: OPENAI_BILLING_KEY_COOLDOWN_MS,
+      isLongWindow: false,
+      reason: `openai billing: ${message || code || status || "exhausted"}`,
+    };
+  }
+
   const matchesPattern =
     RATE_LIMIT_PATTERNS.some((p) => p.test(message)) ||
     LONG_WINDOW_PATTERNS.some((p) => p.test(message));
@@ -340,7 +371,7 @@ export function classifyRateLimit(err: unknown, provider?: string): RateLimitCla
     matchesPattern;
 
   if (!isRateLimit) {
-    return { isRateLimit: false, cooldownMs: 0, isLongWindow: false, reason: "" };
+    return { isRateLimit: false, cooldownMs: 0, isLongWindow: false, isBilling: false, reason: "" };
   }
 
   const retryAfterMs = parseRetryAfter(e.headers) ?? parseRetryAfter(e.response?.headers) ?? null;
@@ -365,5 +396,5 @@ export function classifyRateLimit(err: unknown, provider?: string): RateLimitCla
 
   const reason = `${status ?? code ?? "rate_limit"}: ${message}`;
 
-  return { isRateLimit: true, cooldownMs, isLongWindow, reason };
+  return { isRateLimit: true, cooldownMs, isLongWindow, isBilling: false, reason };
 }
