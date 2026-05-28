@@ -20,6 +20,17 @@
  *     спамить 13× одинаковых сообщений на BullMQ-ретраях.
  */
 
+/**
+ * Cooldown, на который billing-исчерпанный ключ выводится из ротации
+ * (per-key `markRateLimited`, НЕ provider-wide). Биллинг пополняется не
+ * мгновенно, но и блокировать ключ навсегда нельзя — через 30 мин он снова
+ * пробуется; если всё ещё пуст — throttle ставится заново. Это позволяет
+ * `acquireKey` пропустить billing-dead ключ и взять здоровый (с деньгами),
+ * вместо того чтобы каждый запрос упирался в один и тот же мёртвый ключ
+ * (особенно критично для inverted-priority моделей вроде gpt-image-1.5).
+ */
+export const OPENAI_BILLING_KEY_COOLDOWN_MS = 30 * 60 * 1000;
+
 interface BillingErrorLike {
   code?: unknown;
   message?: unknown;

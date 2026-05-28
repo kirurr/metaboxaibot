@@ -52,7 +52,11 @@ import {
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
-import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+} from "@metabox/api/utils/openai-billing-error";
+import { maskKey } from "@metabox/shared";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
@@ -343,11 +347,15 @@ export async function submitWithFallback<T, D extends object>(
       }
 
       // OpenAI billing исчерпан — `billing_hard_limit_reached` (400) или
-      // `insufficient_quota` (429). Симметрично KIE credits: org/project-wide
-      // состояние, ни retry на том же ключе, ни смена ключа в той же org
-      // не помогут. Не recordError'им ключ (это не сбой ключа), пробуем
-      // следующего кандидата, шлём дедуп'нутый алерт в balance-тему.
+      // `insufficient_quota` (429). Не recordError'им (это не сбой ключа), НО
+      // выводим ключ из ротации через markRateLimited на
+      // OPENAI_BILLING_KEY_COOLDOWN_MS — иначе acquireKey снова возвращает тот же
+      // billing-dead ключ. Per-key, НЕ provider-wide. Пробуем следующего
+      // кандидата + дедуп'нутый алерт в balance-тему.
       if (isOpenAiBillingExhaustion(err)) {
+        if (acquired.keyId) {
+          void markRateLimited(acquired.keyId, OPENAI_BILLING_KEY_COOLDOWN_MS, "openai billing");
+        }
         attempts.push({
           provider: candidateProvider,
           outcome: "openai_billing_exhausted",
@@ -363,8 +371,14 @@ export async function submitWithFallback<T, D extends object>(
           { channel: "balance" },
         );
         logger.warn(
-          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
-          "submitWithFallback: OpenAI billing exhausted — trying next candidate",
+          {
+            jobId: opts.jobId,
+            provider: candidateProvider,
+            modelId: opts.primaryModel.id,
+            keyId: acquired.keyId,
+            keyMask: maskKey(acquired.apiKey),
+          },
+          "submitWithFallback: OpenAI billing exhausted — key quarantined, trying next candidate",
         );
         continue;
       }

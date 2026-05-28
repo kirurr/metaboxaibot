@@ -46,6 +46,7 @@ import {
   getFallbackCandidates,
   isFallbackCompatible,
   pickGenerationFailedMessage,
+  maskKey,
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
@@ -78,7 +79,10 @@ import {
 } from "@metabox/api/services/key-pool";
 import { isProviderInLongCooldown, markProviderLongCooldown } from "@metabox/api/services/throttle";
 import { isPoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
-import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+} from "@metabox/api/utils/openai-billing-error";
 import {
   classifyRateLimit,
   isFiveXxError,
@@ -984,6 +988,15 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
               // и submit-with-fallback (которые этот код обходит — virtual
               // batch идёт своим путём).
               if (isOpenAiBillingExhaustion(err)) {
+                // Выводим billing-dead ключ из ротации (per-key, НЕ
+                // provider-wide) — иначе acquireKey снова возьмёт его.
+                if (subAcquired.keyId) {
+                  void markRateLimited(
+                    subAcquired.keyId,
+                    OPENAI_BILLING_KEY_COOLDOWN_MS,
+                    "openai billing",
+                  );
+                }
                 const billingDedupKey = subAcquired.keyId
                   ? `openai-billing-exhaustion:${subAcquired.keyId}`
                   : "openai-billing-exhaustion";
@@ -992,6 +1005,16 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                   { section: "image", modelId, jobId: dbJobId },
                   billingDedupKey,
                   { channel: "balance" },
+                );
+                logger.warn(
+                  {
+                    dbJobId,
+                    modelId,
+                    provider: candidateProvider,
+                    keyId: subAcquired.keyId,
+                    keyMask: maskKey(subAcquired.apiKey),
+                  },
+                  "Image batch: OpenAI billing exhausted — key quarantined, trying next candidate",
                 );
                 lastSubError = `openai billing exhausted: ${message.slice(0, 200)}`;
                 continue;
@@ -2237,13 +2260,20 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Image failed after deduct: tokens refunded to user");
       }
 
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "image",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      // Billing-исчерпание уже задедуплено в balance-тему per-key выше. Финальный
+      // job-failure алерт тоже шлём в balance (а не в alerts) — иначе одна
+      // billing-ошибка дублируется в обе темы.
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "image",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {
