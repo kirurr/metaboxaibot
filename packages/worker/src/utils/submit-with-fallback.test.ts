@@ -816,8 +816,43 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
   // следующему кандидату. При отсутствии fallback'а — all_candidates_failed
   // тоже летит в balance (а не в общий fallback-канал).
 
+  test("key-level retry: billing на k1 → берёт здоровый k2 того же провайдера → success (без fallback-модели)", async () => {
+    // gpt-image-1.5 без fallback-модели. Первый ключ billing-dead, второй —
+    // здоровый. submitWithFallback должен вывести k1 из ротации и пройти на k2
+    // в рамках ОДНОГО запроса (key-level retry), не роняя его юзеру.
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k1-dead"))
+      .mockResolvedValueOnce(makeAcquiredKey("k2-healthy"));
+    const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
+      code: "billing_hard_limit_reached",
+      status: 400,
+    });
+    const submit = vi.fn().mockRejectedValueOnce(billingErr).mockResolvedValueOnce("ok-on-k2");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "gpt-image-1.5", provider: "openai" }),
+      fallbacks: [],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("ok-on-k2");
+    expect(res.usedFallback).toBe(false); // тот же провайдер, не fallback-модель
+    expect(submit).toHaveBeenCalledTimes(2); // k1 (billing) → k2 (success)
+    // k1 выведен из ротации, k2 не тронут
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1-dead", 30 * 60 * 1000, "openai billing");
+    expect(mocks.markRateLimited).not.toHaveBeenCalledWith(
+      "k2-healthy",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mocks.recordSuccess).toHaveBeenCalledWith("k2-healthy");
+  });
+
   test("400 billing_hard_limit_reached → openai_billing_exhausted, balance alert, NO recordError", async () => {
-    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    mocks.acquireKey.mockResolvedValue(makeAcquiredKey("k1"));
     const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
       code: "billing_hard_limit_reached",
       status: 400,
@@ -842,7 +877,10 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       { channel: "balance" },
     );
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    // Billing-dead ключ выводится из ротации через markRateLimited (per-key,
+    // 30 мин), чтобы acquireKey не возвращал его снова. НЕ recordError (ключ не
+    // сломан) и НЕ markProviderLongCooldown (провайдер не блокируем).
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyFallback).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "all_candidates_failed",
@@ -852,7 +890,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
   });
 
   test("429 insufficient_quota → ловится billing-веткой, не rate-limit'ом", async () => {
-    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    mocks.acquireKey.mockResolvedValue(makeAcquiredKey("k1"));
     const quotaErr = Object.assign(new Error("429 You exceeded your current quota"), {
       code: "insufficient_quota",
       status: 429,
@@ -876,21 +914,26 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       "openai-billing-exhaustion:k1",
       { channel: "balance" },
     );
-    // Билинг-ветка интерсептит до rate-limit классификатора — ни ключ-throttle,
-    // ни recordError не должны сработать.
+    // Билинг-ветка интерсептит до rate-limit классификатора — recordError и
+    // notifyRateLimit не срабатывают. НО markRateLimited вызывается (per-key
+    // вывод billing-dead ключа из ротации на 30 мин).
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyRateLimit).not.toHaveBeenCalled();
   });
 
-  test("billing на primary + успешный fallback → fallback используется, billing alert всё равно летит", async () => {
-    mocks.acquireKey
-      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
-      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+  test("все openai ключи billing-dead → PoolExhausted → fallback на evolink, billing alert летит", async () => {
+    // billing на единственном openai ключе → key-retry → acquireKey бросает
+    // PoolExhausted (все openai throttled) → continue к fallback-кандидату
+    // evolink → success.
     const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
       code: "billing_hard_limit_reached",
       status: 400,
     });
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary")) // openai 1-я попытка
+      .mockRejectedValueOnce(new PoolExhaustedError("openai", 30000)) // openai key-retry → все throttled
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb")); // evolink
     const submit = vi.fn().mockRejectedValueOnce(billingErr).mockResolvedValueOnce("fallback-ok");
 
     const res = await submitWithFallback({
@@ -905,15 +948,20 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     expect(res.result).toBe("fallback-ok");
     expect(res.usedFallback).toBe(true);
     expect(res.effectiveProvider).toBe("evolink");
-    // billing alert летит даже при успешном fallback'е — оператор должен
-    // увидеть что у primary биллинг пуст независимо от того, спас ли fallback.
+    // billing alert летит — оператор должен увидеть что у openai биллинг пуст
+    // независимо от того, спас ли fallback.
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
       billingErr,
       expect.any(Object),
       "openai-billing-exhaustion:k-primary",
       { channel: "balance" },
     );
-    // Primary key не штрафуется
+    // openai key выведен из ротации (markRateLimited), но НЕ recordError.
+    expect(mocks.markRateLimited).toHaveBeenCalledWith(
+      "k-primary",
+      30 * 60 * 1000,
+      "openai billing",
+    );
     expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
   });
 });

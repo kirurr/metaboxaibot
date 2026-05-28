@@ -48,6 +48,7 @@ import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/
 import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
 import { isFiveXxError } from "@metabox/api/utils/rate-limit-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
 import type { AcquiredKey } from "@metabox/api/services/key-pool";
@@ -1098,13 +1099,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       // сюда не доходят (отработаны выше в resolveUserFacingMessage-ветке со
       // своим ops-алертом). Контент-модерацию исключаем — это вина юзера.
       if (!isUserContentRejection) {
-        await notifyTechError(err, {
-          jobId: dbJobId,
-          modelId,
-          section: "audio",
-          userId: userIdStr,
-          attempt: job.attemptsMade,
-        });
+        await notifyTechError(
+          err,
+          {
+            jobId: dbJobId,
+            modelId,
+            section: "audio",
+            userId: userIdStr,
+            attempt: job.attemptsMade,
+          },
+          isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+        );
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, finalMsg).catch(() => void 0);
