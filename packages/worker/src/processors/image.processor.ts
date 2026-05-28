@@ -995,7 +995,10 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                 // continue subCandidateLoop к fallback-кандидату.
                 if (isOpenAiBillingExhaustion(err)) {
                   if (subAcquired.keyId) {
-                    void markRateLimited(
+                    // await: маркер должен лечь в Redis ДО следующего acquireKey,
+                    // иначе на single-key провайдере (gpt-image-1.5) тот же
+                    // billing-dead ключ переберётся повторно — потратим HTTP впустую.
+                    await markRateLimited(
                       subAcquired.keyId,
                       OPENAI_BILLING_KEY_COOLDOWN_MS,
                       "openai billing",
@@ -1036,7 +1039,19 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
                   }
                   const isLong = cls.isLongWindow || cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS;
                   if (isLong) {
-                    void markProviderLongCooldown(candidateKeyProvider, cls.cooldownMs, cls.reason);
+                    // Provider-wide marker блокирует ВСЕ ключи провайдера для
+                    // sibling sub-jobs. Ставим ТОЛЬКО при действительно длинном
+                    // cooldown (>1ч). Pattern-matched per-account ошибки
+                    // ("insufficient credits" и т.п.) с коротким cooldown —
+                    // изолируем per-key (markRateLimited выше), не роняя соседние
+                    // ключи. Зеркалит submitWithFallback.
+                    if (cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS) {
+                      void markProviderLongCooldown(
+                        candidateKeyProvider,
+                        cls.cooldownMs,
+                        cls.reason,
+                      );
+                    }
                     void notifyRateLimit({
                       section: "image",
                       modelId,

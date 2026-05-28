@@ -315,7 +315,10 @@ export async function submitWithFallback<T, D extends object>(
         // PoolExhausted → уйдём к fallback-кандидату.
         if (isOpenAiBillingExhaustion(err)) {
           if (acquired.keyId) {
-            void markRateLimited(acquired.keyId, OPENAI_BILLING_KEY_COOLDOWN_MS, "openai billing");
+            // await: маркер должен лечь в Redis ДО следующего acquireKey, иначе
+            // на single-key провайдере (gpt-image-1.5) тот же billing-dead ключ
+            // переберётся повторно — потратим HTTP впустую.
+            await markRateLimited(acquired.keyId, OPENAI_BILLING_KEY_COOLDOWN_MS, "openai billing");
           }
           const billingDedupKey = acquired.keyId
             ? `openai-billing-exhaustion:${acquired.keyId}`
