@@ -33,7 +33,12 @@ import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyTechErrorThrottled } from "./notify-error.js";
 import { logger } from "../logger.js";
 
-const MAX_RATE_LIMIT_DEFERS = 5;
+// Согласовано с MAX_TRANSIENT_RETRIES в defer-transient.ts — оба defer'а
+// инкрементят ОДИН и тот же `transientRetries` counter в job.data. Если cap'ы
+// расходятся, меньший из двух становится фактическим cap'ом для обоих типов
+// retry'ев (rate-limit defer'нул 3 раза → счётчик 3 → transient defer пропустит
+// retry на ENOTFOUND, и наоборот). Держим равными.
+const MAX_RATE_LIMIT_DEFERS = 3;
 const JITTER_MS = 30_000;
 
 interface DeferIfRateLimitOpts<D extends { transientRetries?: number; stage?: string }> {

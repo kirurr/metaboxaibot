@@ -309,7 +309,12 @@ export interface FallbackNotificationContext {
      *  / неизвестный 4xx-body) — fallback на соседнего кандидата. Параллельно
      *  submitWithFallback уже шлёт per-candidate notifyTechErrorThrottled с
      *  оригинальным err'ом. */
-    | "unknown_error";
+    | "unknown_error"
+    /** Primary упал с transient network failure (ENOTFOUND, ECONNRESET и т.п.) —
+     *  DNS/socket-уровень. Fallback пробуется (у соседа может быть другой хост);
+     *  если все упали — deferIfTransientNetworkError на уровне processor'а
+     *  retry'ит весь цикл до MAX_TRANSIENT_RETRIES раундов. */
+    | "network_transient";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */

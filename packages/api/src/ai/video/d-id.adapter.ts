@@ -1,6 +1,7 @@
 import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const DID_API = "https://api.d-id.com";
 
@@ -86,7 +87,7 @@ export class DIDAdapter implements VideoAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`D-ID submit failed: ${res.status} ${text}`);
+      throw providerHttpError(`D-ID submit failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as { id: string };
@@ -104,7 +105,7 @@ export class DIDAdapter implements VideoAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`D-ID poll failed: ${res.status} ${text}`);
+      throw providerHttpError(`D-ID poll failed: ${res.status} ${text}`, res.status);
     }
 
     const talk = (await res.json()) as DIDTalk;

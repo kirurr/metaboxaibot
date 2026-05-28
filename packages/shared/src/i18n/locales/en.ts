@@ -426,6 +426,11 @@ export default {
       "❌ Image aspect ratio must be between {min} and {max}. Please upload a different photo.",
     kieKlingMissingElement:
       "❌ Your prompt references @Element{element}, but no image is uploaded for that slot. Upload a photo to the «Element {element}» slot or remove the reference from the prompt.",
+    copyMotionVideoTooShort: "🎬 The video is too short. Minimum — 3 sec.",
+    copyMotionVideoTooLong: "🎬 The video is too long. Maximum — 30 sec.",
+    copyMotionVideoUnreadable: "🎬 Couldn't read the video. Please send it as an MP4 file.",
+    aspectRatioNotSupported:
+      "❌ Aspect ratio {ratio} is not supported by this model. Available: {supported}. Pick a different ratio in settings.",
     ttsTranscriptEmpty:
       "❌ The text to synthesize is empty or contains only punctuation. Please enter actual text and try again.",
     imageTooLarge:

@@ -86,6 +86,7 @@ import { UserFacingError } from "@metabox/shared";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { fetchVideoUrl } from "../utils/fetch-video.js";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
 
@@ -1187,18 +1188,21 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     // ── Poll-stage fallback на 5xx от текущего провайдера ─────────────────
     // Условие: BullMQ retry'и исчерпаны (isLastAttempt) И ошибка — terminal
     // 5xx-сигнал текущего провайдера, который ретраи на нём не починят.
-    // Покрываются ДВА класса ошибок (взаимно дополняющие, не пересекаются):
+    // Покрываются ДВА классификатора (overlap на KIE 5xx — это OK, OR-condition):
     //
-    //  1. `isKieTransientError` — KIE 5xx + 422 task-id-blank + "client closed
-    //     request". KIE-адаптер бросает plain Error БЕЗ `err.status`, поэтому
-    //     детектится по тексту message ("KIE …").
+    //  1. `isKieTransientError` — KIE-специфика: 422 task-id-blank,
+    //     "playground failed", "client closed request", 400 internal-retry,
+    //     ПЛЮС KIE 5xx (через isKieFiveXxError по тексту "KIE … 5xx"). Это
+    //     legacy text-based детектор: работал ещё до миграции на providerHttpError,
+    //     ловит ошибки даже если status property где-то по дороге потеряется.
     //
-    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. Покрывает прочие
-    //     адаптеры, которые выставляют numeric status на throw'е (например
-    //     evolink: 524 от Cloudflare; fal/replicate: 502/503). Эта ветка
-    //     прицельно закрывает дыру кие→evolink→fal: раньше evolink-овые 5xx
-    //     на poll-стадии не каскадировались на fal, и юзер получал generic
-    //     "model is resting" + refund, хотя следующий fallback был свободен.
+    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. После миграции
+    //     адаптеров на providerHttpError покрывает все провайдеры
+    //     (Alibaba/MiniMax/Recraft/evolink: 524 от Cloudflare; fal/replicate:
+    //     502/503; KIE: дубль с (1), безвредный). Закрывает дыру kie→evolink→fal:
+    //     раньше evolink-овые 5xx на poll-стадии не каскадировались на fal, и
+    //     юзер получал generic "model is resting" + refund, хотя следующий
+    //     fallback был свободен.
     //
     // Защита от поспешного каскада на ПЕРВОМ провайдере: `isLastAttempt` —
     // поодиночные 5xx-блипы (например Cloudflare 524 за одну poll-итерацию)
@@ -1233,7 +1237,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     if (
       stage === "poll" &&
       isLastAttempt &&
-      (isKieTransientError(err) || isFiveXxError(err)) &&
+      (isKieTransientError(err) || isFiveXxError(err) || isTransientNetworkError(err)) &&
       modelMeta
     ) {
       // readFallbackState/writeFallbackState — closures внутри try-блока,
@@ -1332,7 +1336,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       } else if (
         !isKieTransientError(err) &&
         !isProviderTemporaryUnavailable(err) &&
-        !isFiveXxError(err)
+        !isFiveXxError(err) &&
+        !isTransientNetworkError(err)
       ) {
         logger.warn(
           {

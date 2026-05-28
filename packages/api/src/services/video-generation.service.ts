@@ -1,11 +1,18 @@
 import { db } from "../db.js";
 import { getVideoQueue } from "../queues/video.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS } from "@metabox/shared";
+import {
+  AI_MODELS,
+  COPY_MOTION_VIDEO_MAX_SEC,
+  COPY_MOTION_VIDEO_MIN_SEC,
+  ONE_SHOT_SETTING_KEYS,
+  UserFacingError,
+} from "@metabox/shared";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
 import { ensureHeygenTtsForVideo } from "./heygen-tts.service.js";
 import { createVideoAdapter } from "../ai/video/factory.js";
 import { validatePromptRefs } from "./prompt-ref.service.js";
+import { probeVideoMetadata } from "../utils/mp4-duration.js";
 import type {
   VideoInput,
   VideoValidationContext,
@@ -149,6 +156,50 @@ export const videoGenerationService = {
   async submitVideo(params: SubmitVideoParams): Promise<SubmitVideoResult> {
     const model = AI_MODELS[params.modelId];
     if (!model) throw new Error(`Unknown model: ${params.modelId}`);
+
+    // Pre-flight длительности motion_video для kling-motion-pro / copy-motion.
+    // Bot scene `copy-motion.ts` уже валидирует на upload, но web-route и
+    // универсальная video-карусель идут мимо неё → ловим в service-layer.
+    // Зеркало логики из copy-motion.ts:200-222.
+    // Все три modelId в kling-v3-motion-control family имеют один и тот же
+    // 3-30 сек лимит провайдера. kling-motion (Standard) и kling-motion-pro
+    // (Pro) доступны напрямую через универсальную video-карусель, copy-motion —
+    // готовый сценарий «Копировать движение» (alias на kling-motion-pro).
+    // `section` в UserFacingError не нужен: resolveUserFacingErrorVariant
+    // смотрит section только для modelTemporarilyUnavailable, для наших ключей
+    // идёт прямой lookup в t.errors[key].
+    if (
+      params.modelId === "kling-motion" ||
+      params.modelId === "kling-motion-pro" ||
+      params.modelId === "copy-motion"
+    ) {
+      // `mediaInputs.motion_video[0]` — это уже presigned URL: и web-route
+      // (resolveMediaInputs → getFileUrl), и bot scene (resolveMediaInputUrls)
+      // конвертят s3-keys в URL'ы ДО передачи в submitVideo. probeVideoMetadata
+      // принимает URL напрямую (он скачивает через HTTP).
+      const motionVideoUrl = params.mediaInputs?.motion_video?.[0];
+      if (motionVideoUrl) {
+        const probe = await probeVideoMetadata(motionVideoUrl).catch(() => null);
+        const durationSec = probe?.durationSec;
+        if (!durationSec || durationSec <= 0) {
+          throw new UserFacingError(`copy-motion: video duration unreadable`, {
+            key: "copyMotionVideoUnreadable",
+          });
+        }
+        if (durationSec < COPY_MOTION_VIDEO_MIN_SEC) {
+          throw new UserFacingError(
+            `copy-motion: video ${durationSec}s < min ${COPY_MOTION_VIDEO_MIN_SEC}s`,
+            { key: "copyMotionVideoTooShort" },
+          );
+        }
+        if (durationSec > COPY_MOTION_VIDEO_MAX_SEC) {
+          throw new UserFacingError(
+            `copy-motion: video ${durationSec}s > max ${COPY_MOTION_VIDEO_MAX_SEC}s`,
+            { key: "copyMotionVideoTooLong" },
+          );
+        }
+      }
+    }
 
     // HeyGen native voice (без EL/Cartesia и без юзерского аудио): синтезим
     // речь у себя ДО `previewVideo`, чтобы probe увидел реальную длительность

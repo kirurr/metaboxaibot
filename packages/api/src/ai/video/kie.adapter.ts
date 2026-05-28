@@ -29,6 +29,7 @@ import {
 import { KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -569,7 +570,7 @@ export class KieVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`KIE submit error ${resp.status}: ${txt}`);
+      throw providerHttpError(`KIE submit error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as KieSubmitResponse;
@@ -646,7 +647,7 @@ export class KieVideoAdapter implements VideoAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`KIE poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`KIE poll error ${resp.status}`, resp.status);
 
     const data = (await resp.json()) as KieTaskResponse;
     if (data.code !== 200 || !data.data) {

@@ -3,6 +3,7 @@ import sharp from "sharp";
 import type { ImageAdapter, ImageInput, ImageResult } from "./base.adapter.js";
 import { config, UserFacingError } from "@metabox/shared";
 import { logCall } from "../../utils/fetch.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 /**
  * fal virtual-try-on endpoint. Unlike the generic `image_urls` + `prompt`
@@ -160,7 +161,7 @@ export class FalAdapter implements ImageAdapter {
   private async resolveTryOnRatio(personUrl: string): Promise<string> {
     try {
       const res = await fetch(personUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw providerHttpError(`HTTP ${res.status}`, res.status);
       const meta = await sharp(Buffer.from(await res.arrayBuffer())).metadata();
       if (!meta.width || !meta.height) throw new Error("no dimensions");
       const target = meta.width / meta.height;

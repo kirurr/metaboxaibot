@@ -299,6 +299,10 @@ export interface Translations {
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
     kieKlingMissingElement: string;
+    copyMotionVideoTooShort: string;
+    copyMotionVideoTooLong: string;
+    copyMotionVideoUnreadable: string;
+    aspectRatioNotSupported: string;
     ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;

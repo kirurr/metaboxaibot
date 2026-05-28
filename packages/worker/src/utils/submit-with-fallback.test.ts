@@ -89,6 +89,7 @@ vi.mock("@metabox/api/utils/rate-limit-error", () => ({
 import { submitWithFallback } from "./submit-with-fallback.js";
 import { PoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
 import { RateLimitLongWindowError } from "./submit-with-throttle.js";
+import { UserFacingError } from "@metabox/shared";
 
 // ── Test sentinel — delayJob throws this in tests ────────────────────────────
 class TestDelayedSentinel extends Error {
@@ -963,5 +964,168 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       "openai billing",
     );
     expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — UserFacingError early-throw (validation)", () => {
+  // Pre-flight адаптеров (Suno length, Cartesia empty transcript, Nano Banana
+  // length и т.п.) бросает UserFacingError без notifyOps. Такие ошибки — это
+  // юзерская валидация, fallback не лечит (один backend → один лимит), tech
+  // не должен шуметь, ключ не штрафуется.
+
+  test("UserFacingError без notifyOps → throw сразу, без fallback, без tech-alert, без recordError", async () => {
+    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    const validationErr = new UserFacingError("Suno: prompt 980 > 500 chars", {
+      key: "sunoPromptTooLongNoLyrics",
+      params: { current: 980 },
+    });
+    const submit = vi.fn().mockRejectedValue(validationErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "suno", provider: "kie" }),
+        fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+        section: "audio",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(validationErr);
+
+    // Только primary попробован, fallback НЕ задействован.
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    expect(mocks.notifyTechErrorThrottled).not.toHaveBeenCalled();
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+  });
+
+  test("UserFacingError c notifyOps:true → попадает в обычный flow (fallback пробуется)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const providerErr = new UserFacingError("Suno API: credits insufficient", {
+      key: "modelTemporarilyUnavailable",
+      section: "audio",
+      notifyOps: true,
+      opsAlertDedupKey: "suno-credits-exhausted",
+    });
+    const submit = vi.fn().mockRejectedValueOnce(providerErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "suno", provider: "kie" }),
+      fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+      section: "audio",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    // Fallback задействован (это provider-side issue, имеет смысл попробовать соседа)
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — transient network error", () => {
+  // ENOTFOUND / ECONNRESET / ETIMEDOUT и т.п. — DNS/socket лёг у провайдера.
+  // Ключ не виноват → НЕ recordError. Пробуем следующего кандидата (у него
+  // может быть другой хост). Если все упали — caller (processor catch) защемит
+  // через deferIfTransientNetworkError (до 3 раундов).
+
+  test("ENOTFOUND на primary → пробует fallback, без recordError, без штрафа", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND kieai.redpandaai.co"), {
+        code: "ENOTFOUND",
+      }),
+    });
+    const submit = vi.fn().mockRejectedValueOnce(dnsErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+      fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Дедуп-алерт ушёл per-candidate (key network-transient:provider:code).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      dnsErr,
+      expect.any(Object),
+      "network-transient:kie:ENOTFOUND",
+    );
+    // Primary key не штрафуется на DNS-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+
+  test("ENOTFOUND на всех кандидатах → throw lastError (caller сделает defer-transient)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND example.com"), { code: "ENOTFOUND" }),
+    });
+    const submit = vi.fn().mockRejectedValue(dnsErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+        fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+        section: "image",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(dnsErr);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    // Notify per-candidate (2 алерта с разными provider в dedup-ключе).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(2);
+    // notifyFallback(all_candidates_failed) НЕ должен звать на transient — иначе
+    // на каждом retry-раунде (×3) был бы лишний алерт без дедупа в fallback-канал.
+    // Per-candidate notifyTechErrorThrottled уже дедуп'нут (5/30мин), этого хватит.
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — provider temporarily unavailable (infra)", () => {
+  // "high demand" / "Service unavailable" / Cloudflare Tunnel error / etc. —
+  // provider-wide инфра-проблема (узел перегружен, CDN edge упал). Ключ
+  // здоровый, штрафовать его нельзя — это не его вина. Пробуем следующего
+  // кандидата.
+
+  test("high demand на primary → fallback пробуется, recordError НЕ вызван", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    // KIE-style "high demand" — matched через isProviderTemporaryUnavailable.
+    const overloadErr = new Error("KIE submit error 422: Service is currently unavailable");
+    const submit = vi.fn().mockRejectedValueOnce(overloadErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "kling", provider: "kie" }),
+      fallbacks: [makeModel({ id: "kling", provider: "evolink" })],
+      section: "video",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Главное: ключ primary НЕ штрафуется на инфра-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalled();
   });
 });
