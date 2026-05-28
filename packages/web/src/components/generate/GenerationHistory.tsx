@@ -1,12 +1,4 @@
-import {
-  memo,
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -378,8 +370,7 @@ function OutputTile({
 }) {
   // Картинка для размытого фона в лайтбоксе: для audio — нет, для video —
   // только thumb (видео ставит сам плеер), для image — thumb или сам url.
-  const backdropUrl =
-    section === "audio" ? null : section === "video" ? thumb : (thumb ?? url);
+  const backdropUrl = section === "audio" ? null : section === "video" ? thumb : (thumb ?? url);
   // Aspect-ratio картинки/видео определяется после загрузки → пересчитывается
   // span. До загрузки рендерим квадратный плейсхолдер (span 3).
   // Аудио всегда квадрат — нет визуального aspect'а.
@@ -558,22 +549,28 @@ function MediaPreviewModal({ item, onClose }: { item: PreviewItem; onClose: () =
       role="dialog"
       aria-modal="true"
     >
-      {/* Backdrop: замыленная и затемнённая копия медиа во весь экран.
-          Поверх — полупрозрачная заливка для дополнительного контраста. */}
+      {/* Backdrop: замыленная копия медиа во весь экран. Картинка должна
+          оставаться различимой (цвета, формы) — затемнение лёгкое, а сильное
+          размытие даёт boke-эффект. Поверх — мягкая чёрная подложка для
+          контраста с инфо-карточкой. Для audio (нет backdropUrl) подкладка
+          плотнее, чтобы не было «серой стены». */}
       {backdropUrl ? (
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none bg-center bg-cover"
           style={{
             backgroundImage: `url("${backdropUrl}")`,
-            filter: "blur(40px) brightness(0.4)",
+            filter: "blur(40px) brightness(0.85)",
             transform: "scale(1.1)",
           }}
         />
       ) : null}
       <div
         aria-hidden
-        className="absolute inset-0 pointer-events-none bg-black/70 backdrop-blur-sm"
+        className={clsx(
+          "absolute inset-0 pointer-events-none backdrop-blur-sm",
+          backdropUrl ? "bg-black/35" : "bg-black/75",
+        )}
       />
 
       <button
@@ -614,14 +611,7 @@ function MediaPreviewModal({ item, onClose }: { item: PreviewItem; onClose: () =
         </div>
 
         {/* Info-карточка — справа на десктопе, снизу на мобилке. */}
-        {job && (
-          <PreviewInfoCard
-            job={job}
-            isMobile={isMobile}
-            onRepeat={handleRepeat}
-            t={t}
-          />
-        )}
+        {job && <PreviewInfoCard job={job} isMobile={isMobile} onRepeat={handleRepeat} t={t} />}
       </div>
     </div>,
     document.body,
