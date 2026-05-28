@@ -313,7 +313,7 @@
     "btnGenerating": "Generating…",
     "btnUploading": "Uploading files…",
     "btnSelectModel": "Select a model",
-    "btnAddToSlot": "Add file to {{slot}}",
+    "btnAddToSlot": "Add a file",
     "btnEnterPrompt": "Enter a prompt",
     "btnPromptOrMedia": "Enter a prompt or add a file",
     "btnAddMedia": "Add a photo",

@@ -5184,6 +5184,12 @@ select {
 .gen-slots.is-single {
   grid-template-columns: 1fr !important;
 }
+/* Мобила: складываем слоты стеком — на узких экранах 2 карточки рядом сжимаются
+   и заголовки переносятся. !important перебивает inline-style из JSX (там
+   `gridTemplateColumns: repeat(min(N, 2), 1fr)` для desktop). */
+.app.mobile .gen-slots {
+  grid-template-columns: 1fr !important;
+}
 
 .gen-slot {
   background: var(--bg-card);

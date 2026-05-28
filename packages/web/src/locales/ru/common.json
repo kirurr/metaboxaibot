@@ -316,7 +316,7 @@
     "btnGenerating": "Генерация…",
     "btnUploading": "Загрузка файлов…",
     "btnSelectModel": "Выберите модель",
-    "btnAddToSlot": "Загрузите файл: {{slot}}",
+    "btnAddToSlot": "Загрузите файл",
     "btnEnterPrompt": "Введите запрос",
     "btnPromptOrMedia": "Введите запрос или загрузите файл",
     "btnAddMedia": "Загрузите фото",

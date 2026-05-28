@@ -2481,7 +2481,7 @@ export function GenerateScene({
               <Sparkles size={16} />
             )}
             <span>{blockerReason ?? t("generate.btnGenerate")}</span>
-            {selectedModel && (
+            {selectedModel && !blockerReason && (
               <span className="gen-cta-cost mono">
                 {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
                 {(previewCost ?? selectedModel.tokenCostApprox).toFixed(2)}
