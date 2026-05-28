@@ -43,6 +43,7 @@ import {
   useCreateGalleryFolder,
   useDeleteGalleryFolder,
   useDeleteGalleryJob,
+  useGalleryFailedToday,
   useGalleryFolders,
   useGalleryJob,
   useGalleryModelCounts,
@@ -51,6 +52,7 @@ import {
   useRemoveJobFromGalleryFolder,
   useUpdateGalleryFolder,
 } from "@/hooks/useGallery";
+import type { GenerationJobDto } from "@/api/generation";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
 import {
@@ -60,7 +62,8 @@ import {
 import { useModelsStore } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
 import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore";
-import { PendingTile } from "@/components/generate/GenerationHistory";
+import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
+import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import { formatTokens } from "@/utils/format";
 
@@ -1056,20 +1059,41 @@ export default function GalleryPage() {
     });
   }, [pendingJobs, folderId, section, modelId, jobs]);
 
+  // Сегодняшние failed-генерации. Gallery API возвращает только "done", поэтому
+  // тянем отдельным запросом через `/web/generations` (тот же эндпоинт, что у
+  // GenerationHistory). Скрытые юзером (`onDismiss`) фильтруем по persisted
+  // store; in-session WS-error дедуплицируем по pendingIds (та же job уже
+  // живёт как PendingTile-error до рефреша).
+  const { data: failedToday = [] } = useGalleryFailedToday(section || undefined);
+  const dismissedIds = useDismissedErrorsStore((s) => s.ids);
+  const dismissError = useDismissedErrorsStore((s) => s.dismiss);
+  const visibleFailed = useMemo<GenerationJobDto[]>(() => {
+    if (folderId) return [];
+    const dismissed = new Set(dismissedIds);
+    const pendingIds = new Set(pendingJobs.map((p) => p.id));
+    return failedToday.filter((j) => {
+      if (dismissed.has(j.id)) return false;
+      if (pendingIds.has(j.id)) return false;
+      if (modelId && j.modelId !== modelId) return false;
+      return true;
+    });
+  }, [failedToday, folderId, modelId, dismissedIds, pendingJobs]);
+
   const groups = useMemo(() => groupByDay(jobs), [jobs]);
 
-  // Pending'и идут в группу «Сегодня» — они логически часть сегодняшней ленты.
-  // Если такой группы ещё нет (только что зашли, jobs пустой / в jobs нет
-  // сегодняшних) — создаём пустую плейсхолдер-группу под pending'и.
+  // Pending'и и сегодняшние failed идут в группу «Сегодня» — они логически
+  // часть сегодняшней ленты. Если такой группы ещё нет (только что зашли,
+  // jobs пустой / в jobs нет сегодняшних) — создаём пустую плейсхолдер-группу
+  // под них.
   const todayKey = new Date().toLocaleDateString("en-CA");
   const groupsWithPending = useMemo(() => {
-    if (visiblePending.length === 0) return groups;
+    if (visiblePending.length === 0 && visibleFailed.length === 0) return groups;
     if (groups.some((g) => g.key === todayKey)) return groups;
     return [
       { key: todayKey, label: formatDayLabel(todayKey), items: [] as GalleryJob[] },
       ...groups,
     ];
-  }, [groups, visiblePending.length, todayKey]);
+  }, [groups, visiblePending.length, visibleFailed.length, todayKey]);
 
   // Избранные работы — отдельной секцией наверху, дублируются в датах (видны и
   // там, и там, как «закреплённые» сверху). Скрываем секцию когда юзер уже
@@ -1144,7 +1168,8 @@ export default function GalleryPage() {
   }, [navigate]);
 
   const gridClass = GRID_CLASS[gridLayout];
-  const isEmpty = !isLoading && jobs.length === 0 && visiblePending.length === 0;
+  const isEmpty =
+    !isLoading && jobs.length === 0 && visiblePending.length === 0 && visibleFailed.length === 0;
 
   return (
     <div className="page">
@@ -1224,8 +1249,10 @@ export default function GalleryPage() {
 
               {groupsWithPending.map((g) => {
                 const isCollapsed = collapsed.has(g.key);
-                const pendingHere = g.key === todayKey ? visiblePending : [];
-                const totalCount = g.items.length + pendingHere.length;
+                const isToday = g.key === todayKey;
+                const pendingHere = isToday ? visiblePending : [];
+                const failedHere = isToday ? visibleFailed : [];
+                const totalCount = g.items.length + pendingHere.length + failedHere.length;
                 return (
                   <section key={g.key}>
                     <button
@@ -1242,6 +1269,14 @@ export default function GalleryPage() {
                     </button>
                     {!isCollapsed && (
                       <ul className={gridClass}>
+                        {failedHere.map((j) => (
+                          <FailedTile
+                            key={`f-${j.id}`}
+                            job={j}
+                            onDismiss={() => dismissError(j.id)}
+                            compact={gridLayout === "compact"}
+                          />
+                        ))}
                         {pendingHere.map((p) => (
                           <PendingTile
                             key={`p-${p.id}`}

@@ -327,12 +327,25 @@ export function PendingTile({
   );
 }
 
-function FailedTile({ job }: { job: GenerationJobDto }) {
+export function FailedTile({
+  job,
+  onDismiss,
+  compact = false,
+}: {
+  job: GenerationJobDto;
+  /** Если задан — рендерится кнопка скрытия. В GenerationHistory не используется. */
+  onDismiss?: () => void;
+  /** В compact-режиме тайл квадратный (без masonry-span), для Gallery 3-col layout. */
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <li
-      style={{ gridRow: "span 4" }}
-      className="relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center bg-[rgba(220,50,50,0.08)] border border-[var(--danger,#d44)]"
+      style={compact ? undefined : { gridRow: "span 4" }}
+      className={clsx(
+        "relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center bg-[rgba(220,50,50,0.08)] border border-[var(--danger,#d44)]",
+        compact && "aspect-square",
+      )}
     >
       <AlertCircle size={20} className="text-[var(--danger,#d44)] mb-2" />
       <div className="text-xs font-semibold text-[var(--danger,#d44)] mb-1">
@@ -344,6 +357,15 @@ function FailedTile({ job }: { job: GenerationJobDto }) {
       <div className="mt-2 text-[10px] text-text-hint font-mono">
         {new Date(job.createdAt).toLocaleString()}
       </div>
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-2 px-2.5 py-1 text-xs border border-border rounded-md text-text-hint hover:text-text"
+        >
+          {t("common.close")}
+        </button>
+      )}
     </li>
   );
 }

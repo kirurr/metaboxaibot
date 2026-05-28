@@ -27,6 +27,7 @@ import {
   type ListGalleryJobsQuery,
   type UpdateGalleryFolderBody,
 } from "@/api/gallery";
+import { listGenerations, type GenerationJobDto } from "@/api/generation";
 
 // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,32 @@ export function useGalleryJob(jobId: string | undefined) {
         }
       }
       return undefined;
+    },
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Сегодняшние failed-генерации для отображения в Gallery. Gallery API сам по
+ * себе возвращает только `status: "done"`, поэтому failed тянем через
+ * `/web/generations` (тот же эндпоинт, что у `GenerationHistory`), а статус и
+ * "сегодня"-окно фильтруем клиентом в `select`.
+ *
+ * `queryKey` стартует с `galleryKeys.all` — существующая инвалидация в
+ * `notificationsStore.upsert` (на каждый WS `notification:new`, включая
+ * `*_error`) автоматически перефетчит этот запрос.
+ */
+export function useGalleryFailedToday(section?: string) {
+  return useQuery<{ items: GenerationJobDto[] }, Error, GenerationJobDto[]>({
+    queryKey: [...galleryKeys.all, "failed-today", section ?? null] as const,
+    queryFn: () => listGenerations({ section, limit: 100 }),
+    select: (data) => {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const cutoff = startOfToday.getTime();
+      return data.items.filter(
+        (j) => j.status === "failed" && new Date(j.createdAt).getTime() >= cutoff,
+      );
     },
     staleTime: 30_000,
   });
