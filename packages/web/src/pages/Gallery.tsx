@@ -13,12 +13,13 @@ import {
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  ChevronLeft,
-  ChevronRight,
+  ChevronDown,
   Download,
   FolderPlus,
+  Grid3x3,
   Heart,
   Image as ImageIcon,
+  LayoutGrid,
   Loader2,
   MoreVertical,
   Music,
@@ -44,8 +45,8 @@ import {
   useDeleteGalleryJob,
   useGalleryFolders,
   useGalleryJob,
-  useGalleryJobs,
   useGalleryModelCounts,
+  useInfiniteGalleryJobs,
   useRemoveFromGalleryFavorites,
   useRemoveJobFromGalleryFolder,
   useUpdateGalleryFolder,
@@ -64,8 +65,6 @@ import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate
 import { formatTokens } from "@/utils/format";
 
 type Section = "" | "image" | "audio" | "video";
-
-const PAGE_LIMIT = 24;
 
 const SECTIONS: { value: Section; label: string }[] = [
   { value: "", label: "Все" },
@@ -715,12 +714,14 @@ function JobCard({
   output,
   folders,
   favoritesFolderId,
+  layout,
   onOpen,
 }: {
   job: GalleryJob;
   output: GalleryOutput;
   folders: GalleryFolder[];
   favoritesFolderId: string | undefined;
+  layout: GridLayout;
   onOpen: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -736,6 +737,9 @@ function JobCard({
   // metadata из <img>/<video>, до этого рендерим квадрат-дефолт (span 4).
   const [aspect, setAspect] = useState<number | null>(job.section === "audio" ? 1 : null);
   const rowSpan = spanFromAspect(aspect);
+  // В compact-режиме все тайлы квадратные на всех брейкпоинтах — masonry-span
+  // отключаем, иначе тайлы вытягиваются в прямоугольники.
+  const isCompact = layout === "compact";
 
   const handleToggleFav = (e: MouseEvent) => {
     e.stopPropagation();
@@ -748,8 +752,10 @@ function JobCard({
 
   return (
     <li
-      style={{ gridRow: `span ${rowSpan}` }}
-      className="group relative card overflow-hidden cursor-pointer"
+      style={isCompact ? undefined : { gridRow: `span ${rowSpan}` }}
+      className={`group relative card overflow-hidden cursor-pointer ${
+        isCompact ? "aspect-square" : ""
+      }`}
       onClick={onOpen}
     >
       <JobCardThumbnail section={job.section} output={output} onAspect={setAspect} />
@@ -906,101 +912,89 @@ function GalleryPreview({
   );
 }
 
-// ── Job grid ────────────────────────────────────────────────────────────────
+// ── Grid layout + grouping helpers ──────────────────────────────────────────
 
-function JobGrid({
-  jobs,
-  pendingJobs,
-  onDismissPending,
-  isLoading,
-  error,
-  folders,
-  favoritesFolderId,
-  onOpen,
-}: {
-  jobs: GalleryJob[];
-  pendingJobs: PendingJob[];
-  onDismissPending: (id: string) => void;
-  isLoading: boolean;
-  error: unknown;
-  folders: GalleryFolder[];
-  favoritesFolderId: string | undefined;
-  onOpen: (job: GalleryJob, outputIdx: number) => void;
-}) {
-  if (error) {
-    return <div className="p-8 text-center text-danger">{getErrorMessage(error)}</div>;
-  }
-  if (isLoading) {
-    return (
-      <div className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} style={{ gridRow: "span 4" }} className="skeleton rounded" />
-        ))}
-      </div>
-    );
-  }
-  if (jobs.length === 0 && pendingJobs.length === 0) {
-    return <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>;
-  }
-  return (
-    <ul className="grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3 list-none p-0 m-0">
-      {pendingJobs.map((p) => (
-        <PendingTile key={`p-${p.id}`} job={p} onDismiss={() => onDismissPending(p.id)} />
-      ))}
-      {jobs.flatMap((j) =>
-        j.outputs.map((o, idx) => (
-          <JobCard
-            key={`${j.id}-${o.id}`}
-            job={j}
-            output={o}
-            folders={folders}
-            favoritesFolderId={favoritesFolderId}
-            onOpen={() => onOpen(j, idx)}
-          />
-        )),
-      )}
-    </ul>
-  );
+type GridLayout = "compact" | "large";
+
+const GRID_CLASS: Record<GridLayout, string> = {
+  // Compact: на всех брейкпоинтах квадратные тайлы (aspect-square на карточке);
+  // без auto-rows — masonry не нужен.
+  compact:
+    "grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 xl:grid-cols-6 2xl:grid-cols-8 list-none p-0 m-0",
+  large:
+    "grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3 list-none p-0 m-0",
+};
+
+/** Локальная дата YYYY-MM-DD из ISO. en-CA-локаль даёт ISO-формат напрямую. */
+function dayKey(iso: string | null | undefined): string {
+  if (!iso) return "unknown";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  return d.toLocaleDateString("en-CA");
 }
 
-// ── Pagination ──────────────────────────────────────────────────────────────
+function formatDayLabel(key: string): string {
+  if (key === "unknown") return "Без даты";
+  const today = new Date().toLocaleDateString("en-CA");
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = yesterdayDate.toLocaleDateString("en-CA");
+  if (key === today) return "Сегодня";
+  if (key === yesterday) return "Вчера";
+  return new Date(key).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
 
-function Pagination({
-  page,
-  total,
-  limit,
+function groupByDay(
+  jobs: GalleryJob[],
+): Array<{ key: string; label: string; items: GalleryJob[] }> {
+  const map = new Map<string, GalleryJob[]>();
+  for (const j of jobs) {
+    const key = dayKey(j.completedAt);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(j);
+    else map.set(key, [j]);
+  }
+  // Сортируем по убыванию ключа (новые сверху). "unknown" — в конец.
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      if (a === "unknown") return 1;
+      if (b === "unknown") return -1;
+      return a < b ? 1 : -1;
+    })
+    .map(([key, items]) => ({ key, label: formatDayLabel(key), items }));
+}
+
+function GridLayoutSwitcher({
+  value,
   onChange,
 }: {
-  page: number;
-  total: number;
-  limit: number;
-  onChange: (p: number) => void;
+  value: GridLayout;
+  onChange: (v: GridLayout) => void;
 }) {
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  if (totalPages <= 1) return null;
+  const btn = (active: boolean) =>
+    `p-1.5 rounded ${
+      active ? "bg-accent text-white" : "bg-bg-elevated text-text-secondary hover:text-text"
+    }`;
   return (
-    <div className="flex items-center justify-center gap-3 mt-6 text-sm text-text-secondary">
-      <Button
-        variant="ghost"
-        size="sm"
-        leftIcon={<ChevronLeft size={14} />}
-        disabled={page <= 1}
-        onClick={() => onChange(page - 1)}
+    <div className="flex items-center gap-1 md:hidden">
+      <button
+        type="button"
+        onClick={() => onChange("compact")}
+        className={btn(value === "compact")}
+        title="Компактная сетка"
+        aria-label="Компактная сетка"
       >
-        Назад
-      </Button>
-      <span>
-        Стр. {page} из {totalPages}, всего {total}
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        rightIcon={<ChevronRight size={14} />}
-        disabled={page >= totalPages}
-        onClick={() => onChange(page + 1)}
+        <Grid3x3 size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("large")}
+        className={btn(value === "large")}
+        title="Крупная сетка"
+        aria-label="Крупная сетка"
       >
-        Вперёд
-      </Button>
+        <LayoutGrid size={16} />
+      </button>
     </div>
   );
 }
@@ -1011,7 +1005,8 @@ export default function GalleryPage() {
   const [section, setSection] = useState<Section>("");
   const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
-  const [page, setPage] = useState(1);
+  const [gridLayout, setGridLayout] = useState<GridLayout>("large");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const { jobId } = useParams<{ jobId: string }>();
   const [searchParams] = useSearchParams();
@@ -1029,18 +1024,15 @@ export default function GalleryPage() {
       section: section || undefined,
       modelId,
       folderId,
-      page,
-      limit: PAGE_LIMIT,
     }),
-    [section, modelId, folderId, page],
+    [section, modelId, folderId],
   );
 
-  const { data: jobsData, isLoading, error } = useGalleryJobs(params);
+  const { jobs, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error } =
+    useInfiniteGalleryJobs(params);
   const { data: folders = [] } = useGalleryFolders();
   const detail = useGalleryJob(jobId);
   const favoritesFolderId = folders.find((f) => f.isDefault)?.id;
-  const jobs = jobsData?.items ?? [];
-  const total = jobsData?.total ?? 0;
 
   const pendingJobs = usePendingJobsStore((s) => s.pendingJobs);
   const removePending = usePendingJobsStore((s) => s.remove);
@@ -1064,6 +1056,29 @@ export default function GalleryPage() {
     });
   }, [pendingJobs, folderId, section, modelId, jobs]);
 
+  const groups = useMemo(() => groupByDay(jobs), [jobs]);
+
+  // Pending'и идут в группу «Сегодня» — они логически часть сегодняшней ленты.
+  // Если такой группы ещё нет (только что зашли, jobs пустой / в jobs нет
+  // сегодняшних) — создаём пустую плейсхолдер-группу под pending'и.
+  const todayKey = new Date().toLocaleDateString("en-CA");
+  const groupsWithPending = useMemo(() => {
+    if (visiblePending.length === 0) return groups;
+    if (groups.some((g) => g.key === todayKey)) return groups;
+    return [
+      { key: todayKey, label: formatDayLabel(todayKey), items: [] as GalleryJob[] },
+      ...groups,
+    ];
+  }, [groups, visiblePending.length, todayKey]);
+
+  // Избранные работы — отдельной секцией наверху, дублируются в датах (видны и
+  // там, и там, как «закреплённые» сверху). Скрываем секцию когда юзер уже
+  // отфильтровал по папке — там и так показывается её содержимое.
+  const favoriteJobs = useMemo<GalleryJob[]>(() => {
+    if (folderId !== undefined || !favoritesFolderId) return [];
+    return jobs.filter((j) => j.folderIds.includes(favoritesFolderId));
+  }, [jobs, folderId, favoritesFolderId]);
+
   // 404 при прямом заходе на /gallery/{несуществующий-id} — toast + редирект.
   useEffect(() => {
     if (jobId && detail.isError) {
@@ -1072,15 +1087,32 @@ export default function GalleryPage() {
     }
   }, [jobId, detail.isError, navigate, pushToast]);
 
+  // Infinite scroll: sentinel внизу страницы; пересечение viewport (с запасом
+  // rootMargin) триггерит fetchNextPage. Перевешиваем observer когда меняются
+  // hasNextPage/isFetchingNextPage (иначе колбэк держит stale ссылку).
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasNextPage) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const handleSection = useCallback((s: Section) => {
     setSection(s);
     setModelId(undefined);
-    setPage(1);
   }, []);
 
   const handleModel = useCallback((id: string | undefined) => {
     setModelId(id);
-    setPage(1);
   }, []);
 
   const handleFolder = useCallback((id: string | undefined) => {
@@ -1088,7 +1120,15 @@ export default function GalleryPage() {
     // Сбрасываем выбранную модель — после смены фолдера её counts могут
     // отсутствовать в чипах, и список окажется пустым без видимой причины.
     setModelId(undefined);
-    setPage(1);
+  }, []);
+
+  const toggleCollapsed = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, []);
 
   const handleOpen = useCallback(
@@ -1103,13 +1143,17 @@ export default function GalleryPage() {
     navigate("/gallery");
   }, [navigate]);
 
+  const gridClass = GRID_CLASS[gridLayout];
+  const isEmpty = !isLoading && jobs.length === 0 && visiblePending.length === 0;
+
   return (
     <div className="page">
-      <div className="page-head rise">
+      <div className="page-head rise flex items-start justify-between gap-3">
         <div>
           <h1 className="h1">Галерея</h1>
           <p className="sub">Все ваши генерации в одном месте.</p>
         </div>
+        <GridLayoutSwitcher value={gridLayout} onChange={setGridLayout} />
       </div>
 
       <div className="flex flex-col gap-6 mt-4">
@@ -1126,18 +1170,120 @@ export default function GalleryPage() {
             />
           </div>
 
-          <JobGrid
-            jobs={jobs}
-            pendingJobs={visiblePending}
-            onDismissPending={removePending}
-            isLoading={isLoading}
-            error={error}
-            folders={folders}
-            favoritesFolderId={favoritesFolderId}
-            onOpen={handleOpen}
-          />
+          {error && <div className="p-8 text-center text-danger">{getErrorMessage(error)}</div>}
 
-          <Pagination page={page} total={total} limit={PAGE_LIMIT} onChange={setPage} />
+          {isLoading && (
+            <div className={gridClass}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} style={{ gridRow: "span 4" }} className="skeleton rounded" />
+              ))}
+            </div>
+          )}
+
+          {!isLoading && !error && (
+            <div className="space-y-8">
+              {favoriteJobs.length > 0 &&
+                (() => {
+                  const FAV_KEY = "__favorites";
+                  const isCollapsed = collapsed.has(FAV_KEY);
+                  return (
+                    <section>
+                      <button
+                        type="button"
+                        onClick={() => toggleCollapsed(FAV_KEY)}
+                        className="flex items-center gap-2 mb-4 text-text-secondary hover:text-text transition-colors w-full text-left"
+                      >
+                        <ChevronDown
+                          size={16}
+                          className={`transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                        />
+                        <Heart size={14} fill="currentColor" className="text-danger" />
+                        <span className="text-sm font-semibold">Избранное</span>
+                        <span className="text-xs text-text-hint">({favoriteJobs.length})</span>
+                      </button>
+                      {!isCollapsed && (
+                        <ul className={gridClass}>
+                          {favoriteJobs.flatMap((j) =>
+                            j.outputs.map((o, idx) => (
+                              <JobCard
+                                key={`fav-${j.id}-${o.id}`}
+                                job={j}
+                                output={o}
+                                folders={folders}
+                                favoritesFolderId={favoritesFolderId}
+                                layout={gridLayout}
+                                onOpen={() => handleOpen(j, idx)}
+                              />
+                            )),
+                          )}
+                        </ul>
+                      )}
+                    </section>
+                  );
+                })()}
+
+              {groupsWithPending.map((g) => {
+                const isCollapsed = collapsed.has(g.key);
+                const pendingHere = g.key === todayKey ? visiblePending : [];
+                const totalCount = g.items.length + pendingHere.length;
+                return (
+                  <section key={g.key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapsed(g.key)}
+                      className="flex items-center gap-2 mb-4 text-text-secondary hover:text-text transition-colors w-full text-left"
+                    >
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                      />
+                      <span className="text-sm font-semibold">{g.label}</span>
+                      <span className="text-xs text-text-hint">({totalCount})</span>
+                    </button>
+                    {!isCollapsed && (
+                      <ul className={gridClass}>
+                        {pendingHere.map((p) => (
+                          <PendingTile
+                            key={`p-${p.id}`}
+                            job={p}
+                            onDismiss={() => removePending(p.id)}
+                            compact={gridLayout === "compact"}
+                          />
+                        ))}
+                        {g.items.flatMap((j) =>
+                          j.outputs.map((o, idx) => (
+                            <JobCard
+                              key={`${j.id}-${o.id}`}
+                              job={j}
+                              output={o}
+                              folders={folders}
+                              favoritesFolderId={favoritesFolderId}
+                              layout={gridLayout}
+                              onOpen={() => handleOpen(j, idx)}
+                            />
+                          )),
+                        )}
+                      </ul>
+                    )}
+                  </section>
+                );
+              })}
+
+              {isEmpty && (
+                <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>
+              )}
+
+              {/* Sentinel — последняя строка триггерит подгрузку. Высоты не имеет,
+                  растягивается по ширине родителя, чтобы IntersectionObserver сработал. */}
+              {hasNextPage && <div ref={sentinelRef} className="h-px w-full" aria-hidden />}
+
+              {isFetchingNextPage && (
+                <div className="flex justify-center py-4">
+                  <Loader2 size={20} className="animate-spin text-text-hint" />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

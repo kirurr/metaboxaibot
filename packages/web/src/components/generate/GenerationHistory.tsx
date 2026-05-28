@@ -270,16 +270,26 @@ function TileRenderer({
 
 // ── Tiles ────────────────────────────────────────────────────────────────────
 
-export function PendingTile({ job, onDismiss }: { job: PendingJob; onDismiss: () => void }) {
+export function PendingTile({
+  job,
+  onDismiss,
+  compact = false,
+}: {
+  job: PendingJob;
+  onDismiss: () => void;
+  /** В compact-режиме тайл квадратный (без masonry-span), для Gallery 3-col layout. */
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
   const status = job.errorMessage ? "error" : (job.status ?? "pending");
   const isError = status === "error";
 
   return (
     <li
-      style={{ gridRow: "span 4" }}
+      style={compact ? undefined : { gridRow: "span 4" }}
       className={clsx(
         "relative rounded-[var(--radius)] overflow-hidden flex flex-col items-center justify-center p-4 text-center",
+        compact && "aspect-square",
         isError
           ? "bg-[rgba(220,50,50,0.08)] border border-[var(--danger,#d44)]"
           : "bg-bg-elevated border border-dashed border-border",
