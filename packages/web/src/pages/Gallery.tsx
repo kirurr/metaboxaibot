@@ -2,7 +2,6 @@ import {
   type CSSProperties,
   type FormEvent,
   type MouseEvent,
-  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -12,16 +11,15 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  Coins,
+  ChevronDown,
   Download,
   FolderPlus,
+  Grid3x3,
   Heart,
   Image as ImageIcon,
+  LayoutGrid,
   Loader2,
   MoreVertical,
   Music,
@@ -45,24 +43,31 @@ import {
   useCreateGalleryFolder,
   useDeleteGalleryFolder,
   useDeleteGalleryJob,
+  useGalleryFailedToday,
   useGalleryFolders,
   useGalleryJob,
-  useGalleryJobs,
   useGalleryModelCounts,
+  useInfiniteGalleryJobs,
   useRemoveFromGalleryFavorites,
   useRemoveJobFromGalleryFolder,
   useUpdateGalleryFolder,
 } from "@/hooks/useGallery";
+import type { GenerationJobDto } from "@/api/generation";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
+import {
+  GenerationPreviewModal,
+  type PreviewOutput,
+} from "@/components/common/GenerationPreviewModal";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
+import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore";
+import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
+import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import { formatTokens } from "@/utils/format";
 
 type Section = "" | "image" | "audio" | "video";
-
-const PAGE_LIMIT = 24;
 
 const SECTIONS: { value: Section; label: string }[] = [
   { value: "", label: "Все" },
@@ -70,6 +75,19 @@ const SECTIONS: { value: Section; label: string }[] = [
   { value: "audio", label: "Аудио" },
   { value: "video", label: "Видео" },
 ];
+
+/**
+ * Masonry-span по aspect'у — повторяет логику из GenerationHistory.tsx, чтобы
+ * галерея визуально совпадала с лентой генерации на странице создания.
+ * Базовый ряд auto-rows-[80px] (на mobile 100px), gap 12px:
+ *   span 3 → wide (16:9 и шире), span 4 → square-дефолт, span 5 → tall (9:16 и уже).
+ */
+function spanFromAspect(aspect: number | null): number {
+  if (aspect == null) return 4;
+  if (aspect > 1.3) return 3;
+  if (aspect < 0.85) return 5;
+  return 4;
+}
 
 function chipClass(active: boolean): string {
   return active
@@ -301,7 +319,7 @@ function FolderRow({
   };
 
   const baseRow =
-    "group flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit md:min-w-0";
+    "group flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit";
   const stateRow = active
     ? "bg-accent text-white"
     : "bg-bg-elevated text-text-secondary hover:text-text";
@@ -392,7 +410,7 @@ function FolderSidebar({
   };
 
   return (
-    <aside className="md:w-60 md:flex-shrink-0">
+    <aside>
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide">Папки</h2>
         <button
@@ -406,10 +424,10 @@ function FolderSidebar({
         </button>
       </div>
 
-      <div className="flex md:flex-col flex-row md:overflow-visible overflow-x-auto gap-1 pb-1 md:pb-0">
+      <div className="flex flex-row overflow-x-auto gap-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div
           onClick={() => onChange(undefined)}
-          className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit md:min-w-0 ${
+          className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer text-sm transition-colors min-w-fit whitespace-nowrap ${
             folderId === undefined
               ? "bg-accent text-white"
               : "bg-bg-elevated text-text-secondary hover:text-text"
@@ -457,9 +475,16 @@ function ThumbnailPlaceholder({ section }: { section: string }) {
   );
 }
 
-function JobCardThumbnail({ job }: { job: GalleryJob }) {
-  const first = job.outputs[0];
-  const imgSrc = first?.thumbnailUrl ?? (job.section === "image" ? first?.previewUrl : null);
+function JobCardThumbnail({
+  section,
+  output,
+  onAspect,
+}: {
+  section: string;
+  output: GalleryOutput;
+  onAspect: (aspect: number) => void;
+}) {
+  const imgSrc = output.thumbnailUrl ?? (section === "image" ? output.previewUrl : null);
   if (imgSrc) {
     return (
       <img
@@ -467,18 +492,22 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
         alt=""
         loading="lazy"
         className="w-full h-full object-cover"
+        onLoad={(e) => {
+          const { naturalWidth, naturalHeight } = e.currentTarget;
+          if (naturalWidth && naturalHeight) onAspect(naturalWidth / naturalHeight);
+        }}
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).style.display = "none";
         }}
       />
     );
   }
-  if (job.section === "video") {
+  if (section === "video") {
     // Кадр-превью бэк не отдал — рендерим само видео без controls и без
     // возможности запустить (pointer-events:none пробрасывает клик на карточку,
     // которая открывает Lightbox). `#t=0.001` гарантирует, что Safari/Firefox
     // отобразят первый кадр, а не чёрный poster.
-    const videoSrc = first?.previewUrl ?? first?.outputUrl ?? null;
+    const videoSrc = output.previewUrl ?? output.outputUrl ?? null;
     if (videoSrc) {
       return (
         <video
@@ -489,6 +518,10 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
           disablePictureInPicture
           controlsList="nodownload nofullscreen noremoteplayback"
           className="w-full h-full object-cover pointer-events-none"
+          onLoadedMetadata={(e) => {
+            const { videoWidth, videoHeight } = e.currentTarget;
+            if (videoWidth && videoHeight) onAspect(videoWidth / videoHeight);
+          }}
           onError={(e) => {
             (e.currentTarget as HTMLVideoElement).style.display = "none";
           }}
@@ -496,19 +529,21 @@ function JobCardThumbnail({ job }: { job: GalleryJob }) {
       );
     }
   }
-  return <ThumbnailPlaceholder section={job.section} />;
+  return <ThumbnailPlaceholder section={section} />;
 }
 
 const MENU_WIDTH = 224;
 
 function JobCardMenu({
   job,
+  output,
   folders,
   anchorRef,
   onClose,
   onOpenLightbox,
 }: {
   job: GalleryJob;
+  output: GalleryOutput;
   folders: GalleryFolder[];
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
@@ -573,10 +608,8 @@ function JobCardMenu({
   };
 
   const handleDownload = async () => {
-    const out = job.outputs[0];
-    if (!out) return;
     try {
-      const { url } = await getGalleryOriginalUrl(out.id);
+      const { url } = await getGalleryOriginalUrl(output.id);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       pushToast({ type: "error", message: getErrorMessage(err) });
@@ -681,13 +714,17 @@ function JobCardMenu({
 
 function JobCard({
   job,
+  output,
   folders,
   favoritesFolderId,
+  layout,
   onOpen,
 }: {
   job: GalleryJob;
+  output: GalleryOutput;
   folders: GalleryFolder[];
   favoritesFolderId: string | undefined;
+  layout: GridLayout;
   onOpen: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -699,6 +736,14 @@ function JobCard({
   const isFav = favoritesFolderId ? job.folderIds.includes(favoritesFolderId) : false;
   const favPending = addFav.isPending || removeFav.isPending;
 
+  // Аудио — нет визуального аспекта; всегда квадрат. Для image/video подождём
+  // metadata из <img>/<video>, до этого рендерим квадрат-дефолт (span 4).
+  const [aspect, setAspect] = useState<number | null>(job.section === "audio" ? 1 : null);
+  const rowSpan = spanFromAspect(aspect);
+  // В compact-режиме все тайлы квадратные на всех брейкпоинтах — masonry-span
+  // отключаем, иначе тайлы вытягиваются в прямоугольники.
+  const isCompact = layout === "compact";
+
   const handleToggleFav = (e: MouseEvent) => {
     e.stopPropagation();
     const opts = {
@@ -709,11 +754,14 @@ function JobCard({
   };
 
   return (
-    <div
-      className="group relative card overflow-hidden aspect-square cursor-pointer"
+    <li
+      style={isCompact ? undefined : { gridRow: `span ${rowSpan}` }}
+      className={`group relative card overflow-hidden cursor-pointer ${
+        isCompact ? "aspect-square" : ""
+      }`}
       onClick={onOpen}
     >
-      <JobCardThumbnail job={job} />
+      <JobCardThumbnail section={job.section} output={output} onAspect={setAspect} />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
@@ -748,365 +796,208 @@ function JobCard({
       {menuOpen && (
         <JobCardMenu
           job={job}
+          output={output}
           folders={folders}
           anchorRef={triggerRef}
           onClose={() => setMenuOpen(false)}
           onOpenLightbox={onOpen}
         />
       )}
-    </div>
+    </li>
   );
 }
 
-// ── Lightbox ────────────────────────────────────────────────────────────────
+// ── Preview (общая модалка) ─────────────────────────────────────────────────
 
-function LightboxMedia({ section, output }: { section: string; output: GalleryOutput }) {
-  const src = output.previewUrl ?? output.outputUrl ?? undefined;
-  if (!src) {
-    return <div className="text-text-secondary p-8">Превью недоступно</div>;
-  }
-  if (section === "video") {
-    return <video src={src} controls className="max-h-[70vh] max-w-full rounded" />;
-  }
-  if (section === "audio") {
-    return (
-      <div className="flex flex-col items-center gap-4 p-8">
-        <Music size={64} className="text-text-secondary" />
-        <audio src={src} controls className="w-full max-w-md" />
-      </div>
-    );
-  }
-  return <img src={src} alt="" className="max-h-[70vh] max-w-full object-contain rounded" />;
-}
-
-function formatLightboxDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
-}
-
-function MetaChip({ icon, label }: { icon: ReactNode; label: string }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs"
-      style={{ background: "var(--accent-lighter)", color: "var(--accent-light)" }}
-    >
-      {icon}
-      {label}
-    </span>
-  );
-}
-
-function Lightbox({ job, onClose }: { job: GalleryJob; onClose: () => void }) {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const pushToast = useUIStore((s) => s.pushToast);
+/**
+ * Адаптер `GalleryJob` → пропсы `GenerationPreviewModal`. Активный output
+ * хранится локально (resets на каждое открытие — `key={job.id}` в GalleryPage).
+ * Кроме повтор/скачивания — здесь же чипы папок (toggle add/remove).
+ */
+function GalleryPreview({
+  job,
+  folders,
+  initialOutputIdx,
+  onClose,
+}: {
+  job: GalleryJob;
+  folders: GalleryFolder[];
+  initialOutputIdx: number;
+  onClose: () => void;
+}) {
   const navigate = useNavigate();
-  const active = job.outputs[activeIdx] ?? job.outputs[0];
-  const hasMultiple = job.outputs.length > 1;
+  const pushToast = useUIStore((s) => s.pushToast);
+  const addToFolder = useAddJobToGalleryFolder();
+  const removeFromFolder = useRemoveJobFromGalleryFolder();
+  const [activeIdx, setActiveIdx] = useState(initialOutputIdx);
 
-  const handleRepeat = () => {
+  const previewOutputs = useMemo<PreviewOutput[]>(
+    () =>
+      job.outputs
+        .map((o) => ({
+          id: o.id,
+          url: o.previewUrl ?? o.outputUrl ?? "",
+          thumbnailUrl: o.thumbnailUrl,
+        }))
+        .filter((o) => o.url),
+    [job.outputs],
+  );
+
+  const handleRepeat = useCallback(() => {
     const section = normalizeSection(job.section);
     if (!section) {
+      // Невалидную секцию показываем тостом, модалку оставляем открытой.
       pushToast({ type: "error", message: "Неизвестная секция" });
       return;
     }
+    onClose();
     navigateToGenerate(navigate, {
       section,
       modelId: job.modelId,
       prompt: job.prompt,
       settings: job.modelSettings,
     });
-  };
+  }, [job, navigate, pushToast, onClose]);
 
-  const goNext = useCallback(() => {
-    setActiveIdx((i) => (i + 1) % job.outputs.length);
-  }, [job.outputs.length]);
-
-  const goPrev = useCallback(() => {
-    setActiveIdx((i) => (i - 1 + job.outputs.length) % job.outputs.length);
-  }, [job.outputs.length]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft" && hasMultiple) goPrev();
-      else if (e.key === "ArrowRight" && hasMultiple) goNext();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, goPrev, goNext, hasMultiple]);
-
-  const handleDownload = async () => {
-    if (!active) return;
+  const handleDownload = useCallback(async () => {
+    // Ищем в `previewOutputs` (отфильтрован по url), а не в `job.outputs` —
+    // иначе при отброшенном output'е activeIdx смещается и качаем не ту работу.
+    const safe = Math.min(activeIdx, previewOutputs.length - 1);
+    const out = previewOutputs[safe];
+    if (!out) return;
     try {
-      const { url } = await getGalleryOriginalUrl(active.id);
+      const { url } = await getGalleryOriginalUrl(out.id);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       pushToast({ type: "error", message: getErrorMessage(err) });
     }
-  };
+  }, [previewOutputs, activeIdx, pushToast]);
 
-  if (!active) return null;
+  const handleToggleFolder = useCallback(
+    (folderId: string) => {
+      const isIn = job.folderIds.includes(folderId);
+      const opts = {
+        onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
+      };
+      if (isIn) removeFromFolder.mutate({ folderId, jobId: job.id }, opts);
+      else addToFolder.mutate({ folderId, jobId: job.id }, opts);
+    },
+    [job.id, job.folderIds, addToFolder, removeFromFolder, pushToast],
+  );
+
+  if (previewOutputs.length === 0) return null;
 
   const tokensValue =
     job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
-  const hasMeta = Boolean(job.completedAt || tokensValue);
+  const safeIdx = Math.min(activeIdx, previewOutputs.length - 1);
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 anim-page-in"
-      onClick={onClose}
-    >
-      <div
-        className="fixed inset-0"
-        style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-      />
-      <div
-        className="relative card w-full max-w-6xl max-h-[90vh] z-10 overflow-hidden flex flex-col md:grid md:grid-cols-[minmax(0,1fr)_340px]"
-        style={{ background: "var(--bg-elevated)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Закрыть"
-          className="absolute top-3 right-3 z-20 h-9 w-9 rounded-full flex items-center justify-center border transition-colors"
-          style={{
-            background: "rgba(0,0,0,0.45)",
-            backdropFilter: "blur(8px)",
-            borderColor: "var(--border-strong)",
-            color: "var(--text-secondary)",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = "var(--text)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
-        >
-          <X size={16} />
-        </button>
-
-        {/* Media column */}
-        <div className="relative flex flex-col min-w-0" style={{ background: "rgba(0,0,0,0.25)" }}>
-          <div className="relative flex-1 flex items-center justify-center min-h-[40vh] md:min-h-[60vh] p-4">
-            <LightboxMedia section={job.section} output={active} />
-
-            {hasMultiple && (
-              <>
-                <button
-                  type="button"
-                  onClick={goPrev}
-                  aria-label="Предыдущий"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full flex items-center justify-center border transition-opacity opacity-70 hover:opacity-100"
-                  style={{
-                    background: "rgba(0,0,0,0.5)",
-                    backdropFilter: "blur(8px)",
-                    borderColor: "var(--border-strong)",
-                    color: "var(--text)",
-                  }}
-                >
-                  <ChevronLeft size={20} />
-                </button>
-                <button
-                  type="button"
-                  onClick={goNext}
-                  aria-label="Следующий"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full flex items-center justify-center border transition-opacity opacity-70 hover:opacity-100"
-                  style={{
-                    background: "rgba(0,0,0,0.5)",
-                    backdropFilter: "blur(8px)",
-                    borderColor: "var(--border-strong)",
-                    color: "var(--text)",
-                  }}
-                >
-                  <ChevronRight size={20} />
-                </button>
-              </>
-            )}
-          </div>
-
-          {hasMultiple && (
-            <div className="flex items-center gap-2 px-4 pb-4 overflow-x-auto [scrollbar-width:thin]">
-              {job.outputs.map((o, i) => {
-                const thumb = o.thumbnailUrl ?? (job.section === "image" ? o.previewUrl : null);
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setActiveIdx(i)}
-                    className={`shrink-0 w-16 h-16 rounded overflow-hidden border-2 transition-colors ${
-                      i === activeIdx
-                        ? "border-[var(--accent)]"
-                        : "border-transparent hover:border-[var(--border-strong)]"
-                    }`}
-                  >
-                    {thumb ? (
-                      <img src={thumb} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <ThumbnailPlaceholder section={job.section} />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Info sidebar */}
-        <aside
-          className="flex flex-col border-t md:border-t-0 md:border-l overflow-hidden"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            <h2 className="text-base font-semibold leading-snug" style={{ color: "var(--text)" }}>
-              {job.modelName}
-            </h2>
-
-            {hasMeta && (
-              <div className="flex flex-wrap gap-1.5">
-                {job.completedAt && (
-                  <MetaChip
-                    icon={<Calendar size={14} />}
-                    label={formatLightboxDate(job.completedAt)}
-                  />
-                )}
-                {tokensValue && (
-                  <MetaChip icon={<Coins size={14} />} label={`${tokensValue} токенов`} />
-                )}
-              </div>
-            )}
-
-            {job.prompt && (
-              <div>
-                <div
-                  className="text-xs uppercase tracking-wide mb-1.5"
-                  style={{ color: "var(--text-hint)" }}
-                >
-                  Промпт
-                </div>
-                <p
-                  className="text-sm leading-relaxed whitespace-pre-wrap break-words"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {job.prompt}
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div
-            className="border-t p-4 flex flex-col gap-2"
-            style={{ borderColor: "var(--border)", background: "var(--bg-elevated)" }}
-          >
-            <Button
-              variant="secondary"
-              leftIcon={<RotateCcw size={16} />}
-              onClick={handleRepeat}
-              fullWidth
-            >
-              Повторить
-            </Button>
-            <Button
-              variant="ghost"
-              leftIcon={<Download size={16} />}
-              onClick={handleDownload}
-              fullWidth
-            >
-              Скачать оригинал
-            </Button>
-          </div>
-        </aside>
-      </div>
-    </div>
+    <GenerationPreviewModal
+      outputs={previewOutputs}
+      activeIdx={safeIdx}
+      onActiveIdxChange={setActiveIdx}
+      section={job.section}
+      onClose={onClose}
+      info={{
+        title: job.modelName,
+        dateIso: job.completedAt,
+        tokensValue,
+        prompt: job.prompt,
+        onRepeat: handleRepeat,
+        onDownload: handleDownload,
+        folders: {
+          list: folders,
+          selectedIds: job.folderIds,
+          onToggle: handleToggleFolder,
+        },
+      }}
+    />
   );
 }
 
-// ── Job grid ────────────────────────────────────────────────────────────────
+// ── Grid layout + grouping helpers ──────────────────────────────────────────
 
-function JobGrid({
-  jobs,
-  isLoading,
-  error,
-  folders,
-  favoritesFolderId,
-  onOpen,
-}: {
-  jobs: GalleryJob[];
-  isLoading: boolean;
-  error: unknown;
-  folders: GalleryFolder[];
-  favoritesFolderId: string | undefined;
-  onOpen: (job: GalleryJob) => void;
-}) {
-  if (error) {
-    return <div className="p-8 text-center text-danger">{getErrorMessage(error)}</div>;
-  }
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="skeleton aspect-square rounded" />
-        ))}
-      </div>
-    );
-  }
-  if (jobs.length === 0) {
-    return <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>;
-  }
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-      {jobs.map((j) => (
-        <JobCard
-          key={j.id}
-          job={j}
-          folders={folders}
-          favoritesFolderId={favoritesFolderId}
-          onOpen={() => onOpen(j)}
-        />
-      ))}
-    </div>
-  );
+type GridLayout = "compact" | "large";
+
+const GRID_CLASS: Record<GridLayout, string> = {
+  // Compact: на всех брейкпоинтах квадратные тайлы (aspect-square на карточке);
+  // без auto-rows — masonry не нужен.
+  compact:
+    "grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 xl:grid-cols-6 2xl:grid-cols-8 list-none p-0 m-0",
+  large:
+    "grid grid-flow-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 auto-rows-[100px] sm:auto-rows-[80px] gap-3 list-none p-0 m-0",
+};
+
+/** Локальная дата YYYY-MM-DD из ISO. en-CA-локаль даёт ISO-формат напрямую. */
+function dayKey(iso: string | null | undefined): string {
+  if (!iso) return "unknown";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  return d.toLocaleDateString("en-CA");
 }
 
-// ── Pagination ──────────────────────────────────────────────────────────────
+function formatDayLabel(key: string): string {
+  if (key === "unknown") return "Без даты";
+  const today = new Date().toLocaleDateString("en-CA");
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = yesterdayDate.toLocaleDateString("en-CA");
+  if (key === today) return "Сегодня";
+  if (key === yesterday) return "Вчера";
+  return new Date(key).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
 
-function Pagination({
-  page,
-  total,
-  limit,
+function groupByDay(
+  jobs: GalleryJob[],
+): Array<{ key: string; label: string; items: GalleryJob[] }> {
+  const map = new Map<string, GalleryJob[]>();
+  for (const j of jobs) {
+    const key = dayKey(j.completedAt);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(j);
+    else map.set(key, [j]);
+  }
+  // Сортируем по убыванию ключа (новые сверху). "unknown" — в конец.
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      if (a === "unknown") return 1;
+      if (b === "unknown") return -1;
+      return a < b ? 1 : -1;
+    })
+    .map(([key, items]) => ({ key, label: formatDayLabel(key), items }));
+}
+
+function GridLayoutSwitcher({
+  value,
   onChange,
 }: {
-  page: number;
-  total: number;
-  limit: number;
-  onChange: (p: number) => void;
+  value: GridLayout;
+  onChange: (v: GridLayout) => void;
 }) {
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  if (totalPages <= 1) return null;
+  const btn = (active: boolean) =>
+    `p-1.5 rounded ${
+      active ? "bg-accent text-white" : "bg-bg-elevated text-text-secondary hover:text-text"
+    }`;
   return (
-    <div className="flex items-center justify-center gap-3 mt-6 text-sm text-text-secondary">
-      <Button
-        variant="ghost"
-        size="sm"
-        leftIcon={<ChevronLeft size={14} />}
-        disabled={page <= 1}
-        onClick={() => onChange(page - 1)}
+    <div className="flex items-center gap-1 md:hidden">
+      <button
+        type="button"
+        onClick={() => onChange("compact")}
+        className={btn(value === "compact")}
+        title="Компактная сетка"
+        aria-label="Компактная сетка"
       >
-        Назад
-      </Button>
-      <span>
-        Стр. {page} из {totalPages}, всего {total}
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        rightIcon={<ChevronRight size={14} />}
-        disabled={page >= totalPages}
-        onClick={() => onChange(page + 1)}
+        <Grid3x3 size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("large")}
+        className={btn(value === "large")}
+        title="Крупная сетка"
+        aria-label="Крупная сетка"
       >
-        Вперёд
-      </Button>
+        <LayoutGrid size={16} />
+      </button>
     </div>
   );
 }
@@ -1117,29 +1008,100 @@ export default function GalleryPage() {
   const [section, setSection] = useState<Section>("");
   const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
-  const [page, setPage] = useState(1);
+  const [gridLayout, setGridLayout] = useState<GridLayout>("large");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const { jobId } = useParams<{ jobId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
+
+  const previewOutputIdx = (() => {
+    const raw = searchParams.get("o");
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  })();
 
   const params = useMemo(
     () => ({
       section: section || undefined,
       modelId,
       folderId,
-      page,
-      limit: PAGE_LIMIT,
     }),
-    [section, modelId, folderId, page],
+    [section, modelId, folderId],
   );
 
-  const { data: jobsData, isLoading, error } = useGalleryJobs(params);
+  const { jobs, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error } =
+    useInfiniteGalleryJobs(params);
   const { data: folders = [] } = useGalleryFolders();
   const detail = useGalleryJob(jobId);
   const favoritesFolderId = folders.find((f) => f.isDefault)?.id;
-  const jobs = jobsData?.items ?? [];
-  const total = jobsData?.total ?? 0;
+
+  const pendingJobs = usePendingJobsStore((s) => s.pendingJobs);
+  const removePending = usePendingJobsStore((s) => s.remove);
+
+  // Pending'и не привязаны к папкам и не имеют modelId-фильтрации до завершения —
+  // если активен фильтр folder, прячем pending'и (иначе бы они «вылетали» из
+  // выбранной папки). modelId сравниваем точно, section — нормализованный.
+  // Success-pending'и не показываем: gallery query инвалидируется в момент
+  // success WS и сама подхватит готовую работу (loader на success-тайле
+  // визуально вводит в заблуждение). Error-pending — показываем, чтобы юзер
+  // увидел причину и dismiss'нул.
+  const visiblePending = useMemo<PendingJob[]>(() => {
+    if (folderId) return [];
+    const jobIds = new Set(jobs.map((j) => j.id));
+    return pendingJobs.filter((p) => {
+      if (p.status === "success") return false;
+      if (jobIds.has(p.id)) return false;
+      if (section && p.section !== section) return false;
+      if (modelId && p.modelId !== modelId) return false;
+      return true;
+    });
+  }, [pendingJobs, folderId, section, modelId, jobs]);
+
+  // Сегодняшние failed-генерации. Gallery API возвращает только "done", поэтому
+  // тянем отдельным запросом через `/web/generations` (тот же эндпоинт, что у
+  // GenerationHistory). Скрытые юзером (`onDismiss`) фильтруем по persisted
+  // store; in-session WS-error дедуплицируем по pendingIds (та же job уже
+  // живёт как PendingTile-error до рефреша).
+  const { data: failedToday = [] } = useGalleryFailedToday(section || undefined);
+  const dismissedIds = useDismissedErrorsStore((s) => s.ids);
+  const dismissError = useDismissedErrorsStore((s) => s.dismiss);
+  const visibleFailed = useMemo<GenerationJobDto[]>(() => {
+    if (folderId) return [];
+    const dismissed = new Set(dismissedIds);
+    const pendingIds = new Set(pendingJobs.map((p) => p.id));
+    return failedToday.filter((j) => {
+      if (dismissed.has(j.id)) return false;
+      if (pendingIds.has(j.id)) return false;
+      if (modelId && j.modelId !== modelId) return false;
+      return true;
+    });
+  }, [failedToday, folderId, modelId, dismissedIds, pendingJobs]);
+
+  const groups = useMemo(() => groupByDay(jobs), [jobs]);
+
+  // Pending'и и сегодняшние failed идут в группу «Сегодня» — они логически
+  // часть сегодняшней ленты. Если такой группы ещё нет (только что зашли,
+  // jobs пустой / в jobs нет сегодняшних) — создаём пустую плейсхолдер-группу
+  // под них.
+  const todayKey = new Date().toLocaleDateString("en-CA");
+  const groupsWithPending = useMemo(() => {
+    if (visiblePending.length === 0 && visibleFailed.length === 0) return groups;
+    if (groups.some((g) => g.key === todayKey)) return groups;
+    return [
+      { key: todayKey, label: formatDayLabel(todayKey), items: [] as GalleryJob[] },
+      ...groups,
+    ];
+  }, [groups, visiblePending.length, visibleFailed.length, todayKey]);
+
+  // Избранные работы — отдельной секцией наверху, дублируются в датах (видны и
+  // там, и там, как «закреплённые» сверху). Скрываем секцию когда юзер уже
+  // отфильтровал по папке — там и так показывается её содержимое.
+  const favoriteJobs = useMemo<GalleryJob[]>(() => {
+    if (folderId !== undefined || !favoritesFolderId) return [];
+    return jobs.filter((j) => j.folderIds.includes(favoritesFolderId));
+  }, [jobs, folderId, favoritesFolderId]);
 
   // 404 при прямом заходе на /gallery/{несуществующий-id} — toast + редирект.
   useEffect(() => {
@@ -1149,15 +1111,32 @@ export default function GalleryPage() {
     }
   }, [jobId, detail.isError, navigate, pushToast]);
 
+  // Infinite scroll: sentinel внизу страницы; пересечение viewport (с запасом
+  // rootMargin) триггерит fetchNextPage. Перевешиваем observer когда меняются
+  // hasNextPage/isFetchingNextPage (иначе колбэк держит stale ссылку).
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasNextPage) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const handleSection = useCallback((s: Section) => {
     setSection(s);
     setModelId(undefined);
-    setPage(1);
   }, []);
 
   const handleModel = useCallback((id: string | undefined) => {
     setModelId(id);
-    setPage(1);
   }, []);
 
   const handleFolder = useCallback((id: string | undefined) => {
@@ -1165,10 +1144,22 @@ export default function GalleryPage() {
     // Сбрасываем выбранную модель — после смены фолдера её counts могут
     // отсутствовать в чипах, и список окажется пустым без видимой причины.
     setModelId(undefined);
-    setPage(1);
   }, []);
 
-  const handleOpen = useCallback((job: GalleryJob) => navigate(`/gallery/${job.id}`), [navigate]);
+  const toggleCollapsed = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleOpen = useCallback(
+    (job: GalleryJob, outputIdx: number) =>
+      navigate(outputIdx > 0 ? `/gallery/${job.id}?o=${outputIdx}` : `/gallery/${job.id}`),
+    [navigate],
+  );
 
   // Закрытие лайтбокса всегда ведёт на /gallery — не на предыдущий URL,
   // чтобы пользователь возвращался в галерею (а не, скажем, на /image).
@@ -1176,16 +1167,21 @@ export default function GalleryPage() {
     navigate("/gallery");
   }, [navigate]);
 
+  const gridClass = GRID_CLASS[gridLayout];
+  const isEmpty =
+    !isLoading && jobs.length === 0 && visiblePending.length === 0 && visibleFailed.length === 0;
+
   return (
     <div className="page">
-      <div className="page-head rise">
+      <div className="page-head rise flex items-start justify-between gap-3">
         <div>
           <h1 className="h1">Галерея</h1>
           <p className="sub">Все ваши генерации в одном месте.</p>
         </div>
+        <GridLayoutSwitcher value={gridLayout} onChange={setGridLayout} />
       </div>
 
-      <div className="flex flex-col md:flex-row gap-6 mt-4">
+      <div className="flex flex-col gap-6 mt-4">
         <FolderSidebar folderId={folderId} onChange={handleFolder} />
 
         <div className="flex-1 min-w-0">
@@ -1199,20 +1195,142 @@ export default function GalleryPage() {
             />
           </div>
 
-          <JobGrid
-            jobs={jobs}
-            isLoading={isLoading}
-            error={error}
-            folders={folders}
-            favoritesFolderId={favoritesFolderId}
-            onOpen={handleOpen}
-          />
+          {error && <div className="p-8 text-center text-danger">{getErrorMessage(error)}</div>}
 
-          <Pagination page={page} total={total} limit={PAGE_LIMIT} onChange={setPage} />
+          {isLoading && (
+            <div className={gridClass}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} style={{ gridRow: "span 4" }} className="skeleton rounded" />
+              ))}
+            </div>
+          )}
+
+          {!isLoading && !error && (
+            <div className="space-y-8">
+              {favoriteJobs.length > 0 &&
+                (() => {
+                  const FAV_KEY = "__favorites";
+                  const isCollapsed = collapsed.has(FAV_KEY);
+                  return (
+                    <section>
+                      <button
+                        type="button"
+                        onClick={() => toggleCollapsed(FAV_KEY)}
+                        className="flex items-center gap-2 mb-4 text-text-secondary hover:text-text transition-colors w-full text-left"
+                      >
+                        <ChevronDown
+                          size={16}
+                          className={`transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                        />
+                        <Heart size={14} fill="currentColor" className="text-danger" />
+                        <span className="text-sm font-semibold">Избранное</span>
+                        <span className="text-xs text-text-hint">({favoriteJobs.length})</span>
+                      </button>
+                      {!isCollapsed && (
+                        <ul className={gridClass}>
+                          {favoriteJobs.flatMap((j) =>
+                            j.outputs.map((o, idx) => (
+                              <JobCard
+                                key={`fav-${j.id}-${o.id}`}
+                                job={j}
+                                output={o}
+                                folders={folders}
+                                favoritesFolderId={favoritesFolderId}
+                                layout={gridLayout}
+                                onOpen={() => handleOpen(j, idx)}
+                              />
+                            )),
+                          )}
+                        </ul>
+                      )}
+                    </section>
+                  );
+                })()}
+
+              {groupsWithPending.map((g) => {
+                const isCollapsed = collapsed.has(g.key);
+                const isToday = g.key === todayKey;
+                const pendingHere = isToday ? visiblePending : [];
+                const failedHere = isToday ? visibleFailed : [];
+                const totalCount = g.items.length + pendingHere.length + failedHere.length;
+                return (
+                  <section key={g.key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapsed(g.key)}
+                      className="flex items-center gap-2 mb-4 text-text-secondary hover:text-text transition-colors w-full text-left"
+                    >
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                      />
+                      <span className="text-sm font-semibold">{g.label}</span>
+                      <span className="text-xs text-text-hint">({totalCount})</span>
+                    </button>
+                    {!isCollapsed && (
+                      <ul className={gridClass}>
+                        {failedHere.map((j) => (
+                          <FailedTile
+                            key={`f-${j.id}`}
+                            job={j}
+                            onDismiss={() => dismissError(j.id)}
+                            compact={gridLayout === "compact"}
+                          />
+                        ))}
+                        {pendingHere.map((p) => (
+                          <PendingTile
+                            key={`p-${p.id}`}
+                            job={p}
+                            onDismiss={() => removePending(p.id)}
+                            compact={gridLayout === "compact"}
+                          />
+                        ))}
+                        {g.items.flatMap((j) =>
+                          j.outputs.map((o, idx) => (
+                            <JobCard
+                              key={`${j.id}-${o.id}`}
+                              job={j}
+                              output={o}
+                              folders={folders}
+                              favoritesFolderId={favoritesFolderId}
+                              layout={gridLayout}
+                              onOpen={() => handleOpen(j, idx)}
+                            />
+                          )),
+                        )}
+                      </ul>
+                    )}
+                  </section>
+                );
+              })}
+
+              {isEmpty && (
+                <div className="p-8 text-center text-text-secondary">Пока ничего нет</div>
+              )}
+
+              {/* Sentinel — последняя строка триггерит подгрузку. Высоты не имеет,
+                  растягивается по ширине родителя, чтобы IntersectionObserver сработал. */}
+              {hasNextPage && <div ref={sentinelRef} className="h-px w-full" aria-hidden />}
+
+              {isFetchingNextPage && (
+                <div className="flex justify-center py-4">
+                  <Loader2 size={20} className="animate-spin text-text-hint" />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {jobId && detail.data && <Lightbox job={detail.data} onClose={handleCloseLightbox} />}
+      {jobId && detail.data && (
+        <GalleryPreview
+          key={detail.data.id}
+          job={detail.data}
+          folders={folders}
+          initialOutputIdx={previewOutputIdx}
+          onClose={handleCloseLightbox}
+        />
+      )}
     </div>
   );
 }

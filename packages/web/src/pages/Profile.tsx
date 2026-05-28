@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Send, X } from "lucide-react";
+import { ArrowRight, History, Send, X } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import * as authApi from "@/api/auth";
 import { formatTokens, fullName, initials, parseTokens } from "@/utils/format";
@@ -173,6 +174,23 @@ export default function Profile() {
         </div>
 
         <div className="col" style={{ gap: 18 }}>
+          <div className="card" style={{ padding: 22 }}>
+            <h3 className="section-title">{t("nav.history")}</h3>
+            <Link
+              to="/history"
+              className="btn btn-primary"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 8,
+              }}
+            >
+              <History size={14} />
+              {t("home.allHistory")}
+              <ArrowRight size={14} />
+            </Link>
+          </div>
           <div className="card" style={{ padding: 22 }}>
             <h3 className="section-title">{t("profile.sectionBalance")}</h3>
             <div className="field-row" style={{ gridTemplateColumns: "1fr auto" }}>

@@ -135,6 +135,9 @@ function Notification({
         >
           {data.message}
         </p>
+        <p className="text-[10px] mt-0.5 leading-tight text-white/40">
+          {new Date(data.createdAt).toLocaleString()}
+        </p>
       </div>
 
       <div className="flex items-center gap-0.5 flex-shrink-0">

@@ -1042,6 +1042,15 @@ select {
 .app.mobile .page-head {
   align-items: flex-start;
 }
+.app.mobile .page-head .actions {
+  width: 100%;
+  flex-wrap: wrap;
+}
+.app.mobile .page-head .actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+}
 
 /* ===== Page-load entrance ===== */
 @keyframes rise {
@@ -1318,7 +1327,9 @@ select {
 }
 .app.mobile .chat-shell {
   grid-template-columns: 1fr;
-  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h));
+  /* Снизу даём воздуха, чтобы composer не прилегал впритык к BottomNav —
+     тот же приём, что у `.gen-scene` на мобиле, только щедрее. */
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 32px);
 }
 
 .chat-side {
@@ -3490,6 +3501,21 @@ select {
   animation: page-in 250ms var(--ease);
 }
 
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.anim-toast-out {
+  animation: toast-out 200ms var(--ease) forwards;
+  pointer-events: none;
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    Tilted scroll grid (Featured) — порт `.tilted-*` из
    `aibox_template/ai-box.html`. Анимация трансформа считается в JS по позиции
@@ -5182,6 +5208,12 @@ select {
   gap: 12px;
 }
 .gen-slots.is-single {
+  grid-template-columns: 1fr !important;
+}
+/* Мобила: складываем слоты стеком — на узких экранах 2 карточки рядом сжимаются
+   и заголовки переносятся. !important перебивает inline-style из JSX (там
+   `gridTemplateColumns: repeat(min(N, 2), 1fr)` для desktop). */
+.app.mobile .gen-slots {
   grid-template-columns: 1fr !important;
 }
 
