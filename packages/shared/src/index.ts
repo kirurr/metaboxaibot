@@ -177,5 +177,6 @@ export {
   MODEL_TRANSLATIONS,
   SETTING_TRANSLATIONS,
   resolveModelDisplay,
+  stripLeadingEmoji,
 } from "@metabox/shared-browser";
 export type { ModelTranslation, SettingTranslation } from "@metabox/shared-browser";

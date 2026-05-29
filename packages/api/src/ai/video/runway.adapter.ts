@@ -9,6 +9,7 @@ import { fetchWithLog } from "../../utils/fetch.js";
 import { parseRunwayTaskFailure } from "../../utils/runway-error.js";
 import { materializeImageInput, type MaterializedImageInput } from "../../services/s3.service.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const RUNWAY_API = "https://api.dev.runwayml.com/v1";
 
@@ -176,7 +177,7 @@ export class RunwayAdapter implements VideoAdapter {
           params: { size: sizeMb, limit: Math.floor(parseFloat(sizeMatch[1])) },
         });
       }
-      throw new Error(`Runway submit failed: ${res.status} ${text}`);
+      throw providerHttpError(`Runway submit failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as { id: string };
@@ -255,7 +256,7 @@ export class RunwayAdapter implements VideoAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Runway poll failed: ${res.status} ${text}`);
+      throw providerHttpError(`Runway poll failed: ${res.status} ${text}`, res.status);
     }
 
     const task = (await res.json()) as RunwayTask;

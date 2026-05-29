@@ -31,9 +31,7 @@ export const ws: Socket<ServerToClientEvents, ClientToServerEvents> = io(WS_URL,
   },
 });
 
-ws.on("connect", () => {
-  console.log("WS connected");
-});
+ws.on("connect", () => {});
 
 ws.on("connect_error", (err) => {
   // err.message содержит текст от middleware (например "Unauthorized" из

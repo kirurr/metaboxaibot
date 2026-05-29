@@ -270,6 +270,9 @@ export const config = {
     deepseek: opt("DEEPSEEK_API_KEY"),
     perplexity: opt("PERPLEXITY_API_KEY"),
     fal: opt("FAL_API_KEY"),
+    // Отдельный admin-ключ FAL — только для balance-монитора (GET /account/billing).
+    // Обычный FAL_API_KEY (генерации) на billing-эндпоинт отдаёт 403.
+    falAdmin: opt("FAL_ADMIN_API_KEY"),
     replicate: opt("REPLICATE_API_KEY") ?? opt("REPLICATE_API_TOKEN"),
     runway: opt("RUNWAY_API_KEY"),
     luma: opt("LUMA_API_KEY"),

@@ -309,7 +309,16 @@ export interface FallbackNotificationContext {
      *  / неизвестный 4xx-body) — fallback на соседнего кандидата. Параллельно
      *  submitWithFallback уже шлёт per-candidate notifyTechErrorThrottled с
      *  оригинальным err'ом. */
-    | "unknown_error";
+    | "unknown_error"
+    /** Primary упал с transient network failure (ENOTFOUND, ECONNRESET и т.п.) —
+     *  DNS/socket-уровень. Fallback пробуется (у соседа может быть другой хост);
+     *  если все упали — deferIfTransientNetworkError на уровне processor'а
+     *  retry'ит весь цикл до MAX_TRANSIENT_RETRIES раундов. */
+    | "network_transient"
+    /** Content-policy / модерация: провайдер зарубил по политике, после
+     *  per-provider ретраев переключаемся на следующего (у него может быть
+     *  другая модерация). См. content-policy-retry.ts. */
+    | "content_policy";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */

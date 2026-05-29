@@ -29,6 +29,7 @@ import {
 import { KLING_SUPPORTED_ASPECTS } from "../../utils/image-aspect.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
 import { translatePromptRefs } from "../../services/prompt-ref-translator.service.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -205,6 +206,19 @@ export class KieVideoAdapter implements VideoAdapter {
     const limit = this.promptMaxLength;
     if (input.prompt && input.prompt.length > limit) {
       return { key: "promptTooLong", params: { limit } };
+    }
+
+    // Kling: last_frame без first_frame не поддерживается (ни KIE, ни Evolink).
+    // Ловим ДО enqueue (зеркало проверки в submit ниже), иначе оба провайдера
+    // отвечают 400 и юзер видит шум вместо понятного отказа. Multishot-ветка
+    // выше уже вернулась — там last_frame игнорируется.
+    if (KLING_MODEL_MAP[this.modelId]) {
+      const mi = input.mediaInputs ?? {};
+      const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
+      const lastFrame = mi.last_frame?.[0];
+      if (lastFrame && !firstFrame) {
+        return { key: "klingLastFrameNeedsFirst" };
+      }
     }
 
     return null;
@@ -569,7 +583,7 @@ export class KieVideoAdapter implements VideoAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`KIE submit error ${resp.status}: ${txt}`);
+      throw providerHttpError(`KIE submit error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as KieSubmitResponse;
@@ -646,7 +660,7 @@ export class KieVideoAdapter implements VideoAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`KIE poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`KIE poll error ${resp.status}`, resp.status);
 
     const data = (await resp.json()) as KieTaskResponse;
     if (data.code !== 200 || !data.data) {

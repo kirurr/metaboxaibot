@@ -272,6 +272,16 @@ export interface AIModel {
   /** Replaces the family description in the Management UI for this specific variant. */
   descriptionOverride?: string;
   /**
+   * Имя для веб-UI без эмодзи (override). Если не задано — на бэке берётся
+   * `stripLeadingEmoji(name)`. Бот по-прежнему использует `name` с эмодзи.
+   */
+  webName?: string;
+  /**
+   * Путь к монохромной SVG-иконке бренда относительно `web/public`
+   * (напр. `"/icons/openai.svg"`). Не задан → в вебе фолбек на букву-аватар.
+   */
+  webIconPath?: string;
+  /**
    * Provider cost in USD per request (break-even cost).
    * For LLM models this is 0 — cost is driven entirely by per-token pricing below.
    * For media generation (image/audio/video) this is the mid-range provider price.

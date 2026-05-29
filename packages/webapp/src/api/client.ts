@@ -19,8 +19,29 @@ import type {
   CartesiaVoice,
   UserVoice,
 } from "../types.js";
+import { tStatic } from "../i18n.js";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
+// 429 (rate limit): нативный Telegram-попап с троттлингом — спам запросов не
+// должен плодить попапы (Telegram кидает ошибку при втором открытом попапе).
+const RATE_LIMIT_POPUP_COOLDOWN_MS = 30_000;
+let rateLimitPopupAt = 0;
+
+function notifyRateLimited(): void {
+  const now = Date.now();
+  if (now - rateLimitPopupAt < RATE_LIMIT_POPUP_COOLDOWN_MS) return;
+  rateLimitPopupAt = now;
+  const msg = tStatic("error.tooManyRequests");
+  const tg = (window as { Telegram?: { WebApp?: { showAlert?: (m: string) => void } } }).Telegram
+    ?.WebApp;
+  try {
+    if (tg?.showAlert) tg.showAlert(msg);
+    else window.alert(msg);
+  } catch {
+    // попап уже открыт — игнорируем
+  }
+}
 
 let _initDataRaw: string | null = null;
 let _webToken: string | null = null;
@@ -75,6 +96,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
+    if (res.status === 429) notifyRateLimited();
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as Record<
       string,
       unknown
@@ -118,6 +140,7 @@ async function uploadRequest<T>(path: string, body: FormData): Promise<T> {
   if (refreshed) setWebToken(refreshed);
 
   if (!res.ok) {
+    if (res.status === 429) notifyRateLimited();
     const err = await res.json().catch(() => ({ error: res.statusText }));
     console.error(`[api] POST ${path} → ${res.status}`, err);
     throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);

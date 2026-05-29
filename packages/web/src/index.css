@@ -356,6 +356,7 @@ select {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
 }
 
@@ -1042,6 +1043,15 @@ select {
 .app.mobile .page-head {
   align-items: flex-start;
 }
+.app.mobile .page-head .actions {
+  width: 100%;
+  flex-wrap: wrap;
+}
+.app.mobile .page-head .actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+}
 
 /* ===== Page-load entrance ===== */
 @keyframes rise {
@@ -1318,7 +1328,9 @@ select {
 }
 .app.mobile .chat-shell {
   grid-template-columns: 1fr;
-  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h));
+  /* Снизу даём воздуха, чтобы composer не прилегал впритык к BottomNav —
+     тот же приём, что у `.gen-scene` на мобиле, только щедрее. */
+  height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 32px);
 }
 
 .chat-side {
@@ -1667,6 +1679,21 @@ select {
   border-radius: 50%;
   background: #5fd29a;
   box-shadow: 0 0 8px rgba(95, 210, 154, 0.6);
+  flex-shrink: 0;
+}
+/* Квадратный аватар модели (иконка бренда или буква) в селекторе чата. */
+.ce-mc-ico {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--accent-light);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 12px;
   flex-shrink: 0;
 }
 .ce-mc-name {
@@ -3490,6 +3517,21 @@ select {
   animation: page-in 250ms var(--ease);
 }
 
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.anim-toast-out {
+  animation: toast-out 200ms var(--ease) forwards;
+  pointer-events: none;
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    Tilted scroll grid (Featured) — порт `.tilted-*` из
    `aibox_template/ai-box.html`. Анимация трансформа считается в JS по позиции
@@ -4903,6 +4945,7 @@ select {
   /* Фиксированная высота под viewport — страница не скроллится, скроллится
      только `.gen-panel-scroll` внутри панели. */
   height: calc(100vh - var(--topbar-h));
+  height: calc(100dvh - var(--topbar-h));
   overflow: hidden;
   background: var(--bg);
   padding: 24px 24px 24px 36px;
@@ -4916,6 +4959,7 @@ select {
      дополнительный воздух 16px, чтобы кнопка «Генерировать» / поле «Введите
      запрос» не прилегали впритык к BottomNav и оставалось видимое пространство. */
   height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 16px);
+  height: calc(100dvh - var(--topbar-h) - var(--mobile-nav-total-h) - 16px);
   padding: 14px;
   /* Mobile: панель растягивается на всю ширину, gap не нужен. */
   gap: 0;
@@ -5182,6 +5226,12 @@ select {
   gap: 12px;
 }
 .gen-slots.is-single {
+  grid-template-columns: 1fr !important;
+}
+/* Мобила: складываем слоты стеком — на узких экранах 2 карточки рядом сжимаются
+   и заголовки переносятся. !important перебивает inline-style из JSX (там
+   `gridTemplateColumns: repeat(min(N, 2), 1fr)` для desktop). */
+.app.mobile .gen-slots {
   grid-template-columns: 1fr !important;
 }
 

@@ -46,6 +46,7 @@ import {
   getFallbackCandidates,
   isFallbackCompatible,
   pickGenerationFailedMessage,
+  maskKey,
 } from "@metabox/shared";
 import type { AIModel } from "@metabox/shared";
 import type { DeductResult } from "@metabox/api/services";
@@ -57,6 +58,9 @@ import {
 } from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
 import {
@@ -78,7 +82,11 @@ import {
 } from "@metabox/api/services/key-pool";
 import { isProviderInLongCooldown, markProviderLongCooldown } from "@metabox/api/services/throttle";
 import { isPoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
-import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+  MAX_BILLING_KEY_RETRIES,
+} from "@metabox/api/utils/openai-billing-error";
 import {
   classifyRateLimit,
   isFiveXxError,
@@ -265,20 +273,23 @@ async function tryVirtualBatchFallbackResubmit(opts: {
   // Все failed sub-job'ы должны быть transient-ошибкой провайдера.
   // Mixed (часть user-facing) → не fallback'аем: юзер увидит specific error.
   //
-  // Два класса transient'ов:
+  // Три класса transient'ов:
   //  - `isKieTransientError`: KIE 5xx + специфичные 422 ("task id is blank",
   //    "playground failed", "client closed request") — внутренние сбои KIE.
   //  - `isProviderTemporaryUnavailable`: pattern-match "high demand" /
   //    "service unavailable" / "task processing failed" — узел провайдера
   //    перегружен (используется в single-shot пути на poll-stage).
-  //
-  // Раньше тут чекался только KIE-specific → KIE 422 "high demand" (E003)
-  // не классифицировался transient'ом → fallback на virtual batch'е не запускался,
-  // юзер получал K=0 alert вместо переключения на evolink-аналог.
+  //  - `isTransientNetworkError`: DNS/socket уровень (ENOTFOUND, ECONNRESET,
+  //    EAI_AGAIN, ETIMEDOUT и т.п.) — например когда у KIE лёг file-upload
+  //    хост `kieai.redpandaai.co`. Без этой проверки virtual batch на ENOTFOUND
+  //    отдавал K=0 fail вместо переключения на evolink-аналог.
   const failedTechSubs = state.subJobs.filter((s) => s.status === "failed" && s.errorRaw);
   if (failedTechSubs.length === 0) return false;
   const allTransient = failedTechSubs.every(
-    (s) => isKieTransientError(s.errorRaw) || isProviderTemporaryUnavailable(s.errorRaw),
+    (s) =>
+      isKieTransientError(s.errorRaw) ||
+      isProviderTemporaryUnavailable(s.errorRaw) ||
+      isTransientNetworkError(s.errorRaw),
   );
   if (!allTransient) return false;
 
@@ -905,146 +916,189 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           // подставит generic шаблон t.errors.generationFailed.
           let lastSubErr: unknown = null;
 
-          for (const candidate of subCandidates) {
+          subCandidateLoop: for (const candidate of subCandidates) {
             const candidateProvider = candidate.provider;
             const candidateKeyProvider = resolveKeyProviderForModel(candidate);
 
             if (await isProviderInLongCooldown(candidateKeyProvider).catch(() => false)) {
               lastSubError = `${candidateProvider} in long cooldown`;
-              continue;
+              continue subCandidateLoop;
             }
 
-            // gpt-image-1.5: inverted priority (low-priority ключ first) —
-            // см. submitWithFallback для подробностей. Тут virtual-batch
-            // ветка, симметрично основной.
-            let subAcquired: Awaited<ReturnType<typeof acquireKey>>;
-            try {
-              subAcquired =
-                candidate.id === "gpt-image-1.5"
-                  ? await acquireKey(candidateKeyProvider, { inverted: true })
-                  : await acquireKey(candidateKeyProvider);
-            } catch (e) {
-              if (isPoolExhaustedError(e)) {
-                lastSubError = `${candidateProvider} pool exhausted`;
-                continue;
-              }
-              throw e;
-            }
-
-            const subAdapter = createImageAdapter(candidate, subAcquired);
-            try {
-              if (!subAdapter.isAsync && subAdapter.generate) {
-                const r = await subAdapter.generate({
-                  prompt: effectivePrompt,
-                  negativePrompt,
-                  imageUrl: job.data.sourceImageUrl,
-                  mediaInputs: job.data.mediaInputs,
-                  aspectRatio,
-                  modelSettings,
-                });
-                const result = Array.isArray(r) ? r[0] : r;
-                state.subJobs[i] = {
-                  status: "succeeded",
-                  providerKeyId: subAcquired.keyId,
-                  effectiveProvider: candidateProvider,
-                  result,
-                };
-              } else if (subAdapter.submit) {
-                const providerJobId = await subAdapter.submit({
-                  prompt: effectivePrompt,
-                  negativePrompt,
-                  imageUrl: job.data.sourceImageUrl,
-                  mediaInputs: job.data.mediaInputs,
-                  aspectRatio,
-                  modelSettings,
-                });
-                state.subJobs[i] = {
-                  status: "pending",
-                  providerJobId,
-                  providerKeyId: subAcquired.keyId,
-                  effectiveProvider: candidateProvider,
-                };
-              } else {
-                throw new Error(`Adapter ${modelId} has no generate()/submit()`);
-              }
-              if (subAcquired.keyId) void recordSuccess(subAcquired.keyId);
-              subSettled = true;
-              break;
-            } catch (err) {
-              lastSubErr = err;
-              const message = err instanceof Error ? err.message : String(err);
-
-              // OpenAI billing exhaustion (`billing_hard_limit_reached` 400 /
-              // `insufficient_quota` 429) — account-wide состояние одного ключа.
-              // НЕ markRateLimited (ключ не виноват, кончились деньги org) и
-              // НЕ markProviderLongCooldown (иначе sub-job[1] увидит маркер и
-              // упадёт с "openai in long cooldown", хотя у соседних ключей
-              // деньги есть). Дедуп'нутый алерт в balance тему + continue к
-              // следующему кандидату. Зеркало логики из submit-with-throttle
-              // и submit-with-fallback (которые этот код обходит — virtual
-              // batch идёт своим путём).
-              if (isOpenAiBillingExhaustion(err)) {
-                const billingDedupKey = subAcquired.keyId
-                  ? `openai-billing-exhaustion:${subAcquired.keyId}`
-                  : "openai-billing-exhaustion";
-                void notifyTechErrorThrottled(
-                  err instanceof Error ? err : new Error(message),
-                  { section: "image", modelId, jobId: dbJobId },
-                  billingDedupKey,
-                  { channel: "balance" },
-                );
-                lastSubError = `openai billing exhausted: ${message.slice(0, 200)}`;
-                continue;
-              }
-
-              const cls = classifyRateLimit(err, candidateKeyProvider);
-              if (cls.isRateLimit) {
-                if (subAcquired.keyId) {
-                  void markRateLimited(subAcquired.keyId, cls.cooldownMs, cls.reason);
+            // Key-level billing retry loop вокруг acquireKey + submit. При
+            // OpenAI billing выводим dead ключ из ротации и берём ДРУГОЙ ключ
+            // того же провайдера (acquireKey пропустит throttled) — спасает
+            // sub-job даже без fallback-модели. Остальные ошибки → break/continue
+            // subCandidateLoop как раньше.
+            let billingKeyAttempts = 0;
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              // gpt-image-1.5: inverted priority (low-priority ключ first) —
+              // см. submitWithFallback для подробностей.
+              let subAcquired: Awaited<ReturnType<typeof acquireKey>>;
+              try {
+                subAcquired =
+                  candidate.id === "gpt-image-1.5"
+                    ? await acquireKey(candidateKeyProvider, { inverted: true })
+                    : await acquireKey(candidateKeyProvider);
+              } catch (e) {
+                if (isPoolExhaustedError(e)) {
+                  lastSubError = `${candidateProvider} pool exhausted`;
+                  continue subCandidateLoop;
                 }
-                const isLong = cls.isLongWindow || cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS;
-                if (isLong) {
-                  void markProviderLongCooldown(candidateKeyProvider, cls.cooldownMs, cls.reason);
+                throw e;
+              }
+
+              const subAdapter = createImageAdapter(candidate, subAcquired);
+              try {
+                if (!subAdapter.isAsync && subAdapter.generate) {
+                  const r = await subAdapter.generate({
+                    prompt: effectivePrompt,
+                    negativePrompt,
+                    imageUrl: job.data.sourceImageUrl,
+                    mediaInputs: job.data.mediaInputs,
+                    aspectRatio,
+                    modelSettings,
+                  });
+                  const result = Array.isArray(r) ? r[0] : r;
+                  state.subJobs[i] = {
+                    status: "succeeded",
+                    providerKeyId: subAcquired.keyId,
+                    effectiveProvider: candidateProvider,
+                    result,
+                  };
+                } else if (subAdapter.submit) {
+                  const providerJobId = await subAdapter.submit({
+                    prompt: effectivePrompt,
+                    negativePrompt,
+                    imageUrl: job.data.sourceImageUrl,
+                    mediaInputs: job.data.mediaInputs,
+                    aspectRatio,
+                    modelSettings,
+                  });
+                  state.subJobs[i] = {
+                    status: "pending",
+                    providerJobId,
+                    providerKeyId: subAcquired.keyId,
+                    effectiveProvider: candidateProvider,
+                  };
+                } else {
+                  throw new Error(`Adapter ${modelId} has no generate()/submit()`);
+                }
+                if (subAcquired.keyId) void recordSuccess(subAcquired.keyId);
+                subSettled = true;
+                break subCandidateLoop;
+              } catch (err) {
+                lastSubErr = err;
+                const message = err instanceof Error ? err.message : String(err);
+
+                // OpenAI billing exhaustion (`billing_hard_limit_reached` 400 /
+                // `insufficient_quota` 429). Выводим dead ключ из ротации
+                // (per-key, НЕ provider-wide — иначе sub-job[1] увидит маркер и
+                // упадёт с "openai in long cooldown") и пробуем ДРУГОЙ ключ того
+                // же провайдера (key-level retry). Дедуп'нутый алерт в balance.
+                // Все ключи billing-dead → acquireKey бросит PoolExhausted →
+                // continue subCandidateLoop к fallback-кандидату.
+                if (isOpenAiBillingExhaustion(err)) {
+                  if (subAcquired.keyId) {
+                    // await: маркер должен лечь в Redis ДО следующего acquireKey,
+                    // иначе на single-key провайдере (gpt-image-1.5) тот же
+                    // billing-dead ключ переберётся повторно — потратим HTTP впустую.
+                    await markRateLimited(
+                      subAcquired.keyId,
+                      OPENAI_BILLING_KEY_COOLDOWN_MS,
+                      "openai billing",
+                    );
+                  }
+                  const billingDedupKey = subAcquired.keyId
+                    ? `openai-billing-exhaustion:${subAcquired.keyId}`
+                    : "openai-billing-exhaustion";
+                  void notifyTechErrorThrottled(
+                    err instanceof Error ? err : new Error(message),
+                    { section: "image", modelId, jobId: dbJobId },
+                    billingDedupKey,
+                    { channel: "balance" },
+                  );
+                  logger.warn(
+                    {
+                      dbJobId,
+                      modelId,
+                      provider: candidateProvider,
+                      keyId: subAcquired.keyId,
+                      keyMask: maskKey(subAcquired.apiKey),
+                      attempt: billingKeyAttempts + 1,
+                    },
+                    "Image batch: OpenAI billing exhausted — key quarantined",
+                  );
+                  lastSubError = `openai billing exhausted: ${message.slice(0, 200)}`;
+                  billingKeyAttempts++;
+                  if (billingKeyAttempts < MAX_BILLING_KEY_RETRIES) {
+                    continue; // key-level retry: следующий ключ того же провайдера
+                  }
+                  continue subCandidateLoop; // budget исчерпан → fallback-кандидат
+                }
+
+                const cls = classifyRateLimit(err, candidateKeyProvider);
+                if (cls.isRateLimit) {
+                  if (subAcquired.keyId) {
+                    void markRateLimited(subAcquired.keyId, cls.cooldownMs, cls.reason);
+                  }
+                  const isLong = cls.isLongWindow || cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS;
+                  if (isLong) {
+                    // Provider-wide marker блокирует ВСЕ ключи провайдера для
+                    // sibling sub-jobs. Ставим ТОЛЬКО при действительно длинном
+                    // cooldown (>1ч). Pattern-matched per-account ошибки
+                    // ("insufficient credits" и т.п.) с коротким cooldown —
+                    // изолируем per-key (markRateLimited выше), не роняя соседние
+                    // ключи. Зеркалит submitWithFallback.
+                    if (cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS) {
+                      void markProviderLongCooldown(
+                        candidateKeyProvider,
+                        cls.cooldownMs,
+                        cls.reason,
+                      );
+                    }
+                    void notifyRateLimit({
+                      section: "image",
+                      modelId,
+                      cooldownMs: cls.cooldownMs,
+                      reason: cls.reason,
+                      isLongWindow: true,
+                      err,
+                      jobId: dbJobId,
+                    });
+                    lastSubError = `long-window: ${message.slice(0, 200)}`;
+                    continue subCandidateLoop; // → следующий кандидат
+                  }
+                  // Short-window 429 — НЕ fallback, mark sub-job failed.
                   void notifyRateLimit({
                     section: "image",
                     modelId,
                     cooldownMs: cls.cooldownMs,
                     reason: cls.reason,
-                    isLongWindow: true,
+                    isLongWindow: false,
                     err,
                     jobId: dbJobId,
                   });
-                  lastSubError = `long-window: ${message.slice(0, 200)}`;
-                  continue; // → следующий кандидат (long-window триггерит fallback)
+                  lastSubError = `rate-limit: ${message.slice(0, 200)}`;
+                  break subCandidateLoop;
                 }
-                // Short-window 429 — НЕ fallback, mark sub-job failed.
-                void notifyRateLimit({
-                  section: "image",
-                  modelId,
-                  cooldownMs: cls.cooldownMs,
-                  reason: cls.reason,
-                  isLongWindow: false,
-                  err,
-                  jobId: dbJobId,
-                });
-                lastSubError = `rate-limit: ${message.slice(0, 200)}`;
-                break;
-              }
-              if (isFiveXxError(err) && allowFiveXxFallback) {
+                if (isFiveXxError(err) && allowFiveXxFallback) {
+                  if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
+                  lastSubError = `5xx: ${message.slice(0, 200)}`;
+                  continue subCandidateLoop; // → следующий кандидат
+                }
+                if (isFiveXxError(err)) {
+                  // Transient 5xx на ранней попытке — пробрасываем наверх: BullMQ
+                  // ретраит, sub-job остаётся pending (без providerJobId) и будет
+                  // переподан заново. Зеркалит поведение submitWithFallback.
+                  if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
+                  throw err;
+                }
                 if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
-                lastSubError = `5xx: ${message.slice(0, 200)}`;
-                continue; // → следующий кандидат (persistent 5xx триггерит fallback)
+                lastSubError = message.slice(0, 200);
+                break subCandidateLoop;
               }
-              if (isFiveXxError(err)) {
-                // Transient 5xx на ранней попытке — пробрасываем наверх: BullMQ
-                // ретраит, sub-job остаётся pending (без providerJobId) и будет
-                // переподан заново. Зеркалит поведение submitWithFallback.
-                if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
-                throw err;
-              }
-              if (subAcquired.keyId) void recordError(subAcquired.keyId, message.slice(0, 500));
-              lastSubError = message.slice(0, 200);
-              break;
             }
           }
 
@@ -2032,6 +2086,33 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     // Throws DelayedError if rescheduled (re-thrown by next iteration of catch).
     // Returns silently otherwise → fall through to user-facing failure handling.
     await deferIfTransientNetworkError({ err, job, token, section: "image" });
+
+    // Content-policy / модерация: вместо мгновенной user-facing ошибки делаем
+    // 1 ретрай на провайдере → fallback → 1 ретрай → и только потом терминальная
+    // ошибка (модерация часто недетерминирована, перезапуск/другой провайдер
+    // нередко проходит). child-safety/CSAM исключён внутри isContentPolicyError.
+    // Virtual batch пропускаем (per-sub-job state — отдельная история, как и у
+    // существующего poll-fallback'а). При re-enqueue хелпер бросает DelayedError;
+    // если цепочка исчерпана — возвращается, проваливаемся в user-facing terminal
+    // ниже (без ops-алерта).
+    if (isContentPolicyError(err) && modelMeta) {
+      const requestedNForCp = job.data.numImages ?? 1;
+      const isVirtualBatchCp = requestedNForCp > 1 && (modelMeta.nativeBatchMax ?? 1) === 1;
+      if (!isVirtualBatchCp) {
+        await handleContentPolicyRetryFallback({
+          job,
+          token,
+          dbJobId,
+          modelId,
+          modelMeta,
+          fallbackSection: "design",
+          notifySection: "image",
+          mediaInputs: job.data.mediaInputs,
+          userId: userIdStr,
+        });
+      }
+    }
+
     const userMsg = resolveUserFacingMessage(err, t);
     if (userMsg !== null) {
       logger.warn({ dbJobId, err }, "Image job rejected: user-facing error");
@@ -2080,13 +2161,21 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
 
     const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
 
-    // ── Poll-stage fallback на KIE 5xx (single-shot path) ───────────────
+    // ── Poll-stage fallback на KIE 5xx / network-transient (single-shot path) ──
     // KIE при 5xx terminal не перезапускает генерацию у себя. Если retry'и
     // BullMQ исчерпаны и есть неиспользованный fallback — пере-enqueue:
     // stage→generate, providerJobId→null, attemptedProviders ← +effective.
     // Virtual batch path тут не покрыт (там per-sub-job state'ы — отдельная
-    // задача).
-    if (stage === "poll" && isLastAttempt && isKieTransientError(err) && modelMeta) {
+    // задача, см. tryVirtualBatchFallbackResubmit).
+    //
+    // isTransientNetworkError покрывает DNS/socket-outage'и (например, когда у
+    // KIE лёг file-upload хост) — fallback на evolink имеет другой backend.
+    if (
+      stage === "poll" &&
+      isLastAttempt &&
+      (isKieTransientError(err) || isTransientNetworkError(err)) &&
+      modelMeta
+    ) {
       const requestedN = job.data.numImages ?? 1;
       const isVirtualBatchNow = requestedN > 1 && (modelMeta?.nativeBatchMax ?? 1) === 1;
       // Virtual batch не покрыт — там per-sub-job state'ы, отдельная задача.
@@ -2184,7 +2273,11 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
           { dbJobId, modelId },
           "Image fallback skipped: modelMeta missing (model not in AI_MODELS)",
         );
-      } else if (!isKieTransientError(err) && !isProviderTemporaryUnavailable(err)) {
+      } else if (
+        !isKieTransientError(err) &&
+        !isProviderTemporaryUnavailable(err) &&
+        !isTransientNetworkError(err)
+      ) {
         logger.warn(
           {
             dbJobId,
@@ -2193,7 +2286,7 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
             registeredFallbacks: fallbackCandidates.map((m) => m.provider),
             errMessage: err instanceof Error ? err.message : String(err),
           },
-          "Image fallback skipped: error type not eligible (need KIE transient or provider-unavailable)",
+          "Image fallback skipped: error type not eligible (need KIE transient / provider-unavailable / network-transient)",
         );
       } else if (fallbackCandidates.length === 0) {
         logger.warn(
@@ -2237,13 +2330,20 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Image failed after deduct: tokens refunded to user");
       }
 
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "image",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      // Billing-исчерпание уже задедуплено в balance-тему per-key выше. Финальный
+      // job-failure алерт тоже шлём в balance (а не в alerts) — иначе одна
+      // billing-ошибка дублируется в обе темы.
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "image",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {

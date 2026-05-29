@@ -675,7 +675,12 @@ export function createBot(token: string): Bot<BotContext> {
     const message = err.error instanceof Error ? err.error.message : String(err.error);
     if (
       message.includes("bot was blocked by the user") ||
-      message.includes("user is deactivated")
+      message.includes("user is deactivated") ||
+      // Бенайн: callback устарел (>15с) — ack уже невозможен и не нужен. Без
+      // этого валится как 🔴 "Unhandled bot error" и юзеру шлётся ложное
+      // "unexpected error".
+      message.includes("query is too old") ||
+      message.includes("query ID is invalid")
     ) {
       return;
     }

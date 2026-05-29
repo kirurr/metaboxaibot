@@ -299,6 +299,10 @@ export interface Translations {
     kieImageTooSmall: string;
     kieImageAspectRatioOutOfRange: string;
     kieKlingMissingElement: string;
+    copyMotionVideoTooShort: string;
+    copyMotionVideoTooLong: string;
+    copyMotionVideoUnreadable: string;
+    aspectRatioNotSupported: string;
     ttsTranscriptEmpty: string;
     imageTooLarge: string;
     imageFormatUnsupported: string;
@@ -337,6 +341,8 @@ export interface Translations {
     outputLimitOnlyThinking: string;
     modelOnlyThinking: string;
     chatInvalidImage: string;
+    chatDocumentTooLarge: string;
+    chatContextOverflow: string;
     upscaleResultTooLarge: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;

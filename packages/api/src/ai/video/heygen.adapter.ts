@@ -10,6 +10,7 @@ import { getFileUrl } from "../../services/s3.service.js";
 import { logger } from "../../logger.js";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { transcodeToMp3 } from "../../utils/audio-transcode.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 import { parseHeyGenErrorBody, parseHeyGenPollFailure } from "../../utils/heygen-error.js";
 import { resolveImageMimeType, resolveAudioMimeType } from "../../utils/mime-detect.js";
 import sharp from "sharp";
@@ -145,7 +146,7 @@ export class HeyGenAdapter implements VideoAdapter {
     );
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      throw new Error(`HeyGen /v3/voices/speech failed: ${res.status} ${txt}`);
+      throw providerHttpError(`HeyGen /v3/voices/speech failed: ${res.status} ${txt}`, res.status);
     }
     const json = (await res.json()) as {
       data?: { audio_url?: string; duration?: number };
@@ -290,7 +291,10 @@ export class HeyGenAdapter implements VideoAdapter {
           key: "heygenAudioFormat",
         });
       }
-      throw new Error(`HeyGen audio asset upload failed: ${uploadRes.status} ${text}`);
+      throw providerHttpError(
+        `HeyGen audio asset upload failed: ${uploadRes.status} ${text}`,
+        uploadRes.status,
+      );
     }
     const uploadData = (await uploadRes.json()) as { data?: { asset_id?: string } };
     const assetId = uploadData.data?.asset_id;
@@ -373,7 +377,10 @@ export class HeyGenAdapter implements VideoAdapter {
     );
     if (!uploadRes.ok) {
       const text = await uploadRes.text();
-      throw new Error(`HeyGen asset upload failed: ${uploadRes.status} ${text}`);
+      throw providerHttpError(
+        `HeyGen asset upload failed: ${uploadRes.status} ${text}`,
+        uploadRes.status,
+      );
     }
     const uploadData = (await uploadRes.json()) as { data?: { asset_id?: string } };
     const assetId = uploadData.data?.asset_id;
@@ -493,7 +500,7 @@ export class HeyGenAdapter implements VideoAdapter {
       }
       const structured = parseHeyGenErrorBody(json);
       if (structured) throw structured;
-      throw new Error(`HeyGen /v3/videos submit failed: ${res.status} ${text}`);
+      throw providerHttpError(`HeyGen /v3/videos submit failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as { data?: { video_id?: string } };
@@ -513,7 +520,7 @@ export class HeyGenAdapter implements VideoAdapter {
     const text = await res.text();
 
     if (!res.ok) {
-      throw new Error(`HeyGen poll failed: ${res.status} ${text}`);
+      throw providerHttpError(`HeyGen poll failed: ${res.status} ${text}`, res.status);
     }
 
     const result = JSON.parse(text) as HeyGenVideoDetail;

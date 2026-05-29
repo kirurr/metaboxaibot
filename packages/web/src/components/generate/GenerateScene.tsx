@@ -19,6 +19,7 @@ import { uploadChatFile, signChatUploads, type ChatUploadDto } from "@/api/uploa
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
 import { ChipPopover } from "@/components/settings/ChipPopover";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { SettingControl } from "@/components/settings/SettingControl";
 import { isSettingVisible, UNSUPPORTED_TYPES } from "@/components/settings/utils";
 import {
@@ -65,7 +66,8 @@ import { CreateAvatarModal } from "./CreateAvatarModal";
 import { MentionTextarea, type MentionTextareaHandle } from "./MentionTextarea";
 import { ShotListEditor } from "./ShotListEditor";
 import { multishotBlocker, parseShots, type ShotEntry } from "@/utils/multishot";
-import { GenerationHistory, type PendingJob, type TrackedJobOutput } from "./GenerationHistory";
+import { GenerationHistory } from "./GenerationHistory";
+import { usePendingJobsStore } from "@/stores/pendingJobsStore";
 import { FloatingMediaBg } from "./FloatingMediaBg";
 import type { AmbientSection } from "@/api/ambientMedia";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -152,10 +154,7 @@ type GenerateDraft = {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function modelDisplayName(m: WebModelDto): string {
-  return m.familyName ?? m.name;
-}
-function modelLetter(m: WebModelDto): string {
-  return modelDisplayName(m).trim().slice(0, 1).toUpperCase() || "·";
+  return m.familyName ?? m.webName;
 }
 function modelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
@@ -742,28 +741,10 @@ export function GenerateScene({
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  // Локально трекаемые job'ы между submit'ом и финальным WS-event'ом.
-  // GenerationHistory сама подписывается на notification:new и зовёт
-  // onJobResolved/onJobFailed когда соответствующая нотификация прилетает.
-  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
-
-  // Стабильные колбэки для GenerationHistory — иначе инлайн-стрелки меняли бы
-  // ссылку на каждый рендер и React.memo на истории не срабатывал бы (она
-  // перерисовывалась бы на каждый символ промпта). Завязаны только на стабильный
-  // setPendingJobs, поэтому deps пустые.
-  const handleJobResolved = useCallback((jobId: string) => {
-    setPendingJobs((prev) => prev.filter((p) => p.id !== jobId));
-  }, []);
-  const handleJobFailed = useCallback((jobId: string, errorMessage: string) => {
-    setPendingJobs((prev) =>
-      prev.map((p) => (p.id === jobId ? { ...p, errorMessage, status: "error" } : p)),
-    );
-  }, []);
-  const handleJobSucceeded = useCallback((jobId: string, outputs: TrackedJobOutput[]) => {
-    setPendingJobs((prev) =>
-      prev.map((p) => (p.id === jobId ? { ...p, outputs, status: "success" } : p)),
-    );
-  }, []);
+  // Pending-job'и трекаются в глобальном store (usePendingJobsStore), а WS-sync —
+  // в usePendingJobsSync (см. router/guards.tsx). Это позволяет видеть статус
+  // генерации и на /gallery, не только на /generate.
+  const addPendingJob = usePendingJobsStore((s) => s.add);
 
   // Есть ли уже генерации в правой пэйне. Пока пусто и задан ambientSection —
   // в фоне показываем «выпадающие» плавающие медиа; как только появилась первая
@@ -1012,6 +993,7 @@ export function GenerateScene({
   const location = useLocation();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
+  const dismissToast = useUIStore((s) => s.dismissToast);
   const lastConsumedPrefillKey = useRef<string | null>(null);
   const pendingPrefillRef = useRef<GeneratePrefill | null>(null);
   // Параллельно с pendingPrefillRef помечаем «это восстановление черновика,
@@ -1930,7 +1912,14 @@ export function GenerateScene({
     if (!canGenerate || !selectedModel) return;
     setBusy(true);
     setSubmitError(null);
+    let loadingToastId: string | null = null;
     try {
+      loadingToastId = pushToast({
+        type: "loading",
+        message: t("notifications.toast.generationStarted"),
+        description: t("notifications.toast.generationHint"),
+        durationMs: 5000,
+      });
       // В payload — только ready-файлы (uploading/error пропускаем). Передаём
       // s3Key'и: presigned URL'ы могут протухнуть, бекенд сам резолвит. Картинки
       // @-элементов кладутся в ref_element_N, а @имя в промпте → @ElementN (MVP).
@@ -1972,24 +1961,21 @@ export function GenerateScene({
       } else {
         throw new Error(`Unsupported section: ${section}`);
       }
-      // Локально трекаем pending-job: GenerationHistory подхватит её и
-      // переключит в success/error когда придёт `notification:new`.
-      // section пишем нормализованный под DB-словарь ("image"/"video"/"audio"),
-      // т.к. модель имеет "design" в каталоге — у success-карточки рендер
-      // outputs зависит от типа медиа.
+      // Глобально трекаем pending-job: GenerationHistory / Gallery подхватят его
+      // и переключат в success/error когда придёт `notification:new` (sync —
+      // в usePendingJobsSync). section пишем нормализованный под DB-словарь
+      // ("image"/"video"/"audio"), т.к. модель имеет "design" в каталоге.
       const trackedSection = section === "design" || section === "image" ? "image" : section;
-      setPendingJobs((prev) => [
-        {
-          id: result.dbJobId,
-          modelId: selectedModel.id,
-          section: trackedSection,
-          prompt,
-          startedAt: Date.now(),
-          status: "pending",
-        },
-        ...prev,
-      ]);
+      addPendingJob({
+        id: result.dbJobId,
+        modelId: selectedModel.id,
+        section: trackedSection,
+        prompt,
+        startedAt: Date.now(),
+        status: "pending",
+      });
     } catch (err) {
+      if (loadingToastId) dismissToast(loadingToastId);
       const msg = err instanceof ApiError ? err.message : "Не удалось запустить генерацию";
       setSubmitError(msg);
     } finally {
@@ -2427,9 +2413,12 @@ export function GenerateScene({
                 className="gen-model-btn"
                 onClick={() => setModelOpen(!modelOpen)}
               >
-                <div className="gen-model-glyph">
-                  {selectedModel ? modelLetter(selectedModel) : "·"}
-                </div>
+                <ModelAvatar
+                  className="gen-model-glyph"
+                  icon={selectedModel?.webIconPath ?? null}
+                  name={selectedModel ? modelDisplayName(selectedModel) : "·"}
+                  iconSize={18}
+                />
                 <div className="gen-model-text">
                   <span className="gen-model-meta">Model</span>
                   <span className="gen-model-name">
@@ -2460,7 +2449,12 @@ export function GenerateScene({
                           setModelOpen(false);
                         }}
                       >
-                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <ModelAvatar
+                          className="gen-model-glyph"
+                          icon={m.webIconPath}
+                          name={modelDisplayName(m)}
+                          iconSize={18}
+                        />
                         <div className="gen-model-item-body">
                           <div className="gen-model-item-name">{modelDisplayName(m)}</div>
                           <div className="gen-model-item-desc">{modelDesc(m)}</div>
@@ -2481,7 +2475,7 @@ export function GenerateScene({
               <Sparkles size={16} />
             )}
             <span>{blockerReason ?? t("generate.btnGenerate")}</span>
-            {selectedModel && (
+            {selectedModel && !blockerReason && (
               <span className="gen-cta-cost mono">
                 {previewLoading && <Loader2 size={11} className="spin" />}≈{" "}
                 {(previewCost ?? selectedModel.tokenCostApprox).toFixed(2)}
@@ -2521,10 +2515,6 @@ export function GenerateScene({
         )}
         <GenerationHistory
           selectedModel={selectedModel}
-          pendingJobs={pendingJobs}
-          onJobResolved={handleJobResolved}
-          onJobFailed={handleJobFailed}
-          onJobSucceeded={handleJobSucceeded}
           onHasContentChange={setHistoryHasContent}
         />
       </div>

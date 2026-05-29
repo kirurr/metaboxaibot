@@ -12,6 +12,7 @@ import { ElevenLabsAdapter } from "./elevenlabs.adapter.js";
 import { acquireKey } from "../../services/key-pool.service.js";
 import { envKeyForProvider } from "../key-provider.js";
 import { isPoolExhaustedError } from "../../utils/pool-exhausted-error.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -387,7 +388,7 @@ export class KieElevenLabsAdapter implements AudioAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`KIE audio poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`KIE audio poll error ${resp.status}`, resp.status);
 
     const data = (await resp.json()) as KieTaskResponse;
     if (data.code !== 200 || !data.data) {

@@ -36,19 +36,14 @@ export type MenuItem = {
 /** Сколько моделей показываем в mega-menu/sheet максимум — чтобы не утопить колонку. */
 export const MAX_MODELS_IN_MENU = 6;
 
-/** Имя моделей в UI: для family-моделей подставляем familyName, иначе берём `name` как есть. */
+/** Имя моделей в UI: для family-моделей подставляем familyName, иначе `webName` (без эмодзи). */
 export function displayModelName(m: WebModelDto): string {
-  return m.familyName ?? m.name;
+  return m.familyName ?? m.webName;
 }
 
 /** Короткое описание для строки в mega-menu (приоритет: описание варианта → общее описание). */
 export function displayModelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
-}
-
-/** Берём первую букву family или name — для квадратного «letter» аватара слева. */
-export function modelLetter(m: WebModelDto): string {
-  return displayModelName(m).trim().slice(0, 1).toUpperCase() || "·";
 }
 
 /**

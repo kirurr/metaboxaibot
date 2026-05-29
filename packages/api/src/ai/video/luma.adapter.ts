@@ -2,6 +2,7 @@ import type { VideoAdapter, VideoInput, VideoResult } from "./base.adapter.js";
 import { config } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { parseLumaSubmitError, parseLumaPollFailure } from "../../utils/luma-error.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const LUMA_API = "https://api.lumalabs.ai/dream-machine/v1";
 
@@ -83,7 +84,7 @@ export class LumaAdapter implements VideoAdapter {
       }
       const structured = parseLumaSubmitError(json);
       if (structured) throw structured;
-      throw new Error(`Luma submit failed: ${res.status} ${text}`);
+      throw providerHttpError(`Luma submit failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as LumaGeneration;
@@ -101,7 +102,7 @@ export class LumaAdapter implements VideoAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Luma poll failed: ${res.status} ${text}`);
+      throw providerHttpError(`Luma poll failed: ${res.status} ${text}`, res.status);
     }
 
     const gen = (await res.json()) as LumaGeneration;

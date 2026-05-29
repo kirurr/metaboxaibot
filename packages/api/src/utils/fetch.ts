@@ -134,19 +134,58 @@ const TRANSIENT_NETWORK_CODES = new Set([
   "EPIPE",
   "UND_ERR_SOCKET", // undici socket error
   "UND_ERR_CONNECT_TIMEOUT",
+  // TLS handshake-уровень: обычно transient (провайдер обновляет cert chain,
+  // наш CA bundle обновляется при рестарте контейнера). Лучше retry/fallback,
+  // чем сразу фейлить юзеру. Если TLS-проблема постоянная (cert вообще не
+  // совпадает с hostname) — после исчерпания retry budget'а fail дойдёт.
+  // Конкретные коды для документации; общий `ERR_SSL_*` ловится prefix-checkом
+  // в `isTransientNetworkError` (catch-all для OpenSSL-уровень ошибок типа
+  // `ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE`).
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
 ]);
+
+/** Префиксы кодов-ошибок, которые мы целиком относим к transient. */
+const TRANSIENT_NETWORK_CODE_PREFIXES = ["ERR_SSL_"];
+
+function isTransientCode(code: string): boolean {
+  if (TRANSIENT_NETWORK_CODES.has(code)) return true;
+  for (const prefix of TRANSIENT_NETWORK_CODE_PREFIXES) {
+    if (code.startsWith(prefix)) return true;
+  }
+  return false;
+}
 
 /**
  * Returns true if the given error represents a transient network failure
  * (DNS hiccup, connection reset, etc.) rather than a logical/HTTP error.
  * Walks the `cause` chain because undici wraps the original libuv error.
+ *
+ * Принимает и Error-like объект (обычный путь из fetch'а), и сырую строку
+ * (символика `s.errorRaw` в virtual-batch sub-job'ах — там message сохранён
+ * в БД как plain string без code/cause). Без string-ветки batch не
+ * классифицировал ENOTFOUND и не запускал fallback на evolink.
  */
 export function isTransientNetworkError(err: unknown): boolean {
+  if (typeof err === "string") {
+    // String input: substring match по кодам (для virtual-batch errorRaw).
+    // ERR_SSL_* prefix покрывает все OpenSSL handshake-уровень ошибки.
+    for (const code of TRANSIENT_NETWORK_CODES) {
+      if (err.includes(code)) return true;
+    }
+    for (const prefix of TRANSIENT_NETWORK_CODE_PREFIXES) {
+      if (err.includes(prefix)) return true;
+    }
+    return false;
+  }
   let cur: unknown = err;
   for (let i = 0; i < 5 && cur; i++) {
     if (typeof cur === "object" && cur !== null) {
       const code = (cur as { code?: unknown }).code;
-      if (typeof code === "string" && TRANSIENT_NETWORK_CODES.has(code)) return true;
+      if (typeof code === "string" && isTransientCode(code)) return true;
       // undici generic wrapper exposes "fetch failed" — treat as transient only
       // when the underlying cause is a transient code (handled by the walk).
       cur = (cur as { cause?: unknown }).cause;

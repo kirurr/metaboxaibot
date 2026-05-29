@@ -59,9 +59,12 @@ import {
 } from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
-import { computeSeedance2BillableUsd } from "../utils/seedance2-billing.js";
+import { computeSeedance2BillableUsd } from "@metabox/api/utils/seedance2-billing";
 import {
   acquireForSubmit,
   acquireForPoll,
@@ -85,6 +88,7 @@ import { UserFacingError } from "@metabox/shared";
 import { classifyError, POLL_TIMEOUT_CODE } from "../utils/classify-error.js";
 import { apiNotifySuccess, apiNotifyError } from "../utils/api-notify.js";
 import { fetchVideoUrl } from "../utils/fetch-video.js";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 
 const INITIAL_POLL_INTERVAL_MS = 5000;
 
@@ -1110,13 +1114,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
           errorCode: "PROVIDER_INSUFFICIENT_CREDIT",
         },
       });
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "video",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "video",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, msg).catch(() => void 0);
       } else {
@@ -1130,6 +1138,25 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       }
       throw new UnrecoverableError(msg);
     }
+
+    // Content-policy / модерация: 1 ретрай на провайдере → fallback → 1 ретрай →
+    // потом терминальная ошибка (модерация часто недетерминирована). child-safety
+    // исключён внутри isContentPolicyError. При re-enqueue хелпер бросает
+    // DelayedError; иначе возвращается и проваливаемся в user-facing terminal.
+    if (isContentPolicyError(err) && modelMeta) {
+      await handleContentPolicyRetryFallback({
+        job,
+        token,
+        dbJobId,
+        modelId,
+        modelMeta,
+        fallbackSection: "video",
+        notifySection: "video",
+        mediaInputs: job.data.mediaInputs,
+        userId: userIdStr,
+      });
+    }
+
     const userMsg = resolveUserFacingMessage(err, t);
     if (userMsg !== null) {
       logger.warn({ dbJobId, err }, "Video job rejected: user-facing error");
@@ -1182,18 +1209,21 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     // ── Poll-stage fallback на 5xx от текущего провайдера ─────────────────
     // Условие: BullMQ retry'и исчерпаны (isLastAttempt) И ошибка — terminal
     // 5xx-сигнал текущего провайдера, который ретраи на нём не починят.
-    // Покрываются ДВА класса ошибок (взаимно дополняющие, не пересекаются):
+    // Покрываются ДВА классификатора (overlap на KIE 5xx — это OK, OR-condition):
     //
-    //  1. `isKieTransientError` — KIE 5xx + 422 task-id-blank + "client closed
-    //     request". KIE-адаптер бросает plain Error БЕЗ `err.status`, поэтому
-    //     детектится по тексту message ("KIE …").
+    //  1. `isKieTransientError` — KIE-специфика: 422 task-id-blank,
+    //     "playground failed", "client closed request", 400 internal-retry,
+    //     ПЛЮС KIE 5xx (через isKieFiveXxError по тексту "KIE … 5xx"). Это
+    //     legacy text-based детектор: работал ещё до миграции на providerHttpError,
+    //     ловит ошибки даже если status property где-то по дороге потеряется.
     //
-    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. Покрывает прочие
-    //     адаптеры, которые выставляют numeric status на throw'е (например
-    //     evolink: 524 от Cloudflare; fal/replicate: 502/503). Эта ветка
-    //     прицельно закрывает дыру кие→evolink→fal: раньше evolink-овые 5xx
-    //     на poll-стадии не каскадировались на fal, и юзер получал generic
-    //     "model is resting" + refund, хотя следующий fallback был свободен.
+    //  2. `isFiveXxError` — generic HTTP 5xx по `err.status`. После миграции
+    //     адаптеров на providerHttpError покрывает все провайдеры
+    //     (Alibaba/MiniMax/Recraft/evolink: 524 от Cloudflare; fal/replicate:
+    //     502/503; KIE: дубль с (1), безвредный). Закрывает дыру kie→evolink→fal:
+    //     раньше evolink-овые 5xx на poll-стадии не каскадировались на fal, и
+    //     юзер получал generic "model is resting" + refund, хотя следующий
+    //     fallback был свободен.
     //
     // Защита от поспешного каскада на ПЕРВОМ провайдере: `isLastAttempt` —
     // поодиночные 5xx-блипы (например Cloudflare 524 за одну poll-итерацию)
@@ -1228,7 +1258,7 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
     if (
       stage === "poll" &&
       isLastAttempt &&
-      (isKieTransientError(err) || isFiveXxError(err)) &&
+      (isKieTransientError(err) || isFiveXxError(err) || isTransientNetworkError(err)) &&
       modelMeta
     ) {
       // readFallbackState/writeFallbackState — closures внутри try-блока,
@@ -1327,7 +1357,8 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       } else if (
         !isKieTransientError(err) &&
         !isProviderTemporaryUnavailable(err) &&
-        !isFiveXxError(err)
+        !isFiveXxError(err) &&
+        !isTransientNetworkError(err)
       ) {
         logger.warn(
           {
@@ -1383,13 +1414,17 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
         logger.warn({ dbJobId, tokensSpent }, "Video failed after deduct: tokens refunded to user");
       }
 
-      await notifyTechError(err, {
-        jobId: dbJobId,
-        modelId,
-        section: "video",
-        userId: userIdStr,
-        attempt: job.attemptsMade,
-      });
+      await notifyTechError(
+        err,
+        {
+          jobId: dbJobId,
+          modelId,
+          section: "video",
+          userId: userIdStr,
+          attempt: job.attemptsMade,
+        },
+        isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+      );
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, failureMsg).catch(() => void 0);
       } else {

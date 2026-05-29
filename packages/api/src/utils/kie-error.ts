@@ -44,6 +44,12 @@ export function isKieFiveXxError(err: unknown): boolean {
  * сработать как при 5xx. Без этой ветки fallback пропускался на последней
  * попытке, юзер получал generic «модель устала».
  *
+ * `422` + `"Director: unexpected error handling prediction (E9243)"` — внутренний
+ * сбой KIE-пайплайна («Director») на poll'е (наблюдали 2026-05 на kling). Тот же
+ * класс, что `playground failed` — не наша вина и не валидация ввода; на другом
+ * backend'е (evolink/fal) генерация может пройти. Без этой ветки fallback
+ * пропускался (`Video fallback skipped: not eligible`) и джоба падала целиком.
+ *
  * `400` + `"Internal Error, Please try again later."` — KIE нестандартно
  * сигналит transient через 400-failCode (наблюдали 2026-05 на gpt-image-2).
  * Сочетание «Internal Error» + «try again later» — однозначный transient-
@@ -68,7 +74,9 @@ export function isKieTransientError(err: unknown): boolean {
   if (!/^KIE\b/i.test(message)) return false;
   const is422Transient =
     /\b422\b/.test(message) &&
-    /playground failed|task id is blank|client closed request/i.test(message);
+    /playground failed|task id is blank|client closed request|director:? unexpected error/i.test(
+      message,
+    );
   const is400InternalRetry =
     /\b400\b/.test(message) && /internal error.*try again later/i.test(message);
   const is422TooManyRequests =

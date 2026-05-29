@@ -81,6 +81,10 @@ export type ModelSettingDto = {
 export type WebModelDto = {
   id: string;
   name: string;
+  /** Имя для веб-UI без эмодзи (override `webName` либо `name` со срезанным эмодзи). */
+  webName: string;
+  /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`); `null` → буква-аватар. */
+  webIconPath: string | null;
   description: string;
   section: ModelSection | string;
   provider: string;

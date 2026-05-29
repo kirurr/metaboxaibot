@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { Check, ChevronDown } from "lucide-react";
 import type { WebModelDto } from "@/api/models";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { modelDesc, modelDisplayName, modelRate } from "./chatHelpers";
 
 export const ChatEmpty = memo(function ChatEmpty({
@@ -47,7 +48,12 @@ export const ChatEmpty = memo(function ChatEmpty({
         onClick={() => setModelOpen(!modelOpen)}
       >
         <div className="ce-mc-row">
-          <span className="ce-mc-dot" />
+          <ModelAvatar
+            className="ce-mc-ico"
+            icon={selectedModel?.webIconPath ?? null}
+            name={selectedModel ? modelDisplayName(selectedModel) : "·"}
+            iconSize={15}
+          />
           <span className="ce-mc-name">
             {selectedModel ? modelDisplayName(selectedModel) : t("common.loading")}
           </span>
@@ -68,6 +74,12 @@ export const ChatEmpty = memo(function ChatEmpty({
                 }}
               >
                 <span className="mp-row-name">
+                  <ModelAvatar
+                    className="ce-mc-ico"
+                    icon={m.webIconPath}
+                    name={modelDisplayName(m)}
+                    iconSize={15}
+                  />
                   {modelDisplayName(m)}
                   {m.id === modelId && <Check size={12} />}
                 </span>

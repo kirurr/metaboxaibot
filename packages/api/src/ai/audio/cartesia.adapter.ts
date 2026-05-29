@@ -4,6 +4,7 @@ import { fetchWithLog } from "../../utils/fetch.js";
 import { transcodeToMp3 } from "../../utils/audio-transcode.js";
 import { resolveAudioMimeType } from "../../utils/mime-detect.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 /**
  * Cartesia /tts/bytes ругается 400/404 на голос, который у нас сохранён,
@@ -147,7 +148,7 @@ export class CartesiaAdapter implements AudioAdapter {
           section: "audio",
         });
       }
-      throw new Error(`Cartesia TTS failed: ${res.status} ${text}`);
+      throw providerHttpError(`Cartesia TTS failed: ${res.status} ${text}`, res.status);
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -216,7 +217,7 @@ export class CartesiaAdapter implements AudioAdapter {
           section: "audio",
         });
       }
-      throw new Error(`Cartesia voice clone failed: ${res.status} ${text}`);
+      throw providerHttpError(`Cartesia voice clone failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as { id: string };
@@ -297,7 +298,7 @@ export class CartesiaAdapter implements AudioAdapter {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        throw new Error(`Cartesia listVoices failed: ${res.status} ${body}`);
+        throw providerHttpError(`Cartesia listVoices failed: ${res.status} ${body}`, res.status);
       }
       const data = (await res.json()) as {
         data: Array<{ id: string; name?: string; created_at?: string }>;

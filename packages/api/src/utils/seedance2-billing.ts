@@ -1,10 +1,10 @@
 /**
  * Seedance 2.0 / 2.0 Fast — pure billing helpers для evolink primary.
  *
- * Логика отделена от video.processor'а ради тестируемости. Processor
- * импортирует {@link computeSeedance2BillableUsd} и применяет её только когда
- * у задачи есть ref_videos (r2v режим). Для no-video случая обычный
- * `calculateCost` через costMatrix продолжает работать.
+ * Логика отделена ради тестируемости и переиспользования. Воркер
+ * (video.processor) применяет её при списании, а previewVideo (cost-preview) —
+ * при оценке предв. цены, оба только когда у задачи есть ref_videos (r2v
+ * режим). Для no-video случая обычный `calculateCost` через costMatrix работает.
  *
  * Pricing rules (per evolink docs):
  *   - С видео-инпутом: используется ПОНИЖЕННЫЙ per-second rate, но добавочно

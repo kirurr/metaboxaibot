@@ -5,6 +5,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
   // ── Аудио ─────────────────────────────────────────────────────────────────
   "tts-openai": {
     id: "tts-openai",
+    webIconPath: "/icons/openai.svg",
     name: "🔊 Синтез речи (OpenAI)",
     description:
       "Синтез речи от OpenAI. Быстрая генерация, естественная интонация. Дешевле ElevenLabs, но меньше голосов и нет клонированных.",
@@ -222,6 +223,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
   },
   "tts-el": {
     id: "tts-el",
+    webIconPath: "/icons/elevenlabs.svg",
     name: "🔊 Синтез речи (ElevenLabs)",
     description:
       "Синтез речи от ElevenLabs — широкая библиотека официальных голосов. Выше качество и выразительность, чем OpenAI TTS, но дороже.",
@@ -304,6 +306,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
   },
   suno: {
     id: "suno",
+    webIconPath: "/icons/suno.svg",
     name: "🎵 Suno",
     description:
       "Генерирует полноценные музыкальные треки с вокалом и аранжировкой. Можно задать стиль, настроение и текст песни. До 4 минут. Также доступен режим без вокала в разделе «⚙ Управление».",
@@ -352,6 +355,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
   },
   "sounds-el": {
     id: "sounds-el",
+    webIconPath: "/icons/elevenlabs.svg",
     name: "🔔 Звуковые эффекты (ElevenLabs)",
     description:
       "Генерирует оригинальные звуковые эффекты по описанию. Подходит для видеопроизводства, игр и подкастов. Рекомендуем задавать промпт на английском языке.",
@@ -403,6 +407,7 @@ export const AUDIO_MODELS: Record<string, AIModel> = {
   },
   "music-el": {
     id: "music-el",
+    webIconPath: "/icons/elevenlabs.svg",
     name: "🎶 ElevenLabs (музыка без вокала)",
     description:
       "Генерирует фоновую музыку, амбиент и атмосферы через ElevenLabs. Инструментал без вокала, до 22 секунд. Быстрее Suno, но без пения. Промпт лучше на английском.",

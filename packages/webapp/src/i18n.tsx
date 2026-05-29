@@ -504,6 +504,7 @@ const translations = {
       "Tap «Refresh menu» — the bot will send a new main menu with a working «Profile» button.",
     "auth.refreshMenu": "Refresh menu",
     "auth.openFromTelegram": "Please open this app from Telegram",
+    "error.tooManyRequests": "Too many requests in a row. Take a ~30-second break and try again.",
     "auth.notRegisteredTitle": "Open the bot first",
     "auth.notRegisteredText":
       "To use the mini-app, send the /start command to the bot or follow a friend's referral link.",
@@ -1058,6 +1059,8 @@ const translations = {
       "Нажмите «Обновить меню» — бот пришлёт свежее главное меню с рабочей кнопкой «Профиль».",
     "auth.refreshMenu": "Обновить меню",
     "auth.openFromTelegram": "Пожалуйста, откройте приложение через Telegram",
+    "error.tooManyRequests":
+      "Слишком много запросов подряд. Передохните полминуты и попробуйте снова.",
     "auth.notRegisteredTitle": "Сначала откройте бота",
     "auth.notRegisteredText":
       "Чтобы пользоваться мини-приложением, отправьте боту команду /start или перейдите по реферальной ссылке от друга.",
@@ -1157,4 +1160,19 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
 export function useI18n() {
   return useContext(I18nContext);
+}
+
+/**
+ * Не-React доступ к переводам — для кода вне дерева компонентов (например,
+ * api/client при показе попапа). Локаль резолвится так же, как в I18nProvider.
+ */
+export function tStatic(key: TranslationKey): string {
+  const saved = localStorage.getItem("metabox_lang");
+  const locale: Locale =
+    saved === "ru" || saved === "en"
+      ? saved
+      : navigator.language.slice(0, 2) === "ru"
+        ? "ru"
+        : "en";
+  return translations[locale]?.[key] ?? translations.en[key] ?? key;
 }

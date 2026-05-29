@@ -1,6 +1,11 @@
 import { db } from "../db.js";
 import { getImageQueue } from "../queues/image.queue.js";
-import { AI_MODELS, ONE_SHOT_SETTING_KEYS, validateNanoBananaPromptLength } from "@metabox/shared";
+import {
+  AI_MODELS,
+  ONE_SHOT_SETTING_KEYS,
+  UserFacingError,
+  validateNanoBananaPromptLength,
+} from "@metabox/shared";
 import { logger } from "../logger.js";
 import { checkBalance } from "./token.service.js";
 import { costPreviewService } from "./cost-preview.service.js";
@@ -148,6 +153,29 @@ export const generationService = {
     const modelSettings = preview.effectiveModelSettings;
     const effectiveAspectRatio = preview.effectiveAspectRatio;
     const numImages = preview.numImages;
+
+    // Pre-flight aspect_ratio support: модель декларирует supportedAspectRatios,
+    // юзер мог сохранить ratio который не поддерживается (например `4:5` для
+    // nano-banana-1 → evolink `gemini-2.5-flash-image` принимает только
+    // `auto 1:1 2:3 3:2 4:3 3:4 16:9 9:16`). Без этого юзер платит токенами,
+    // ждёт submit к провайдеру, видит generic 400.
+    if (
+      effectiveAspectRatio &&
+      model.supportedAspectRatios &&
+      model.supportedAspectRatios.length > 0 &&
+      !model.supportedAspectRatios.includes(effectiveAspectRatio)
+    ) {
+      throw new UserFacingError(
+        `aspect ratio ${effectiveAspectRatio} not supported by ${modelId}`,
+        {
+          key: "aspectRatioNotSupported",
+          params: {
+            ratio: effectiveAspectRatio,
+            supported: model.supportedAspectRatios.join(", "),
+          },
+        },
+      );
+    }
 
     await checkBalance(userId, preview.cost);
 

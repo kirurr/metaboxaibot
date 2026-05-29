@@ -2,6 +2,7 @@ import type { AudioAdapter, AudioInput, AudioResult } from "./base.adapter.js";
 import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { logger } from "../../logger.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
@@ -115,7 +116,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
     if (!res.ok) {
       const text = await res.text();
       throwIfElAccountBlocked(this.modelId, res.status, text);
-      throw new Error(`ElevenLabs TTS failed: ${res.status} ${text}`);
+      throw providerHttpError(`ElevenLabs TTS failed: ${res.status} ${text}`, res.status);
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -168,7 +169,10 @@ export class ElevenLabsAdapter implements AudioAdapter {
         }
       }
       throwIfElAccountBlocked(this.modelId, res.status, text);
-      throw new Error(`ElevenLabs sound generation failed: ${res.status} ${text}`);
+      throw providerHttpError(
+        `ElevenLabs sound generation failed: ${res.status} ${text}`,
+        res.status,
+      );
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -200,7 +204,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`ElevenLabs voice clone failed: ${res.status} ${text}`);
+      throw providerHttpError(`ElevenLabs voice clone failed: ${res.status} ${text}`, res.status);
     }
 
     const data = (await res.json()) as { voice_id: string };
@@ -247,7 +251,7 @@ export class ElevenLabsAdapter implements AudioAdapter {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`ElevenLabs listVoices failed: ${res.status} ${body}`);
+      throw providerHttpError(`ElevenLabs listVoices failed: ${res.status} ${body}`, res.status);
     }
     const data = (await res.json()) as {
       voices?: Array<{

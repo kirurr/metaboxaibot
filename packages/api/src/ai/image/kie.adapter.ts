@@ -3,6 +3,7 @@ import { AI_MODELS, config, UserFacingError } from "@metabox/shared";
 import { fetchWithLog } from "../../utils/fetch.js";
 import { buildKieUploadName, parseImageMime, uploadFileUrl } from "../../utils/kie-upload.js";
 import { classifyAIError } from "../../services/ai-error-classifier.service.js";
+import { providerHttpError } from "../../utils/rate-limit-error.js";
 
 const KIE_BASE = "https://api.kie.ai";
 
@@ -233,7 +234,7 @@ export class KieImageAdapter implements ImageAdapter {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`KIE image submit error ${resp.status}: ${txt}`);
+      throw providerHttpError(`KIE image submit error ${resp.status}: ${txt}`, resp.status);
     }
 
     const data = (await resp.json()) as KieSubmitResponse;
@@ -287,7 +288,7 @@ export class KieImageAdapter implements ImageAdapter {
       this.fetchFn,
     );
 
-    if (!resp.ok) throw new Error(`KIE image poll error ${resp.status}`);
+    if (!resp.ok) throw providerHttpError(`KIE image poll error ${resp.status}`, resp.status);
 
     const data = (await resp.json()) as KieTaskResponse;
     if (data.code !== 200 || !data.data) {
@@ -388,15 +389,33 @@ export class KieImageAdapter implements ImageAdapter {
       // "could not generate ... due to identity preservation" — оба триггера
       // сработают, но конкретная подсказка про face reference полезнее
       // generic "переформулируйте промпт".
+      // `cause: rawFailMsg` (ПОЛНЫЙ, до sanitize) — детектор child-safety в
+      // воркере (isChildSafetyError) ходит по cause-цепочке; без него обрезанный
+      // technicalMessage мог бы потерять маркер child/minor за границей среза, и
+      // child-safety ошибочно ушла бы в content-policy retry/fallback.
       if (isIdentityPreservation)
-        throw new UserFacingError(technicalMessage, { key: "identityPreservationNotAllowed" });
+        throw new UserFacingError(technicalMessage, {
+          key: "identityPreservationNotAllowed",
+          cause: rawFailMsg,
+        });
       if (isNoResult) {
         throw new UserFacingError(technicalMessage, { key: "generationNoResult" });
       }
       if (isPublicFigure)
-        throw new UserFacingError(technicalMessage, { key: "publicFigureViolation" });
-      if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
-      if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
+        throw new UserFacingError(technicalMessage, {
+          key: "publicFigureViolation",
+          cause: rawFailMsg,
+        });
+      if (isCopyright)
+        throw new UserFacingError(technicalMessage, {
+          key: "copyrightViolation",
+          cause: rawFailMsg,
+        });
+      if (isPolicy)
+        throw new UserFacingError(technicalMessage, {
+          key: "contentPolicyViolation",
+          cause: rawFailMsg,
+        });
       // Midjourney syntax detector: KIE при 400 от провайдера часто эхает
       // обратно сам промпт юзера в `failMsg`. Если в нём видны характерные
       // Midjourney-маркеры (`/imagine prompt:`, флаги `--ar`/`--stylize`/

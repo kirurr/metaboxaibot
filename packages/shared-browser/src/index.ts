@@ -5,6 +5,7 @@ export {
 } from "./i18n/model-translations.js";
 export type { ModelTranslation, SettingTranslation } from "./i18n/model-translations.js";
 export { suggestEmailTypo } from "./email-suggest.js";
+export { stripLeadingEmoji } from "./strip-emoji.js";
 // WS-API намеренно вынесен в sub-export `@metabox/shared-browser/ws`:
 // `./ws/schemas.js` тянет `zod`, а main entry грузится транзитивно бэкендом
 // через `@metabox/shared` (там value-re-export'ы MODEL_TRANSLATIONS и пр.).

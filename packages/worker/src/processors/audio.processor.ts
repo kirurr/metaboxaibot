@@ -48,6 +48,9 @@ import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/
 import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
 import { isFiveXxError } from "@metabox/api/utils/rate-limit-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
+import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
 import type { AcquiredKey } from "@metabox/api/services/key-pool";
@@ -918,6 +921,27 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     // Throws DelayedError if rescheduled (propagates → BullMQ delays job).
     // Returns silently otherwise → fall through to user-facing failure handling.
     await deferIfTransientNetworkError({ err, job, token, section: "audio" });
+
+    // Content-policy / модерация: 1 ретрай на провайдере → fallback → 1 ретрай →
+    // потом терминальная ошибка (модерация часто недетерминирована). child-safety
+    // исключён внутри isContentPolicyError. При re-enqueue хелпер бросает
+    // DelayedError; иначе возвращается и проваливаемся в user-facing terminal.
+    if (isContentPolicyError(err) && modelMeta) {
+      await handleContentPolicyRetryFallback({
+        job,
+        token,
+        dbJobId,
+        modelId,
+        modelMeta,
+        fallbackSection: "audio",
+        notifySection: "audio",
+        // audio JobData не имеет mediaInputs, и submit-путь audio fallback'ов
+        // не фильтрует по совместимости — мирроринг, не отсекаем кандидатов.
+        skipCompatibilityFilter: true,
+        userId: userIdStr,
+      });
+    }
+
     const providerMsg = resolveUserFacingMessage(err, t);
     if (providerMsg !== null) {
       logger.warn({ dbJobId, err }, "Audio job rejected: user-facing error");
@@ -1098,13 +1122,17 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
       // сюда не доходят (отработаны выше в resolveUserFacingMessage-ветке со
       // своим ops-алертом). Контент-модерацию исключаем — это вина юзера.
       if (!isUserContentRejection) {
-        await notifyTechError(err, {
-          jobId: dbJobId,
-          modelId,
-          section: "audio",
-          userId: userIdStr,
-          attempt: job.attemptsMade,
-        });
+        await notifyTechError(
+          err,
+          {
+            jobId: dbJobId,
+            modelId,
+            section: "audio",
+            userId: userIdStr,
+            attempt: job.attemptsMade,
+          },
+          isOpenAiBillingExhaustion(err) ? "balance" : "alerts",
+        );
       }
       if (telegramChatId !== null) {
         await telegram.sendMessage(telegramChatId, finalMsg).catch(() => void 0);

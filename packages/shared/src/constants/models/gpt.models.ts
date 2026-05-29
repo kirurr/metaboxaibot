@@ -383,6 +383,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── GPT 5 ─────────────────────────────────────────────────────────────────
   "gpt-5.5": {
     id: "gpt-5.5",
+    webIconPath: "/icons/openai.svg",
     name: "💬 GPT 5.5",
     description:
       "Новейший флагман OpenAI с контекстом 1M+ токенов и поддержкой reasoning-режима (от выкл. до максимального). Лучший баланс интеллекта, скорости и цены в линейке.",
@@ -403,6 +404,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gpt-5.4": {
     id: "gpt-5.4",
+    webIconPath: "/icons/openai.svg",
     name: "💬 GPT 5.4",
     description:
       "Флагман OpenAI нового поколения — умнее и быстрее GPT 5 Pro. Лучший баланс интеллекта, скорости и цены в линейке.",
@@ -440,6 +442,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // },
   "gpt-5-nano": {
     id: "gpt-5-nano",
+    webIconPath: "/icons/openai.svg",
     name: "✨ GPT 5 Nano",
     description:
       "Самая лёгкая и дешёвая в линейке GPT 5 — мгновенные ответы для простых задач. Не поддерживает изображения.",
@@ -459,6 +462,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "o4-mini": {
     id: "o4-mini",
+    webIconPath: "/icons/openai.svg",
     name: "🔬 GPT-o4 Mini",
     description:
       "Новейшая reasoning-модель OpenAI — цепочка рассуждений для сложных задач. Понимает изображения, умнее o3 Mini.",
@@ -495,6 +499,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // },
   "o3-mini": {
     id: "o3-mini",
+    webIconPath: "/icons/openai.svg",
     name: "🔩 GPT-o3 Mini",
     description:
       "Предыдущая компактная reasoning-модель OpenAI. Не понимает изображения — для текстовых задач с цепочкой рассуждений.",
@@ -535,6 +540,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // },
   "claude-sonnet": {
     id: "claude-sonnet",
+    webIconPath: "/icons/claude.svg",
     name: "📜 Claude 4.6 Sonnet",
     description:
       "Новейший Sonnet (версия 4.6) — лучший баланс цена/качество у Anthropic. Быстрее и дешевле Opus, отлично для кода, текстов и анализа.",
@@ -570,6 +576,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // },
   "claude-haiku": {
     id: "claude-haiku",
+    webIconPath: "/icons/claude.svg",
     name: "🍃 Claude 4.5 Haiku",
     description:
       "Самая быстрая и дешёвая модель Anthropic. Мгновенные ответы для простых задач, понимает изображения. Слабее Sonnet и Opus в рассуждениях.",
@@ -589,6 +596,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── Google Gemini ──────────────────────────────────────────────────────────
   "gemini-3-pro": {
     id: "gemini-3-pro",
+    webIconPath: "/icons/gemini.svg",
     name: "💎 Gemini 3 Pro",
     description:
       "Флагман Google, контекст до 1M токенов и мультимодальность. Поддерживает поиск в интернете. Базовая версия 3 Pro.",
@@ -606,6 +614,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gemini-3.1-pro": {
     id: "gemini-3.1-pro",
+    webIconPath: "/icons/gemini.svg",
     name: "💍 Gemini 3.1 Pro",
     description:
       "Обновлённый Gemini 3 Pro (версия 3.1) — лучше следует инструкциям и точнее отвечает. Та же цена, что и 3.0. Поиск в интернете.",
@@ -623,6 +632,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gemini-2-flash": {
     id: "gemini-2-flash",
+    webIconPath: "/icons/gemini.svg",
     name: "🌟 Gemini 2.5 Flash",
     description:
       "Быстрая и дешёвая модель Google с reasoning. Отличное соотношение цена/качество, дешевле Pro в ~7 раз. Поиск в интернете.",
@@ -640,6 +650,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gemini-2-flash-lite": {
     id: "gemini-2-flash-lite",
+    webIconPath: "/icons/gemini.svg",
     name: "⭐ Gemini 2.5 Flash Lite",
     description:
       "Самая лёгкая и дешёвая модель Google. Для простых задач с минимальными затратами. Без изображений и поиска в интернете.",
@@ -659,6 +670,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── DeepSeek ──────────────────────────────────────────────────────────────
   "deepseek-r1": {
     id: "deepseek-r1",
+    webIconPath: "/icons/deepseek.svg",
     name: "🔍 DeepSeek R1",
     description:
       "Reasoning-модель из Китая — сильна в математике и коде, думает пошагово. Медленнее V3, но точнее для сложных задач.",
@@ -676,6 +688,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "deepseek-v3": {
     id: "deepseek-v3",
+    webIconPath: "/icons/deepseek.svg",
     name: "🐋 DeepSeek V3",
     description:
       "Быстрая модель DeepSeek для общих задач и генерации текста. Без пошагового reasoning — быстрее R1, но менее точна в сложных задачах.",
@@ -695,6 +708,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── xAI Grok ──────────────────────────────────────────────────────────────
   "grok-4": {
     id: "grok-4",
+    webIconPath: "/icons/grok.svg",
     name: "🤖 Grok 4",
     description:
       "Флагман xAI — максимальное качество рассуждений, контекст 256K. Дороже Grok 4 Fast, но точнее для сложных задач.",
@@ -713,6 +727,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "grok-4-fast": {
     id: "grok-4-fast",
+    webIconPath: "/icons/grok.svg",
     name: "🏎️ Grok 4 Fast",
     description:
       "Ускоренная версия Grok 4 от xAI. Контекст до 2M токенов, в ~10 раз дешевле стандартного Grok 4. Быстрые ответы с рассуждением.",
@@ -733,6 +748,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── Perplexity ────────────────────────────────────────────────────────────
   "perplexity-sonar-pro": {
     id: "perplexity-sonar-pro",
+    webIconPath: "/icons/perplexity.svg",
     name: "🌐 Perplexity Sonar Pro + Internet",
     description:
       "Мощный AI-поиск с глубокими ответами из интернета. Дороже Sonar, но точнее анализирует источники и даёт более развёрнутые ответы.",
@@ -750,6 +766,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "perplexity-sonar-research": {
     id: "perplexity-sonar-research",
+    webIconPath: "/icons/perplexity.svg",
     name: "🔭 Perplexity Sonar Deep Research",
     description:
       "Автономный исследователь — анализирует десятки источников за один запрос. Идеален для глубокого ресёрча, дольше обычного Sonar.",
@@ -767,6 +784,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "perplexity-sonar": {
     id: "perplexity-sonar",
+    webIconPath: "/icons/perplexity.svg",
     name: "📡 Perplexity Sonar + Internet",
     description:
       "Быстрый и дешёвый AI-поиск с актуальными данными из интернета. Базовая версия — для оперативных вопросов без глубокого анализа.",
@@ -786,6 +804,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // ── Qwen 3 ───────────────────────────────────────────────────────────────
   "qwen-3-max-thinking": {
     id: "qwen-3-max-thinking",
+    webIconPath: "/icons/qwen.svg",
     name: "🧮 Qwen 3 Max Thinking",
     description:
       "Крупнейшая reasoning-модель Alibaba. Максимальное качество в линейке Qwen — для самых сложных задач. Дороже Qwen 3 Thinking.",
@@ -807,6 +826,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "qwen-3-thinking": {
     id: "qwen-3-thinking",
+    webIconPath: "/icons/qwen.svg",
     name: "💭 Qwen 3 Thinking",
     description:
       "Reasoning-модель Alibaba среднего размера — дешевле Max, но сильна в коде и математике. Оптимальный баланс цена/качество в линейке Qwen.",
@@ -843,6 +863,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // переключится туда при исчерпании kie-ключей с 5xx/network ошибкой.
   "claude-opus": {
     id: "claude-opus",
+    webIconPath: "/icons/claude.svg",
     name: "🎭 Claude 4.6 Opus",
     description:
       "Новейшая и самая умная модель Anthropic (версия 4.6). Лучшая для сложных аналитических и творческих задач. Понимает изображения.",
@@ -880,6 +901,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   // },
   "gpt-5.5-pro": {
     id: "gpt-5.5-pro",
+    webIconPath: "/icons/openai.svg",
     name: "🧠 GPT 5.5 Pro",
     description:
       "Новейшая флагманская модель OpenAI. Максимальная точность и глубокие рассуждения с расширенным контекстом 1M+ токенов. Дороже GPT 5.5 — для задач, где важна безупречная точность.",
@@ -899,6 +921,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gpt-5.4-pro": {
     id: "gpt-5.4-pro",
+    webIconPath: "/icons/openai.svg",
     name: "🧠 GPT 5.4 Pro",
     description:
       "Самая мощная модель OpenAI. Максимальная точность, глубокие рассуждения. Значительно дороже GPT 5.4 — для задач, где важна безупречная точность.",
@@ -918,6 +941,7 @@ export const GPT_MODELS: Record<string, AIModel> = {
   },
   "gpt-5-pro": {
     id: "gpt-5-pro",
+    webIconPath: "/icons/openai.svg",
     name: "💡 GPT 5 Pro",
     description:
       "Предыдущее поколение флагмана OpenAI. Только максимальный уровень рассуждений — для самых сложных задач. Дороже GPT 5.4.",

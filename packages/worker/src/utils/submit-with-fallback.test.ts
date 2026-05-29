@@ -89,6 +89,7 @@ vi.mock("@metabox/api/utils/rate-limit-error", () => ({
 import { submitWithFallback } from "./submit-with-fallback.js";
 import { PoolExhaustedError } from "@metabox/api/utils/pool-exhausted-error";
 import { RateLimitLongWindowError } from "./submit-with-throttle.js";
+import { UserFacingError } from "@metabox/shared";
 
 // ── Test sentinel — delayJob throws this in tests ────────────────────────────
 class TestDelayedSentinel extends Error {
@@ -816,8 +817,43 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
   // следующему кандидату. При отсутствии fallback'а — all_candidates_failed
   // тоже летит в balance (а не в общий fallback-канал).
 
+  test("key-level retry: billing на k1 → берёт здоровый k2 того же провайдера → success (без fallback-модели)", async () => {
+    // gpt-image-1.5 без fallback-модели. Первый ключ billing-dead, второй —
+    // здоровый. submitWithFallback должен вывести k1 из ротации и пройти на k2
+    // в рамках ОДНОГО запроса (key-level retry), не роняя его юзеру.
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k1-dead"))
+      .mockResolvedValueOnce(makeAcquiredKey("k2-healthy"));
+    const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
+      code: "billing_hard_limit_reached",
+      status: 400,
+    });
+    const submit = vi.fn().mockRejectedValueOnce(billingErr).mockResolvedValueOnce("ok-on-k2");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "gpt-image-1.5", provider: "openai" }),
+      fallbacks: [],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("ok-on-k2");
+    expect(res.usedFallback).toBe(false); // тот же провайдер, не fallback-модель
+    expect(submit).toHaveBeenCalledTimes(2); // k1 (billing) → k2 (success)
+    // k1 выведен из ротации, k2 не тронут
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1-dead", 30 * 60 * 1000, "openai billing");
+    expect(mocks.markRateLimited).not.toHaveBeenCalledWith(
+      "k2-healthy",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mocks.recordSuccess).toHaveBeenCalledWith("k2-healthy");
+  });
+
   test("400 billing_hard_limit_reached → openai_billing_exhausted, balance alert, NO recordError", async () => {
-    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    mocks.acquireKey.mockResolvedValue(makeAcquiredKey("k1"));
     const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
       code: "billing_hard_limit_reached",
       status: 400,
@@ -842,7 +878,10 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       { channel: "balance" },
     );
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    // Billing-dead ключ выводится из ротации через markRateLimited (per-key,
+    // 30 мин), чтобы acquireKey не возвращал его снова. НЕ recordError (ключ не
+    // сломан) и НЕ markProviderLongCooldown (провайдер не блокируем).
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyFallback).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "all_candidates_failed",
@@ -852,7 +891,7 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
   });
 
   test("429 insufficient_quota → ловится billing-веткой, не rate-limit'ом", async () => {
-    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    mocks.acquireKey.mockResolvedValue(makeAcquiredKey("k1"));
     const quotaErr = Object.assign(new Error("429 You exceeded your current quota"), {
       code: "insufficient_quota",
       status: 429,
@@ -876,21 +915,26 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
       "openai-billing-exhaustion:k1",
       { channel: "balance" },
     );
-    // Билинг-ветка интерсептит до rate-limit классификатора — ни ключ-throttle,
-    // ни recordError не должны сработать.
+    // Билинг-ветка интерсептит до rate-limit классификатора — recordError и
+    // notifyRateLimit не срабатывают. НО markRateLimited вызывается (per-key
+    // вывод billing-dead ключа из ротации на 30 мин).
     expect(mocks.recordError).not.toHaveBeenCalled();
-    expect(mocks.markRateLimited).not.toHaveBeenCalled();
+    expect(mocks.markRateLimited).toHaveBeenCalledWith("k1", 30 * 60 * 1000, "openai billing");
     expect(mocks.notifyRateLimit).not.toHaveBeenCalled();
   });
 
-  test("billing на primary + успешный fallback → fallback используется, billing alert всё равно летит", async () => {
-    mocks.acquireKey
-      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
-      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+  test("все openai ключи billing-dead → PoolExhausted → fallback на evolink, billing alert летит", async () => {
+    // billing на единственном openai ключе → key-retry → acquireKey бросает
+    // PoolExhausted (все openai throttled) → continue к fallback-кандидату
+    // evolink → success.
     const billingErr = Object.assign(new Error("400 Billing hard limit has been reached."), {
       code: "billing_hard_limit_reached",
       status: 400,
     });
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary")) // openai 1-я попытка
+      .mockRejectedValueOnce(new PoolExhaustedError("openai", 30000)) // openai key-retry → все throttled
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb")); // evolink
     const submit = vi.fn().mockRejectedValueOnce(billingErr).mockResolvedValueOnce("fallback-ok");
 
     const res = await submitWithFallback({
@@ -905,15 +949,183 @@ describe("submitWithFallback — OpenAI billing exhaustion", () => {
     expect(res.result).toBe("fallback-ok");
     expect(res.usedFallback).toBe(true);
     expect(res.effectiveProvider).toBe("evolink");
-    // billing alert летит даже при успешном fallback'е — оператор должен
-    // увидеть что у primary биллинг пуст независимо от того, спас ли fallback.
+    // billing alert летит — оператор должен увидеть что у openai биллинг пуст
+    // независимо от того, спас ли fallback.
     expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
       billingErr,
       expect.any(Object),
       "openai-billing-exhaustion:k-primary",
       { channel: "balance" },
     );
-    // Primary key не штрафуется
+    // openai key выведен из ротации (markRateLimited), но НЕ recordError.
+    expect(mocks.markRateLimited).toHaveBeenCalledWith(
+      "k-primary",
+      30 * 60 * 1000,
+      "openai billing",
+    );
     expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — UserFacingError early-throw (validation)", () => {
+  // Pre-flight адаптеров (Suno length, Cartesia empty transcript, Nano Banana
+  // length и т.п.) бросает UserFacingError без notifyOps. Такие ошибки — это
+  // юзерская валидация, fallback не лечит (один backend → один лимит), tech
+  // не должен шуметь, ключ не штрафуется.
+
+  test("UserFacingError без notifyOps → throw сразу, без fallback, без tech-alert, без recordError", async () => {
+    mocks.acquireKey.mockResolvedValueOnce(makeAcquiredKey("k1"));
+    const validationErr = new UserFacingError("Suno: prompt 980 > 500 chars", {
+      key: "sunoPromptTooLongNoLyrics",
+      params: { current: 980 },
+    });
+    const submit = vi.fn().mockRejectedValue(validationErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "suno", provider: "kie" }),
+        fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+        section: "audio",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(validationErr);
+
+    // Только primary попробован, fallback НЕ задействован.
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    expect(mocks.notifyTechErrorThrottled).not.toHaveBeenCalled();
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+  });
+
+  test("UserFacingError c notifyOps:true → попадает в обычный flow (fallback пробуется)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const providerErr = new UserFacingError("Suno API: credits insufficient", {
+      key: "modelTemporarilyUnavailable",
+      section: "audio",
+      notifyOps: true,
+      opsAlertDedupKey: "suno-credits-exhausted",
+    });
+    const submit = vi.fn().mockRejectedValueOnce(providerErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "suno", provider: "kie" }),
+      fallbacks: [makeModel({ id: "suno", provider: "apipass" })],
+      section: "audio",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    // Fallback задействован (это provider-side issue, имеет смысл попробовать соседа)
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — transient network error", () => {
+  // ENOTFOUND / ECONNRESET / ETIMEDOUT и т.п. — DNS/socket лёг у провайдера.
+  // Ключ не виноват → НЕ recordError. Пробуем следующего кандидата (у него
+  // может быть другой хост). Если все упали — caller (processor catch) защемит
+  // через deferIfTransientNetworkError (до 3 раундов).
+
+  test("ENOTFOUND на primary → пробует fallback, без recordError, без штрафа", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND kieai.redpandaai.co"), {
+        code: "ENOTFOUND",
+      }),
+    });
+    const submit = vi.fn().mockRejectedValueOnce(dnsErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+      fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+      section: "image",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.result).toBe("fallback-ok");
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Дедуп-алерт ушёл per-candidate (key network-transient:provider:code).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledWith(
+      dnsErr,
+      expect.any(Object),
+      "network-transient:kie:ENOTFOUND",
+    );
+    // Primary key не штрафуется на DNS-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalledWith("k-primary", expect.anything());
+  });
+
+  test("ENOTFOUND на всех кандидатах → throw lastError (caller сделает defer-transient)", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    const dnsErr = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND example.com"), { code: "ENOTFOUND" }),
+    });
+    const submit = vi.fn().mockRejectedValue(dnsErr);
+
+    await expect(
+      submitWithFallback({
+        primaryModel: makeModel({ id: "nano-banana-pro", provider: "kie" }),
+        fallbacks: [makeModel({ id: "nano-banana-pro", provider: "evolink" })],
+        section: "image",
+        job: makeJob(),
+        allowFiveXxFallback: false,
+        submit,
+      }),
+    ).rejects.toBe(dnsErr);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(mocks.recordError).not.toHaveBeenCalled();
+    // Notify per-candidate (2 алерта с разными provider в dedup-ключе).
+    expect(mocks.notifyTechErrorThrottled).toHaveBeenCalledTimes(2);
+    // notifyFallback(all_candidates_failed) НЕ должен звать на transient — иначе
+    // на каждом retry-раунде (×3) был бы лишний алерт без дедупа в fallback-канал.
+    // Per-candidate notifyTechErrorThrottled уже дедуп'нут (5/30мин), этого хватит.
+    expect(mocks.notifyFallback).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe("submitWithFallback — provider temporarily unavailable (infra)", () => {
+  // "high demand" / "Service unavailable" / Cloudflare Tunnel error / etc. —
+  // provider-wide инфра-проблема (узел перегружен, CDN edge упал). Ключ
+  // здоровый, штрафовать его нельзя — это не его вина. Пробуем следующего
+  // кандидата.
+
+  test("high demand на primary → fallback пробуется, recordError НЕ вызван", async () => {
+    mocks.acquireKey
+      .mockResolvedValueOnce(makeAcquiredKey("k-primary"))
+      .mockResolvedValueOnce(makeAcquiredKey("k-fb"));
+    // KIE-style "high demand" — matched через isProviderTemporaryUnavailable.
+    const overloadErr = new Error("KIE submit error 422: Service is currently unavailable");
+    const submit = vi.fn().mockRejectedValueOnce(overloadErr).mockResolvedValueOnce("fallback-ok");
+
+    const res = await submitWithFallback({
+      primaryModel: makeModel({ id: "kling", provider: "kie" }),
+      fallbacks: [makeModel({ id: "kling", provider: "evolink" })],
+      section: "video",
+      job: makeJob(),
+      allowFiveXxFallback: false,
+      submit,
+    });
+
+    expect(res.usedFallback).toBe(true);
+    expect(res.effectiveProvider).toBe("evolink");
+    // Главное: ключ primary НЕ штрафуется на инфра-проблеме провайдера.
+    expect(mocks.recordError).not.toHaveBeenCalled();
   });
 });

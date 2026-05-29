@@ -647,6 +647,15 @@ export async function handleVideoMediaInputRemove(ctx: BotContext): Promise<void
     }
   } else {
     await userStateService.clearMediaInputSlot(ctx.user.id, modelId, slotKey);
+    // Каскад: слоты с revealAfter === slotKey без него не имеют смысла (напр.
+    // last_frame revealAfter first_frame). Чистим их тоже — иначе остаётся
+    // невалидный набор (last без first → провайдер 400 на сабмите).
+    const dependents = (AI_MODELS[modelId]?.mediaInputs ?? []).filter(
+      (s) => s.revealAfter === slotKey,
+    );
+    for (const dep of dependents) {
+      await userStateService.clearMediaInputSlot(ctx.user.id, modelId, dep.slotKey);
+    }
   }
   await sendVideoMediaInputStatus(ctx, { edit: true });
 }
@@ -1432,7 +1441,13 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
             widthPx = meta.width;
             heightPx = meta.height;
           } catch (err) {
+            // Зеркалит active-slot/auto-slot ветки: без probe размеры неизвестны,
+            // а validateMediaAgainstSlot пропускает undefined (undefined < minWidth
+            // === false) — undersized-картинка уходила бы к провайдеру (KIE 422
+            // "image dimensions must be at least 300 pixels"). Reject, не continue.
             logger.warn({ err }, "probeImageMetadata failed in caption+photo path");
+            await ctx.reply(ctx.t.errors.mediaSlotReadMetadataFailed);
+            return;
           }
         }
         const violation = validateMediaAgainstSlot(

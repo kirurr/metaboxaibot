@@ -577,6 +577,7 @@ const TOPAZ_VIDEO_COST: Record<string, number> = {
 export const VIDEO_MODELS: Record<string, AIModel> = {
   kling: {
     id: "kling",
+    webIconPath: "/icons/kling.svg",
     name: "🎥 Kling 3.0",
     description:
       "Генерирует видео до 15 секунд со звуком. Лучше всех передаёт движения людей. Стандартная версия — быстрее и дешевле Pro.",
@@ -607,6 +608,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "kling-pro": {
     id: "kling-pro",
+    webIconPath: "/icons/kling.svg",
     name: "🎥 Kling 3.0 Pro",
     description:
       "Генерирует видео до 15 секунд со звуком. Лучше всех передаёт движения людей. Pro-версия — повышенная детализация и качество движений.",
@@ -637,6 +639,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "kling-motion": {
     id: "kling-motion",
+    webIconPath: "/icons/kling.svg",
     name: "🎥 Kling Motion",
     description:
       "Переносит движения из референсного видео на любого персонажа с изображения. Standard-версия — быстрее и дешевле Pro. Идеален для портретов и простых анимаций.",
@@ -660,6 +663,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "kling-motion-pro": {
     id: "kling-motion-pro",
+    webIconPath: "/icons/kling.svg",
     name: "🎥 Kling Motion Pro",
     description:
       "Переносит движения из референсного видео на любого персонажа с изображения. Pro-версия — повышенная точность переноса и детализация.",
@@ -801,6 +805,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   seedance: {
     id: "seedance",
+    webIconPath: "/icons/bytedance.svg",
     name: "💃 Seedance 1.5 Pro (ByteDance)",
     description:
       "Создаёт видео с выразительным движением и генерацией звука. Предыдущее поколение — проверенная стабильность, до 12 секунд. Хорош для креативных и стилизованных роликов.",
@@ -861,6 +866,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "seedance-2": {
     id: "seedance-2",
+    webIconPath: "/icons/bytedance.svg",
     name: "💃 Seedance 2.0 (ByteDance)",
     description:
       "Новейшая видеомодель ByteDance — значительно выше качество и реалистичность движений по сравнению с 1.5. Встроенный звук, до 15 секунд, широкий выбор соотношений сторон.",
@@ -936,6 +942,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "seedance-2-fast": {
     id: "seedance-2-fast",
+    webIconPath: "/icons/bytedance.svg",
     name: "💃 Seedance 2.0 Fast (ByteDance)",
     description:
       "Ускоренная версия Seedance 2.0 — быстрее и дешевле стандарта при схожем качестве. Встроенная генерация звука, до 15 секунд.",
@@ -1332,6 +1339,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   // t2v чтобы не сломать сохранённый `videoModelId` у существующих юзеров.
   "grok-imagine": {
     id: "grok-imagine",
+    webIconPath: "/icons/grok.svg",
     name: "🔮 Grok Imagine (текст → видео)",
     description:
       "Видеомодель от xAI (Grok), режим text-to-video. Без референсных изображений — генерация только по текстовому промпту.",
@@ -1394,6 +1402,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "grok-imagine-r2v": {
     id: "grok-imagine-r2v",
+    webIconPath: "/icons/grok.svg",
     name: "🔮 Grok Imagine (фото → видео)",
     description:
       "Видеомодель от xAI (Grok), режим reference-to-video. Принимает до 7 референсных изображений — ссылайтесь на них в промпте через @Image1, @Image2 и т.д.",
@@ -1465,6 +1474,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   // Pricing: FAL extend pricing — $0.06/s flat (между r2v $0.05 и t2v $0.07).
   "grok-imagine-extend": {
     id: "grok-imagine-extend",
+    webIconPath: "/icons/grok.svg",
     name: "🔁 Grok Imagine — продление",
     description:
       "Продление существующего Grok-видео. Активируется только через кнопку «🔁 Продлить» под результатом.",
@@ -1495,6 +1505,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   veo: {
     id: "veo",
+    webIconPath: "/icons/gemini.svg",
     name: "📽️ Veo 3.1",
     description:
       "Видео от Google со звуком и голосами. Поддерживает вертикальный формат для Reels и Shorts. Standard — максимальное качество, выше детализации чем Fast. Можно задать первый и последний кадр — Veo сгенерирует плавный переход между ними.",
@@ -1536,6 +1547,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "veo-fast": {
     id: "veo-fast",
+    webIconPath: "/icons/gemini.svg",
     name: "📽️ Veo 3.1 Fast",
     description:
       "Быстрая и более доступная версия Veo 3.1 от Google. Со звуком и голосами, но чуть ниже детализация чем Standard. Поддерживает 4K. Можно задать первый и последний кадр — Veo сгенерирует плавный переход между ними.",
@@ -1577,6 +1589,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "hailuo-fast": {
     id: "hailuo-fast",
+    webIconPath: "/icons/hailuo.svg",
     name: "🎞️ Hailuo 2.3 Fast",
     description:
       "Быстрая версия Hailuo 2.3 от MiniMax — ~40% дешевле стандартной при схожем качестве. Чуть ниже детализация. Требует фото как первый кадр.",
@@ -1623,6 +1636,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   hailuo: {
     id: "hailuo",
+    webIconPath: "/icons/hailuo.svg",
     name: "🎞️ Hailuo 2.3",
     description:
       "Стандартная версия Hailuo 2.3 от MiniMax — максимальное качество, поддержка 1080p и 10-секундных клипов. Принимает фото как первый кадр.",
@@ -1679,6 +1693,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   sora: {
     id: "sora",
+    webIconPath: "/icons/sora.svg",
     name: "🌌 Sora 2",
     description:
       "Устаревшая модель генерации видео от OpenAI. Объекты двигаются как в реальности, со звуком и правильной физикой. Отправьте фото вместе с текстом — оно станет первым кадром видео.",
@@ -1716,6 +1731,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   runway: {
     id: "runway",
+    webIconPath: "/icons/runway.svg",
     name: "🛫 Runway Gen-4.5",
     description:
       "Полный контроль над видео: указывайте, что и как должно двигаться, управляйте камерой. Выбор профессионалов.",
@@ -1794,6 +1810,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   "luma-ray2": {
     id: "luma-ray2",
+    webIconPath: "/icons/luma.svg",
     name: "☀️ Luma: Ray 2",
     description:
       "Реалистичное видео от Luma AI. Плавные движения, кинематографическое качество. Поддерживает фото как первый кадр.",
@@ -1848,6 +1865,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   minimax: {
     id: "minimax",
+    webIconPath: "/icons/minimax.svg",
     name: "🎦 MiniMax Video-01",
     description:
       "Китайская видеомодель с отличным качеством движения персонажей. Генерирует 6-секундные клипы с высокой плавностью.",
@@ -1877,6 +1895,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   pika: {
     id: "pika",
+    webIconPath: "/icons/pika.svg",
     name: "📸 Pika 2.2",
     description:
       "Быстрые видео с крутыми спецэффектами: взрывы, плавление, сжатие. Идеально для TikTok и Reels. Поддерживает фото как первый кадр.",
@@ -1938,6 +1957,7 @@ export const VIDEO_MODELS: Record<string, AIModel> = {
   },
   wan: {
     id: "wan",
+    webIconPath: "/icons/alibaba.svg",
     name: "🏯 Wan 2.7 (Alibaba)",
     description:
       "Видеомодель Alibaba с высоким качеством движения и поддержкой 1080p. Поддерживает три режима: image-to-video (первый кадр, опционально последний кадр и driving audio) и video continuation (начальный клип, опционально последний кадр). Без медиа — text-to-video с соотношением из настроек.",

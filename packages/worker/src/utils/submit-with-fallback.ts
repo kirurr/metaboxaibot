@@ -52,7 +52,13 @@ import {
 import { resolveKeyProviderForModel } from "@metabox/api/ai/key-provider";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
 import { isKieCreditsExhausted } from "@metabox/api/utils/kie-error";
-import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
+import {
+  isOpenAiBillingExhaustion,
+  OPENAI_BILLING_KEY_COOLDOWN_MS,
+  MAX_BILLING_KEY_RETRIES,
+} from "@metabox/api/utils/openai-billing-error";
+import { maskKey } from "@metabox/shared";
+import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 import { logger } from "../logger.js";
 import { delayJob } from "./delay-job.js";
 import { notifyRateLimit, notifyFallback, notifyTechErrorThrottled } from "./notify-error.js";
@@ -96,6 +102,7 @@ export type FallbackReason =
   | "provider_long_cooldown_marker"
   | "kie_credits_exhausted"
   | "openai_billing_exhausted"
+  | "network_transient"
   | "unknown_error";
 
 export interface FallbackCandidateAttempt {
@@ -110,6 +117,7 @@ export interface FallbackCandidateAttempt {
     | "incompatible_input"
     | "kie_credits_exhausted"
     | "openai_billing_exhausted"
+    | "network_transient"
     | "unknown_error";
   error?: string;
 }
@@ -201,7 +209,7 @@ export async function submitWithFallback<T, D extends object>(
     lastDeferDelay = lastDeferDelay === null ? candidateMs : Math.min(lastDeferDelay, candidateMs);
   };
 
-  for (const candidate of candidates) {
+  candidateLoop: for (const candidate of candidates) {
     const isPrimary = candidate === opts.primaryModel;
     const candidateProvider = candidate.provider;
     const keyProvider = resolveKeyProviderForModel(candidate);
@@ -217,328 +225,416 @@ export async function submitWithFallback<T, D extends object>(
         { jobId: opts.jobId, modelId: opts.primaryModel.id, provider: keyProvider, remaining },
         "submitWithFallback: skipping candidate — provider in long cooldown",
       );
-      continue;
+      continue candidateLoop;
     }
 
-    // 2. acquireKey
-    // Для gpt-image-1.5 берём ключ из low-priority группы первым делом
-    // (модель раз в месяц юзается → иначе холодный ключ никогда не получит
-    // трафика и tier у OpenAI не растёт). Fallback на high-priority встроен
-    // в acquireKey, если все low-priority throttled — возьмёт обычным
-    // порядком.
-    let acquired: AcquiredKey;
-    try {
-      acquired =
-        candidate.id === "gpt-image-1.5"
-          ? await acquireKey(keyProvider, { inverted: true })
-          : await acquireKey(keyProvider);
-    } catch (err) {
-      if (isPoolExhaustedError(err)) {
-        attempts.push({ provider: candidateProvider, outcome: "pool_exhausted" });
-        updateDeferDelay(err.retryAfterMs);
-        logger.info(
-          { jobId: opts.jobId, modelId: opts.primaryModel.id, provider: keyProvider },
-          "submitWithFallback: candidate pool exhausted — trying next",
-        );
-        continue;
+    // Key-level retry loop вокруг acquireKey + submit. При OpenAI billing на
+    // ключе выводим его из ротации и берём ДРУГОЙ ключ того же провайдера
+    // (acquireKey пропустит throttled) — `continue` к началу этого while.
+    // Все остальные ошибки → `continue candidateLoop`/`throw` (к fallback-
+    // кандидату или наверх) как раньше.
+    let billingKeyAttempts = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // 2. acquireKey
+      // Для gpt-image-1.5 берём ключ из low-priority группы первым делом
+      // (модель раз в месяц юзается → иначе холодный ключ никогда не получит
+      // трафика и tier у OpenAI не растёт). Fallback на high-priority встроен
+      // в acquireKey, если все low-priority throttled — возьмёт обычным
+      // порядком.
+      let acquired: AcquiredKey;
+      try {
+        acquired =
+          candidate.id === "gpt-image-1.5"
+            ? await acquireKey(keyProvider, { inverted: true })
+            : await acquireKey(keyProvider);
+      } catch (err) {
+        if (isPoolExhaustedError(err)) {
+          attempts.push({ provider: candidateProvider, outcome: "pool_exhausted" });
+          updateDeferDelay(err.retryAfterMs);
+          logger.info(
+            { jobId: opts.jobId, modelId: opts.primaryModel.id, provider: keyProvider },
+            "submitWithFallback: candidate pool exhausted — trying next",
+          );
+          continue candidateLoop;
+        }
+        // Не PoolExhausted — это что-то системное. Бросаем наверх.
+        throw err;
       }
-      // Не PoolExhausted — это что-то системное. Бросаем наверх.
-      throw err;
-    }
 
-    // 3. Submit.
-    try {
-      const result = await opts.submit(candidate, acquired);
-      // Success.
-      if (acquired.keyId) void recordSuccess(acquired.keyId);
-      attempts.push({ provider: candidateProvider, outcome: "success" });
+      // 3. Submit.
+      try {
+        const result = await opts.submit(candidate, acquired);
+        // Success.
+        if (acquired.keyId) void recordSuccess(acquired.keyId);
+        attempts.push({ provider: candidateProvider, outcome: "success" });
 
-      if (!isPrimary) {
-        const reason = inferFallbackReason(attempts);
-        logger.warn(
-          {
-            jobId: opts.jobId,
-            event: "provider_fallback",
+        if (!isPrimary) {
+          const reason = inferFallbackReason(attempts);
+          logger.warn(
+            {
+              jobId: opts.jobId,
+              event: "provider_fallback",
+              section: opts.section,
+              modelId: opts.primaryModel.id,
+              primaryProvider: opts.primaryModel.provider,
+              fallbackProvider: candidateProvider,
+              reason,
+              attempts,
+            },
+            "submitWithFallback: switched to fallback provider",
+          );
+          void notifyFallback({
             section: opts.section,
             modelId: opts.primaryModel.id,
             primaryProvider: opts.primaryModel.provider,
             fallbackProvider: candidateProvider,
             reason,
-            attempts,
-          },
-          "submitWithFallback: switched to fallback provider",
-        );
-        void notifyFallback({
-          section: opts.section,
-          modelId: opts.primaryModel.id,
-          primaryProvider: opts.primaryModel.provider,
-          fallbackProvider: candidateProvider,
-          reason,
-          jobId: opts.jobId,
-          userId: opts.userId,
-        });
-      }
-
-      return {
-        result,
-        acquired,
-        effectiveProvider: candidateProvider,
-        effectiveModel: candidate,
-        usedFallback: !isPrimary,
-        attempts,
-      };
-    } catch (err) {
-      lastError = err;
-      const message = err instanceof Error ? err.message : String(err);
-      const cls = classifyRateLimit(err, keyProvider);
-
-      // Provider temporarily unavailable (e.g. KIE 422 "high demand") — узел
-      // провайдера перегружен, retry на том же или соседнем ключе того же
-      // провайдера не помогает. Пробуем следующего кандидата (другую модель/
-      // провайдера). Эти же паттерны матчатся и в RATE_LIMIT_PATTERNS — если
-      // следующего кандидата нет (зацикливаемся на том же primary), управление
-      // упадёт ниже в rate-limit defer-цикл и сохранится legacy behavior.
-      if (isProviderTemporaryUnavailable(err)) {
-        if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
-        attempts.push({
-          provider: candidateProvider,
-          outcome: "provider_unavailable",
-          error: message.slice(0, 200),
-        });
-        logger.warn(
-          {
             jobId: opts.jobId,
-            provider: candidateProvider,
-            err: message.slice(0, 200),
-          },
-          "submitWithFallback: provider temporarily unavailable — trying next candidate",
-        );
-        // Не выставляем lastDeferDelay — если все unavailable, бросим ошибку наверх.
-        continue;
-      }
-
-      // KIE-аккаунт без кредитов (402) — provider-wide состояние, ни retry,
-      // ни смена ключа, ни cooldown не помогут. Пробуем следующего кандидата
-      // (fallback-провайдера). Параллельно — ops-алёрт в balance-канал (дедуп):
-      // KIE надо пополнить независимо от того, спас ли fallback этот запрос.
-      if (isKieCreditsExhausted(err)) {
-        // НЕ вызываем recordError на ключе: 402 — account-wide состояние
-        // (кончились кредиты), а не сбой конкретного ключа.
-        attempts.push({
-          provider: candidateProvider,
-          outcome: "kie_credits_exhausted",
-          error: message.slice(0, 200),
-        });
-        void notifyTechErrorThrottled(
-          err instanceof Error ? err : new Error(message),
-          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
-          "kie-credits-exhausted",
-          { channel: "balance" },
-        );
-        logger.warn(
-          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
-          "submitWithFallback: KIE credits exhausted — trying next candidate",
-        );
-        continue;
-      }
-
-      // OpenAI billing исчерпан — `billing_hard_limit_reached` (400) или
-      // `insufficient_quota` (429). Симметрично KIE credits: org/project-wide
-      // состояние, ни retry на том же ключе, ни смена ключа в той же org
-      // не помогут. Не recordError'им ключ (это не сбой ключа), пробуем
-      // следующего кандидата, шлём дедуп'нутый алерт в balance-тему.
-      if (isOpenAiBillingExhaustion(err)) {
-        attempts.push({
-          provider: candidateProvider,
-          outcome: "openai_billing_exhausted",
-          error: message.slice(0, 200),
-        });
-        const billingDedupKey = acquired.keyId
-          ? `openai-billing-exhaustion:${acquired.keyId}`
-          : "openai-billing-exhaustion";
-        void notifyTechErrorThrottled(
-          err instanceof Error ? err : new Error(message),
-          { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
-          billingDedupKey,
-          { channel: "balance" },
-        );
-        logger.warn(
-          { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
-          "submitWithFallback: OpenAI billing exhausted — trying next candidate",
-        );
-        continue;
-      }
-
-      if (cls.isRateLimit) {
-        // Per-key throttle: bad key карантинится, остальные ключи провайдера
-        // продолжают работу. notifyRateLimit вызываем всегда per-key (как делал
-        // оригинальный submitWithThrottle). Для env-mode используем `tripThrottle`
-        // с проверкой возврата чтобы не спамить tg-канал из нескольких workers.
-        let shouldNotify = true;
-        if (acquired.keyId) {
-          void markRateLimited(acquired.keyId, cls.cooldownMs, cls.reason);
-        } else {
-          // Env-only режим — model-level gate (legacy thundering-herd protection).
-          // tripThrottle через SETNX вернёт false если gate уже стоит → не дублируем нотификацию.
-          shouldNotify = await tripThrottle(opts.primaryModel.id, cls.cooldownMs, cls.reason);
+            userId: opts.userId,
+          });
         }
 
-        const isLong = cls.isLongWindow || cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS;
+        return {
+          result,
+          acquired,
+          effectiveProvider: candidateProvider,
+          effectiveModel: candidate,
+          usedFallback: !isPrimary,
+          attempts,
+        };
+      } catch (err) {
+        lastError = err;
+        const message = err instanceof Error ? err.message : String(err);
+        const cls = classifyRateLimit(err, keyProvider);
 
-        if (isLong) {
-          // Provider-wide marker блокирует ВСЕ ключи провайдера на cooldownMs.
-          // Ставим его ТОЛЬКО когда cooldownMs действительно длинный (>1ч) —
-          // это надёжный signal что провайдер реально лежит (например, вернул
-          // Retry-After: 3600+).
-          //
-          // Pattern-matched isLongWindow ("insufficient credits", "trial limit",
-          // "out of credits", "account suspended" и т.п.) с коротким cooldown
-          // (60с дефолт) — это per-account ошибка одного ключа, НЕ отказ всего
-          // провайдера. У соседних ключей того же провайдера деньги/доступ
-          // могут быть в порядке. Не блокируем их ради per-key проблемы —
-          // markRateLimited на конкретный keyId уже изолирует "плохой" ключ,
-          // следующий submit acquireKey'ем подберёт здоровый.
-          if (cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS) {
-            void markProviderLongCooldown(keyProvider, cls.cooldownMs, cls.reason);
+        // UserFacingError без `notifyOps` — это пользовательская валидационная
+        // ошибка (длина prompt'а, формат, content policy, etc.), которую адаптер
+        // сам диагностировал и обернул в i18n key. Fallback на соседнего провайдера
+        // бессмыслен (одни и те же лимиты на бэкенде), recordError ставить нельзя
+        // (ключ исправен), tech-alert не нужен (это юзер ввёл что-то не так,
+        // не баг провайдера). Сразу throw — processor превратит в localized
+        // сообщение пользователю.
+        //
+        // UserFacingError с `notifyOps: true` (provider credit-exhausted, account
+        // suspended и т.п.) НЕ ловится этим guard'ом — попадает в обычный flow
+        // ниже (KIE credits / OpenAI billing / unknown_error) где fallback и
+        // ops-alert уместны.
+        if (err instanceof UserFacingError && !err.notifyOps) {
+          throw err;
+        }
+
+        // OpenAI billing исчерпан — `billing_hard_limit_reached` (400) или
+        // `insufficient_quota` (429). Не recordError'им (это не сбой ключа), НО
+        // выводим ключ из ротации через markRateLimited на
+        // OPENAI_BILLING_KEY_COOLDOWN_MS (per-key, НЕ provider-wide) и пробуем
+        // ДРУГОЙ ключ того же провайдера (key-level retry) — спасает запрос даже
+        // у моделей без fallback. Дедуп'нутый алерт в balance-тему. Если все
+        // ключи провайдера billing-dead — следующий acquireKey бросит
+        // PoolExhausted → уйдём к fallback-кандидату.
+        if (isOpenAiBillingExhaustion(err)) {
+          if (acquired.keyId) {
+            // await: маркер должен лечь в Redis ДО следующего acquireKey, иначе
+            // на single-key провайдере (gpt-image-1.5) тот же billing-dead ключ
+            // переберётся повторно — потратим HTTP впустую.
+            await markRateLimited(acquired.keyId, OPENAI_BILLING_KEY_COOLDOWN_MS, "openai billing");
           }
+          const billingDedupKey = acquired.keyId
+            ? `openai-billing-exhaustion:${acquired.keyId}`
+            : "openai-billing-exhaustion";
+          void notifyTechErrorThrottled(
+            err instanceof Error ? err : new Error(message),
+            { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+            billingDedupKey,
+            { channel: "balance" },
+          );
+          logger.warn(
+            {
+              jobId: opts.jobId,
+              provider: candidateProvider,
+              modelId: opts.primaryModel.id,
+              keyId: acquired.keyId,
+              keyMask: maskKey(acquired.apiKey),
+              attempt: billingKeyAttempts + 1,
+            },
+            "submitWithFallback: OpenAI billing exhausted — key quarantined",
+          );
+          billingKeyAttempts++;
+          if (billingKeyAttempts < MAX_BILLING_KEY_RETRIES) {
+            continue; // key-level retry: следующий ключ того же провайдера
+          }
+          // Budget исчерпан → к fallback-кандидату.
+          attempts.push({
+            provider: candidateProvider,
+            outcome: "openai_billing_exhausted",
+            error: message.slice(0, 200),
+          });
+          continue candidateLoop;
+        }
+
+        // Provider temporarily unavailable (e.g. KIE 422 "high demand", Cloudflare
+        // 530 Tunnel error) — узел провайдера или его CDN-edge перегружен/упал.
+        // Retry на том же или соседнем ключе того же провайдера не помогает.
+        // Пробуем следующего кандидата (другую модель/провайдера).
+        //
+        // НЕ recordError'им ключ: это инфра-проблема провайдера (Cloudflare/Argo
+        // Tunnel/CDN), а не сбой ключа. Без guard'а здоровые ключи помечались бы
+        // как сбойные на каждом таком сбое — особенно болезненно при широких
+        // outage'ах (например, KIE 530 на всех воркерах сразу), когда «всем
+        // ключам» накручивается error-counter, и пул потом ошибочно их карантинит.
+        if (isProviderTemporaryUnavailable(err)) {
+          attempts.push({
+            provider: candidateProvider,
+            outcome: "provider_unavailable",
+            error: message.slice(0, 200),
+          });
+          logger.warn(
+            {
+              jobId: opts.jobId,
+              provider: candidateProvider,
+              err: message.slice(0, 200),
+            },
+            "submitWithFallback: provider temporarily unavailable — trying next candidate",
+          );
+          // Не выставляем lastDeferDelay — если все unavailable, бросим ошибку наверх.
+          continue candidateLoop;
+        }
+
+        // KIE-аккаунт без кредитов (402) — provider-wide состояние, ни retry,
+        // ни смена ключа, ни cooldown не помогут. Пробуем следующего кандидата
+        // (fallback-провайдера). Параллельно — ops-алёрт в balance-канал (дедуп):
+        // KIE надо пополнить независимо от того, спас ли fallback этот запрос.
+        if (isKieCreditsExhausted(err)) {
+          // НЕ вызываем recordError на ключе: 402 — account-wide состояние
+          // (кончились кредиты), а не сбой конкретного ключа.
+          attempts.push({
+            provider: candidateProvider,
+            outcome: "kie_credits_exhausted",
+            error: message.slice(0, 200),
+          });
+          void notifyTechErrorThrottled(
+            err instanceof Error ? err : new Error(message),
+            { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+            "kie-credits-exhausted",
+            { channel: "balance" },
+          );
+          logger.warn(
+            { jobId: opts.jobId, provider: candidateProvider, modelId: opts.primaryModel.id },
+            "submitWithFallback: KIE credits exhausted — trying next candidate",
+          );
+          continue candidateLoop;
+        }
+
+        // Transient network failure (ENOTFOUND, ECONNRESET, ETIMEDOUT и т.п.) —
+        // DNS/socket лёг у провайдера или у нашего инфра-upstream'а. Ключ не
+        // виноват → НЕ recordError. Дедуп'нутый tech-alert (5 алертов / 30 мин
+        // на пару provider:code — defaults у notifyTechErrorThrottled). Пробуем
+        // следующего кандидата — у него может быть другой хост. Если все упали
+        // (lastError остаётся network-transient), processor catch вызовет
+        // `deferIfTransientNetworkError` — defer'ит job на 30-60s, до 3 раундов.
+        if (isTransientNetworkError(err)) {
+          attempts.push({
+            provider: candidateProvider,
+            outcome: "network_transient",
+            error: message.slice(0, 200),
+          });
+          // Извлекаем code из cause-chain для дедуп-ключа (ENOTFOUND и т.п.).
+          // Если не нашли — используем provider'а без code.
+          let code = "unknown";
+          let cur: unknown = err;
+          for (let i = 0; i < 5 && cur; i++) {
+            if (typeof cur === "object" && cur !== null) {
+              const c = (cur as { code?: unknown }).code;
+              if (typeof c === "string") {
+                code = c;
+                break;
+              }
+              cur = (cur as { cause?: unknown }).cause;
+            } else break;
+          }
+          void notifyTechErrorThrottled(
+            err instanceof Error ? err : new Error(message),
+            { section: opts.section, modelId: opts.primaryModel.id, jobId: opts.jobId },
+            `network-transient:${candidateProvider}:${code}`,
+          );
+          logger.warn(
+            { jobId: opts.jobId, provider: candidateProvider, code },
+            "submitWithFallback: transient network error — trying next candidate",
+          );
+          continue candidateLoop;
+        }
+
+        if (cls.isRateLimit) {
+          // Per-key throttle: bad key карантинится, остальные ключи провайдера
+          // продолжают работу. notifyRateLimit вызываем всегда per-key (как делал
+          // оригинальный submitWithThrottle). Для env-mode используем `tripThrottle`
+          // с проверкой возврата чтобы не спамить tg-канал из нескольких workers.
+          let shouldNotify = true;
+          if (acquired.keyId) {
+            void markRateLimited(acquired.keyId, cls.cooldownMs, cls.reason);
+          } else {
+            // Env-only режим — model-level gate (legacy thundering-herd protection).
+            // tripThrottle через SETNX вернёт false если gate уже стоит → не дублируем нотификацию.
+            shouldNotify = await tripThrottle(opts.primaryModel.id, cls.cooldownMs, cls.reason);
+          }
+
+          const isLong = cls.isLongWindow || cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS;
+
+          if (isLong) {
+            // Provider-wide marker блокирует ВСЕ ключи провайдера на cooldownMs.
+            // Ставим его ТОЛЬКО когда cooldownMs действительно длинный (>1ч) —
+            // это надёжный signal что провайдер реально лежит (например, вернул
+            // Retry-After: 3600+).
+            //
+            // Pattern-matched isLongWindow ("insufficient credits", "trial limit",
+            // "out of credits", "account suspended" и т.п.) с коротким cooldown
+            // (60с дефолт) — это per-account ошибка одного ключа, НЕ отказ всего
+            // провайдера. У соседних ключей того же провайдера деньги/доступ
+            // могут быть в порядке. Не блокируем их ради per-key проблемы —
+            // markRateLimited на конкретный keyId уже изолирует "плохой" ключ,
+            // следующий submit acquireKey'ем подберёт здоровый.
+            if (cls.cooldownMs > LONG_WINDOW_THRESHOLD_MS) {
+              void markProviderLongCooldown(keyProvider, cls.cooldownMs, cls.reason);
+            }
+            if (shouldNotify) {
+              void notifyRateLimit({
+                section: opts.section,
+                modelId: opts.primaryModel.id,
+                cooldownMs: cls.cooldownMs,
+                reason: cls.reason,
+                isLongWindow: true,
+                err,
+                jobId: opts.jobId,
+              });
+            }
+            attempts.push({
+              provider: candidateProvider,
+              outcome: "long_window",
+              error: cls.reason,
+            });
+            updateDeferDelay(cls.cooldownMs);
+            continue candidateLoop;
+          }
+
+          // Short-window 429: НЕ триггер fallback'а (consrative). Дефёрим текущий
+          // job — BullMQ retry с другим ключом из того же пула. То же поведение
+          // что у оригинального submitWithThrottle.
           if (shouldNotify) {
             void notifyRateLimit({
               section: opts.section,
               modelId: opts.primaryModel.id,
               cooldownMs: cls.cooldownMs,
               reason: cls.reason,
-              isLongWindow: true,
+              isLongWindow: false,
               err,
               jobId: opts.jobId,
             });
           }
+          const delay = withJitter(cls.cooldownMs);
+          logger.info(
+            {
+              jobId: opts.jobId,
+              modelId: opts.primaryModel.id,
+              provider: candidateProvider,
+              delay,
+              reason: cls.reason,
+            },
+            "submitWithFallback: short-window 429 — deferring (no fallback for short window)",
+          );
+          await delayJob(opts.job, opts.job.data as Record<string, unknown>, delay, opts.token);
+          throw new Error("unreachable: delayJob did not throw");
+        }
+
+        // Adapter signals this input is structurally incompatible with the provider
+        // but another candidate can handle it — skip immediately, no key penalty.
+        if (err instanceof ProviderInputIncompatibleError) {
+          attempts.push({ provider: candidateProvider, outcome: "incompatible_input" });
+          logger.info(
+            { jobId: opts.jobId, provider: candidateProvider, reason: err.message },
+            "submitWithFallback: provider incompatible with input — skipping to next candidate",
+          );
+          continue candidateLoop;
+        }
+
+        // 5xx — fallback только если этот BullMQ job уже несколько раз пытался.
+        if (isFiveXxError(err) && opts.allowFiveXxFallback) {
+          if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
           attempts.push({
             provider: candidateProvider,
-            outcome: "long_window",
-            error: cls.reason,
+            outcome: "persistent_5xx",
+            error: message.slice(0, 200),
           });
-          updateDeferDelay(cls.cooldownMs);
-          continue;
+          logger.warn(
+            {
+              jobId: opts.jobId,
+              provider: candidateProvider,
+              attemptsMade: opts.allowFiveXxFallback,
+              err: message.slice(0, 200),
+            },
+            "submitWithFallback: 5xx after retries — trying fallback",
+          );
+          // Не выставляем lastDeferDelay — если все 5xx-ят, бросим оригинальную ошибку наверх.
+          continue candidateLoop;
         }
 
-        // Short-window 429: НЕ триггер fallback'а (consrative). Дефёрим текущий
-        // job — BullMQ retry с другим ключом из того же пула. То же поведение
-        // что у оригинального submitWithThrottle.
-        if (shouldNotify) {
-          void notifyRateLimit({
-            section: opts.section,
-            modelId: opts.primaryModel.id,
-            cooldownMs: cls.cooldownMs,
-            reason: cls.reason,
-            isLongWindow: false,
-            err,
-            jobId: opts.jobId,
-          });
+        // 5xx на ранних попытках (allowFiveXxFallback=false) — известная категория,
+        // НЕ fallback. Пробрасываем наверх, чтобы BullMQ ретраил job с другим ключом
+        // того же провайдера. На attemptsMade >= threshold ветка выше уже даст
+        // fallback'у шанс.
+        //
+        // UserFacingError-guard на recordError: пользовательская ошибка (пустой
+        // ввод, content policy, невалидный формат) — ключ работал исправно,
+        // отказался обрабатывать сам провайдер на уровне content'а запроса.
+        // Без guard'а здоровые ключи помечались бы как сбойные на каждом таком
+        // запросе.
+        if (isFiveXxError(err)) {
+          if (acquired.keyId && !(err instanceof UserFacingError)) {
+            void recordError(acquired.keyId, message.slice(0, 500));
+          }
+          throw err;
         }
-        const delay = withJitter(cls.cooldownMs);
-        logger.info(
-          {
-            jobId: opts.jobId,
-            modelId: opts.primaryModel.id,
-            provider: candidateProvider,
-            delay,
-            reason: cls.reason,
-          },
-          "submitWithFallback: short-window 429 — deferring (no fallback for short window)",
-        );
-        await delayJob(opts.job, opts.job.data as Record<string, unknown>, delay, opts.token);
-        throw new Error("unreachable: delayJob did not throw");
-      }
 
-      // Adapter signals this input is structurally incompatible with the provider
-      // but another candidate can handle it — skip immediately, no key penalty.
-      if (err instanceof ProviderInputIncompatibleError) {
-        attempts.push({ provider: candidateProvider, outcome: "incompatible_input" });
-        logger.info(
-          { jobId: opts.jobId, provider: candidateProvider, reason: err.message },
-          "submitWithFallback: provider incompatible with input — skipping to next candidate",
-        );
-        continue;
-      }
-
-      // 5xx — fallback только если этот BullMQ job уже несколько раз пытался.
-      if (isFiveXxError(err) && opts.allowFiveXxFallback) {
-        if (acquired.keyId) void recordError(acquired.keyId, message.slice(0, 500));
+        // Unknown / unclassified error (4xx non-429, validation, content policy,
+        // network reset, неизвестные строки в теле ответа, etc.). Раньше throw'или
+        // сразу — пользователь получал failure, даже если соседний провайдер мог бы
+        // справиться. Теперь best-effort: пробуем следующего кандидата, плюс шлём
+        // burst-throttled алерт в tech-чат (дедуп по provider + первым 80 символам
+        // сообщения) — чтобы ops видели «фактически неклассифицированную» категорию
+        // и могли добавить classifier при повторении паттерна. Если все кандидаты
+        // упали так же — lastError пробросится наверх ниже (`throw lastError`),
+        // юзер получит обычную failure-кнопку, processor добавит свой top-level
+        // notifyTechError.
+        //
+        // UserFacingError-guard на recordError — см. комментарий в 5xx-ветке выше.
+        if (acquired.keyId && !(err instanceof UserFacingError)) {
+          void recordError(acquired.keyId, message.slice(0, 500));
+        }
         attempts.push({
           provider: candidateProvider,
-          outcome: "persistent_5xx",
+          outcome: "unknown_error",
           error: message.slice(0, 200),
         });
+        void notifyTechErrorThrottled(
+          err instanceof Error ? err : new Error(message),
+          {
+            section: opts.section,
+            modelId: opts.primaryModel.id,
+            jobId: opts.jobId,
+            userId: opts.userId,
+          },
+          `unknown-error:${candidateProvider}:${message.slice(0, 80)}`,
+        );
         logger.warn(
           {
             jobId: opts.jobId,
             provider: candidateProvider,
-            attemptsMade: opts.allowFiveXxFallback,
+            modelId: opts.primaryModel.id,
             err: message.slice(0, 200),
           },
-          "submitWithFallback: 5xx after retries — trying fallback",
+          "submitWithFallback: unknown error — trying next candidate",
         );
-        // Не выставляем lastDeferDelay — если все 5xx-ят, бросим оригинальную ошибку наверх.
-        continue;
+        continue candidateLoop;
       }
-
-      // 5xx на ранних попытках (allowFiveXxFallback=false) — известная категория,
-      // НЕ fallback. Пробрасываем наверх, чтобы BullMQ ретраил job с другим ключом
-      // того же провайдера. На attemptsMade >= threshold ветка выше уже даст
-      // fallback'у шанс.
-      //
-      // UserFacingError-guard на recordError: пользовательская ошибка (пустой
-      // ввод, content policy, невалидный формат) — ключ работал исправно,
-      // отказался обрабатывать сам провайдер на уровне content'а запроса.
-      // Без guard'а здоровые ключи помечались бы как сбойные на каждом таком
-      // запросе.
-      if (isFiveXxError(err)) {
-        if (acquired.keyId && !(err instanceof UserFacingError)) {
-          void recordError(acquired.keyId, message.slice(0, 500));
-        }
-        throw err;
-      }
-
-      // Unknown / unclassified error (4xx non-429, validation, content policy,
-      // network reset, неизвестные строки в теле ответа, etc.). Раньше throw'или
-      // сразу — пользователь получал failure, даже если соседний провайдер мог бы
-      // справиться. Теперь best-effort: пробуем следующего кандидата, плюс шлём
-      // burst-throttled алерт в tech-чат (дедуп по provider + первым 80 символам
-      // сообщения) — чтобы ops видели «фактически неклассифицированную» категорию
-      // и могли добавить classifier при повторении паттерна. Если все кандидаты
-      // упали так же — lastError пробросится наверх ниже (`throw lastError`),
-      // юзер получит обычную failure-кнопку, processor добавит свой top-level
-      // notifyTechError.
-      //
-      // UserFacingError-guard на recordError — см. комментарий в 5xx-ветке выше.
-      if (acquired.keyId && !(err instanceof UserFacingError)) {
-        void recordError(acquired.keyId, message.slice(0, 500));
-      }
-      attempts.push({
-        provider: candidateProvider,
-        outcome: "unknown_error",
-        error: message.slice(0, 200),
-      });
-      void notifyTechErrorThrottled(
-        err instanceof Error ? err : new Error(message),
-        {
-          section: opts.section,
-          modelId: opts.primaryModel.id,
-          jobId: opts.jobId,
-          userId: opts.userId,
-        },
-        `unknown-error:${candidateProvider}:${message.slice(0, 80)}`,
-      );
-      logger.warn(
-        {
-          jobId: opts.jobId,
-          provider: candidateProvider,
-          modelId: opts.primaryModel.id,
-          err: message.slice(0, 200),
-        },
-        "submitWithFallback: unknown error — trying next candidate",
-      );
-      continue;
     }
   }
 
@@ -554,6 +650,21 @@ export async function submitWithFallback<T, D extends object>(
     },
     "submitWithFallback: all candidates exhausted",
   );
+
+  // Transient network outage (DNS лёг у провайдера/upstream'а) — пропускаем
+  // и all_candidates_failed-алерт, и circuit-breaker-defer. Per-candidate
+  // дедуп'нутые алерты (`network-transient:provider:code`) уже отправлены
+  // выше — этого достаточно. all_candidates_failed без дедупа спамил бы
+  // fallback-канал на каждом retry-раунде (×3 раундов defer-transient'а).
+  // Circuit-breaker (MAX_FALLBACK_DEFERS=6, cap 10 мин) тут вреден: DNS-флап
+  // должен лечиться deferIfTransientNetworkError в processor catch'е (30-60s),
+  // а не съедать fallbackDeferCount-budget из-за чужой DNS-проблемы. Бросаем
+  // lastError напрямую — processor подхватит и сделает свой defer-transient.
+  if (isTransientNetworkError(lastError)) {
+    if (lastError) throw lastError;
+    throw new Error(`submitWithFallback: transient network — no candidates available`);
+  }
+
   // Если последняя ошибка — OpenAI billing-исчерпание, шлём all_candidates_failed
   // в balance тему (а не в fallback тему). Иначе при пустом OpenAI billing'е
   // эти алерты спамят общий fallback-канал вперемешку с обычными fallback'ами.
@@ -635,6 +746,7 @@ function inferFallbackReason(attempts: FallbackCandidateAttempt[]): FallbackReas
   if (primaryOutcome === "persistent_5xx") return "persistent_5xx";
   if (primaryOutcome === "kie_credits_exhausted") return "kie_credits_exhausted";
   if (primaryOutcome === "openai_billing_exhausted") return "openai_billing_exhausted";
+  if (primaryOutcome === "network_transient") return "network_transient";
   if (primaryOutcome === "unknown_error") return "unknown_error";
   return "pool_exhausted";
 }
