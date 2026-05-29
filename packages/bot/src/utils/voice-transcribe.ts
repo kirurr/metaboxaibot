@@ -3,6 +3,7 @@ import { InlineKeyboard } from "grammy";
 import { config } from "@metabox/shared";
 import { transcribeAudio } from "@metabox/api/services/transcription";
 import { logger } from "../logger.js";
+import { escapeCodeEntity } from "./markdown.js";
 import type { BotContext } from "../types/context.js";
 
 // ── Transcription text store (TTL 10 min, max 500 entries) ──────────────────
@@ -163,7 +164,7 @@ export async function transcribeAndReply(
 
     const chunks = chunkBySpace(text, TRANSCRIPTION_CHUNK_MAX);
     for (let i = 0; i < chunks.length; i++) {
-      const quoted = "```\n".concat(escapeMarkdownV2(chunks[i]), "```\n");
+      const quoted = "```\n".concat(escapeCodeEntity(chunks[i]), "```\n");
       const isLast = i === chunks.length - 1;
       const md2Text = [i === 0 ? `${header}\n\n` : "", quoted, isLast ? `\n\n${hint}` : ""].join(
         "",

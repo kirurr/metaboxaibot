@@ -225,7 +225,7 @@ export function escapeMdV2(text: string): string {
  * ломает Pre-entity → "can't find end of Pre entity". `\` экранируем первым,
  * чтобы не задвоить бэкслеши, добавленные для бэктиков.
  */
-function escapeCodeEntity(s: string): string {
+export function escapeCodeEntity(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
 }
 
