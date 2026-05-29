@@ -13,7 +13,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { AI_MODELS, MODELS_BY_SECTION } from "@metabox/shared";
+import { AI_MODELS, MODELS_BY_SECTION, getT } from "@metabox/shared";
 import { WEB_PRESET_MODEL_IDS } from "../src/routes/web-models.js";
 import { buildTestApp } from "./helpers/build-app.js";
 import { bearer, createTestUser } from "./fixtures/users.js";
@@ -24,6 +24,8 @@ interface WebModelDto {
   name: string;
   webName: string;
   webIconPath: string | null;
+  description: string;
+  shortDescription: string | null;
   section: string;
   provider: string;
   modes: Array<{ id: string; label: string }> | null;
@@ -247,6 +249,66 @@ describe("GET /web/models", () => {
         // webIconPath — либо строковый путь, либо null.
         expect(m.webIconPath === null || typeof m.webIconPath === "string").toBe(true);
       }
+    });
+
+    it("localizes description (EN full) and shortDescription via modelDescriptions i18n", async () => {
+      // Берём модель, у которой в en-локали есть и full, и short, и без
+      // descriptionOverride (чтобы RU-фоллбек был ровно `m.description`).
+      const enMd = getT("en").modelDescriptions;
+      const modelId = Object.keys(enMd).find(
+        (id) =>
+          enMd[id]?.full &&
+          enMd[id]?.short &&
+          AI_MODELS[id] &&
+          !AI_MODELS[id]!.hiddenFromCarousel &&
+          !AI_MODELS[id]!.descriptionOverride,
+      );
+      expect(modelId).toBeDefined();
+
+      const { accessToken } = await createTestUser({ withTelegram: true });
+      const [enRes, ruRes] = await Promise.all([
+        app.inject({ method: "GET", url: "/web/models?lang=en", headers: bearer(accessToken) }),
+        app.inject({ method: "GET", url: "/web/models?lang=ru", headers: bearer(accessToken) }),
+      ]);
+      const enM = (enRes.json() as WebModelDto[]).find((m) => m.id === modelId)!;
+      const ruM = (ruRes.json() as WebModelDto[]).find((m) => m.id === modelId)!;
+      expect(enM).toBeDefined();
+      expect(ruM).toBeDefined();
+
+      // EN: description = full-перевод из i18n, shortDescription = short из i18n.
+      expect(enM.description).toBe(enMd[modelId!]!.full);
+      expect(enM.shortDescription).toBe(enMd[modelId!]!.short);
+
+      // RU: full в i18n не дублируется → description фоллбекает на константу.
+      expect(ruM.description).toBe(AI_MODELS[modelId!]!.description);
+      // short локализован отдельно для RU и отличается от EN.
+      expect(ruM.shortDescription).toBeTruthy();
+      expect(ruM.shortDescription).not.toBe(enM.shortDescription);
+    });
+
+    it("falls back to constant description with null shortDescription when no i18n key", async () => {
+      // Модель без записи в modelDescriptions (ни в en, ни в ru) — но отдаётся
+      // каталогом (не hidden или preset-exposed). Описание = константа, short = null.
+      const enMd = getT("en").modelDescriptions;
+      const candidate = Object.values(AI_MODELS).find(
+        (m) =>
+          (!m.hiddenFromCarousel || WEB_PRESET_MODEL_IDS.has(m.id)) &&
+          !enMd[m.id]?.full &&
+          !enMd[m.id]?.short,
+      );
+      // Если все отдаваемые модели покрыты i18n — кейс нечего проверять (skip).
+      if (!candidate) return;
+
+      const { accessToken } = await createTestUser({ withTelegram: true });
+      const res = await app.inject({
+        method: "GET",
+        url: "/web/models?lang=en",
+        headers: bearer(accessToken),
+      });
+      const serialized = (res.json() as WebModelDto[]).find((m) => m.id === candidate.id)!;
+      expect(serialized).toBeDefined();
+      expect(serialized.shortDescription).toBeNull();
+      expect(serialized.description).toBe(candidate.descriptionOverride ?? candidate.description);
     });
 
     it("preserves supportedDurations for a video model", async () => {

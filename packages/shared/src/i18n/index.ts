@@ -604,6 +604,14 @@ export interface Translations {
     r2i: string;
     clipExtend: string;
   };
+  /**
+   * Локализованные описания моделей для веб-каталога (`/web/models`). Ключ —
+   * `modelId`. `full` — полное описание (замена `description` из констант),
+   * `short` — краткий тэглайн для меню выбора. Любое отсутствующее поле/ключ
+   * фоллбекает на `description` из констант (см. serializeForWeb). Поэтому
+   * RU `full` можно не дублировать — он покрыт фоллбеком на константу.
+   */
+  modelDescriptions: Record<string, { full?: string; short?: string }>;
   linkMetabox: {
     title: string;
     subtitle: string;

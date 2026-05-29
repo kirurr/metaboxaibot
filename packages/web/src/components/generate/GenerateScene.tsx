@@ -157,7 +157,10 @@ function modelDisplayName(m: WebModelDto): string {
   return m.familyName ?? m.webName;
 }
 function modelDesc(m: WebModelDto): string {
-  return m.descriptionOverride ?? m.description;
+  // Приоритет — краткий тэглайн (локализованный), иначе полное описание (уже
+  // override-aware и локализованное на бэке). Зеркалит `displayModelDesc` из
+  // capabilityData, чтобы подпись в селекторе совпадала с мега-меню/sheet.
+  return m.shortDescription ?? m.description;
 }
 
 /** Resolve active mode: либо explicit default, либо первый. */

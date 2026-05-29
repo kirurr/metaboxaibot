@@ -27,6 +27,8 @@ export interface ModelDto {
   /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`); `null` → буква-аватар. */
   webIconPath: string | null;
   description: string;
+  /** Краткий тэглайн для селектора (локализованный); `null` → фоллбек на `description`. */
+  shortDescription: string | null;
   section: string;
   provider: string;
   familyId: string | null;

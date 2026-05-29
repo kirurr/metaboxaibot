@@ -119,7 +119,7 @@ export function ModelSelector({ models, currentModelId, onPick, disabled }: Prop
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{selectorName(m)}</div>
                     <div className="text-xs text-text-hint mt-0.5 line-clamp-2">
-                      {m.description}
+                      {m.shortDescription ?? m.description}
                     </div>
                   </div>
                   {active && <Check size={16} className="text-accent shrink-0 mt-0.5" />}
