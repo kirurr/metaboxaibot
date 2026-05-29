@@ -647,6 +647,15 @@ export async function handleVideoMediaInputRemove(ctx: BotContext): Promise<void
     }
   } else {
     await userStateService.clearMediaInputSlot(ctx.user.id, modelId, slotKey);
+    // Каскад: слоты с revealAfter === slotKey без него не имеют смысла (напр.
+    // last_frame revealAfter first_frame). Чистим их тоже — иначе остаётся
+    // невалидный набор (last без first → провайдер 400 на сабмите).
+    const dependents = (AI_MODELS[modelId]?.mediaInputs ?? []).filter(
+      (s) => s.revealAfter === slotKey,
+    );
+    for (const dep of dependents) {
+      await userStateService.clearMediaInputSlot(ctx.user.id, modelId, dep.slotKey);
+    }
   }
   await sendVideoMediaInputStatus(ctx, { edit: true });
 }

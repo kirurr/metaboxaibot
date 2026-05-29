@@ -208,6 +208,19 @@ export class KieVideoAdapter implements VideoAdapter {
       return { key: "promptTooLong", params: { limit } };
     }
 
+    // Kling: last_frame без first_frame не поддерживается (ни KIE, ни Evolink).
+    // Ловим ДО enqueue (зеркало проверки в submit ниже), иначе оба провайдера
+    // отвечают 400 и юзер видит шум вместо понятного отказа. Multishot-ветка
+    // выше уже вернулась — там last_frame игнорируется.
+    if (KLING_MODEL_MAP[this.modelId]) {
+      const mi = input.mediaInputs ?? {};
+      const firstFrame = mi.first_frame?.[0] ?? input.imageUrl;
+      const lastFrame = mi.last_frame?.[0];
+      if (lastFrame && !firstFrame) {
+        return { key: "klingLastFrameNeedsFirst" };
+      }
+    }
+
     return null;
   }
 
