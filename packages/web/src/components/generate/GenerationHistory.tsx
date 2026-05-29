@@ -18,7 +18,8 @@ import {
 } from "@/components/common/GenerationPreviewModal";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
 import { getModelDisplay } from "@/stores/modelsStore";
-import { formatTokens } from "@/utils/format";
+import { formatTokensSpent } from "@/utils/format";
+import { parseShots } from "@/utils/multishot";
 
 /**
  * Лента всех генераций текущей секции (image/design/video/audio), независимо
@@ -166,8 +167,9 @@ function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
       iconPath: md.icon,
       dateIso: job.completedAt ?? job.createdAt,
       tokensValue:
-        job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null,
+        job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null,
       prompt: job.prompt,
+      shots: parseShots(job.modelSettings?.shots),
       onRepeat: () => {
         const route = normalizeSection(job.section);
         if (!route) {
@@ -409,7 +411,7 @@ function OutputTile({
   const meta = (
     <div className="flex justify-between items-start gap-2 text-[10px] font-mono text-white/70 mb-auto">
       <span>{new Date(createdAt).toLocaleString()}</span>
-      {tokensSpent && <span>{Number(tokensSpent).toFixed(2)} ✦</span>}
+      {tokensSpent && <span>{formatTokensSpent(tokensSpent)} ✦</span>}
     </div>
   );
 

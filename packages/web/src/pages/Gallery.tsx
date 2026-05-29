@@ -66,7 +66,8 @@ import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore"
 import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
 import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
-import { formatTokens } from "@/utils/format";
+import { formatTokensSpent } from "@/utils/format";
+import { parseShots } from "@/utils/multishot";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -903,7 +904,7 @@ function GalleryPreview({
   if (previewOutputs.length === 0) return null;
 
   const tokensValue =
-    job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null;
+    job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null;
   const safeIdx = Math.min(activeIdx, previewOutputs.length - 1);
 
   return (
@@ -919,6 +920,7 @@ function GalleryPreview({
         dateIso: job.completedAt,
         tokensValue,
         prompt: job.prompt,
+        shots: parseShots(job.modelSettings?.shots),
         onRepeat: handleRepeat,
         onDownload: handleDownload,
         folders: {

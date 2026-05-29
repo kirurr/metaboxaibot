@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/common/Button";
 import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import type { ShotEntry } from "@/utils/multishot";
 import type { GalleryFolder } from "@/api/gallery";
 
 /**
@@ -58,6 +59,9 @@ export type PreviewInfo = {
   /** Уже отформатированное значение токенов — модалка не форматирует. */
   tokensValue?: string | null;
   prompt?: string | null;
+  /** Мультишот (Kling): промпты живут по шотам, top-level `prompt` пустой. Если
+   *  список непустой — секция промпта рендерит список шотов вместо одиночного. */
+  shots?: ShotEntry[];
   /** Закрытие модалки — на ответственности колбэка (нужно, чтобы caller мог
    *  показать toast при невалидной секции и оставить модалку открытой). */
   onRepeat?: () => void;
@@ -159,14 +163,18 @@ export function GenerationPreviewModal({
         )}
       />
 
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={t("common.close")}
-        className="absolute top-4 right-4 lg:top-6 lg:right-6 z-50 btn btn-ghost btn-icon"
-      >
-        <X size={20} />
-      </button>
+      {/* Крестик уровня overlay — только когда нет инфо-карточки (она держит
+          свой крестик в шапке). Иначе на экране было бы два крестика. */}
+      {!info && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("common.close")}
+          className="absolute top-4 right-4 lg:top-6 lg:right-6 z-50 btn btn-ghost btn-icon"
+        >
+          <X size={20} />
+        </button>
+      )}
 
       {/* Внутренний контейнер НЕ останавливает propagation — иначе кликнуть в
           летербокс/гэп для закрытия было бы нельзя (он заполняет весь viewport).
@@ -277,7 +285,7 @@ export function GenerationPreviewModal({
           )}
         </div>
 
-        {info && <PreviewInfoCard info={info} isMobile={isMobile} />}
+        {info && <PreviewInfoCard info={info} isMobile={isMobile} onClose={onClose} />}
       </div>
     </div>,
     document.body,
@@ -302,21 +310,18 @@ function formatPreviewDate(iso: string): string {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
 }
 
-function PreviewInfoCard({ info, isMobile }: { info: PreviewInfo; isMobile: boolean }) {
+function PreviewInfoCard({
+  info,
+  isMobile,
+  onClose,
+}: {
+  info: PreviewInfo;
+  isMobile: boolean;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
-  const [promptExpanded, setPromptExpanded] = useState(false);
-  const [isTruncated, setIsTruncated] = useState(false);
-  const promptRef = useRef<HTMLParagraphElement>(null);
-
-  // Детект «реально ли промпт обрезан line-clamp'ом». Считаем один раз после
-  // mount'а (промпт за время жизни модалки не меняется).
-  useLayoutEffect(() => {
-    const el = promptRef.current;
-    if (!el) return;
-    setIsTruncated(el.scrollHeight - el.clientHeight > 1);
-  }, [info.prompt]);
-
   const hasMeta = Boolean(info.dateIso || info.tokensValue);
+  const shots = info.shots ?? [];
 
   return (
     <aside
@@ -327,13 +332,21 @@ function PreviewInfoCard({ info, isMobile }: { info: PreviewInfo; isMobile: bool
       <div className="flex items-center gap-2 shrink-0 min-w-0">
         {info.iconPath && (
           <ModelAvatar
-            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-white/10 text-white"
+            className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center bg-white/10 text-white"
             icon={info.iconPath}
             name={info.title}
-            iconSize={18}
+            iconSize={16}
           />
         )}
-        <h2 className="h2 break-words m-0 min-w-0">{info.title}</h2>
+        <h2 className="text-base font-semibold break-words m-0 min-w-0 flex-1">{info.title}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("common.close")}
+          className="shrink-0 -mr-1 -mt-1 btn btn-ghost btn-icon"
+        >
+          <X size={18} />
+        </button>
       </div>
 
       {hasMeta && (
@@ -347,44 +360,13 @@ function PreviewInfoCard({ info, isMobile }: { info: PreviewInfo; isMobile: bool
         </div>
       )}
 
-      <div className="flex flex-col gap-2 min-h-0">
-        <div
-          className="text-xs uppercase tracking-wide shrink-0"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          {t("prompts.promptUsed")}
-        </div>
-        <div className="flex flex-col gap-2 bg-white/[0.04] rounded-[var(--radius)] p-3">
-          <p
-            ref={promptRef}
-            className={clsx(
-              "text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0",
-              // Мобилка/планшет (<lg): всегда скролл, фикс. высота — карточка
-              // не меняет размер при длинном промпте, нет кнопки «Развернуть».
-              "max-lg:overflow-y-auto max-lg:max-h-[4.5rem] max-lg:pr-1",
-              // Десктоп (lg+): line-clamp-3 в свёрнутом, max-h+scroll в раскрытом.
-              !promptExpanded && "lg:line-clamp-3",
-              promptExpanded && "lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1",
-            )}
-          >
-            {info.prompt || "—"}
-          </p>
-          {isTruncated && (
-            <button
-              type="button"
-              onClick={() => setPromptExpanded((v) => !v)}
-              aria-expanded={promptExpanded}
-              className="hidden lg:inline-flex self-start items-center gap-1 text-xs text-text-hint hover:text-text transition-colors"
-            >
-              <ChevronDown
-                size={14}
-                className={clsx("transition-transform", promptExpanded && "rotate-180")}
-              />
-              {promptExpanded ? t("common.collapse") : t("common.expand")}
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Секция промпта: мультишот (список шотов) → одиночный промпт → ничего
+          (пустой промпт прочерком больше не рисуем). */}
+      {shots.length > 0 ? (
+        <MultiShotSection shots={shots} />
+      ) : info.prompt?.trim() ? (
+        <SinglePromptSection prompt={info.prompt} />
+      ) : null}
 
       {info.folders && <FoldersSection folders={info.folders} />}
 
@@ -412,6 +394,93 @@ function PreviewInfoCard({ info, isMobile }: { info: PreviewInfo; isMobile: bool
         )}
       </div>
     </aside>
+  );
+}
+
+function PromptSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="text-xs uppercase tracking-wide shrink-0"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Одиночный промпт: line-clamp-3 + «Развернуть» на десктопе, скролл на мобиле. */
+function SinglePromptSection({ prompt }: { prompt: string }) {
+  const { t } = useTranslation();
+  const [promptExpanded, setPromptExpanded] = useState(false);
+  const [isTruncated, setIsTruncated] = useState(false);
+  const promptRef = useRef<HTMLParagraphElement>(null);
+
+  // Детект «реально ли промпт обрезан line-clamp'ом». Считаем один раз после
+  // mount'а (промпт за время жизни модалки не меняется).
+  useLayoutEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    setIsTruncated(el.scrollHeight - el.clientHeight > 1);
+  }, [prompt]);
+
+  return (
+    <div className="flex flex-col gap-2 min-h-0">
+      <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
+      <div className="flex flex-col gap-2 bg-white/[0.04] rounded-[var(--radius)] p-3">
+        <p
+          ref={promptRef}
+          className={clsx(
+            "text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0",
+            // Мобилка/планшет (<lg): всегда скролл, фикс. высота — карточка
+            // не меняет размер при длинном промпте, нет кнопки «Развернуть».
+            "max-lg:overflow-y-auto max-lg:max-h-[4.5rem] max-lg:pr-1",
+            // Десктоп (lg+): line-clamp-3 в свёрнутом, max-h+scroll в раскрытом.
+            !promptExpanded && "lg:line-clamp-3",
+            promptExpanded && "lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1",
+          )}
+        >
+          {prompt}
+        </p>
+        {isTruncated && (
+          <button
+            type="button"
+            onClick={() => setPromptExpanded((v) => !v)}
+            aria-expanded={promptExpanded}
+            className="hidden lg:inline-flex self-start items-center gap-1 text-xs text-text-hint hover:text-text transition-colors"
+          >
+            <ChevronDown
+              size={14}
+              className={clsx("transition-transform", promptExpanded && "rotate-180")}
+            />
+            {promptExpanded ? t("common.collapse") : t("common.expand")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Мультишот (Kling): список блоков «Шот N · длительность» + промпт шота. */
+function MultiShotSection({ shots }: { shots: ShotEntry[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-2 min-h-0">
+      <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
+      <div className="flex flex-col gap-2 overflow-y-auto max-h-[4.5rem] lg:max-h-[40vh] pr-1">
+        {shots.map((shot, i) => (
+          <div key={i} className="flex flex-col gap-1 bg-white/[0.04] rounded-[var(--radius)] p-3">
+            <div className="flex items-center gap-2 text-xs text-text-hint">
+              <span className="font-semibold">{t("generate.multishot.shotN", { n: i + 1 })}</span>
+              <span>·</span>
+              <span>{t("generate.multishot.seconds", { value: shot.duration })}</span>
+            </div>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0">
+              {shot.prompt || "—"}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

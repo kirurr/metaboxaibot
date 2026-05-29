@@ -578,7 +578,8 @@
     "loading": "Loading…",
     "tryPrompt": "Try the same prompt",
     "tryPromptAndSettings": "Try the same prompt and settings",
-    "promptUsed": "Prompt used for this generation:"
+    "promptUsed": "Prompt used for this generation:",
+    "prompt": "Prompt"
   },
   "voicePicker": {
     "title": "Pick a voice",

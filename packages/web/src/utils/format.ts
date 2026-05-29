@@ -48,6 +48,12 @@ export function formatTokens(raw: string | null | undefined): string {
   return Math.round(parseTokens(raw)).toLocaleString("en-US");
 }
 
+/** "0.34" / "12.5" / "12" — до 2 знаков, без хвостовых нулей. Для стоимости
+ *  одной генерации (может быть дробной < 1, поэтому НЕ round как у formatTokens). */
+export function formatTokensSpent(raw: string | null | undefined): string {
+  return String(parseFloat(parseTokens(raw).toFixed(2)));
+}
+
 /** "+2,140" / "−4,410" — со знаком и тысячным разделителем. */
 export function formatTokenDelta(raw: string | null | undefined): string {
   const n = parseTokens(raw);
