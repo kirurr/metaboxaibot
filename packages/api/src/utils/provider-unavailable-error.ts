@@ -71,5 +71,20 @@ export function isProviderTemporaryUnavailable(err: unknown): boolean {
   // recordError на ключ ставить НЕЛЬЗЯ (при широком ауте KIE закарантинили бы
   // все здоровые ключи). Требуем И фразу, И 5xx — bare 401 без 5xx остаётся
   // perm auth-ошибкой и сюда не попадает. (Наблюдали 2026-05 на gpt-image-2.)
+  // KIE проксирует ошибку server-side скачивания нашего file-URL в msg вида
+  // "File download failed: ... Network connection lost." — транзиентный сетевой
+  // блип между KIE и источником (Telegram/S3), а НЕ сбой нашего ключа.
+  // recordError ставить нельзя (иначе на блипах карантинятся здоровые ключи).
+  // 404 ("File download failed ... 404 Not Found") сюда не попадает — это
+  // истёкший файл, kie-upload кидает UserFacingError(mediaSlotExpired) раньше.
+  if (
+    /File download failed/i.test(msg) &&
+    /Network connection lost|connection reset|connection timed out|connection refused|\btimed out\b/i.test(
+      msg,
+    )
+  ) {
+    return true;
+  }
+
   return /authentication service response error/i.test(msg) && /\b5\d{2}\b/.test(msg);
 }
