@@ -36,7 +36,9 @@ export function toMarkdownV2(src: string): string {
       const nl = inner.indexOf("\n");
       const lang = nl > 0 ? inner.slice(0, nl).trim() : "";
       const code = nl >= 0 ? inner.slice(nl + 1) : inner;
-      out.push("```" + lang + "\n" + code + (code.endsWith("\n") ? "" : "\n") + "```");
+      out.push(
+        "```" + lang + "\n" + escapeCodeEntity(code) + (code.endsWith("\n") ? "" : "\n") + "```",
+      );
       i = closeIdx + 3;
       continue;
     }
@@ -45,7 +47,7 @@ export function toMarkdownV2(src: string): string {
     if (src[i] === "`") {
       const closeIdx = src.indexOf("`", i + 1);
       if (closeIdx !== -1 && !src.slice(i + 1, closeIdx).includes("\n")) {
-        out.push("`" + src.slice(i + 1, closeIdx) + "`");
+        out.push("`" + escapeCodeEntity(src.slice(i + 1, closeIdx)) + "`");
         i = closeIdx + 1;
         continue;
       }
@@ -214,6 +216,17 @@ const MDV2_ESCAPE_GLOBAL = /[_*[\]()~`>#+=|{}.!\-\\]/g;
 /** Escape MarkdownV2 special chars in plain text spans. */
 export function escapeMdV2(text: string): string {
   return text.replace(MDV2_ESCAPE_GLOBAL, "\\$&");
+}
+
+/**
+ * Внутри pre/code-сущностей Telegram требует экранировать ТОЛЬКО `\` и `` ` ``
+ * (остальные спецсимволы внутри блока литеральны). Без этого код с обилием
+ * бэкслешей (RTF `\par`, regex, Windows-пути) или бэктиков (JS template literal)
+ * ломает Pre-entity → "can't find end of Pre entity". `\` экранируем первым,
+ * чтобы не задвоить бэкслеши, добавленные для бэктиков.
+ */
+function escapeCodeEntity(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
 }
 
 /**

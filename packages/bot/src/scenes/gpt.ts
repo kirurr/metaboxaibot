@@ -448,15 +448,14 @@ async function streamGptResponse(
     for (let i = 0; i < parts.length; i++) {
       const isLast = i === parts.length - 1;
       const raw = carryOpener + parts[i];
-      let body: string;
-      if (isLast) {
-        body = raw;
-        carryOpener = "";
-      } else {
-        const { closed, opener } = closeOpenMarkdownV2(raw);
-        body = closed;
-        carryOpener = opener;
-      }
+      // Балансим фенсы на КАЖДОМ куске, включая последний: если ответ оборвался
+      // посреди ``` блока (truncation / незакрытый код), последний кусок без
+      // закрытия уходил бы как невалидный Pre-entity. На сбалансированном куске
+      // closeOpenMarkdownV2 — no-op. У последнего куска opener'а нет (следующего
+      // сообщения не будет).
+      const { closed, opener } = closeOpenMarkdownV2(raw);
+      const body = closed;
+      carryOpener = isLast ? "" : opener;
       const v2 = toMarkdownV2(body);
       await deliverChunk(msgId, body, v2, i === 0);
     }
