@@ -105,6 +105,14 @@ export function deleteGalleryJob(jobId: string) {
   });
 }
 
+/** Удаляет один output. `jobDeleted: true` — это был последний, джоба снесена. */
+export function deleteGalleryOutput(outputId: string) {
+  return apiClient<{ jobDeleted: boolean }>(
+    `/web/gallery/outputs/${encodeURIComponent(outputId)}`,
+    { method: "DELETE" },
+  );
+}
+
 // ── Folders ─────────────────────────────────────────────────────────────────
 
 export async function listGalleryFolders(signal?: AbortSignal): Promise<GalleryFolder[]> {

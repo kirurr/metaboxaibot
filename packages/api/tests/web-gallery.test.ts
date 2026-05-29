@@ -609,6 +609,93 @@ describe("web-gallery: DELETE /web/gallery/jobs/:id", () => {
   });
 });
 
+// ── 8b. DELETE /web/gallery/outputs/:id ────────────────────────────────────
+
+describe("web-gallery: DELETE /web/gallery/outputs/:id", () => {
+  it("deletes one output of a multi-output job, keeps the job + the rest", async () => {
+    const { aibUserId, headers } = await seedUserAndAuth();
+    const job = await seedJob(aibUserId, {
+      outputs: [
+        { s3Key: "out/a.png", thumbnailS3Key: "out/a-thumb.png" },
+        { s3Key: "out/b.png", thumbnailS3Key: "out/b-thumb.png" },
+      ],
+    });
+    const outputs = await db.generationJobOutput.findMany({
+      where: { jobId: job.id },
+      orderBy: { index: "asc" },
+    });
+    expect(outputs).toHaveLength(2);
+    const target = outputs[0]!;
+
+    vi.mocked(deleteFile).mockClear();
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/web/gallery/outputs/${target.id}`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ jobDeleted: false });
+
+    // Джоба и второй output остались, удалён только целевой.
+    const inDb = await db.generationJob.findUnique({ where: { id: job.id } });
+    expect(inDb).not.toBeNull();
+    const remaining = await db.generationJobOutput.findMany({ where: { jobId: job.id } });
+    expect(remaining.map((o) => o.id)).toEqual([outputs[1]!.id]);
+
+    // deleteFile вызван только для ключей удалённого output'а.
+    const keysCalled = vi.mocked(deleteFile).mock.calls.map((c) => c[0]);
+    expect(new Set(keysCalled)).toEqual(new Set(["out/a.png", "out/a-thumb.png"]));
+  });
+
+  it("deletes the whole job when removing the last output (jobDeleted:true)", async () => {
+    const { aibUserId, headers } = await seedUserAndAuth();
+    const job = await seedJob(aibUserId, {
+      outputs: [{ s3Key: "out/only.png", thumbnailS3Key: "out/only-thumb.png" }],
+    });
+    const output = await db.generationJobOutput.findFirst({ where: { jobId: job.id } });
+    expect(output).not.toBeNull();
+
+    vi.mocked(deleteFile).mockClear();
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/web/gallery/outputs/${output!.id}`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ jobDeleted: true });
+
+    const inDb = await db.generationJob.findUnique({ where: { id: job.id } });
+    expect(inDb).toBeNull();
+    const keysCalled = vi.mocked(deleteFile).mock.calls.map((c) => c[0]);
+    expect(new Set(keysCalled)).toEqual(new Set(["out/only.png", "out/only-thumb.png"]));
+  });
+
+  it("returns 404 for an unknown output id", async () => {
+    const { headers } = await seedUserAndAuth();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/web/gallery/outputs/does-not-exist",
+      headers,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 403 when deleting another user's output", async () => {
+    const { aibUserId } = await seedUserAndAuth();
+    const job = await seedJob(aibUserId, { outputs: [{ s3Key: "out/x.png" }] });
+    const output = await db.generationJobOutput.findFirst({ where: { jobId: job.id } });
+    expect(output).not.toBeNull();
+
+    const { headers: otherHeaders } = await seedUserAndAuth();
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/web/gallery/outputs/${output!.id}`,
+      headers: otherHeaders,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 // ── 9. Folders CRUD ────────────────────────────────────────────────────────
 
 describe("web-gallery: folders", () => {

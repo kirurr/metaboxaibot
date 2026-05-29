@@ -170,7 +170,20 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "downloadOriginal": "Download original",
-    "addToFolders": "Add to folders"
+    "save": "Save",
+    "addToFolders": "Add to folders",
+    "copy": "Copy",
+    "copied": "Copied",
+    "settings": "Settings",
+    "seeAll": "Show all",
+    "favorite": "Add to favorites",
+    "inFavorites": "In favorites",
+    "animate": "Animate",
+    "reference": "Reference",
+    "upscale": "Upscale",
+    "newFolder": "New folder",
+    "on": "On",
+    "off": "Off"
   },
   "auth": {
     "welcomeBack": "Welcome back.",
@@ -578,7 +591,8 @@
     "loading": "Loading…",
     "tryPrompt": "Try the same prompt",
     "tryPromptAndSettings": "Try the same prompt and settings",
-    "promptUsed": "Prompt used for this generation:"
+    "promptUsed": "Prompt used for this generation:",
+    "prompt": "Prompt"
   },
   "voicePicker": {
     "title": "Pick a voice",

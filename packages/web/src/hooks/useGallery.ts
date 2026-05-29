@@ -12,6 +12,7 @@ import {
   createGalleryFolder,
   deleteGalleryFolder,
   deleteGalleryJob,
+  deleteGalleryOutput,
   galleryKeys,
   getGalleryJob,
   getGalleryModelCounts,
@@ -168,6 +169,14 @@ export function useDeleteGalleryJob() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (jobId: string) => deleteGalleryJob(jobId),
+    onSuccess: () => invalidateGallery(qc),
+  });
+}
+
+export function useDeleteGalleryOutput() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (outputId: string) => deleteGalleryOutput(outputId),
     onSuccess: () => invalidateGallery(qc),
   });
 }

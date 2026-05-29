@@ -173,7 +173,20 @@
     "expand": "Развернуть",
     "collapse": "Свернуть",
     "downloadOriginal": "Скачать оригинал",
-    "addToFolders": "В папки"
+    "save": "Сохранить",
+    "addToFolders": "В папки",
+    "copy": "Копировать",
+    "copied": "Скопировано",
+    "settings": "Настройки",
+    "seeAll": "Показать все",
+    "favorite": "В избранное",
+    "inFavorites": "В избранном",
+    "animate": "Анимировать",
+    "reference": "Референс",
+    "upscale": "Апскейл",
+    "newFolder": "Новая папка",
+    "on": "Вкл",
+    "off": "Выкл"
   },
   "auth": {
     "welcomeBack": "С возвращением.",
@@ -583,7 +596,8 @@
     "loading": "Загрузка…",
     "tryPrompt": "Попробовать тот же промпт",
     "tryPromptAndSettings": "Попробовать этот промпт и настройки",
-    "promptUsed": "Промпт, использованный для генерации:"
+    "promptUsed": "Промпт, использованный для генерации:",
+    "prompt": "Промпт"
   },
   "voicePicker": {
     "title": "Выбор голоса",
