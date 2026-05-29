@@ -2242,19 +2242,17 @@ export function GenerateScene({
           {!hidePrompt && multishotToggle && (
             <div className="gen-multishot-switch">
               <div className="gen-multishot-switch-label">
-                <span>{multishotToggle.label}</span>
-                {multishotToggle.description && (
-                  <span
-                    className="gen-tip gen-multishot-switch-info"
-                    tabIndex={0}
-                    aria-label={multishotToggle.description}
-                  >
-                    <Info size={13} />
-                    <span className="gen-tip-bubble" role="tooltip">
-                      {multishotToggle.description}
-                    </span>
+                <span>{t("generate.multishot.toggleLabel")}</span>
+                <span
+                  className="gen-tip gen-multishot-switch-info"
+                  tabIndex={0}
+                  aria-label={t("generate.multishot.toggleDescription")}
+                >
+                  <Info size={13} />
+                  <span className="gen-tip-bubble" role="tooltip">
+                    {t("generate.multishot.toggleDescription")}
                   </span>
-                )}
+                </span>
               </div>
               <button
                 type="button"
