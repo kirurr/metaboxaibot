@@ -62,7 +62,7 @@ import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unav
 import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
-import { computeSeedance2BillableUsd } from "../utils/seedance2-billing.js";
+import { computeSeedance2BillableUsd } from "@metabox/api/utils/seedance2-billing";
 import {
   acquireForSubmit,
   acquireForPoll,

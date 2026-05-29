@@ -131,6 +131,8 @@ export function isContextOverflowError(err: unknown): boolean {
     lower.includes("prompt is too long") ||
     lower.includes("maximum context length") ||
     lower.includes("too many tokens") ||
-    lower.includes("request payload size exceeds")
+    lower.includes("request payload size exceeds") ||
+    // OpenAI Responses API: "Your input exceeds the context window of this model."
+    lower.includes("exceeds the context window")
   );
 }

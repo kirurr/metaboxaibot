@@ -4,9 +4,12 @@ import {
   parseVideoShots,
   sumShotDuration,
 } from "@metabox/shared";
-import { calculateCost, computeVideoTokens } from "./token.service.js";
+import { calculateCost, computeVideoTokens, usdToTokens } from "./token.service.js";
+import { getModelMultiplier } from "./pricing-config.service.js";
 import { userStateService } from "./user-state.service.js";
 import { probeAudioDurationSec } from "../utils/audio-transcode.js";
+import { probeVideoMetadata } from "../utils/mp4-duration.js";
+import { computeSeedance2BillableUsd } from "../utils/seedance2-billing.js";
 import { logger } from "../logger.js";
 import type { SubmitImageParams } from "./generation.service.js";
 import type { SubmitVideoParams } from "./video-generation.service.js";
@@ -172,6 +175,99 @@ export const costPreviewService = {
       effectiveDuration = 1;
     }
 
+    // Kling Motion (Standard/Pro): длительность результата = длине референс-
+    // видео (motion_video), юзером не настраивается и нет `duration` в settings,
+    // поэтому previewVideo иначе берёт fallback 5с и занижает цену вдвое (юзер
+    // видел ~25 ✦, списывалось ~52 ✦ за 10с ролик — биллинг по фактической
+    // длине выхода в video.processor.ts). Probe'аем загруженное видео той же
+    // mp4-метрикой, что воркер юзает для wan/seedance, и округляем ВВЕРХ —
+    // превью никогда не ниже реального списания. supportsWeb:false → это
+    // бот-only confirm-гейт, probe срабатывает один раз, не в hot-path
+    // веб-превью. Если probe сорвался / видео ещё нет — уходим в per_second
+    // (как copy-motion): показываем цену секунды, не выдавая ложный total.
+    if (modelId === "kling-motion" || modelId === "kling-motion-pro") {
+      const motionVideoUrl = params.mediaInputs?.motion_video?.[0];
+      let probedDuration: number | null = null;
+      if (motionVideoUrl) {
+        try {
+          probedDuration = (await probeVideoMetadata(motionVideoUrl)).durationSec;
+        } catch (err) {
+          logger.warn({ err, modelId }, "Kling Motion preview: reference video probe failed");
+        }
+      }
+      if (probedDuration && probedDuration > 0) {
+        effectiveDuration = Math.ceil(probedDuration);
+        // +1с буфер ТОЛЬКО в цене: probe меряет ВХОД (motion_video), а воркер
+        // биллит ВЫХОД (actualDuration без ceil). Если Kling вернёт ролик на
+        // доли секунды длиннее входа — буфер гарантирует preview ≥ списания.
+        // Возвращаемый effectiveDuration остаётся честным: провайдеру duration
+        // не уходит (kie kling-motion-control его не принимает).
+        const cost = calculateCost(
+          model,
+          0,
+          0,
+          undefined,
+          undefined,
+          modelSettings,
+          effectiveDuration + 1,
+        );
+        return {
+          cost,
+          pricingMode,
+          effectiveDuration,
+          effectiveAspectRatio,
+          effectiveModelSettings: modelSettings,
+          estimatedVideoTokens: undefined,
+        };
+      }
+      pricingMode = "per_second";
+      effectiveDuration = 1;
+    }
+
+    // Grok Imagine extend: FAL склеивает исходник + продление, реальный output =
+    // source + extension (fal.adapter.ts), воркер биллит всю склейку по
+    // actualDuration. Настройка `duration` (здесь = effectiveDuration, 6-10с)
+    // задаёт длину ТОЛЬКО продления — именно её получает провайдер
+    // (fal.adapter.ts берёт job.duration как длину extension'а). Поэтому цену
+    // считаем по (ceil(source) + extension + 1с буфер), но ВОЗВРАЩАЕМ
+    // effectiveDuration = длина продления, чтобы в очередь/адаптер ушло
+    // провайдер-корректное значение, а не раздутая склейка. +1с буфер —
+    // на seam/padding склейки. supportsWeb:false → бот-only confirm-гейт, probe
+    // один раз. Probe сорвался / нет видео → per_second (цена секунды).
+    if (modelId === "grok-imagine-extend") {
+      const extensionDuration = effectiveDuration;
+      const sourceUrl = params.mediaInputs?.source_video?.[0];
+      let sourceDuration: number | null = null;
+      if (sourceUrl) {
+        try {
+          sourceDuration = (await probeVideoMetadata(sourceUrl)).durationSec;
+        } catch (err) {
+          logger.warn({ err, modelId }, "Grok extend preview: source video probe failed");
+        }
+      }
+      if (sourceDuration && sourceDuration > 0) {
+        const cost = calculateCost(
+          model,
+          0,
+          0,
+          undefined,
+          undefined,
+          modelSettings,
+          Math.ceil(sourceDuration) + extensionDuration + 1,
+        );
+        return {
+          cost,
+          pricingMode,
+          effectiveDuration: extensionDuration,
+          effectiveAspectRatio,
+          effectiveModelSettings: modelSettings,
+          estimatedVideoTokens: undefined,
+        };
+      }
+      pricingMode = "per_second";
+      effectiveDuration = 1;
+    }
+
     // Runway gen4.5 принимает только 5/10s; в userState у части юзеров остались
     // значения 2-4, 6-9 со старого слайдера 2..10. Снэпаем здесь, чтобы списание
     // совпало с тем, что адаптер фактически отправит провайдеру. Для остальных
@@ -195,6 +291,52 @@ export const costPreviewService = {
     // нерентабелен (полная загрузка MP4 на каждый ререндер UI).
     if (modelId === "wan" && params.mediaInputs?.first_clip?.[0]) {
       effectiveDuration += 5;
+    }
+
+    // Seedance 2.0 / 2.0 Fast (evolink) в r2v-режиме (есть ref_videos): провайдер
+    // биллит по ПОНИЖЕННОЙ ставке, но billable = output + max(Σinput, output)
+    // ≥ 2×output (computeSeedance2BillableUsd, та же формула что в
+    // video.processor.ts). Обычный calculateCost ниже считает по no-video ставке
+    // × output и занижает (пониженная ставка не компенсирует удвоение секунд).
+    // Probe'аем ref_videos и считаем точную цену той же формулой, что списывает
+    // воркер. Probe части видео сорвался → берём 0 для него: max(Σinput, output)
+    // завысит, но не занизит. supportsWeb:false → previewVideo для seedance-2
+    // зовётся только в боте (confirm-гейт + submit), не в hot-path веб-превью.
+    // +1с буфер в outputDuration (только цена): воркер биллит по фактической
+    // длине выхода (actualDuration), которая может быть на доли секунды длиннее
+    // запрошенной настройки; буфер гарантирует preview ≥ списания. Возвращаемый
+    // effectiveDuration остаётся честным (= настройка, уходит провайдеру).
+    if (
+      (modelId === "seedance-2" || modelId === "seedance-2-fast") &&
+      model.provider === "evolink"
+    ) {
+      const refVideos = params.mediaInputs?.ref_videos ?? [];
+      if (refVideos.length > 0) {
+        const resolution = (modelSettings.resolution as string | undefined) ?? "720p";
+        const inputDurations = await Promise.all(
+          refVideos.map((u) =>
+            probeVideoMetadata(u)
+              .then((m) => m.durationSec ?? 0)
+              .catch(() => 0),
+          ),
+        );
+        const usd = computeSeedance2BillableUsd({
+          modelId,
+          resolution,
+          outputDuration: effectiveDuration + 1,
+          inputVideoDurations: inputDurations,
+        });
+        if (usd !== null) {
+          return {
+            cost: usdToTokens(usd) * getModelMultiplier(modelId),
+            pricingMode,
+            effectiveDuration,
+            effectiveAspectRatio,
+            effectiveModelSettings: modelSettings,
+            estimatedVideoTokens: undefined,
+          };
+        }
+      }
     }
 
     const estimatedVideoTokens = model.costUsdPerMVideoToken

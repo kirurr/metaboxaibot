@@ -57,7 +57,19 @@ export function isProviderTemporaryUnavailable(err: unknown): boolean {
   // ответа парсится как plain text, status=530. providerHttpError() поднимает
   // 530 в `err.status` → isFiveXxError ловит. Дублирующая text-проверка здесь —
   // safety net на случай если новый адаптер забудет про providerHttpError.
-  return /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed|Cloudflare Tunnel error|\berror 1033\b|Argo Tunnel/i.test(
-    msg,
-  );
+  if (
+    /high demand|service is (currently |temporarily )?unavailable|service unavailable|service busy|allocating resources|task (processing|execute) failed|Cloudflare Tunnel error|\berror 1033\b|Argo Tunnel/i.test(
+      msg,
+    )
+  ) {
+    return true;
+  }
+  // KIE auth-сервис временно лёг: на submit'е (file upload) KIE возвращает
+  // code-уровневую ошибку "Authentication failed: Authentication service
+  // response error: 502" — это 5xx их ВНУТРЕННЕГО auth-микросервиса (bad
+  // gateway), а не невалидный наш ключ. Транзиент: retry/fallback помогут,
+  // recordError на ключ ставить НЕЛЬЗЯ (при широком ауте KIE закарантинили бы
+  // все здоровые ключи). Требуем И фразу, И 5xx — bare 401 без 5xx остаётся
+  // perm auth-ошибкой и сюда не попадает. (Наблюдали 2026-05 на gpt-image-2.)
+  return /authentication service response error/i.test(msg) && /\b5\d{2}\b/.test(msg);
 }
