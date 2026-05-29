@@ -935,6 +935,9 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
         modelMeta,
         fallbackSection: "audio",
         notifySection: "audio",
+        // audio JobData не имеет mediaInputs, и submit-путь audio fallback'ов
+        // не фильтрует по совместимости — мирроринг, не отсекаем кандидатов.
+        skipCompatibilityFilter: true,
         userId: userIdStr,
       });
     }

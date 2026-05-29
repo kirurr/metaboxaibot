@@ -10,10 +10,14 @@
  *
  * Re-enqueue зеркалит существующий poll-stage fallback (см. *.processor.ts):
  * чистим providerJobId/Key, сбрасываем stage, мерджим состояние в inputData,
- * `delayJob` (moveToDelayed — НЕ ест BullMQ attempts). Per-provider счётчик
- * ретраев живёт в `inputData.contentPolicy.retries`, цепочка провайдеров — в
- * `inputData.fallback.attemptedProviders` (тот же ключ, что у 5xx/unavailable
- * fallback'а — провайдер, исчерпанный модерацией, не пробуется и им).
+ * `delayJob` (moveToDelayed — НЕ ест BullMQ attempts).
+ *
+ * ВАЖНО про `attemptedProviders`: процессор после УСПЕШНОГО submit пишет туда
+ * объединение всех `fbResult.attempts`, ВКЛЮЧАЯ успешный провайдер. Submit-стадия
+ * строит из него `skipProviders`. Поэтому для «ретрая на ТОМ ЖЕ провайдере» мы
+ * обязаны УБРАТЬ currentEff из attemptedProviders (иначе submit его скипнет и
+ * ретрай уйдёт на fallback / упадёт «no candidates»). Прочие провайдеры из
+ * attemptedProviders (история 5xx/unavailable fallback'а) сохраняем.
  *
  * child-safety / CSAM сюда НЕ попадает — отфильтровано в `isContentPolicyError`.
  */
@@ -33,7 +37,16 @@ const PER_PROVIDER_RETRIES = 1;
 const REENQUEUE_DELAY_MS = 1000;
 
 interface ContentPolicyState {
+  /** Сколько ретраев УЖЕ сделано на каждом провайдере. */
   retries?: Record<string, number>;
+  /**
+   * Сколько всего re-enqueue'ев сделано (ретраи + fallback'и). Circuit-breaker:
+   * `delayJob` (moveToDelayed) НЕ инкрементит BullMQ attemptsMade, поэтому без
+   * собственного счётчика теоретический цикл ничем не ограничен. Завершение и
+   * так гарантируется монотонным ростом attemptedProviders + проверкой `next`,
+   * но кап — страховка от будущих изменений (нестабильный порядок кандидатов и т.п.).
+   */
+  totalReenqueues?: number;
 }
 
 interface FallbackState {
@@ -54,14 +67,21 @@ export interface ContentPolicyRetryOpts {
   notifySection: string;
   /** mediaInputs текущей джобы — для фильтра совместимости кандидатов. */
   mediaInputs?: Record<string, string[]>;
+  /**
+   * Пропустить `isFallbackCompatible`-фильтр кандидатов. Для audio: у audio
+   * JobData нет mediaInputs, а submit-путь audio fallback'ов тоже не фильтрует —
+   * мирроринг, чтобы не отсечь валидного кандидата.
+   */
+  skipCompatibilityFilter?: boolean;
   userId?: string;
 }
 
 /**
  * Обрабатывает content-policy ошибку: ретрай на том же провайдере, потом
  * fallback. Если re-enqueue произошёл — БРОСАЕТ `DelayedError` (через delayJob)
- * и НЕ возвращается. Если цепочка исчерпана — возвращается (caller проваливается
- * в обычный terminal user-facing path, без ops-алерта).
+ * и НЕ возвращается. Если цепочка исчерпана / сработал circuit-breaker —
+ * возвращается (caller проваливается в обычный terminal user-facing path,
+ * без ops-алерта).
  */
 export async function handleContentPolicyRetryFallback(
   opts: ContentPolicyRetryOpts,
@@ -77,8 +97,31 @@ export async function handleContentPolicyRetryFallback(
   const fbState = (inputData.fallback as FallbackState | undefined) ?? {};
   const cpState = (inputData.contentPolicy as ContentPolicyState | undefined) ?? {};
   const retries: Record<string, number> = { ...(cpState.retries ?? {}) };
+  const totalReenqueues = cpState.totalReenqueues ?? 0;
 
   const currentEff = fbState.effectiveProvider ?? modelMeta.provider;
+
+  const candidatesRaw = getFallbackCandidates(modelId, fallbackSection);
+  const candidates = opts.skipCompatibilityFilter
+    ? candidatesRaw
+    : candidatesRaw.filter((m) => isFallbackCompatible(m, mediaInputs));
+
+  // Circuit-breaker: (#кандидатов + primary) × (ретрай + первичный заход).
+  const maxReenqueues = (candidates.length + 1) * (PER_PROVIDER_RETRIES + 1);
+  if (totalReenqueues >= maxReenqueues) {
+    logger.warn(
+      { dbJobId, modelId, totalReenqueues, maxReenqueues },
+      "Content-policy: circuit breaker tripped — terminal user error",
+    );
+    return;
+  }
+
+  // attemptedProviders включает currentEff (success-провайдер). Для ретрая на
+  // ТОМ ЖЕ провайдере убираем его, чтобы submit не скипнул; прочую историю
+  // (5xx/unavailable fallback) сохраняем.
+  const priorAttempted = new Set(fbState.attemptedProviders ?? []);
+  priorAttempted.delete(currentEff);
+
   const usedForCurrent = retries[currentEff] ?? 0;
 
   const reenqueueData = {
@@ -91,7 +134,12 @@ export async function handleContentPolicyRetryFallback(
   // ── 1. Один ретрай на текущем провайдере (модерация часто недетерминирована).
   if (usedForCurrent < PER_PROVIDER_RETRIES) {
     retries[currentEff] = usedForCurrent + 1;
-    const merged = { ...inputData, contentPolicy: { retries } };
+    const merged = {
+      ...inputData,
+      // attemptedProviders без currentEff → submit повторно выберет currentEff.
+      fallback: { ...fbState, attemptedProviders: Array.from(priorAttempted) },
+      contentPolicy: { retries, totalReenqueues: totalReenqueues + 1 },
+    };
     await db.generationJob.update({
       where: { id: dbJobId },
       data: {
@@ -109,12 +157,8 @@ export async function handleContentPolicyRetryFallback(
   }
 
   // ── 2. Ретрай исчерпан — fallback на следующего совместимого кандидата.
-  const attempted = new Set(fbState.attemptedProviders ?? []);
-  attempted.add(currentEff);
-  const candidates = getFallbackCandidates(modelId, fallbackSection).filter((m) =>
-    isFallbackCompatible(m, mediaInputs),
-  );
-  const next = candidates.find((m) => !attempted.has(m.provider));
+  priorAttempted.add(currentEff);
+  const next = candidates.find((m) => !priorAttempted.has(m.provider));
 
   if (!next) {
     // Цепочка исчерпана — terminal. Caller покажет user-facing сообщение без
@@ -124,7 +168,7 @@ export async function handleContentPolicyRetryFallback(
         dbJobId,
         modelId,
         currentEff,
-        attempted: Array.from(attempted),
+        attempted: Array.from(priorAttempted),
         registeredFallbacks: candidates.map((m) => m.provider),
       },
       "Content-policy: retry+fallback chain exhausted — terminal user error",
@@ -136,10 +180,10 @@ export async function handleContentPolicyRetryFallback(
     ...inputData,
     fallback: {
       primaryProvider: fbState.primaryProvider ?? modelMeta.provider,
-      attemptedProviders: Array.from(attempted),
+      attemptedProviders: Array.from(priorAttempted),
     },
     // Счётчики ретраев сохраняем; новый провайдер стартует с 0 → получит свой ретрай.
-    contentPolicy: { retries },
+    contentPolicy: { retries, totalReenqueues: totalReenqueues + 1 },
   };
   await db.generationJob.update({
     where: { id: dbJobId },
