@@ -1,5 +1,6 @@
 import { Api } from "grammy";
-import { config } from "@metabox/shared";
+import { config, decryptSecret } from "@metabox/shared";
+import { db } from "@metabox/api/db";
 import { logger } from "../logger.js";
 
 interface ProviderStatus {
@@ -37,11 +38,25 @@ async function checkElevenlabs(): Promise<ProviderStatus | null> {
 
 // ── FAL.ai ────────────────────────────────────────────────────────────────────
 // Endpoint: GET https://api.fal.ai/v1/account/billing?expand=credits
-// Требует ADMIN-ключ (FAL_ADMIN_API_KEY) — обычный FAL_API_KEY (генерации) даёт
-// 403. Без admin-ключа чек тихо скипается (return null), без шума в логах.
+// Требует ADMIN-ключ — обычный FAL_API_KEY (генерации) на billing даёт 403.
+// Источник ключа: сначала key-pool в БД (provider "fal-admin", добавляется через
+// admin-keys и хранится зашифрованным), затем env FAL_ADMIN_API_KEY как фолбэк.
+// Если ключа нет нигде — чек тихо скипается (return null), без шума в логах.
+
+async function resolveFalAdminKey(): Promise<string | null> {
+  const row = await db.providerKey
+    .findFirst({
+      where: { provider: "fal-admin", isActive: true },
+      orderBy: { priority: "desc" },
+      select: { keyCipher: true },
+    })
+    .catch(() => null);
+  if (row) return decryptSecret(row.keyCipher);
+  return config.ai.falAdmin ?? null;
+}
 
 async function checkFal(): Promise<ProviderStatus | null> {
-  const key = config.ai.falAdmin;
+  const key = await resolveFalAdminKey();
   if (!key) return null;
 
   const res = await fetch("https://api.fal.ai/v1/account/billing?expand=credits", {
