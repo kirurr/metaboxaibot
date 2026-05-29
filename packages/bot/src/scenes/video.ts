@@ -1432,7 +1432,13 @@ export async function handleVideoPhoto(ctx: BotContext): Promise<void> {
             widthPx = meta.width;
             heightPx = meta.height;
           } catch (err) {
+            // Зеркалит active-slot/auto-slot ветки: без probe размеры неизвестны,
+            // а validateMediaAgainstSlot пропускает undefined (undefined < minWidth
+            // === false) — undersized-картинка уходила бы к провайдеру (KIE 422
+            // "image dimensions must be at least 300 pixels"). Reject, не continue.
             logger.warn({ err }, "probeImageMetadata failed in caption+photo path");
+            await ctx.reply(ctx.t.errors.mediaSlotReadMetadataFailed);
+            return;
           }
         }
         const violation = validateMediaAgainstSlot(
