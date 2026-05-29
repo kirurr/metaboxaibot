@@ -85,6 +85,8 @@ export function ShaderHero() {
 
     let raf = 0;
     let t = 1.0;
+    let last = 0;
+    const SPEED = 3.0; // ед/сек, = прежние 0.05/кадр при 60 FPS
 
     function resize() {
       if (!canvas) return;
@@ -99,8 +101,11 @@ export function ShaderHero() {
       gl!.uniform2f(uRes, w, h);
     }
 
-    function frame() {
-      t += 0.05;
+    function frame(now: number) {
+      const dt = last ? (now - last) / 1000 : 0; // сек; первый кадр без скачка
+      last = now;
+      // клемп защищает от рывка после возврата из фоновой вкладки (RAF был на паузе)
+      t += SPEED * Math.min(dt, 0.1);
       resize();
       gl!.uniform1f(uTime, t);
       gl!.drawArrays(gl!.TRIANGLES, 0, 6);
@@ -108,7 +113,7 @@ export function ShaderHero() {
     }
 
     resize();
-    frame();
+    raf = requestAnimationFrame(frame);
     window.addEventListener("resize", resize);
 
     return () => {
