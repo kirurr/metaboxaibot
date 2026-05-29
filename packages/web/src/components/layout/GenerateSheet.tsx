@@ -259,13 +259,18 @@ export function GenerateSheet({ open, onClose }: { open: boolean; onClose: () =>
               >
                 {t("capabilities.columns.models")}
               </div>
-              <div className="flex flex-col gap-1">
+              {/* Показываем все семейства (порядок = карусель бота). Высота
+                  ограничена MAX_MODELS_IN_MENU строками, дальше — скролл. */}
+              <div
+                className="flex flex-col gap-1 overflow-y-auto"
+                style={{ maxHeight: `calc(${MAX_MODELS_IN_MENU} * 5rem)` }}
+              >
                 {models.length === 0 ? (
                   <div className="text-xs px-3 py-4" style={{ color: "var(--text-hint)" }}>
                     {t("capabilities.columns.loading")}
                   </div>
                 ) : (
-                  models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                  models.map((m) => (
                     <button
                       key={m.id}
                       type="button"

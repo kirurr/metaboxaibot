@@ -540,6 +540,15 @@ select {
   color: var(--text-secondary);
   line-height: 1.4;
 }
+/* Колонка моделей показывает все семейства, но высота ограничена inline-стилем
+   (MAX_MODELS_IN_MENU строк) и скроллится. Клампим описание в 2 строки, чтобы
+   строки были одной высоты и видимое кол-во читалось как ~MAX_MODELS_IN_MENU. */
+.mega-list-models .mega-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .mega-badge {
   font-size: 9.5px;
   font-weight: 700;

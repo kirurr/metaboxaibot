@@ -168,11 +168,16 @@ export function CapabilityTabs() {
                   {c.id !== "audio" && (
                     <div className="mega-col">
                       <div className="mega-col-head">{t("capabilities.columns.models")}</div>
-                      <div className="mega-list">
+                      {/* Показываем все семейства (порядок = карусель бота). Высота
+                          ограничена MAX_MODELS_IN_MENU строками, дальше — скролл. */}
+                      <div
+                        className="mega-list mega-list-models"
+                        style={{ maxHeight: `calc(${MAX_MODELS_IN_MENU} * 4.6rem)` }}
+                      >
                         {models.length === 0 ? (
                           <div className="mega-empty">{t("capabilities.columns.loading")}</div>
                         ) : (
-                          models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
+                          models.map((m) => (
                             <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
                               <ModelAvatar
                                 className="mega-ico letter"
