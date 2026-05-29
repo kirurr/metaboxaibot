@@ -1,4 +1,17 @@
+import type { ReactNode } from "react";
+import {
+  Camera,
+  Eraser,
+  ImageMinus,
+  ImageUpscale,
+  ScanFace,
+  VenetianMask,
+  WandSparkles,
+} from "lucide-react";
 import type { WebModelDto } from "@/api/models";
+
+/** Размер/толщина обводки Lucide-иконок в пунктах меню капабилити. */
+const ICON_PROPS = { size: 18, strokeWidth: 1.5 } as const;
 
 /**
  * Общая капабилити-конфигурация (image / video / audio / chat) и хелперы
@@ -26,7 +39,8 @@ export type MenuItem = {
   /** i18n-ключи для name/desc. */
   nameKey: string;
   descKey: string;
-  glyph?: string;
+  /** Готовые пресеты используют Lucide-иконку; плейсхолдеры — текст-глиф. */
+  glyph?: ReactNode;
   letter?: string;
   badge?: "TOP" | "NEW";
   /** Sub-route внутри секции (например "photo-create" → /image/photo-create). */
@@ -68,12 +82,12 @@ export const FEATURE_MENUS: Record<string, MenuItem[]> = {
     {
       nameKey: "capabilities.features.image.generate.name",
       descKey: "capabilities.features.image.generate.desc",
-      glyph: "▢",
+      glyph: <WandSparkles {...ICON_PROPS} />,
     },
     {
       nameKey: "capabilities.features.image.photoCreate.name",
       descKey: "capabilities.features.image.photoCreate.desc",
-      glyph: "❂",
+      glyph: <Camera {...ICON_PROPS} />,
       link: "photo-create",
     },
     // Плейсхолдеры без пресета/реализации — временно скрыты (вели просто на /image).
@@ -90,7 +104,7 @@ export const FEATURE_MENUS: Record<string, MenuItem[]> = {
     {
       nameKey: "capabilities.features.image.upscale.name",
       descKey: "capabilities.features.image.upscale.desc",
-      glyph: "▲",
+      glyph: <ImageUpscale {...ICON_PROPS} />,
       link: "upscale",
     },
     // {
@@ -106,25 +120,25 @@ export const FEATURE_MENUS: Record<string, MenuItem[]> = {
     {
       nameKey: "capabilities.features.image.background.name",
       descKey: "capabilities.features.image.background.desc",
-      glyph: "▦",
+      glyph: <ImageMinus {...ICON_PROPS} />,
       link: "bg-removal",
     },
     {
       nameKey: "capabilities.features.image.faceSwap.name",
       descKey: "capabilities.features.image.faceSwap.desc",
-      glyph: "◑",
+      glyph: <ScanFace {...ICON_PROPS} />,
       link: "face-swap",
     },
     {
       nameKey: "capabilities.features.image.clothingTryon.name",
       descKey: "capabilities.features.image.clothingTryon.desc",
-      glyph: "❖",
+      glyph: <VenetianMask {...ICON_PROPS} />,
       link: "clothing-tryon",
     },
     {
       nameKey: "capabilities.features.image.objectRemoval.name",
       descKey: "capabilities.features.image.objectRemoval.desc",
-      glyph: "⊘",
+      glyph: <Eraser {...ICON_PROPS} />,
       link: "object-removal",
     },
   ],
