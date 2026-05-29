@@ -356,6 +356,7 @@ select {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
 }
 
@@ -4944,6 +4945,7 @@ select {
   /* Фиксированная высота под viewport — страница не скроллится, скроллится
      только `.gen-panel-scroll` внутри панели. */
   height: calc(100vh - var(--topbar-h));
+  height: calc(100dvh - var(--topbar-h));
   overflow: hidden;
   background: var(--bg);
   padding: 24px 24px 24px 36px;
@@ -4957,6 +4959,7 @@ select {
      дополнительный воздух 16px, чтобы кнопка «Генерировать» / поле «Введите
      запрос» не прилегали впритык к BottomNav и оставалось видимое пространство. */
   height: calc(100vh - var(--topbar-h) - var(--mobile-nav-total-h) - 16px);
+  height: calc(100dvh - var(--topbar-h) - var(--mobile-nav-total-h) - 16px);
   padding: 14px;
   /* Mobile: панель растягивается на всю ширину, gap не нужен. */
   gap: 0;
