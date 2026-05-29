@@ -264,6 +264,41 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  /**
+   * DELETE /web/gallery/outputs/:id
+   * Removes a single output (+ its S3 artifacts). If it was the last output of
+   * the job, the whole job is removed too (`jobDeleted: true`).
+   */
+  fastify.delete<{ Params: { id: string } }>(
+    "/web/gallery/outputs/:id",
+    {
+      schema: {
+        description: "Delete a single generation output",
+        params: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+            properties: { jobDeleted: { type: "boolean" } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const aibUserId = request.webUser!.aibUserId!;
+      const { id } = request.params;
+      try {
+        return await galleryService.deleteOutput(aibUserId, id);
+      } catch (err) {
+        return mapGalleryError(err, reply);
+      }
+    },
+  );
+
   // ── Folders ───────────────────────────────────────────────────────────────
 
   fastify.get(

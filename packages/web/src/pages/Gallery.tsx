@@ -1,6 +1,5 @@
 import {
   type CSSProperties,
-  type FormEvent,
   type MouseEvent,
   type RefObject,
   useCallback,
@@ -29,7 +28,6 @@ import {
   RotateCcw,
   Trash2,
   Video as VideoIcon,
-  X,
 } from "lucide-react";
 import {
   getGalleryOriginalUrl,
@@ -42,7 +40,7 @@ import {
   useAddToGalleryFavorites,
   useCreateGalleryFolder,
   useDeleteGalleryFolder,
-  useDeleteGalleryJob,
+  useDeleteGalleryOutput,
   useGalleryFailedToday,
   useGalleryFolders,
   useGalleryJob,
@@ -53,12 +51,8 @@ import {
   useUpdateGalleryFolder,
 } from "@/hooks/useGallery";
 import type { GenerationJobDto } from "@/api/generation";
-import { Button } from "@/components/common/Button";
-import { Input } from "@/components/common/Input";
-import {
-  GenerationPreviewModal,
-  type PreviewOutput,
-} from "@/components/common/GenerationPreviewModal";
+import { JobPreview } from "@/components/common/JobPreview";
+import { FolderNameDialog } from "@/components/common/FolderNameDialog";
 import { useModelsStore, getModelDisplay } from "@/stores/modelsStore";
 import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useUIStore } from "@/stores/uiStore";
@@ -66,8 +60,6 @@ import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore"
 import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
 import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
-import { formatTokensSpent } from "@/utils/format";
-import { parseShots } from "@/utils/multishot";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -178,96 +170,6 @@ function ModelFilterChips({
 }
 
 // ── Folder sidebar ──────────────────────────────────────────────────────────
-
-/**
- * Модалка для ввода имени папки — общий компонент для create и rename.
- * Submit-кнопка disabled пока поле пустое или не изменилось от initialValue.
- */
-function FolderNameDialog({
-  title,
-  initialValue = "",
-  placeholder,
-  submitLabel,
-  pending,
-  onSubmit,
-  onClose,
-}: {
-  title: string;
-  initialValue?: string;
-  placeholder?: string;
-  submitLabel: string;
-  pending: boolean;
-  onSubmit: (value: string) => void;
-  onClose: () => void;
-}) {
-  const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(id);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const trimmed = value.trim();
-  const canSubmit = trimmed.length > 0 && trimmed !== initialValue.trim() && !pending;
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!canSubmit) return;
-    onSubmit(trimmed);
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 anim-page-in"
-      onClick={onClose}
-    >
-      <div
-        className="fixed inset-0"
-        style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-      />
-      <form
-        onSubmit={handleSubmit}
-        className="relative card w-full max-w-sm p-5 z-10"
-        style={{ background: "var(--bg-elevated)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Закрыть"
-          className="absolute top-3 right-3 text-text-hint hover:text-text"
-        >
-          <X size={18} />
-        </button>
-        <h3 className="text-base font-semibold mb-3">{title}</h3>
-        <Input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={placeholder}
-          maxLength={64}
-        />
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Отмена
-          </Button>
-          <Button type="submit" size="sm" disabled={!canSubmit} loading={pending}>
-            {submitLabel}
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 function FolderRow({
   folder,
@@ -555,7 +457,7 @@ function JobCardMenu({
   const navigate = useNavigate();
   const addToFolder = useAddJobToGalleryFolder();
   const removeFromFolder = useRemoveJobFromGalleryFolder();
-  const deleteJob = useDeleteGalleryJob();
+  const deleteOutput = useDeleteGalleryOutput();
   const menuRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
@@ -620,9 +522,15 @@ function JobCardMenu({
   };
 
   const handleDelete = () => {
-    if (!window.confirm("Удалить работу безвозвратно?")) return;
-    deleteJob.mutate(job.id, {
-      onSuccess: () => pushToast({ type: "success", message: "Работа удалена" }),
+    // Карточка = один output. Удаляем именно его; бэкенд снесёт всю джобу, только
+    // если это был последний output (тогда `jobDeleted: true`).
+    if (!window.confirm("Удалить этот результат безвозвратно?")) return;
+    deleteOutput.mutate(output.id, {
+      onSuccess: (res) =>
+        pushToast({
+          type: "success",
+          message: res.jobDeleted ? "Работа удалена" : "Результат удалён",
+        }),
       onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
     });
     onClose();
@@ -705,7 +613,7 @@ function JobCardMenu({
         type="button"
         onClick={handleDelete}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-bg-secondary rounded text-danger"
-        disabled={deleteJob.isPending}
+        disabled={deleteOutput.isPending}
       >
         <Trash2 size={14} /> Удалить
       </button>
@@ -818,118 +726,6 @@ function JobCard({
         />
       )}
     </li>
-  );
-}
-
-// ── Preview (общая модалка) ─────────────────────────────────────────────────
-
-/**
- * Адаптер `GalleryJob` → пропсы `GenerationPreviewModal`. Активный output
- * хранится локально (resets на каждое открытие — `key={job.id}` в GalleryPage).
- * Кроме повтор/скачивания — здесь же чипы папок (toggle add/remove).
- */
-function GalleryPreview({
-  job,
-  folders,
-  initialOutputIdx,
-  onClose,
-}: {
-  job: GalleryJob;
-  folders: GalleryFolder[];
-  initialOutputIdx: number;
-  onClose: () => void;
-}) {
-  const navigate = useNavigate();
-  const pushToast = useUIStore((s) => s.pushToast);
-  const addToFolder = useAddJobToGalleryFolder();
-  const removeFromFolder = useRemoveJobFromGalleryFolder();
-  const [activeIdx, setActiveIdx] = useState(initialOutputIdx);
-  // Имя + иконка модели (без эмодзи) из каталога; фоллбек — сохранённый modelName.
-  const modelDisplay = getModelDisplay(job.modelId, job.modelName);
-
-  const previewOutputs = useMemo<PreviewOutput[]>(
-    () =>
-      job.outputs
-        .map((o) => ({
-          id: o.id,
-          url: o.previewUrl ?? o.outputUrl ?? "",
-          thumbnailUrl: o.thumbnailUrl,
-        }))
-        .filter((o) => o.url),
-    [job.outputs],
-  );
-
-  const handleRepeat = useCallback(() => {
-    const section = normalizeSection(job.section);
-    if (!section) {
-      // Невалидную секцию показываем тостом, модалку оставляем открытой.
-      pushToast({ type: "error", message: "Неизвестная секция" });
-      return;
-    }
-    onClose();
-    navigateToGenerate(navigate, {
-      section,
-      modelId: job.modelId,
-      prompt: job.prompt,
-      settings: job.modelSettings,
-    });
-  }, [job, navigate, pushToast, onClose]);
-
-  const handleDownload = useCallback(async () => {
-    // Ищем в `previewOutputs` (отфильтрован по url), а не в `job.outputs` —
-    // иначе при отброшенном output'е activeIdx смещается и качаем не ту работу.
-    const safe = Math.min(activeIdx, previewOutputs.length - 1);
-    const out = previewOutputs[safe];
-    if (!out) return;
-    try {
-      const { url } = await getGalleryOriginalUrl(out.id);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      pushToast({ type: "error", message: getErrorMessage(err) });
-    }
-  }, [previewOutputs, activeIdx, pushToast]);
-
-  const handleToggleFolder = useCallback(
-    (folderId: string) => {
-      const isIn = job.folderIds.includes(folderId);
-      const opts = {
-        onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
-      };
-      if (isIn) removeFromFolder.mutate({ folderId, jobId: job.id }, opts);
-      else addToFolder.mutate({ folderId, jobId: job.id }, opts);
-    },
-    [job.id, job.folderIds, addToFolder, removeFromFolder, pushToast],
-  );
-
-  if (previewOutputs.length === 0) return null;
-
-  const tokensValue =
-    job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null;
-  const safeIdx = Math.min(activeIdx, previewOutputs.length - 1);
-
-  return (
-    <GenerationPreviewModal
-      outputs={previewOutputs}
-      activeIdx={safeIdx}
-      onActiveIdxChange={setActiveIdx}
-      section={job.section}
-      onClose={onClose}
-      info={{
-        title: modelDisplay.name,
-        iconPath: modelDisplay.icon,
-        dateIso: job.completedAt,
-        tokensValue,
-        prompt: job.prompt,
-        shots: parseShots(job.modelSettings?.shots),
-        onRepeat: handleRepeat,
-        onDownload: handleDownload,
-        folders: {
-          list: folders,
-          selectedIds: job.folderIds,
-          onToggle: handleToggleFolder,
-        },
-      }}
-    />
   );
 }
 
@@ -1341,7 +1137,7 @@ export default function GalleryPage() {
       </div>
 
       {jobId && detail.data && (
-        <GalleryPreview
+        <JobPreview
           key={detail.data.id}
           job={detail.data}
           folders={folders}

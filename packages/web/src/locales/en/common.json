@@ -170,7 +170,16 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "downloadOriginal": "Download original",
-    "addToFolders": "Add to folders"
+    "addToFolders": "Add to folders",
+    "copy": "Copy",
+    "copied": "Copied",
+    "settings": "Settings",
+    "seeAll": "Show all",
+    "favorite": "Add to favorites",
+    "inFavorites": "In favorites",
+    "newFolder": "New folder",
+    "on": "On",
+    "off": "Off"
   },
   "auth": {
     "welcomeBack": "Welcome back.",

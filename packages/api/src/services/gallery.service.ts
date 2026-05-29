@@ -344,6 +344,39 @@ async function deleteJob(userId: bigint, jobId: string): Promise<void> {
   await db.generationJob.delete({ where: { id: jobId } });
 }
 
+/**
+ * Удаляет один output (картинку/видео) джобы + его S3-артефакты. Если это был
+ * последний output — удаляет всю джобу целиком (`jobDeleted: true`), иначе
+ * остаётся джоба с остальными output'ами.
+ */
+async function deleteOutput(userId: bigint, outputId: string): Promise<{ jobDeleted: boolean }> {
+  const output = await db.generationJobOutput.findUnique({
+    where: { id: outputId },
+    select: { id: true, jobId: true, s3Key: true, thumbnailS3Key: true },
+  });
+  if (!output) throw new GalleryNotFoundError();
+
+  const job = await db.generationJob.findUnique({
+    where: { id: output.jobId },
+    select: { id: true, userId: true, _count: { select: { outputs: true } } },
+  });
+  if (!job) throw new GalleryNotFoundError();
+  if (job.userId !== userId) throw new GalleryForbiddenError();
+
+  await Promise.all([
+    output.s3Key ? deleteFile(output.s3Key) : Promise.resolve(),
+    output.thumbnailS3Key ? deleteFile(output.thumbnailS3Key) : Promise.resolve(),
+  ]);
+
+  if (job._count.outputs <= 1) {
+    // Последний output — сносим джобу целиком (outputs каскадно).
+    await db.generationJob.delete({ where: { id: job.id } });
+    return { jobDeleted: true };
+  }
+  await db.generationJobOutput.delete({ where: { id: outputId } });
+  return { jobDeleted: false };
+}
+
 async function listFolders(userId: bigint): Promise<GalleryFolderDto[]> {
   const folders = await db.galleryFolder.findMany({
     where: { userId },
@@ -488,6 +521,7 @@ export const galleryService = {
   getOutputPreviewUrl,
   getOutputOriginalUrl,
   deleteJob,
+  deleteOutput,
   listFolders,
   createFolder,
   updateFolder,

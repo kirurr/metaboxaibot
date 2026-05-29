@@ -3,20 +3,27 @@ import { createPortal } from "react-dom";
 import {
   ArrowRight,
   Calendar,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Coins,
+  Copy,
   Download,
+  FolderPlus,
+  Heart,
   Music2,
+  Trash2,
   X,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/common/Button";
 import { ModelAvatar } from "@/components/common/ModelAvatar";
+import { FolderNameDialog } from "@/components/common/FolderNameDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { ShotEntry } from "@/utils/multishot";
+import type { SettingRow } from "@/utils/settingsDisplay";
 import type { GalleryFolder } from "@/api/gallery";
 
 /**
@@ -48,6 +55,8 @@ export type PreviewFolders = {
   /** Какие папки сейчас отмечены (из `job.folderIds`). */
   selectedIds: string[];
   onToggle: (folderId: string) => void;
+  /** Создать новую папку (открывает диалог ввода имени). */
+  onCreate?: (name: string) => void;
 };
 
 export type PreviewInfo = {
@@ -62,6 +71,14 @@ export type PreviewInfo = {
   /** Мультишот (Kling): промпты живут по шотам, top-level `prompt` пустой. Если
    *  список непустой — секция промпта рендерит список шотов вместо одиночного. */
   shots?: ShotEntry[];
+  /** Настройки генерации (label/value), уже отрезолвленные caller'ом. */
+  settings?: SettingRow[];
+  /** Избранное: текущее состояние + тоггл. Кнопка-сердечко рендерится только
+   *  если задан `onToggleFavorite`. */
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
+  /** Удаление джобы (на ответственности колбэка: confirm + закрытие модалки). */
+  onDelete?: () => void;
   /** Закрытие модалки — на ответственности колбэка (нужно, чтобы caller мог
    *  показать toast при невалидной секции и оставить модалку открытой). */
   onRepeat?: () => void;
@@ -368,6 +385,8 @@ function PreviewInfoCard({
         <SinglePromptSection prompt={info.prompt} />
       ) : null}
 
+      {info.settings && info.settings.length > 0 && <SettingsSection rows={info.settings} />}
+
       {info.folders && <FoldersSection folders={info.folders} />}
 
       <div className="flex flex-col gap-2 mt-auto shrink-0">
@@ -381,16 +400,43 @@ function PreviewInfoCard({
             {t("common.retry")}
           </Button>
         )}
-        {info.onDownload && (
-          <Button
-            variant="ghost"
-            size={isMobile ? "md" : "lg"}
-            leftIcon={<Download size={16} />}
-            onClick={info.onDownload}
-            fullWidth
-          >
-            {t("common.downloadOriginal")}
-          </Button>
+        {(info.onDownload || info.onToggleFavorite || info.onDelete) && (
+          <div className="grid grid-cols-2 gap-2">
+            {info.onDownload && (
+              <Button
+                variant="ghost"
+                size="md"
+                leftIcon={<Download size={16} />}
+                onClick={info.onDownload}
+                fullWidth
+              >
+                {t("common.downloadOriginal")}
+              </Button>
+            )}
+            {info.onToggleFavorite && (
+              <Button
+                variant="ghost"
+                size="md"
+                leftIcon={<Heart size={16} fill={info.isFavorite ? "currentColor" : "none"} />}
+                onClick={info.onToggleFavorite}
+                fullWidth
+                className={info.isFavorite ? "text-danger" : undefined}
+              >
+                {info.isFavorite ? t("common.inFavorites") : t("common.favorite")}
+              </Button>
+            )}
+            {info.onDelete && (
+              <Button
+                variant="danger"
+                size="md"
+                leftIcon={<Trash2 size={16} />}
+                onClick={info.onDelete}
+                fullWidth
+              >
+                {t("common.delete")}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </aside>
@@ -405,6 +451,37 @@ function PromptSectionLabel({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+/** Иконка-кнопка «копировать» с transient-состоянием «скопировано». */
+function CopyButton({ text, className }: { text: string; className?: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => clearTimeout(timer.current ?? undefined), []);
+
+  const copy = () => {
+    void navigator.clipboard?.writeText(text);
+    setCopied(true);
+    clearTimeout(timer.current ?? undefined);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={copied ? t("common.copied") : t("common.copy")}
+      title={copied ? t("common.copied") : t("common.copy")}
+      className={clsx(
+        "shrink-0 inline-flex items-center justify-center p-1 rounded text-text-hint hover:text-text transition-colors",
+        className,
+      )}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
   );
 }
 
@@ -425,7 +502,10 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
 
   return (
     <div className="flex flex-col gap-2 min-h-0">
-      <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
+      <div className="flex items-center justify-between gap-2">
+        <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
+        <CopyButton text={prompt} />
+      </div>
       <div className="flex flex-col gap-2 bg-white/[0.04] rounded-[var(--radius)] p-3">
         <p
           ref={promptRef}
@@ -473,6 +553,7 @@ function MultiShotSection({ shots }: { shots: ShotEntry[] }) {
               <span className="font-semibold">{t("generate.multishot.shotN", { n: i + 1 })}</span>
               <span>·</span>
               <span>{t("generate.multishot.seconds", { value: shot.duration })}</span>
+              {shot.prompt && <CopyButton text={shot.prompt} className="ml-auto" />}
             </div>
             <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0">
               {shot.prompt || "—"}
@@ -484,11 +565,49 @@ function MultiShotSection({ shots }: { shots: ShotEntry[] }) {
   );
 }
 
+/** Блок настроек генерации: label/value-строки. Advanced скрыты под «Показать все». */
+function SettingsSection({ rows }: { rows: SettingRow[] }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const hasAdvanced = rows.some((r) => r.advanced);
+  const visible = expanded ? rows : rows.filter((r) => !r.advanced);
+
+  return (
+    <div className="flex flex-col gap-2 shrink-0">
+      <PromptSectionLabel>{t("common.settings")}</PromptSectionLabel>
+      <div className="flex flex-col gap-1.5 bg-white/[0.04] rounded-[var(--radius)] p-3 max-h-40 overflow-y-auto">
+        {visible.map((r) => (
+          <div key={r.label} className="flex items-start justify-between gap-3 text-sm">
+            <span className="text-text-secondary min-w-0 break-words">{r.label}</span>
+            <span className="text-text break-words text-right">{r.value}</span>
+          </div>
+        ))}
+      </div>
+      {hasAdvanced && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="self-start inline-flex items-center gap-1 text-xs text-text-hint hover:text-text transition-colors"
+        >
+          <ChevronDown
+            size={14}
+            className={clsx("transition-transform", expanded && "rotate-180")}
+          />
+          {expanded ? t("common.collapse") : t("common.seeAll")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function FoldersSection({ folders }: { folders: PreviewFolders }) {
   const { t } = useTranslation();
+  const [createOpen, setCreateOpen] = useState(false);
   // Default («Избранное») управляется кнопкой-сердечком на карточке — не выводим.
   const nonDefault = useMemo(() => folders.list.filter((f) => !f.isDefault), [folders.list]);
-  if (nonDefault.length === 0) return null;
+  // Секцию показываем, если есть пользовательские папки ЛИБО доступно создание.
+  if (nonDefault.length === 0 && !folders.onCreate) return null;
 
   return (
     <div className="flex flex-col gap-2 shrink-0">
@@ -515,7 +634,29 @@ function FoldersSection({ folders }: { folders: PreviewFolders }) {
             </button>
           );
         })}
+        {folders.onCreate && (
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs transition-colors bg-white/[0.06] text-text-secondary hover:text-text hover:bg-white/[0.1]"
+          >
+            <FolderPlus size={12} />
+            {t("common.newFolder")}
+          </button>
+        )}
       </div>
+      {createOpen && folders.onCreate && (
+        <FolderNameDialog
+          title={t("common.newFolder")}
+          submitLabel={t("common.newFolder")}
+          pending={false}
+          onSubmit={(name) => {
+            folders.onCreate?.(name);
+            setCreateOpen(false);
+          }}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,9 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { AlertCircle, Loader2, Music2 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "@/stores/uiStore";
 import {
   usePendingJobsStore,
   type PendingJob,
@@ -13,13 +11,11 @@ import { listGenerations, type GenerationJobDto, type GenerationOutputDto } from
 import type { WebModelDto } from "@/api/models";
 import {
   GenerationPreviewModal,
-  type PreviewInfo,
   type PreviewOutput,
 } from "@/components/common/GenerationPreviewModal";
-import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
-import { getModelDisplay } from "@/stores/modelsStore";
+import { JobPreview } from "@/components/common/JobPreview";
+import { useGalleryFolders, useGalleryJob } from "@/hooks/useGallery";
 import { formatTokensSpent } from "@/utils/format";
-import { parseShots } from "@/utils/multishot";
 
 /**
  * Лента всех генераций текущей секции (image/design/video/audio), независимо
@@ -67,8 +63,7 @@ type PreviewItem = {
 
 function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const pushToast = useUIStore((s) => s.pushToast);
+  const { data: folders = [] } = useGalleryFolders();
   const [history, setHistory] = useState<GenerationJobDto[]>([]);
   const [loading, setLoading] = useState(false);
   const pendingJobs = usePendingJobsStore((s) => s.pendingJobs);
@@ -158,36 +153,13 @@ function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
     [preview],
   );
 
-  const previewInfo = useMemo<PreviewInfo | undefined>(() => {
-    const job = preview?.job;
-    if (!job) return undefined;
-    const md = getModelDisplay(job.modelId, job.modelName);
-    return {
-      title: md.name,
-      iconPath: md.icon,
-      dateIso: job.completedAt ?? job.createdAt,
-      tokensValue:
-        job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null,
-      prompt: job.prompt,
-      shots: parseShots(job.modelSettings?.shots),
-      onRepeat: () => {
-        const route = normalizeSection(job.section);
-        if (!route) {
-          // Невалидную секцию показываем тостом, модалку оставляем — юзеру
-          // полезно видеть инфо о job'е.
-          pushToast({ type: "error", message: "Неизвестная секция" });
-          return;
-        }
-        setPreview(null);
-        navigateToGenerate(navigate, {
-          section: route,
-          modelId: job.modelId,
-          prompt: job.prompt,
-          settings: job.modelSettings,
-        });
-      },
-    };
-  }, [preview, navigate, pushToast]);
+  // Завершённая джоба ленты — это та же `generationJob`, что и в галерее.
+  // Дотягиваем полный `GalleryJob` по id (мгновенно из кэша, если есть) и
+  // рендерим общий `JobPreview` — единый вид с галереей (папки/избранное/
+  // удаление/настройки). Пока грузится или для pending-success (нет gallery-
+  // джобы) показываем минимальную модалку без экшенов.
+  const openJobId = preview?.job?.id;
+  const detail = useGalleryJob(openJobId);
 
   if (!hasContent && !loading) {
     return null;
@@ -209,16 +181,29 @@ function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
           />
         ))}
       </ul>
-      {preview && (
-        <GenerationPreviewModal
-          outputs={previewOutputs}
-          activeIdx={0}
-          onActiveIdxChange={() => undefined}
-          section={preview.section}
-          onClose={() => setPreview(null)}
-          info={previewInfo}
-        />
-      )}
+      {preview &&
+        (detail.data ? (
+          <JobPreview
+            key={detail.data.id}
+            job={detail.data}
+            folders={folders}
+            onClose={() => setPreview(null)}
+            onDeleted={(id, jobRemoved) => {
+              // Снесли всю джобу — убираем её тайлы из локальной истории сразу;
+              // удалили один из нескольких output'ов — рефетчим снапшот ленты.
+              if (jobRemoved) setHistory((h) => h.filter((j) => j.id !== id));
+              else void refetch();
+            }}
+          />
+        ) : (
+          <GenerationPreviewModal
+            outputs={previewOutputs}
+            activeIdx={0}
+            onActiveIdxChange={() => undefined}
+            section={preview.section}
+            onClose={() => setPreview(null)}
+          />
+        ))}
     </section>
   );
 }

@@ -173,7 +173,16 @@
     "expand": "Развернуть",
     "collapse": "Свернуть",
     "downloadOriginal": "Скачать оригинал",
-    "addToFolders": "В папки"
+    "addToFolders": "В папки",
+    "copy": "Копировать",
+    "copied": "Скопировано",
+    "settings": "Настройки",
+    "seeAll": "Показать все",
+    "favorite": "В избранное",
+    "inFavorites": "В избранном",
+    "newFolder": "Новая папка",
+    "on": "Вкл",
+    "off": "Выкл"
   },
   "auth": {
     "welcomeBack": "С возвращением.",
