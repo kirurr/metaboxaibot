@@ -54,6 +54,10 @@
       "types": "./src/utils/mp4-duration.ts",
       "default": "./dist/utils/mp4-duration.js"
     },
+    "./utils/seedance2-billing": {
+      "types": "./src/utils/seedance2-billing.ts",
+      "default": "./dist/utils/seedance2-billing.js"
+    },
     "./utils/download-token": {
       "types": "./src/utils/download-token.ts",
       "default": "./dist/utils/download-token.js"
