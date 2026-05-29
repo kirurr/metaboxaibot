@@ -846,6 +846,365 @@ export default {
     r2i: "References → image",
     clipExtend: "Clip extend",
   },
+  // Model descriptions for the web catalog. Key = modelId. `full` — English
+  // translation of the RU constant description; `short` — concise menu tagline.
+  modelDescriptions: {
+    // ── Chat / GPT ──
+    "gpt-5.5": {
+      full: "OpenAI's newest flagship with a 1M+ token context and a reasoning mode (from off to maximum). The best balance of intelligence, speed and price in the lineup. 🧠 Supports reasoning mode.",
+      short: "Flagship OpenAI, 1M+ context",
+    },
+    "gpt-5.4": {
+      full: "OpenAI's new-generation flagship — smarter and faster than GPT 5 Pro. The best balance of intelligence, speed and price in the lineup. 🧠 Supports reasoning mode.",
+      short: "New-gen OpenAI flagship",
+    },
+    "gpt-5-nano": {
+      full: "The lightest and cheapest in the GPT 5 line — instant answers for simple tasks. No image input. 🧠 Supports reasoning mode.",
+      short: "Lightest, cheapest GPT 5",
+    },
+    "o4-mini": {
+      full: "OpenAI's newest reasoning model — chain-of-thought for complex tasks. Understands images, smarter than o3 Mini. 🧠 Supports reasoning mode.",
+      short: "Newest reasoning model",
+    },
+    "o3-mini": {
+      full: "OpenAI's previous compact reasoning model. No image input — for text tasks with chain-of-thought. 🧠 Supports reasoning mode.",
+      short: "Compact reasoning, text-only",
+    },
+    "claude-sonnet": {
+      full: "The newest Sonnet (4.6) — Anthropic's best price/quality. Faster and cheaper than Opus, great for code, writing and analysis. 🧠 Supports reasoning mode.",
+      short: "Best price/quality at Anthropic",
+    },
+    "claude-haiku": {
+      full: "Anthropic's fastest and cheapest model. Instant answers for simple tasks, understands images. Weaker than Sonnet and Opus at reasoning.",
+      short: "Fastest, cheapest Claude",
+    },
+    "gemini-3-pro": {
+      full: "Google's flagship, up to 1M token context and multimodality. Supports web search. Base 3 Pro version. 🧠 Supports reasoning mode.",
+      short: "Google flagship, web search",
+    },
+    "gemini-3.1-pro": {
+      full: "An updated Gemini 3 Pro (3.1) — follows instructions better and answers more precisely. Same price as 3.0. Web search. 🧠 Supports reasoning mode.",
+      short: "Updated Gemini 3 Pro",
+    },
+    "gemini-2-flash": {
+      full: "Google's fast, cheap model with reasoning. Great price/quality, ~7× cheaper than Pro. Web search. 🧠 Supports reasoning mode.",
+      short: "Fast, cheap Google + search",
+    },
+    "gemini-2-flash-lite": {
+      full: "Google's lightest, cheapest model. For simple tasks at minimal cost. No images or web search.",
+      short: "Lightest, cheapest Google",
+    },
+    "deepseek-r1": {
+      full: "A reasoning model from China — strong at math and code, thinks step by step. Slower than V3 but more accurate on hard tasks. 🧠 Supports reasoning mode.",
+      short: "Step-by-step reasoning",
+    },
+    "deepseek-v3": {
+      full: "DeepSeek's fast model for general tasks and text generation. No step-by-step reasoning — faster than R1 but less accurate on hard tasks.",
+      short: "Fast general-purpose model",
+    },
+    "grok-4": {
+      full: "xAI's flagship — top reasoning quality, 256K context. Pricier than Grok 4 Fast but more accurate on hard tasks. 🧠 Supports reasoning mode.",
+      short: "xAI flagship, 256K context",
+    },
+    "grok-4-fast": {
+      full: "An accelerated Grok 4 from xAI. Up to 2M token context, ~10× cheaper than standard Grok 4. Fast answers with reasoning. 🧠 Supports reasoning mode.",
+      short: "Fast Grok, 2M context",
+    },
+    "perplexity-sonar-pro": {
+      full: "Powerful AI search with in-depth answers from the web. Pricier than Sonar but analyzes sources better and gives more thorough answers.",
+      short: "Deep AI web search",
+    },
+    "perplexity-sonar-research": {
+      full: "An autonomous researcher — analyzes dozens of sources in a single query. Ideal for deep research, slower than regular Sonar.",
+      short: "Autonomous deep research",
+    },
+    "perplexity-sonar": {
+      full: "Fast, cheap AI search with up-to-date data from the web. Base version — for quick questions without deep analysis.",
+      short: "Fast AI web search",
+    },
+    "qwen-3-max-thinking": {
+      full: "Alibaba's largest reasoning model. Top quality in the Qwen line — for the hardest tasks. Pricier than Qwen 3 Thinking. 🧠 Supports reasoning mode.",
+      short: "Largest Qwen reasoning",
+    },
+    "qwen-3-thinking": {
+      full: "Alibaba's mid-size reasoning model — cheaper than Max but strong at code and math. The best price/quality in the Qwen line. 🧠 Supports reasoning mode.",
+      short: "Balanced Qwen reasoning",
+    },
+    "claude-opus": {
+      full: "Anthropic's newest and smartest model (4.6). Best for complex analytical and creative tasks. Understands images. 🧠 Supports reasoning mode.",
+      short: "Smartest Anthropic model",
+    },
+    "gpt-5.5-pro": {
+      full: "OpenAI's newest flagship model. Maximum accuracy and deep reasoning with an extended 1M+ token context. Pricier than GPT 5.5 — for tasks where flawless accuracy matters. 🧠 Supports reasoning mode.",
+      short: "Max-accuracy OpenAI flagship",
+    },
+    "gpt-5.4-pro": {
+      full: "OpenAI's most powerful model. Maximum accuracy, deep reasoning. Significantly pricier than GPT 5.4 — for tasks where flawless accuracy matters. 🧠 Supports reasoning mode.",
+      short: "OpenAI's most powerful",
+    },
+    "gpt-5-pro": {
+      full: "The previous generation of OpenAI's flagship. Only the maximum reasoning level — for the hardest tasks. Pricier than GPT 5.4. 🧠 Supports reasoning mode.",
+      short: "Prev-gen flagship, max reasoning",
+    },
+
+    // ── Image / Design ──
+    "face-swap-classic": {
+      full: "A specialized neural network for swapping faces in photos.",
+      short: "Face swap in photos",
+    },
+    "clothing-tryon": {
+      full: "Virtual try-on of clothing on a photo.",
+      short: "Virtual clothing try-on",
+    },
+    "bg-removal": {
+      full: "Removes the background from a photo, leaving the subject on a transparent background.",
+      short: "Remove photo background",
+    },
+    "image-upscale": {
+      full: "Increases the resolution and sharpness of a photo up to 4K.",
+      short: "Upscale photo to 4K",
+    },
+    "photo-create": {
+      full: "Generates a realistic photo from a reference and a description, in 2K or 4K quality.",
+      short: "Realistic photo from a reference",
+    },
+    "object-removal": {
+      full: "Removes a chosen object from a photo, filling in the background in its place.",
+      short: "Remove objects from photos",
+    },
+    "nano-banana-pro": {
+      full: "Generates realistic photos and lets you change details with words. PRO — top quality up to 4K, pricier than the standard version.",
+      short: "Realistic photo editing, up to 4K",
+    },
+    "nano-banana-2": {
+      full: "Generates and edits photos via text commands. Standard — cheaper than PRO, supports more references and a wider set of aspect ratios.",
+      short: "Photo generation & editing by text",
+    },
+    "nano-banana-1": {
+      full: "Base version: generates and edits photos from text. Cheaper than PRO and v2, but without resolution choice or advanced settings.",
+      short: "Base photo generation & editing",
+    },
+    "higgsfield-soul": {
+      full: "Image generation with your own character (Soul ID). Build a character from 20+ photos and generate any scene with their look. Supports styles, reference images and batch mode.",
+      short: "Your character (Soul ID) in any scene",
+    },
+    "grok-imagine-image": {
+      full: "Image generation from xAI (Grok). Text-to-image and image-to-image. Quality mode — higher precision and detail; Speed — fast generation with more variants.",
+      short: "xAI image generation",
+    },
+    "gpt-image-2": {
+      full: "The newest GPT Image version. Better than the previous one at text rendering and prompt accuracy.",
+      short: "Newest GPT Image, great text",
+    },
+    "gpt-image-1.5": {
+      full: "Understands complex text prompts best of all. Draws exactly what you describe, including text in images.",
+      short: "Best at complex prompts & text",
+    },
+    midjourney: {
+      full: "Creates the most beautiful, stylish images. The best choice for art, illustration and striking visuals.",
+      short: "Most beautiful art & illustration",
+    },
+    "seedream-5": {
+      full: "Ideal for product photos, clothing and catalogs. Version 5.0 — improved quality and realism over 4.5.",
+      short: "Product photos & catalogs",
+    },
+    "seedream-4.5": {
+      full: "The previous Seedream version — a touch simpler than 5.0 but with proven stability. Good for bulk product-photo generation.",
+      short: "Stable product-photo generation",
+    },
+    "ideogram-quality": {
+      full: "Draws readable text in images best of all. Ideal for logos, posters and ads. Quality — maximum detail and precision, the slowest and priciest option.",
+      short: "Best readable text; max quality",
+    },
+    "ideogram-balanced": {
+      full: "Draws readable text in images best of all. Ideal for logos, posters and ads. Balanced — the optimal balance of quality and speed, mid price.",
+      short: "Best readable text; balanced",
+    },
+    "ideogram-turbo": {
+      full: "Draws readable text in images best of all. Ideal for logos, posters and ads. Turbo — the fastest and cheapest option, slightly lower detail.",
+      short: "Best readable text; fastest",
+    },
+    "imagen-4-fast": {
+      full: "Imagen 4 from Google — high photorealism. Fast — the quickest and cheapest option, no 2K support. Good for fast iterations.",
+      short: "Google photoreal; fast & cheap",
+    },
+    "imagen-4": {
+      full: "Imagen 4 from Google — high photorealism. Standard — a balance of quality and price, with 2K support. The optimal choice for most tasks.",
+      short: "Google photoreal; balanced 2K",
+    },
+    "imagen-4-ultra": {
+      full: "Imagen 4 from Google — high photorealism. Ultra — maximum detail and render quality for professional tasks, with 2K support.",
+      short: "Google photoreal; max detail",
+    },
+    flux: {
+      full: "Maximally realistic photos in seconds. Standard — fine-grained generation controls (steps, CFG, acceleration, LoRA). Cheaper than Pro, more parameters.",
+      short: "Realistic photos, fine control",
+    },
+    "flux-pro": {
+      full: "The professional FLUX.2 version — top quality and prompt accuracy. Fewer manual settings but a better out-of-the-box result.",
+      short: "Pro FLUX, best out-of-the-box",
+    },
+    "recraft-v3": {
+      full: "The previous Recraft generation — a wide range of styles and sub-styles (realism, illustration, vector) and artistry control. Proven stability.",
+      short: "Many styles, proven stability",
+    },
+    "recraft-v4": {
+      full: "Recraft V4 Standard — a new generation for design and marketing. Clean composition and accurate text rendering. Cheaper than Pro, less detail.",
+      short: "Design & marketing; clean text",
+    },
+    "recraft-v4-pro": {
+      full: "Recraft V4 Pro — maximum resolution and detail for raster images. Ideal for high-stakes design projects, production-ready with no edits.",
+      short: "Max-detail raster for design",
+    },
+    "recraft-v4-vector": {
+      full: "Recraft V4 Vector — generates SVG vectors for logos, icons and illustrations. Scale with no quality loss. Standard version — cheaper than Pro Vector.",
+      short: "SVG vectors for logos & icons",
+    },
+    "recraft-v4-pro-vector": {
+      full: "Recraft V4 Pro Vector — top-quality SVG generation. For complex illustrations and branding that need flawless detail and scalability.",
+      short: "Pro SVG for branding",
+    },
+    "stable-diffusion": {
+      full: "Generates detailed images in any style: from photorealism to anime and fantasy. Notably flexible. Works with English prompts only!",
+      short: "Any style; English prompts only",
+    },
+
+    // ── Video ──
+    kling: {
+      full: "Generates video up to 15 seconds with sound. Best at conveying human motion. Standard version — faster and cheaper than Pro.",
+      short: "Lifelike motion, up to 15s + sound",
+    },
+    "kling-pro": {
+      full: "Generates video up to 15 seconds with sound. Best at conveying human motion. Pro version — increased detail and motion quality.",
+      short: "Pro: more detail & motion quality",
+    },
+    "kling-motion": {
+      full: "Transfers motion from a reference video onto any character from an image. Standard version — faster and cheaper than Pro. Ideal for portraits and simple animations.",
+      short: "Transfer motion onto your character",
+    },
+    "kling-motion-pro": {
+      full: "Transfers motion from a reference video onto any character from an image. Pro version — higher transfer precision and detail.",
+      short: "Pro motion transfer, more precise",
+    },
+    "copy-motion": {
+      full: "Transfers motion from a reference video onto a character from your photo.",
+      short: "Copy motion onto your photo",
+    },
+    "photo-animate": {
+      full: "Creates a short animated clip from a single photo.",
+      short: "Animate a single photo",
+    },
+    "video-upscale": {
+      full: "Increases video resolution and sharpness with Topaz AI.",
+      short: "Upscale video with Topaz AI",
+    },
+    seedance: {
+      full: "Creates video with expressive motion and sound. The previous generation — proven stability, up to 12 seconds. Good for creative, stylized clips.",
+      short: "Expressive motion, up to 12s",
+    },
+    "seedance-2": {
+      full: "ByteDance's newest video model — markedly higher quality and motion realism than 1.5. Built-in sound, up to 15 seconds, a wide choice of aspect ratios.",
+      short: "Newest ByteDance, up to 15s",
+    },
+    "seedance-2-fast": {
+      full: "An accelerated Seedance 2.0 — faster and cheaper than standard at similar quality. Built-in sound generation, up to 15 seconds.",
+      short: "Faster, cheaper Seedance 2.0",
+    },
+    "higgsfield-lite": {
+      full: "Realistic human animation — facial expressions, gestures and body motion. Lite — Higgsfield's fastest, most budget-friendly version.",
+      short: "Realistic human animation; budget",
+    },
+    higgsfield: {
+      full: "Realistic human animation — facial expressions, gestures and body motion. Turbo — a balance of quality and speed, higher detail than Lite.",
+      short: "Human animation; balanced Turbo",
+    },
+    "higgsfield-preview": {
+      full: "The flagship version with maximum quality — the most realistic lighting, detail and cinematics.",
+      short: "Flagship; max quality & cinematics",
+    },
+    heygen: {
+      full: "Especially popular with solo creators, influencers and small teams. For avatars, lip-sync and video translation into 175+ languages.",
+      short: "Avatars, lip-sync, 175+ languages",
+    },
+    "grok-imagine": {
+      full: "A video model from xAI (Grok), text-to-video mode. No reference images — generation from a text prompt only.",
+      short: "xAI text-to-video",
+    },
+    "grok-imagine-r2v": {
+      full: "A video model from xAI (Grok), reference-to-video mode. Accepts up to 7 reference images — cite them in the prompt via @Image1, @Image2, etc.",
+      short: "xAI reference-to-video",
+    },
+    veo: {
+      full: "Video from Google with sound and voices. Supports vertical format for Reels and Shorts. Standard — top quality, more detail than Fast. Set a first and last frame and Veo generates a smooth transition between them.",
+      short: "Google video with sound & voices",
+    },
+    "veo-fast": {
+      full: "A faster, more affordable version of Google's Veo 3.1. With sound and voices, slightly less detail than Standard. Supports 4K. Set a first and last frame and Veo generates a smooth transition between them.",
+      short: "Faster Veo; sound, voices, 4K",
+    },
+    "hailuo-fast": {
+      full: "A fast version of Hailuo 2.3 from MiniMax — ~40% cheaper than standard at similar quality. Slightly less detail. Requires a photo as the first frame.",
+      short: "Fast Hailuo; ~40% cheaper",
+    },
+    hailuo: {
+      full: "The standard Hailuo 2.3 from MiniMax — top quality, 1080p support and 10-second clips. Accepts a photo as the first frame.",
+      short: "Hailuo; 1080p, 10s clips",
+    },
+    sora: {
+      full: "OpenAI's legacy video model. Objects move like in real life, with sound and correct physics. Send a photo with text and it becomes the first frame of the video.",
+      short: "OpenAI video; realistic physics",
+    },
+    runway: {
+      full: "Full control over your video: specify what moves and how, control the camera. The professionals' choice.",
+      short: "Full control; pro choice",
+    },
+    "luma-ray2": {
+      full: "Realistic video from Luma AI. Smooth motion, cinematic quality. Supports a photo as the first frame.",
+      short: "Cinematic, smooth motion",
+    },
+    minimax: {
+      full: "A Chinese video model with excellent character motion. Generates 6-second clips with high smoothness.",
+      short: "Smooth 6-second clips",
+    },
+    pika: {
+      full: "Fast videos with cool effects: explosions, melting, squishing. Perfect for TikTok and Reels. Supports a photo as the first frame.",
+      short: "Fast videos with VFX",
+    },
+    wan: {
+      full: "Alibaba's video model with high motion quality and 1080p support. Supports three modes: image-to-video (first frame, optional last frame and driving audio) and video continuation (starting clip, optional last frame). Without media — text-to-video using the aspect ratio from settings.",
+      short: "Alibaba video; 1080p, multi-mode",
+    },
+
+    // ── Audio ──
+    "tts-openai": {
+      full: "Text-to-speech from OpenAI. Fast generation, natural intonation. Cheaper than ElevenLabs but fewer voices and no cloned ones.",
+      short: "OpenAI TTS; fast & cheap",
+    },
+    "voice-clone": {
+      full: "Builds your voice profile from a short audio sample (~5 sec). The ready voice is available in text-to-speech and video avatars.",
+      short: "Clone your voice from ~5s",
+    },
+    "tts-cartesia": {
+      full: "Cartesia Sonic — a fast, cheap TTS supporting your cloned voices and many languages, including Russian.",
+      short: "Cartesia TTS; cloned voices",
+    },
+    "tts-el": {
+      full: "Text-to-speech from ElevenLabs — a wide library of official voices. Higher quality and expressiveness than OpenAI TTS, but pricier.",
+      short: "ElevenLabs TTS; expressive",
+    },
+    suno: {
+      full: "Generates full music tracks with vocals and arrangement. Set the style, mood and lyrics. Up to 4 minutes. A no-vocals mode is also available under «⚙ Management».",
+      short: "Full songs with vocals, up to 4 min",
+    },
+    "sounds-el": {
+      full: "Generates original sound effects from a description. Suited for video production, games and podcasts. We recommend English prompts.",
+      short: "Original SFX from text",
+    },
+    "music-el": {
+      full: "Generates background music, ambient and atmospheres via ElevenLabs. Instrumental without vocals, up to 22 seconds. Faster than Suno but no singing. Prompts work best in English.",
+      short: "Instrumental background music",
+    },
+  },
   linkMetabox: {
     title: "Metabox Learning",
     subtitle: "Link your Metabox account to access the learning section.",

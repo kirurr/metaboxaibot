@@ -59,9 +59,14 @@ export function displayModelName(m: WebModelDto): string {
   return m.familyName ?? m.webName;
 }
 
-/** Короткое описание для строки в mega-menu (приоритет: описание варианта → общее описание). */
+/**
+ * Текст под названием модели в mega-menu/sheet. Приоритет: краткий тэглайн
+ * (`shortDescription`, локализованный) → полное `description` (уже
+ * override-aware и локализованное на бэке). Так в меню видна сжатая подпись,
+ * а при отсутствии тэглайна — полное описание (обрезается CSS до 2 строк).
+ */
 export function displayModelDesc(m: WebModelDto): string {
-  return m.descriptionOverride ?? m.description;
+  return m.shortDescription ?? m.description;
 }
 
 /**

@@ -60,6 +60,14 @@ export const WEB_PRESET_MODEL_IDS = new Set<string>([
 
 function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   const t = getT(lang);
+  // Локализованные описания (`/web/models`). Ключ — modelId. `full` заменяет
+  // `description` из констант, `short` — краткий тэглайн для меню. Любое
+  // отсутствующее поле фоллбекает на константу: full → descriptionOverride →
+  // description; short → null. RU `full` обычно отсутствует в i18n (он и есть
+  // константа), en — переведён.
+  const md = (t.modelDescriptions as Record<string, { full?: string; short?: string }>)[m.id];
+  const description = md?.full ?? m.descriptionOverride ?? m.description;
+  const shortDescription = md?.short ?? null;
   // Modes (operation modes — t2v/i2v/r2v и т.п.). Резолвим labelKey в локаль,
   // null = у модели нет режимов (значит и таб-переключателя в UI не будет).
   const resolvedModes = getResolvedModes(m);
@@ -99,7 +107,10 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
     webName: m.webName ?? stripLeadingEmoji(m.name),
     /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`) или null → буква-аватар. */
     webIconPath: m.webIconPath ?? null,
-    description: m.description,
+    /** Полное описание (локализованное `modelDescriptions[id].full`, иначе константа). */
+    description,
+    /** Краткий тэглайн для меню выбора (локализованный); null → меню падает на `description`. */
+    shortDescription,
     section: m.section,
     // claude-прокси нормализуем под бренд anthropic для каталога. См. routes/models.ts.
     provider:
@@ -209,6 +220,7 @@ export const webModelsRoutes: FastifyPluginAsync = async (fastify) => {
                 id: { type: "string" },
                 name: { type: "string" },
                 description: { type: "string" },
+                shortDescription: { type: "string", nullable: true },
                 section: { type: "string" },
                 provider: { type: "string" },
                 familyId: { type: "string", nullable: true },

@@ -86,6 +86,8 @@ export type WebModelDto = {
   /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`); `null` → буква-аватар. */
   webIconPath: string | null;
   description: string;
+  /** Краткий тэглайн для меню выбора (локализованный); `null` → фоллбек на `description`. */
+  shortDescription: string | null;
   section: ModelSection | string;
   provider: string;
   familyId: string | null;

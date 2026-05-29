@@ -12,7 +12,10 @@ export function modelDisplayName(m: WebModelDto): string {
 }
 
 export function modelDesc(m: WebModelDto): string {
-  return m.descriptionOverride ?? m.description;
+  // Приоритет — краткий тэглайн (локализованный), иначе полное описание (уже
+  // override-aware и локализованное на бэке). Совпадает с `displayModelDesc`
+  // (capabilityData) и `modelDesc` в GenerateScene.
+  return m.shortDescription ?? m.description;
 }
 
 export function modelRate(m: WebModelDto, t: (k: string) => string): string {
