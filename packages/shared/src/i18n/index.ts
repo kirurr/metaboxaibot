@@ -341,6 +341,8 @@ export interface Translations {
     outputLimitOnlyThinking: string;
     modelOnlyThinking: string;
     chatInvalidImage: string;
+    chatDocumentTooLarge: string;
+    chatContextOverflow: string;
     upscaleResultTooLarge: string;
     soulProviderUnavailable: string;
     soulMissingAvatar: string;
