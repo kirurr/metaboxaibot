@@ -389,15 +389,33 @@ export class KieImageAdapter implements ImageAdapter {
       // "could not generate ... due to identity preservation" — оба триггера
       // сработают, но конкретная подсказка про face reference полезнее
       // generic "переформулируйте промпт".
+      // `cause: rawFailMsg` (ПОЛНЫЙ, до sanitize) — детектор child-safety в
+      // воркере (isChildSafetyError) ходит по cause-цепочке; без него обрезанный
+      // technicalMessage мог бы потерять маркер child/minor за границей среза, и
+      // child-safety ошибочно ушла бы в content-policy retry/fallback.
       if (isIdentityPreservation)
-        throw new UserFacingError(technicalMessage, { key: "identityPreservationNotAllowed" });
+        throw new UserFacingError(technicalMessage, {
+          key: "identityPreservationNotAllowed",
+          cause: rawFailMsg,
+        });
       if (isNoResult) {
         throw new UserFacingError(technicalMessage, { key: "generationNoResult" });
       }
       if (isPublicFigure)
-        throw new UserFacingError(technicalMessage, { key: "publicFigureViolation" });
-      if (isCopyright) throw new UserFacingError(technicalMessage, { key: "copyrightViolation" });
-      if (isPolicy) throw new UserFacingError(technicalMessage, { key: "contentPolicyViolation" });
+        throw new UserFacingError(technicalMessage, {
+          key: "publicFigureViolation",
+          cause: rawFailMsg,
+        });
+      if (isCopyright)
+        throw new UserFacingError(technicalMessage, {
+          key: "copyrightViolation",
+          cause: rawFailMsg,
+        });
+      if (isPolicy)
+        throw new UserFacingError(technicalMessage, {
+          key: "contentPolicyViolation",
+          cause: rawFailMsg,
+        });
       // Midjourney syntax detector: KIE при 400 от провайдера часто эхает
       // обратно сам промпт юзера в `failMsg`. Если в нём видны характерные
       // Midjourney-маркеры (`/imagine prompt:`, флаги `--ar`/`--stylize`/

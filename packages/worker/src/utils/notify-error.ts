@@ -314,7 +314,11 @@ export interface FallbackNotificationContext {
      *  DNS/socket-уровень. Fallback пробуется (у соседа может быть другой хост);
      *  если все упали — deferIfTransientNetworkError на уровне processor'а
      *  retry'ит весь цикл до MAX_TRANSIENT_RETRIES раундов. */
-    | "network_transient";
+    | "network_transient"
+    /** Content-policy / модерация: провайдер зарубил по политике, после
+     *  per-provider ретраев переключаемся на следующего (у него может быть
+     *  другая модерация). См. content-policy-retry.ts. */
+    | "content_policy";
   /** GenerationJob.id для трассировки. */
   jobId?: string;
   /** Internal user ID, если доступен. */

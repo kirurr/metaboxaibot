@@ -59,6 +59,8 @@ import {
 } from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
 import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { submitWithThrottle, isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
@@ -1136,6 +1138,25 @@ export async function processVideoJob(job: Job<VideoJobData>, token?: string): P
       }
       throw new UnrecoverableError(msg);
     }
+
+    // Content-policy / модерация: 1 ретрай на провайдере → fallback → 1 ретрай →
+    // потом терминальная ошибка (модерация часто недетерминирована). child-safety
+    // исключён внутри isContentPolicyError. При re-enqueue хелпер бросает
+    // DelayedError; иначе возвращается и проваливаемся в user-facing terminal.
+    if (isContentPolicyError(err) && modelMeta) {
+      await handleContentPolicyRetryFallback({
+        job,
+        token,
+        dbJobId,
+        modelId,
+        modelMeta,
+        fallbackSection: "video",
+        notifySection: "video",
+        mediaInputs: job.data.mediaInputs,
+        userId: userIdStr,
+      });
+    }
+
     const userMsg = resolveUserFacingMessage(err, t);
     if (userMsg !== null) {
       logger.warn({ dbJobId, err }, "Video job rejected: user-facing error");
