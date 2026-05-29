@@ -110,7 +110,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await server.register(rateLimit, {
     max: 120,
     timeWindow: "1 minute",
-    errorResponseBuilder: () => ({ error: "Too Many Requests" }),
+    // statusCode: 429 обязателен — без него наш setErrorHandler ставит 500, и
+    // фронт не может отличить лимит от реальной ошибки. Плагин также шлёт
+    // заголовок Retry-After (секунды до сброса). Фронт по статусу 429 показывает
+    // попап «слишком много запросов, подожди».
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "Too Many Requests",
+    }),
   });
 
   await server.register(swagger, {

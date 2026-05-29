@@ -505,6 +505,10 @@ export default {
       "🧠 {modelName} only had room to think — no space left for the actual answer. Reasoning is above ☝ Try turning off «Extended thinking», shortening the prompt, or picking another model. Tokens for this request were not charged.",
     chatInvalidImage:
       "🖼 Could not process the attached image — the file might be corrupted or in an unsupported format. Supported formats: JPEG, PNG, GIF, WebP. Please try again with a different file.",
+    chatDocumentTooLarge:
+      "📄 The attached document is too large for this model — it exceeds the context window even on its own. Try a shorter file, split it into parts, or pick a model with a larger context window. Tokens for this request were not charged.",
+    chatContextOverflow:
+      "📝 This conversation has grown too long for the model's context window. Start a new dialog to continue. Tokens for this request were not charged.",
     upscaleResultTooLarge:
       "📷 This photo's resolution is already too high to enlarge further — the result would exceed what the AI model can process. Please send a lower-resolution photo. Tokens for this request were not charged.",
     soulProviderUnavailable: "❌ Character creation is temporarily unavailable. Please try later.",

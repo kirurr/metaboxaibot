@@ -235,6 +235,18 @@ async function sendOneItem(
     else await ctx.replyWithAudio(source, opts);
     return true;
   } catch (err) {
+    // Юзер запретил приём голосовых/аудио (privacy) → Telegram 400
+    // VOICE_MESSAGES_FORBIDDEN. Аудио-превью полезно — пробуем как документ.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (kind === "audio" && msg.includes("VOICE_MESSAGES_FORBIDDEN")) {
+      try {
+        await ctx.replyWithDocument(source, opts);
+        return true;
+      } catch (docErr) {
+        logger.warn({ err: docErr, kind }, "sendOneItem: audio document fallback failed");
+        return false;
+      }
+    }
     logger.warn({ err, kind }, "sendOneItem: send failed");
     return false;
   }
@@ -465,10 +477,14 @@ export async function gateLowIqMode(input: GateInput): Promise<boolean> {
     videoPricingMode === "per_second"
       ? ctx.t.confirmGeneration.messagePerSecond
       : ctx.t.confirmGeneration.message;
+  // Replacement через функцию: литеральный `$` в промпте юзера (символ доллара,
+  // напр. "$") не должен трактоваться как спец-паттерн String.replace ($&, $',
+  // $`, $$) — иначе `$'` впрыскивал хвост шаблона в середину промпта, ломал HTML
+  // (незакрытый </blockquote>) и оставлял {cost} неподставленным.
   const text = messageTpl
-    .replace("{model}", escapeHtml(modelName))
-    .replace("{prompt}", escapeHtml(displayedPrompt))
-    .replace("{cost}", cost.toFixed(2));
+    .replace("{model}", () => escapeHtml(modelName))
+    .replace("{prompt}", () => escapeHtml(displayedPrompt))
+    .replace("{cost}", () => cost.toFixed(2));
 
   // Send per-slot media previews BEFORE the confirm message so the user can
   // visually verify uploads. Only for image/video kinds with mediaInputs.

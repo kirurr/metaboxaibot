@@ -3,6 +3,7 @@ import { InlineKeyboard } from "grammy";
 import { config } from "@metabox/shared";
 import { transcribeAudio } from "@metabox/api/services/transcription";
 import { logger } from "../logger.js";
+import { escapeCodeEntity } from "./markdown.js";
 import type { BotContext } from "../types/context.js";
 
 // ── Transcription text store (TTL 10 min, max 500 entries) ──────────────────
@@ -75,6 +76,30 @@ export function escapeMarkdownV2(text: string): string {
   return text.replace(MD2_SPECIAL, "\\$&");
 }
 
+/**
+ * Максимум сырого текста на один code-блок. Telegram-лимит 4096 на сообщение,
+ * но MarkdownV2-escape добавляет `\` к спецсимволам — для prose-расшифровки
+ * инфляция небольшая, 3000 оставляет запас под escape + header + hint + фенсы.
+ * Whisper отдаёт расшифровку одним абзацем без переводов строки, поэтому
+ * режем по границам пробелов.
+ */
+const TRANSCRIPTION_CHUNK_MAX = 3000;
+
+/** Split text into chunks ≤ max, preferring space boundaries. */
+function chunkBySpace(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const parts: string[] = [];
+  let remaining = text;
+  while (remaining.length > max) {
+    const spaceIdx = remaining.lastIndexOf(" ", max);
+    const splitAt = spaceIdx > max / 2 ? spaceIdx + 1 : max;
+    parts.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+  if (remaining) parts.push(remaining);
+  return parts;
+}
+
 // ── Main transcribe-and-reply helper ────────────────────────────────────────
 
 export type VoiceSection = "gpt" | "design" | "video" | "audio";
@@ -129,18 +154,26 @@ export async function transcribeAndReply(
     // Store the transcribed text before sending (so the callback can find it immediately)
     storeTranscription(ctx.user.id, id, text, ctx.message?.message_id);
 
-    // Build MarkdownV2 message with expandable blockquote for easy copying
+    // Build MarkdownV2 message(s). Long transcriptions blow past Telegram's
+    // 4096-char limit — split the raw text into code-block chunks. Header goes
+    // on the first message, hint + "use as prompt" button on the last (the full
+    // text lives in the store, so the button always replays everything intact).
     const header = escapeMarkdownV2(ctx.t.voice.transcriptionResult);
     const hint = escapeMarkdownV2(ctx.t.voice.transcriptionHint);
-    const quotedText = "```\n".concat(escapeMarkdownV2(text), "```\n");
-    const md2Text = `${header}\n\n${quotedText}\n\n${hint}`;
-
     const kb = new InlineKeyboard().text(ctx.t.voice.useAsPrompt, `vp:${section}:${id}`);
 
-    await ctx.reply(md2Text, {
-      parse_mode: "MarkdownV2",
-      reply_markup: kb,
-    });
+    const chunks = chunkBySpace(text, TRANSCRIPTION_CHUNK_MAX);
+    for (let i = 0; i < chunks.length; i++) {
+      const quoted = "```\n".concat(escapeCodeEntity(chunks[i]), "```\n");
+      const isLast = i === chunks.length - 1;
+      const md2Text = [i === 0 ? `${header}\n\n` : "", quoted, isLast ? `\n\n${hint}` : ""].join(
+        "",
+      );
+      await ctx.reply(md2Text, {
+        parse_mode: "MarkdownV2",
+        reply_markup: isLast ? kb : undefined,
+      });
+    }
 
     return text;
   } catch (err) {

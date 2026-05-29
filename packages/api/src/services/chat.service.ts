@@ -616,6 +616,20 @@ export const chatService = {
           });
         }
 
+        // Context-overflow, переживший history-fallback (или без истории, чтобы
+        // её обрезать): сам инпут — обычно один прикреплённый документ — больше
+        // контекстного окна модели. Ретраи/fallback бесполезны → отдаём понятную
+        // UserFacingError вместо generic-ошибки.
+        if (isContextOverflowError(err) || err instanceof ContextOverflowError) {
+          await dialogService.markMessageFailed(userMessage.id);
+          const hasDocs = (documentAttachments?.length ?? 0) > 0;
+          throw new UserFacingError("Input exceeds model context window", {
+            key: hasDocs ? "chatDocumentTooLarge" : "chatContextOverflow",
+            section: "gpt",
+            cause: err,
+          });
+        }
+
         // OpenAI 404 на previousResponseId — провайдер инвалидировал response
         // кэш (billing suspension, принудительная очистка на их стороне). Ключ
         // тот же, но response_id уже не существует. Ретраим с полной историей:
