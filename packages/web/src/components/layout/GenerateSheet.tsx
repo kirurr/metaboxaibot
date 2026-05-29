@@ -11,8 +11,8 @@ import {
   dedupByFamily,
   displayModelDesc,
   displayModelName,
-  modelLetter,
 } from "@/components/layout/capabilityData";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 
 /**
  * Мобильный bottom-sheet, открываемый центральной FAB-кой «Генерировать» в
@@ -273,15 +273,16 @@ export function GenerateSheet({ open, onClose }: { open: boolean; onClose: () =>
                       className="flex items-start gap-3 p-3 rounded-[14px] text-left transition-colors"
                       style={{ background: "var(--bg-secondary)" }}
                     >
-                      <span
+                      <ModelAvatar
                         className="shrink-0 w-10 h-10 rounded-[10px] flex items-center justify-center text-base font-semibold"
                         style={{
                           background: "var(--accent-lighter)",
                           color: "var(--accent-light)",
                         }}
-                      >
-                        {modelLetter(m)}
-                      </span>
+                        icon={m.webIconPath}
+                        name={displayModelName(m)}
+                        iconSize={24}
+                      />
                       <span className="min-w-0 flex-1">
                         <span
                           className="block text-sm font-medium truncate"

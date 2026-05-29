@@ -19,6 +19,7 @@ import { uploadChatFile, signChatUploads, type ChatUploadDto } from "@/api/uploa
 import type { MediaInputSlotDto, ModelModeDto, ModelSettingDto, WebModelDto } from "@/api/models";
 import { ApiError } from "@/api/client";
 import { ChipPopover } from "@/components/settings/ChipPopover";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { SettingControl } from "@/components/settings/SettingControl";
 import { isSettingVisible, UNSUPPORTED_TYPES } from "@/components/settings/utils";
 import {
@@ -153,10 +154,7 @@ type GenerateDraft = {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function modelDisplayName(m: WebModelDto): string {
-  return m.familyName ?? m.name;
-}
-function modelLetter(m: WebModelDto): string {
-  return modelDisplayName(m).trim().slice(0, 1).toUpperCase() || "·";
+  return m.familyName ?? m.webName;
 }
 function modelDesc(m: WebModelDto): string {
   return m.descriptionOverride ?? m.description;
@@ -2415,9 +2413,12 @@ export function GenerateScene({
                 className="gen-model-btn"
                 onClick={() => setModelOpen(!modelOpen)}
               >
-                <div className="gen-model-glyph">
-                  {selectedModel ? modelLetter(selectedModel) : "·"}
-                </div>
+                <ModelAvatar
+                  className="gen-model-glyph"
+                  icon={selectedModel?.webIconPath ?? null}
+                  name={selectedModel ? modelDisplayName(selectedModel) : "·"}
+                  iconSize={18}
+                />
                 <div className="gen-model-text">
                   <span className="gen-model-meta">Model</span>
                   <span className="gen-model-name">
@@ -2448,7 +2449,12 @@ export function GenerateScene({
                           setModelOpen(false);
                         }}
                       >
-                        <div className="gen-model-glyph">{modelLetter(m)}</div>
+                        <ModelAvatar
+                          className="gen-model-glyph"
+                          icon={m.webIconPath}
+                          name={modelDisplayName(m)}
+                          iconSize={18}
+                        />
                         <div className="gen-model-item-body">
                           <div className="gen-model-item-name">{modelDisplayName(m)}</div>
                           <div className="gen-model-item-desc">{modelDesc(m)}</div>

@@ -22,6 +22,10 @@ export interface MessageDto {
 export interface ModelDto {
   id: string;
   name: string;
+  /** Имя для веб-UI без эмодзи. */
+  webName: string;
+  /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`); `null` → буква-аватар. */
+  webIconPath: string | null;
   description: string;
   section: string;
   provider: string;

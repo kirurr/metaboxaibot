@@ -1680,6 +1680,21 @@ select {
   box-shadow: 0 0 8px rgba(95, 210, 154, 0.6);
   flex-shrink: 0;
 }
+/* Квадратный аватар модели (иконка бренда или буква) в селекторе чата. */
+.ce-mc-ico {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--accent-light);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
 .ce-mc-name {
   flex: 1;
   font-size: 14.5px;

@@ -12,8 +12,8 @@ import {
   dedupByFamily,
   displayModelDesc,
   displayModelName,
-  modelLetter,
 } from "@/components/layout/capabilityData";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 
 /**
  * Капабилити-табы в TopNav: «Chat / Image / Video / Audio».
@@ -174,7 +174,11 @@ export function CapabilityTabs() {
                         ) : (
                           models.slice(0, MAX_MODELS_IN_MENU).map((m) => (
                             <button key={m.id} className="mega-item" onClick={() => pick(c, m.id)}>
-                              <span className="mega-ico letter">{modelLetter(m)}</span>
+                              <ModelAvatar
+                                className="mega-ico letter"
+                                icon={m.webIconPath}
+                                name={displayModelName(m)}
+                              />
                               <span className="mega-body">
                                 <span className="mega-name">{displayModelName(m)}</span>
                                 <span className="mega-desc">{displayModelDesc(m)}</span>

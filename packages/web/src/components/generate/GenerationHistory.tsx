@@ -17,6 +17,7 @@ import {
   type PreviewOutput,
 } from "@/components/common/GenerationPreviewModal";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
+import { getModelDisplay } from "@/stores/modelsStore";
 import { formatTokens } from "@/utils/format";
 
 /**
@@ -159,8 +160,10 @@ function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
   const previewInfo = useMemo<PreviewInfo | undefined>(() => {
     const job = preview?.job;
     if (!job) return undefined;
+    const md = getModelDisplay(job.modelId, job.modelName);
     return {
-      title: job.modelName,
+      title: md.name,
+      iconPath: md.icon,
       dateIso: job.completedAt ?? job.createdAt,
       tokensValue:
         job.tokensSpent && job.tokensSpent !== "0" ? formatTokens(job.tokensSpent) : null,
