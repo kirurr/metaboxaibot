@@ -7,11 +7,14 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Coins,
   Copy,
   Download,
   FolderPlus,
   Heart,
+  Images,
+  Maximize2,
   Music2,
   Trash2,
   X,
@@ -79,6 +82,11 @@ export type PreviewInfo = {
   onToggleFavorite?: () => void;
   /** Удаление джобы (на ответственности колбэка: confirm + закрытие модалки). */
   onDelete?: () => void;
+  /** Открыть текущий output в другом инструменте. Рендерятся по наличию колбэка
+   *  (image-output: animate/reference/upscale; video-output: только upscale). */
+  onAnimate?: () => void;
+  onReference?: () => void;
+  onUpscale?: () => void;
   /** Закрытие модалки — на ответственности колбэка (нужно, чтобы caller мог
    *  показать toast при невалидной секции и оставить модалку открытой). */
   onRepeat?: () => void;
@@ -400,46 +408,115 @@ function PreviewInfoCard({
             {t("common.retry")}
           </Button>
         )}
-        {(info.onDownload || info.onToggleFavorite || info.onDelete) && (
-          <div className="grid grid-cols-2 gap-2">
-            {info.onDownload && (
-              <Button
-                variant="ghost"
-                size="md"
-                leftIcon={<Download size={16} />}
-                onClick={info.onDownload}
-                fullWidth
-              >
-                {t("common.downloadOriginal")}
-              </Button>
+
+        {/* Творческие продолжения — равные тайлы (иконка над подписью). */}
+        {(info.onAnimate || info.onReference || info.onUpscale) && (
+          <div className="flex gap-2">
+            {info.onAnimate && (
+              <ActionTile
+                icon={<Clapperboard size={18} />}
+                label={t("common.animate")}
+                onClick={info.onAnimate}
+              />
             )}
-            {info.onToggleFavorite && (
-              <Button
-                variant="ghost"
-                size="md"
-                leftIcon={<Heart size={16} fill={info.isFavorite ? "currentColor" : "none"} />}
-                onClick={info.onToggleFavorite}
-                fullWidth
-                className={info.isFavorite ? "text-danger" : undefined}
-              >
-                {info.isFavorite ? t("common.inFavorites") : t("common.favorite")}
-              </Button>
+            {info.onReference && (
+              <ActionTile
+                icon={<Images size={18} />}
+                label={t("common.reference")}
+                onClick={info.onReference}
+              />
             )}
-            {info.onDelete && (
-              <Button
-                variant="danger"
-                size="md"
-                leftIcon={<Trash2 size={16} />}
-                onClick={info.onDelete}
-                fullWidth
-              >
-                {t("common.delete")}
-              </Button>
+            {info.onUpscale && (
+              <ActionTile
+                icon={<Maximize2 size={18} />}
+                label={t("common.upscale")}
+                onClick={info.onUpscale}
+              />
             )}
           </div>
         )}
+
+        {/* Утилиты — компактный ряд иконок с подписью, отделён линией. */}
+        {(info.onDownload || info.onToggleFavorite || info.onDelete) && (
+          <>
+            <div className="border-t border-[color:var(--border)] mt-1" />
+            <div className="flex items-center gap-1">
+              {info.onDownload && (
+                <UtilityAction
+                  icon={<Download size={16} />}
+                  label={t("common.save")}
+                  onClick={info.onDownload}
+                />
+              )}
+              {info.onToggleFavorite && (
+                <UtilityAction
+                  icon={<Heart size={16} fill={info.isFavorite ? "currentColor" : "none"} />}
+                  label={info.isFavorite ? t("common.inFavorites") : t("common.favorite")}
+                  onClick={info.onToggleFavorite}
+                />
+              )}
+              {info.onDelete && (
+                <UtilityAction
+                  icon={<Trash2 size={16} />}
+                  label={t("common.delete")}
+                  onClick={info.onDelete}
+                  danger
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
     </aside>
+  );
+}
+
+/** Тайл «творческого» действия: иконка над короткой подписью, равная ширина. */
+function ActionTile({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-2.5 rounded-[var(--radius)] bg-white/[0.06] text-text hover:bg-white/[0.1] transition-colors"
+    >
+      {icon}
+      <span className="text-xs truncate max-w-full">{label}</span>
+    </button>
+  );
+}
+
+/** Компактное действие-утилита: иконка + подпись в строку, ghost-стиль. */
+function UtilityAction({
+  icon,
+  label,
+  onClick,
+  danger,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        "flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs transition-colors",
+        danger ? "text-danger hover:text-text" : "text-text-secondary hover:text-text",
+      )}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 

@@ -19,6 +19,7 @@ import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate
 import { formatTokensSpent } from "@/utils/format";
 import { parseShots } from "@/utils/multishot";
 import { buildSettingsRows } from "@/utils/settingsDisplay";
+import { openOutputInTool, REUSE_TARGETS, type ReuseOutput } from "@/utils/openOutputInTool";
 
 /**
  * Единый адаптер `GalleryJob` → `GenerationPreviewModal`. Используется и галереей
@@ -170,11 +171,56 @@ export function JobPreview({
     });
   }, [deleteOutput, previewOutputs, activeIdx, job.id, pushToast, onClose, onDeleted]);
 
+  // Активный output как источник для «открыть в инструменте». s3Key есть только
+  // у сохранённых в наш S3 output'ов (provider-only → null, кнопки прячем).
+  const makeReuseOutput = useCallback((): ReuseOutput | null => {
+    const idx = Math.min(activeIdx, previewOutputs.length - 1);
+    const out = previewOutputs[idx];
+    if (!out) return null;
+    const jo = job.outputs.find((o) => o.id === out.id);
+    if (!jo?.s3Key) return null;
+    return {
+      s3Key: jo.s3Key,
+      url: jo.previewUrl ?? jo.outputUrl ?? null,
+      name: modelDisplay.name,
+    };
+  }, [activeIdx, previewOutputs, job.outputs, modelDisplay.name]);
+
+  const handleAnimate = useCallback(() => {
+    const o = makeReuseOutput();
+    if (!o) return;
+    onClose();
+    void openOutputInTool(navigate, REUSE_TARGETS.animate, o);
+  }, [makeReuseOutput, navigate, onClose]);
+
+  const handleReference = useCallback(() => {
+    const o = makeReuseOutput();
+    if (!o) return;
+    onClose();
+    void openOutputInTool(navigate, REUSE_TARGETS.reference, o);
+  }, [makeReuseOutput, navigate, onClose]);
+
+  const handleUpscale = useCallback(() => {
+    const o = makeReuseOutput();
+    if (!o) return;
+    const target =
+      normalizeSection(job.section) === "video"
+        ? REUSE_TARGETS.upscaleVideo
+        : REUSE_TARGETS.upscaleImage;
+    onClose();
+    void openOutputInTool(navigate, target, o);
+  }, [makeReuseOutput, navigate, onClose, job.section]);
+
   if (previewOutputs.length === 0) return null;
 
   const tokensValue =
     job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null;
   const safeIdx = Math.min(activeIdx, previewOutputs.length - 1);
+
+  // Доступность reuse-кнопок: тип секции + наличие s3Key у активного output.
+  const sec = normalizeSection(job.section);
+  const activeJobOutput = job.outputs.find((o) => o.id === previewOutputs[safeIdx]?.id);
+  const canReuse = !!activeJobOutput?.s3Key;
 
   return (
     <GenerationPreviewModal
@@ -194,6 +240,9 @@ export function JobPreview({
         isFavorite,
         onToggleFavorite: handleToggleFavorite,
         onDelete: handleDelete,
+        onAnimate: sec === "image" && canReuse ? handleAnimate : undefined,
+        onReference: sec === "image" && canReuse ? handleReference : undefined,
+        onUpscale: (sec === "image" || sec === "video") && canReuse ? handleUpscale : undefined,
         onRepeat: handleRepeat,
         onDownload: handleDownload,
         folders: {

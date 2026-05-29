@@ -173,6 +173,7 @@
     "expand": "Развернуть",
     "collapse": "Свернуть",
     "downloadOriginal": "Скачать оригинал",
+    "save": "Сохранить",
     "addToFolders": "В папки",
     "copy": "Копировать",
     "copied": "Скопировано",
@@ -180,6 +181,9 @@
     "seeAll": "Показать все",
     "favorite": "В избранное",
     "inFavorites": "В избранном",
+    "animate": "Анимировать",
+    "reference": "Референс",
+    "upscale": "Апскейл",
     "newFolder": "Новая папка",
     "on": "Вкл",
     "off": "Выкл"
