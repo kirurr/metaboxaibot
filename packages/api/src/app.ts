@@ -110,23 +110,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await server.register(rateLimit, {
     max: 120,
     timeWindow: "1 minute",
-    errorResponseBuilder: (req) => {
-      // ВРЕМЕННАЯ диагностика (проверка ключевания rate-limit). Срабатывает
-      // только при превышении лимита. Если на разных юзерах `ip` одинаковый,
-      // а `xff`/`xRealIp` разные — лимит общий на весь сервис (trustProxy off),
-      // и его надо чинить (trustProxy + keyGenerator). Убрать после проверки.
-      logger.warn(
-        {
-          ip: req.ip,
-          xff: req.headers["x-forwarded-for"],
-          xRealIp: req.headers["x-real-ip"],
-          method: req.method,
-          url: req.url,
-        },
-        "rate-limit hit — keying diagnostic",
-      );
-      return { error: "Too Many Requests" };
-    },
+    // statusCode: 429 обязателен — без него наш setErrorHandler ставит 500, и
+    // фронт не может отличить лимит от реальной ошибки. Плагин также шлёт
+    // заголовок Retry-After (секунды до сброса). Фронт по статусу 429 показывает
+    // попап «слишком много запросов, подожди».
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "Too Many Requests",
+    }),
   });
 
   await server.register(swagger, {
