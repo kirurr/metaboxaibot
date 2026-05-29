@@ -58,6 +58,8 @@ import {
 } from "../utils/notify-error.js";
 import { isKieTransientError } from "@metabox/api/utils/kie-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
 import { isTransientNetworkError } from "@metabox/api/utils/fetch";
 import { isRateLimitLongWindowError } from "../utils/submit-with-throttle.js";
 import { submitWithFallback } from "../utils/submit-with-fallback.js";
@@ -2084,6 +2086,33 @@ export async function processImageJob(job: Job<ImageJobData>, token?: string): P
     // Throws DelayedError if rescheduled (re-thrown by next iteration of catch).
     // Returns silently otherwise → fall through to user-facing failure handling.
     await deferIfTransientNetworkError({ err, job, token, section: "image" });
+
+    // Content-policy / модерация: вместо мгновенной user-facing ошибки делаем
+    // 1 ретрай на провайдере → fallback → 1 ретрай → и только потом терминальная
+    // ошибка (модерация часто недетерминирована, перезапуск/другой провайдер
+    // нередко проходит). child-safety/CSAM исключён внутри isContentPolicyError.
+    // Virtual batch пропускаем (per-sub-job state — отдельная история, как и у
+    // существующего poll-fallback'а). При re-enqueue хелпер бросает DelayedError;
+    // если цепочка исчерпана — возвращается, проваливаемся в user-facing terminal
+    // ниже (без ops-алерта).
+    if (isContentPolicyError(err) && modelMeta) {
+      const requestedNForCp = job.data.numImages ?? 1;
+      const isVirtualBatchCp = requestedNForCp > 1 && (modelMeta.nativeBatchMax ?? 1) === 1;
+      if (!isVirtualBatchCp) {
+        await handleContentPolicyRetryFallback({
+          job,
+          token,
+          dbJobId,
+          modelId,
+          modelMeta,
+          fallbackSection: "design",
+          notifySection: "image",
+          mediaInputs: job.data.mediaInputs,
+          userId: userIdStr,
+        });
+      }
+    }
+
     const userMsg = resolveUserFacingMessage(err, t);
     if (userMsg !== null) {
       logger.warn({ dbJobId, err }, "Image job rejected: user-facing error");

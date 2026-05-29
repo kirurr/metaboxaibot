@@ -48,6 +48,8 @@ import { resolveKeyProvider, resolveKeyProviderForModel } from "@metabox/api/ai/
 import { isKieFiveXxError } from "@metabox/api/utils/kie-error";
 import { isFiveXxError } from "@metabox/api/utils/rate-limit-error";
 import { isProviderTemporaryUnavailable } from "@metabox/api/utils/provider-unavailable-error";
+import { isContentPolicyError } from "../utils/content-policy-error.js";
+import { handleContentPolicyRetryFallback } from "../utils/content-policy-retry.js";
 import { isOpenAiBillingExhaustion } from "@metabox/api/utils/openai-billing-error";
 import { notifyFallback } from "../utils/notify-error.js";
 import { resolveVoiceForTTS } from "@metabox/api/services/user-voice";
@@ -919,6 +921,24 @@ export async function processAudioJob(job: Job<AudioJobData>, token?: string): P
     // Throws DelayedError if rescheduled (propagates → BullMQ delays job).
     // Returns silently otherwise → fall through to user-facing failure handling.
     await deferIfTransientNetworkError({ err, job, token, section: "audio" });
+
+    // Content-policy / модерация: 1 ретрай на провайдере → fallback → 1 ретрай →
+    // потом терминальная ошибка (модерация часто недетерминирована). child-safety
+    // исключён внутри isContentPolicyError. При re-enqueue хелпер бросает
+    // DelayedError; иначе возвращается и проваливаемся в user-facing terminal.
+    if (isContentPolicyError(err) && modelMeta) {
+      await handleContentPolicyRetryFallback({
+        job,
+        token,
+        dbJobId,
+        modelId,
+        modelMeta,
+        fallbackSection: "audio",
+        notifySection: "audio",
+        userId: userIdStr,
+      });
+    }
+
     const providerMsg = resolveUserFacingMessage(err, t);
     if (providerMsg !== null) {
       logger.warn({ dbJobId, err }, "Audio job rejected: user-facing error");
