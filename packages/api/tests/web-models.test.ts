@@ -22,6 +22,8 @@ import { db } from "./helpers/db.js";
 interface WebModelDto {
   id: string;
   name: string;
+  webName: string;
+  webIconPath: string | null;
   section: string;
   provider: string;
   modes: Array<{ id: string; label: string }> | null;
@@ -226,6 +228,25 @@ describe("GET /web/models", () => {
       expect(serialized).toBeDefined();
       expect(serialized!.tokenCostUnit).toBe("1k_tok");
       expect(serialized!.tokenCostApprox).toBeGreaterThan(0);
+    });
+
+    it("exposes webName (без эмодзи) и webIconPath для каждой модели", async () => {
+      const { accessToken } = await createTestUser({ withTelegram: true });
+      const res = await app.inject({
+        method: "GET",
+        url: "/web/models",
+        headers: bearer(accessToken),
+      });
+      const body = res.json() as WebModelDto[];
+      expect(body.length).toBeGreaterThan(0);
+      for (const m of body) {
+        expect(typeof m.webName).toBe("string");
+        expect(m.webName.length).toBeGreaterThan(0);
+        // webName не должен начинаться с эмодзи (срезается на сервере).
+        expect(/^[\p{Extended_Pictographic}]/u.test(m.webName)).toBe(false);
+        // webIconPath — либо строковый путь, либо null.
+        expect(m.webIconPath === null || typeof m.webIconPath === "string").toBe(true);
+      }
     });
 
     it("preserves supportedDurations for a video model", async () => {

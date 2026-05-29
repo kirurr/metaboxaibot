@@ -21,6 +21,7 @@ import {
   getResolvedModes,
   defaultModeId,
   getT,
+  stripLeadingEmoji,
   type Section,
   type Language,
 } from "@metabox/shared";
@@ -94,13 +95,21 @@ function serializeForWeb(m: (typeof AI_MODELS)[string], lang: Language) {
   return {
     id: m.id,
     name: m.name,
+    /** Имя для веб-UI без эмодзи (override `webName` либо `name` со срезанным эмодзи). */
+    webName: m.webName ?? stripLeadingEmoji(m.name),
+    /** Путь к монохромной SVG-иконке бренда (`/icons/*.svg`) или null → буква-аватар. */
+    webIconPath: m.webIconPath ?? null,
     description: m.description,
     section: m.section,
     // claude-прокси нормализуем под бренд anthropic для каталога. См. routes/models.ts.
     provider:
       m.provider === "kie-claude" || m.provider === "evolink-claude" ? "anthropic" : m.provider,
     familyId: m.familyId ?? null,
-    familyName: m.familyId ? (MODEL_FAMILIES[m.familyId]?.name ?? null) : null,
+    // Имя семейства тоже чистим от эмодзи — иначе family-модели (FLUX, Recraft,
+    // Claude…) показывали бы эмодзи в вебе, т.к. UI берёт familyName в приоритете.
+    familyName: m.familyId
+      ? stripLeadingEmoji(MODEL_FAMILIES[m.familyId]?.name ?? "") || null
+      : null,
     versionLabel: m.versionLabel ?? null,
     variantLabel: m.variantLabel ?? null,
     descriptionOverride: m.descriptionOverride ?? null,

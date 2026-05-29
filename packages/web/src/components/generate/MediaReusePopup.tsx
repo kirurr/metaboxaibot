@@ -17,6 +17,7 @@ import { useUploadedMedia, useDeleteUploadedMedia } from "@/hooks/useUploadedMed
 import { useInfiniteGalleryJobs } from "@/hooks/useGallery";
 import { useElements, useDeleteElement } from "@/hooks/useElements";
 import { type Element } from "@/api/elements";
+import { getModelDisplay } from "@/stores/modelsStore";
 import { ElementEditPopup } from "./ElementEditPopup";
 
 /**
@@ -157,8 +158,9 @@ export function MediaReusePopup({
 
   const generatedTiles: Tile[] = useMemo(
     () =>
-      generated.jobs.flatMap((job) =>
-        job.outputs
+      generated.jobs.flatMap((job) => {
+        const modelName = getModelDisplay(job.modelId, job.modelName).name;
+        return job.outputs
           .filter((o) => o.s3Key)
           .map((o) => ({
             key: o.id,
@@ -167,12 +169,12 @@ export function MediaReusePopup({
               s3Key: o.s3Key as string,
               url: o.previewUrl,
               mimeType: synthMime(slotType),
-              name: job.modelName,
+              name: modelName,
               type: slotType,
             },
-            label: job.prompt || job.modelName,
-          })),
-      ),
+            label: job.prompt || modelName,
+          }));
+      }),
     [generated.jobs, slotType],
   );
 

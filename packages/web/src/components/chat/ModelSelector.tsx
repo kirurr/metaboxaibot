@@ -2,6 +2,16 @@ import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
 import clsx from "clsx";
 import type { ModelDto } from "@/api/chat";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
+
+/** Имя модели для веба (familyName-бренд → webName без эмодзи). */
+function selectorName(m: ModelDto): string {
+  return m.familyName ?? m.webName;
+}
+
+/** Класс маленького бокса-аватара в дропдауне выбора модели. */
+const AVATAR_BOX =
+  "shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-semibold bg-bg-elevated border border-border text-text-secondary";
 
 interface Props {
   models: ModelDto[];
@@ -28,7 +38,9 @@ export function ModelSelector({ models, currentModelId, onPick, disabled }: Prop
   const gptModels = models.filter((m) => m.section === "gpt");
   const filtered = q
     ? gptModels.filter((m) =>
-        `${m.name} ${m.provider} ${m.variantLabel ?? ""}`.toLowerCase().includes(q.toLowerCase()),
+        `${selectorName(m)} ${m.provider} ${m.variantLabel ?? ""}`
+          .toLowerCase()
+          .includes(q.toLowerCase()),
       )
     : gptModels;
 
@@ -46,7 +58,17 @@ export function ModelSelector({ models, currentModelId, onPick, disabled }: Prop
           disabled && "opacity-50 cursor-not-allowed",
         )}
       >
-        <span className="truncate max-w-[200px]">{current ? current.name : "Выберите модель"}</span>
+        {current && (
+          <ModelAvatar
+            className={AVATAR_BOX}
+            icon={current.webIconPath}
+            name={selectorName(current)}
+            iconSize={13}
+          />
+        )}
+        <span className="truncate max-w-[200px]">
+          {current ? selectorName(current) : "Выберите модель"}
+        </span>
         <ChevronDown size={14} className={clsx("transition-transform", open && "rotate-180")} />
       </button>
 
@@ -88,8 +110,14 @@ export function ModelSelector({ models, currentModelId, onPick, disabled }: Prop
                     active && "bg-bg-secondary",
                   )}
                 >
+                  <ModelAvatar
+                    className={clsx(AVATAR_BOX, "mt-0.5")}
+                    icon={m.webIconPath}
+                    name={selectorName(m)}
+                    iconSize={13}
+                  />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{m.name}</div>
+                    <div className="text-sm font-medium truncate">{selectorName(m)}</div>
                     <div className="text-xs text-text-hint mt-0.5 line-clamp-2">
                       {m.description}
                     </div>

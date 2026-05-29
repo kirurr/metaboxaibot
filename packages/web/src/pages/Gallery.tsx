@@ -59,7 +59,8 @@ import {
   GenerationPreviewModal,
   type PreviewOutput,
 } from "@/components/common/GenerationPreviewModal";
-import { useModelsStore } from "@/stores/modelsStore";
+import { useModelsStore, getModelDisplay } from "@/stores/modelsStore";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useUIStore } from "@/stores/uiStore";
 import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore";
 import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
@@ -134,7 +135,7 @@ function ModelFilterChips({
   const models = useModelsStore((s) => s.models);
   const modelNameById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const model of models) m.set(model.id, model.name);
+    for (const model of models) m.set(model.id, model.webName);
     return m;
   }, [models]);
 
@@ -735,6 +736,8 @@ function JobCard({
 
   const isFav = favoritesFolderId ? job.folderIds.includes(favoritesFolderId) : false;
   const favPending = addFav.isPending || removeFav.isPending;
+  // Имя + иконка модели (без эмодзи) из каталога; фоллбек — сохранённый modelName.
+  const modelDisplay = getModelDisplay(job.modelId, job.modelName);
 
   // Аудио — нет визуального аспекта; всегда квадрат. Для image/video подождём
   // metadata из <img>/<video>, до этого рендерим квадрат-дефолт (span 4).
@@ -789,7 +792,17 @@ function JobCard({
       </button>
 
       <div className="absolute bottom-0 left-0 right-0 p-2 text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <div className="truncate font-semibold">{job.modelName}</div>
+        <div className="flex items-center gap-1.5 font-semibold min-w-0">
+          {modelDisplay.icon && (
+            <ModelAvatar
+              className="shrink-0 w-4 h-4 flex items-center justify-center"
+              icon={modelDisplay.icon}
+              name={modelDisplay.name}
+              iconSize={14}
+            />
+          )}
+          <span className="truncate">{modelDisplay.name}</span>
+        </div>
         {job.prompt && <div className="truncate text-white/70">{job.prompt}</div>}
       </div>
 
@@ -830,6 +843,8 @@ function GalleryPreview({
   const addToFolder = useAddJobToGalleryFolder();
   const removeFromFolder = useRemoveJobFromGalleryFolder();
   const [activeIdx, setActiveIdx] = useState(initialOutputIdx);
+  // Имя + иконка модели (без эмодзи) из каталога; фоллбек — сохранённый modelName.
+  const modelDisplay = getModelDisplay(job.modelId, job.modelName);
 
   const previewOutputs = useMemo<PreviewOutput[]>(
     () =>
@@ -899,7 +914,8 @@ function GalleryPreview({
       section={job.section}
       onClose={onClose}
       info={{
-        title: job.modelName,
+        title: modelDisplay.name,
+        iconPath: modelDisplay.icon,
         dateIso: job.completedAt,
         tokensValue,
         prompt: job.prompt,

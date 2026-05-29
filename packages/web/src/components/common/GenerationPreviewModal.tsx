@@ -14,6 +14,7 @@ import {
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/common/Button";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { GalleryFolder } from "@/api/gallery";
 
@@ -50,6 +51,8 @@ export type PreviewFolders = {
 
 export type PreviewInfo = {
   title: string;
+  /** Путь к монохромной иконке модели рядом с заголовком (если есть). */
+  iconPath?: string | null;
   /** ISO-дата для чипа в шапке. */
   dateIso?: string | null;
   /** Уже отформатированное значение токенов — модалка не форматирует. */
@@ -321,7 +324,17 @@ function PreviewInfoCard({ info, isMobile }: { info: PreviewInfo; isMobile: bool
       style={{ background: "var(--bg-elevated)" }}
       onClick={(e) => e.stopPropagation()}
     >
-      <h2 className="h2 shrink-0 break-words">{info.title}</h2>
+      <div className="flex items-center gap-2 shrink-0 min-w-0">
+        {info.iconPath && (
+          <ModelAvatar
+            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-white/10 text-white"
+            icon={info.iconPath}
+            name={info.title}
+            iconSize={18}
+          />
+        )}
+        <h2 className="h2 break-words m-0 min-w-0">{info.title}</h2>
+      </div>
 
       {hasMeta && (
         <div className="flex flex-wrap gap-1.5 shrink-0">

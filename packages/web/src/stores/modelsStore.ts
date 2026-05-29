@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { stripLeadingEmoji } from "@metabox/shared-browser";
 import { getModels, type ModelSection, type WebModelDto } from "@/api/models";
 import { i18n } from "@/i18n";
 
@@ -99,6 +100,28 @@ export function setupModelsI18nSync(): void {
       void useModelsStore.getState().reload();
     }
   });
+}
+
+/** Имя + иконка модели для отображения в вебе. `icon: null` → фолбек на букву-аватар. */
+export type ModelDisplay = { icon: string | null; name: string };
+
+/**
+ * Имя и иконка для DTO. Имя: `familyName` (бренд для дедуп-семейств, напр. "Claude")
+ * → `webName` (уже без эмодзи с бэка). Иконка — `webIconPath` или null.
+ */
+export function modelDisplay(m: WebModelDto): ModelDisplay {
+  return { icon: m.webIconPath, name: m.familyName ?? m.webName };
+}
+
+/**
+ * Геттер по id модели — для мест, где на руках только id (галерея, лента,
+ * превью генераций). Если модели нет в каталоге (легаси-джоб со старой
+ * моделью) — фоллбек на `fallbackName` с обрезанным эмодзи, иначе на id.
+ */
+export function getModelDisplay(id: string, fallbackName?: string): ModelDisplay {
+  const m = useModelsStore.getState().models.find((x) => x.id === id);
+  if (m) return modelDisplay(m);
+  return { icon: null, name: fallbackName ? stripLeadingEmoji(fallbackName) : id };
 }
 
 /** Маппинг capability'а из UI на секцию каталога. */

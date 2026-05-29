@@ -8,7 +8,7 @@ export function dialogTitle(d: DialogDto, fallback: string): string {
 }
 
 export function modelDisplayName(m: WebModelDto): string {
-  return m.familyName ?? m.name;
+  return m.familyName ?? m.webName;
 }
 
 export function modelDesc(m: WebModelDto): string {

@@ -525,6 +525,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "nano-banana-pro": {
     id: "nano-banana-pro",
+    webIconPath: "/icons/nanobanana.svg",
     name: "🍌 Nano Banana PRO",
     description:
       "Генерирует реалистичные фото и позволяет менять детали словами. PRO — максимальное качество до 4K, дороже стандартной версии.",
@@ -602,6 +603,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "nano-banana-2": {
     id: "nano-banana-2",
+    webIconPath: "/icons/nanobanana.svg",
     name: "🍌 Nano Banana 2",
     description:
       "Генерирует реалистичные фото и редактирует их по текстовым командам. Standard — дешевле PRO, поддерживает большее число референсов и расширенный набор соотношений сторон.",
@@ -697,6 +699,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "nano-banana-1": {
     id: "nano-banana-1",
+    webIconPath: "/icons/nanobanana.svg",
     name: "🍌 Nano Banana",
     description:
       "Базовая версия: генерирует и редактирует фото по тексту. Дешевле PRO и v2, но без выбора разрешения и расширенных настроек.",
@@ -876,6 +879,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "grok-imagine-image": {
     id: "grok-imagine-image",
+    webIconPath: "/icons/grok.svg",
     name: "🔮 Grok Imagine",
     description:
       "Генерация изображений от xAI (Grok). Text-to-image и image-to-image. Режим Quality — повышенная точность и детализация, Speed — быстрая генерация с большим количеством вариантов.",
@@ -923,6 +927,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "gpt-image-2": {
     id: "gpt-image-2",
+    webIconPath: "/icons/openai.svg",
     name: "🖼️ GPT Image 2",
     description:
       "Новейшая версия GPT Image. Лучше предыдущей в рендеринге текста и точности следования промпту.",
@@ -1027,6 +1032,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "gpt-image-1.5": {
     id: "gpt-image-1.5",
+    webIconPath: "/icons/openai.svg",
     name: "🖼️ GPT Image 1.5",
     description:
       "Лучше всех понимает сложные текстовые запросы. Точно рисует то, что вы описали, включая текст на картинках.",
@@ -1145,6 +1151,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   midjourney: {
     id: "midjourney",
+    webIconPath: "/icons/midjourney.svg",
     name: "🎨 MidJourney v7",
     description:
       "Создаёт самые красивые и стильные изображения. Лучший выбор для арта, иллюстраций и эффектных визуалов.",
@@ -1324,6 +1331,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "seedream-5": {
     id: "seedream-5",
+    webIconPath: "/icons/bytedance.svg",
     name: "🛍️ Seedream 5.0 (ByteDance)",
     description:
       "Идеально для товарных фото, одежды и каталогов. Версия 5.0 — улучшенное качество и реалистичность по сравнению с 4.5.",
@@ -1355,6 +1363,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "seedream-4.5": {
     id: "seedream-4.5",
+    webIconPath: "/icons/bytedance.svg",
     name: "🛍️ Seedream 4.5",
     description:
       "Предыдущая версия Seedream — чуть проще, чем 5.0, но проверенная стабильность. Подойдёт для массовой генерации товарных фото.",
@@ -1386,6 +1395,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "ideogram-quality": {
     id: "ideogram-quality",
+    webIconPath: "/icons/ideogram.svg",
     name: "✍️ Ideogram v3.0 Quality",
     description:
       "Лучше всех рисует читаемый текст на картинках. Идеален для логотипов, постеров и рекламы. Quality — максимальная детализация и точность, самый медленный и дорогой вариант.",
@@ -1425,6 +1435,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "ideogram-balanced": {
     id: "ideogram-balanced",
+    webIconPath: "/icons/ideogram.svg",
     name: "✍️ Ideogram v3.0 Balanced",
     description:
       "Лучше всех рисует читаемый текст на картинках. Идеален для логотипов, постеров и рекламы. Balanced — оптимальный баланс качества и скорости, средняя цена.",
@@ -1464,6 +1475,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "ideogram-turbo": {
     id: "ideogram-turbo",
+    webIconPath: "/icons/ideogram.svg",
     name: "✍️ Ideogram v3.0 Turbo",
     description:
       "Лучше всех рисует читаемый текст на картинках. Идеален для логотипов, постеров и рекламы. Turbo — самый быстрый и дешёвый вариант, чуть ниже детализация.",
@@ -1503,6 +1515,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "imagen-4-fast": {
     id: "imagen-4-fast",
+    webIconPath: "/icons/gemini.svg",
     name: "🔮 Imagen 4 Fast",
     description:
       "Imagen 4 от Google — высокая фотореалистичность. Fast — самый быстрый и дешёвый вариант, без поддержки 2K разрешения. Подходит для быстрых итераций.",
@@ -1553,6 +1566,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "imagen-4": {
     id: "imagen-4",
+    webIconPath: "/icons/gemini.svg",
     name: "🔮 Imagen 4",
     description:
       "Imagen 4 от Google — высокая фотореалистичность. Standard — баланс качества и цены, поддержка 2K разрешения. Оптимальный выбор для большинства задач.",
@@ -1614,6 +1628,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "imagen-4-ultra": {
     id: "imagen-4-ultra",
+    webIconPath: "/icons/gemini.svg",
     name: "🔮 Imagen 4 Ultra",
     description:
       "Imagen 4 от Google — высокая фотореалистичность. Ultra — максимальная детализация и качество рендеринга для профессиональных задач, поддержка 2K.",
@@ -1675,6 +1690,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   flux: {
     id: "flux",
+    webIconPath: "/icons/flux.svg",
     name: "⚡ FLUX.2",
     description:
       "Максимально реалистичные фото за секунды. Standard — тонкая настройка генерации (шаги, CFG, ускорение, LoRA). Дешевле Pro, больше параметров.",
@@ -1712,6 +1728,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "flux-pro": {
     id: "flux-pro",
+    webIconPath: "/icons/flux.svg",
     name: "⚡ FLUX.2 Pro",
     description:
       "Профессиональная версия FLUX.2 — максимальное качество и точность следования промпту. Меньше ручных настроек, но выше результат из коробки.",
@@ -1740,6 +1757,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "recraft-v3": {
     id: "recraft-v3",
+    webIconPath: "/icons/recraft.svg",
     name: "🖌️ Recraft v3",
     description:
       "Предыдущее поколение Recraft — широкий выбор стилей и под-стилей (реализм, иллюстрация, вектор), настройка художественности. Проверенная стабильность.",
@@ -1906,6 +1924,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "recraft-v4": {
     id: "recraft-v4",
+    webIconPath: "/icons/recraft.svg",
     name: "🖌️ Recraft V4",
     description:
       "Recraft V4 Standard — новое поколение для дизайна и маркетинга. Чистая композиция и точный рендеринг текста. Дешевле Pro, меньше детализация.",
@@ -1957,6 +1976,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "recraft-v4-pro": {
     id: "recraft-v4-pro",
+    webIconPath: "/icons/recraft.svg",
     name: "💠 Recraft V4 Pro",
     description:
       "Recraft V4 Pro — максимальное разрешение и детализация растровых изображений. Идеален для ответственных дизайн-проектов, готовых в производство без правок.",
@@ -2008,6 +2028,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "recraft-v4-vector": {
     id: "recraft-v4-vector",
+    webIconPath: "/icons/recraft.svg",
     name: "📐 Recraft V4 Vector (SVG)",
     description:
       "Recraft V4 Vector — генерирует SVG-векторы для логотипов, иконок и иллюстраций. Масштабируются без потери качества. Стандартная версия — дешевле Pro Vector.",
@@ -2058,6 +2079,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "recraft-v4-pro-vector": {
     id: "recraft-v4-pro-vector",
+    webIconPath: "/icons/recraft.svg",
     name: "📐 Recraft V4 Pro Vector (SVG)",
     description:
       "Recraft V4 Pro Vector — максимальное качество SVG-генерации. Подходит для сложных иллюстраций и брендинга, где требуется безупречная детализация и масштабируемость.",
@@ -2108,6 +2130,7 @@ export const DESIGN_MODELS: Record<string, AIModel> = {
   },
   "stable-diffusion": {
     id: "stable-diffusion",
+    webIconPath: "/icons/stability.svg",
     name: "🌊 Stable Diffusion 3.5 Medium",
     description:
       "Генерирует детальные изображения в любом стиле: от фотореализма до аниме и фэнтези. Отличается гибкостью. Работает только с промптами на анлгийском языке!",
