@@ -182,7 +182,13 @@ export async function handleContentPolicyRetryFallback(
       primaryProvider: fbState.primaryProvider ?? modelMeta.provider,
       attemptedProviders: Array.from(priorAttempted),
     },
-    // Счётчики ретраев сохраняем; новый провайдер стартует с 0 → получит свой ретрай.
+    // Счётчики ретраев сохраняем. ВАЖНО: на poll-стадии (effectiveProvider уже
+    // записан после успешного submit — типичный случай output-модерации, ради
+    // которой и сделана фича) новый провайдер стартует с retries=0 и получит
+    // свой ретрай. На submit-стадии (effectiveProvider ещё не записан)
+    // currentEff резолвится в primary, поэтому ретрай достаётся primary, а
+    // каждый fallback-кандидат пробуется по разу — цепочка всё равно проходит
+    // всех и корректно завершается.
     contentPolicy: { retries, totalReenqueues: totalReenqueues + 1 },
   };
   await db.generationJob.update({
