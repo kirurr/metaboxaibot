@@ -359,6 +359,8 @@
     "audioPromptPlaceholder": "British male narrator, warm tone — read this onboarding script…",
     "openPromptExamples": "Prompt examples",
     "multishot": {
+      "toggleLabel": "Multishot",
+      "toggleDescription": "Build a video from several shots, each with its own prompt and duration. Up to 5 shots, total duration 3–15 seconds.",
       "shotN": "Shot {{n}}",
       "shotPlaceholder": "Describe this shot",
       "duration": "Duration",
