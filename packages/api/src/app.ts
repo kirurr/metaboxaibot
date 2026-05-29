@@ -110,7 +110,23 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await server.register(rateLimit, {
     max: 120,
     timeWindow: "1 minute",
-    errorResponseBuilder: () => ({ error: "Too Many Requests" }),
+    errorResponseBuilder: (req) => {
+      // ВРЕМЕННАЯ диагностика (проверка ключевания rate-limit). Срабатывает
+      // только при превышении лимита. Если на разных юзерах `ip` одинаковый,
+      // а `xff`/`xRealIp` разные — лимит общий на весь сервис (trustProxy off),
+      // и его надо чинить (trustProxy + keyGenerator). Убрать после проверки.
+      logger.warn(
+        {
+          ip: req.ip,
+          xff: req.headers["x-forwarded-for"],
+          xRealIp: req.headers["x-real-ip"],
+          method: req.method,
+          url: req.url,
+        },
+        "rate-limit hit — keying diagnostic",
+      );
+      return { error: "Too Many Requests" };
+    },
   });
 
   await server.register(swagger, {
