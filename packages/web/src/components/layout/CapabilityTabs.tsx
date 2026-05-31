@@ -62,12 +62,17 @@ export function CapabilityTabs() {
   }, [allModels]);
 
   const openMenu = (id: string, hasMenu = true) => {
+    // Наведение на cap без mega-меню (например Chat) должно закрыть открытый
+    // попап, а не отменять его закрытие. Закрываем через scheduleClose (с
+    // задержкой), чтобы случайное "задевание" такого cap'а по пути в mega-зону
+    // не моргало: вход в попап/соседний mega-таб отменит таймер. `hovered` на
+    // не-mega cap по-прежнему не выставляем (иначе showMenu моргает на gap'е).
+    if (!hasMenu) {
+      scheduleClose();
+      return;
+    }
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    // Не переключаем `hovered` на cap без mega-меню (например Chat). Иначе при
-    // hover'е на edge соседней кнопки курсор задевает её cap-wrap, сбрасывает
-    // hovered → showMenu для текущего раздела становится false → попап
-    // моргает/исчезает на пересечении gap'а между cap-wrap'ами.
-    if (hasMenu) setHovered(id);
+    setHovered(id);
   };
   const cancelClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
