@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Save, RotateCcw } from "lucide-react";
 import { adminApi, type ModelPricingDto, type PricingSnapshotDto } from "@/api/admin";
 import { Button } from "@/components/common/Button";
@@ -33,6 +34,7 @@ function formatTokens(n: number): string {
 }
 
 export default function AdminPricing() {
+  const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
   const [data, setData] = useState<PricingSnapshotDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +92,7 @@ export default function AdminPricing() {
   const saveGlobal = async () => {
     const value = parseMultiplier(globalInput, NaN);
     if (value === null || Number.isNaN(value)) {
-      pushToast({ type: "error", message: "Множитель: число > 0 и ≤ 10" });
+      pushToast({ type: "error", message: t("admin.multiplierRange") });
       return;
     }
     setSavingGlobal(true);
@@ -99,7 +101,7 @@ export default function AdminPricing() {
         multiplier: value,
         note: globalNote.trim() || null,
       });
-      pushToast({ type: "success", message: "Глобальная маржа сохранена" });
+      pushToast({ type: "success", message: t("admin.marginSaved") });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });
@@ -113,7 +115,7 @@ export default function AdminPricing() {
     setSavingGlobal(true);
     try {
       await adminApi.pricing.deleteGlobal();
-      pushToast({ type: "success", message: "Override сброшен" });
+      pushToast({ type: "success", message: t("admin.overrideCleared") });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });
@@ -127,7 +129,7 @@ export default function AdminPricing() {
     const edit = edits[m.id] ?? {};
     const nextMultiplier = parseMultiplier(edit.multiplier, m.multiplier);
     if (nextMultiplier === null) {
-      pushToast({ type: "error", message: "Множитель: число > 0 и ≤ 10" });
+      pushToast({ type: "error", message: t("admin.multiplierRange") });
       return;
     }
     setSavingId(m.id);
@@ -136,7 +138,7 @@ export default function AdminPricing() {
         multiplier: nextMultiplier,
         note: (edit.note ?? m.note ?? "").trim() || null,
       });
-      pushToast({ type: "success", message: `${m.name}: сохранено` });
+      pushToast({ type: "success", message: t("admin.modelSaved", { name: m.name }) });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });
@@ -150,7 +152,7 @@ export default function AdminPricing() {
     setSavingId(m.id);
     try {
       await adminApi.pricing.deleteModel(m.id);
-      pushToast({ type: "success", message: `${m.name}: сброшено` });
+      pushToast({ type: "success", message: t("admin.modelCleared", { name: m.name }) });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });
