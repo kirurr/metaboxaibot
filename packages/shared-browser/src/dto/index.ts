@@ -64,7 +64,8 @@ export type {
 } from "./model-settings-state.js";
 export {
   galleryOutputSchema,
-  galleryJobSchema,
+  galleryItemSchema,
+  galleryJobDetailSchema,
   galleryListResponseSchema,
   galleryFolderSchema,
   galleryModelCountSchema,
@@ -76,7 +77,8 @@ export {
 } from "./gallery.js";
 export type {
   GalleryOutput,
-  GalleryJob,
+  GalleryItem,
+  GalleryJobDetail,
   GalleryListResponse,
   GalleryFolder,
   GalleryModelCount,

@@ -4,14 +4,7 @@ import { api } from "../api/client.js";
 import { useI18n } from "../i18n.js";
 import type { TranslationKey } from "../i18n.js";
 // import { BannerSlider } from "../components/BannerSlider.js";
-import type {
-  UserProfile,
-  GalleryJob,
-  GalleryOutput,
-  GalleryFolder,
-  Model,
-  ModelSettingDef,
-} from "../types.js";
+import type { UserProfile, GalleryItem, GalleryFolder, Model, ModelSettingDef } from "../types.js";
 import { openExternalLink, closeMiniApp } from "../utils/telegram.js";
 import { SETTING_TRANSLATIONS } from "@metabox/shared-browser";
 import { StyledSelect } from "../components/management/StyledSelect.js";
@@ -284,12 +277,12 @@ function GalleryTab({
   const { t } = useI18n();
   const [section, setSection] = useState<Section>("image");
   const [modelFilter, setModelFilter] = useState<string | null>(null);
-  const [items, setItems] = useState<GalleryJob[]>([]);
+  const [items, setItems] = useState<GalleryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detailsJob, setDetailsJob] = useState<GalleryJob | null>(null);
+  const [detailsItem, setDetailsItem] = useState<GalleryItem | null>(null);
   // modelId → Model — used by the details modal to render setting labels and
   // option labels (settings page-style) instead of raw key/value strings.
   // Cached per section visit; refreshed when the active section chip changes.
@@ -299,11 +292,11 @@ function GalleryTab({
   // Folders state
   const [folders, setFolders] = useState<GalleryFolder[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
-  const [folderModalJob, setFolderModalJob] = useState<GalleryJob | null>(null);
+  const [folderModalItem, setFolderModalItem] = useState<GalleryItem | null>(null);
   const [editFolder, setEditFolder] = useState<GalleryFolder | null>(null);
   const [folderSelectOpen, setFolderSelectOpen] = useState(false);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
-  const pendingFolderJobRef = useRef<GalleryJob | null>(null);
+  const pendingFolderItemRef = useRef<GalleryItem | null>(null);
 
   const LIMIT = 20;
 
@@ -410,14 +403,16 @@ function GalleryTab({
     setPage(1);
   };
 
-  const handleSend = useCallback(async (jobId: string) => {
-    await api.gallery.sendJob(jobId);
+  const handleSend = useCallback(async (outputId: string) => {
+    await api.gallery.sendOutput(outputId);
   }, []);
 
   const handleDelete = useCallback(
-    async (jobId: string) => {
-      await api.gallery.deleteJob(jobId);
-      setItems((prev) => prev.filter((j) => j.id !== jobId));
+    async (outputId: string) => {
+      // Удаляем один output. Если это был последний в джобе — бэк снесёт всю
+      // джобу (`jobDeleted: true`); локально просто фильтруем карточку.
+      await api.gallery.deleteOutput(outputId);
+      setItems((prev) => prev.filter((it) => it.id !== outputId));
       setTotal((prev) => Math.max(0, prev - 1));
       loadFolders();
     },
@@ -425,21 +420,21 @@ function GalleryTab({
   );
 
   const handleToggleFavorite = useCallback(
-    async (job: GalleryJob) => {
+    async (item: GalleryItem) => {
       const favFolder = folders.find((f) => f.isDefault);
-      const isFav = favFolder ? job.folderIds.includes(favFolder.id) : false;
+      const isFav = favFolder ? item.folderIds.includes(favFolder.id) : false;
 
       if (isFav && favFolder) {
-        await api.gallery.favorites.remove(job.id);
+        await api.gallery.favorites.remove(item.id);
         if (activeFolderId === favFolder.id) {
-          setItems((prev) => prev.filter((j) => j.id !== job.id));
+          setItems((prev) => prev.filter((it) => it.id !== item.id));
           setTotal((prev) => Math.max(0, prev - 1));
         } else {
           setItems((prev) =>
-            prev.map((j) =>
-              j.id === job.id
-                ? { ...j, folderIds: j.folderIds.filter((id) => id !== favFolder.id) }
-                : j,
+            prev.map((it) =>
+              it.id === item.id
+                ? { ...it, folderIds: it.folderIds.filter((id) => id !== favFolder.id) }
+                : it,
             ),
           );
         }
@@ -447,9 +442,11 @@ function GalleryTab({
           prev.map((f) => (f.id === favFolder.id ? { ...f, itemCount: f.itemCount - 1 } : f)),
         );
       } else {
-        const { folderId } = await api.gallery.favorites.add(job.id);
+        const { folderId } = await api.gallery.favorites.add(item.id);
         setItems((prev) =>
-          prev.map((j) => (j.id === job.id ? { ...j, folderIds: [...j.folderIds, folderId] } : j)),
+          prev.map((it) =>
+            it.id === item.id ? { ...it, folderIds: [...it.folderIds, folderId] } : it,
+          ),
         );
         const favAlreadyExists = folders.some((f) => f.id === folderId);
         setFolders((prev) => {
@@ -606,16 +603,16 @@ function GalleryTab({
 
       {!loading && items.length > 0 && (
         <div className={`gallery-grid${section === "image" ? " gallery-grid--2col" : ""}`}>
-          {items.map((job) => (
+          {items.map((item) => (
             <GalleryCard
-              key={job.id}
-              job={job}
-              isFavorited={favFolder ? job.folderIds.includes(favFolder.id) : false}
+              key={item.id}
+              item={item}
+              isFavorited={favFolder ? item.folderIds.includes(favFolder.id) : false}
               onSend={handleSend}
               onDelete={handleDelete}
-              onOpenDetails={setDetailsJob}
+              onOpenDetails={setDetailsItem}
               onToggleFavorite={handleToggleFavorite}
-              onAddToFolder={setFolderModalJob}
+              onAddToFolder={setFolderModalItem}
             />
           ))}
         </div>
@@ -643,30 +640,30 @@ function GalleryTab({
         </div>
       )}
 
-      {detailsJob &&
+      {detailsItem &&
         createPortal(
           <GalleryDetailsModal
-            job={detailsJob}
-            model={modelsById[detailsJob.modelId] ?? null}
-            onClose={() => setDetailsJob(null)}
+            item={detailsItem}
+            model={modelsById[detailsItem.modelId] ?? null}
+            onClose={() => setDetailsItem(null)}
           />,
           document.body,
         )}
 
-      {folderModalJob &&
+      {folderModalItem &&
         createPortal(
           <FolderPickerModal
-            job={folderModalJob}
+            item={folderModalItem}
             folders={folders}
-            onClose={() => setFolderModalJob(null)}
-            onUpdate={(updatedJob) => {
-              setFolderModalJob(updatedJob);
-              setItems((prev) => prev.map((j) => (j.id === updatedJob.id ? updatedJob : j)));
+            onClose={() => setFolderModalItem(null)}
+            onUpdate={(updatedItem) => {
+              setFolderModalItem(updatedItem);
+              setItems((prev) => prev.map((it) => (it.id === updatedItem.id ? updatedItem : it)));
               loadFolders();
             }}
             onCreateFolder={() => {
-              pendingFolderJobRef.current = folderModalJob;
-              setFolderModalJob(null);
+              pendingFolderItemRef.current = folderModalItem;
+              setFolderModalItem(null);
               setCreateFolderOpen(true);
             }}
           />,
@@ -678,16 +675,16 @@ function GalleryTab({
           <FolderEditModal
             folder={null}
             onClose={() => {
-              pendingFolderJobRef.current = null;
+              pendingFolderItemRef.current = null;
               setCreateFolderOpen(false);
             }}
             onSave={async (name) => {
               const created = await api.gallery.folders.create(name);
               setFolders((prev) => sortFolders([...prev, created]));
               setCreateFolderOpen(false);
-              if (pendingFolderJobRef.current) {
-                setFolderModalJob(pendingFolderJobRef.current);
-                pendingFolderJobRef.current = null;
+              if (pendingFolderItemRef.current) {
+                setFolderModalItem(pendingFolderItemRef.current);
+                pendingFolderItemRef.current = null;
               }
             }}
           />,
@@ -739,16 +736,16 @@ function GalleryTab({
 /* ── Folder Picker Modal ───────────────────────────────────────────────────── */
 
 function FolderPickerModal({
-  job,
+  item,
   folders,
   onClose,
   onUpdate,
   onCreateFolder,
 }: {
-  job: GalleryJob;
+  item: GalleryItem;
   folders: GalleryFolder[];
   onClose: () => void;
-  onUpdate: (job: GalleryJob) => void;
+  onUpdate: (item: GalleryItem) => void;
   onCreateFolder: () => void;
 }) {
   const { t } = useI18n();
@@ -757,14 +754,14 @@ function FolderPickerModal({
   const toggle = async (folder: GalleryFolder) => {
     if (pending) return;
     setPending(folder.id);
-    const isIn = job.folderIds.includes(folder.id);
+    const isIn = item.folderIds.includes(folder.id);
     try {
       if (isIn) {
-        await api.gallery.folders.removeItem(folder.id, job.id);
-        onUpdate({ ...job, folderIds: job.folderIds.filter((id) => id !== folder.id) });
+        await api.gallery.folders.removeItem(folder.id, item.id);
+        onUpdate({ ...item, folderIds: item.folderIds.filter((id) => id !== folder.id) });
       } else {
-        await api.gallery.folders.addItem(folder.id, job.id);
-        onUpdate({ ...job, folderIds: [...job.folderIds, folder.id] });
+        await api.gallery.folders.addItem(folder.id, item.id);
+        onUpdate({ ...item, folderIds: [...item.folderIds, folder.id] });
       }
     } catch {
       // silent
@@ -782,7 +779,7 @@ function FolderPickerModal({
         <div className="modal-title">{t("gallery.folder.addToFolder")}</div>
         <ul className="folder-picker__list">
           {folders.map((folder) => {
-            const checked = job.folderIds.includes(folder.id);
+            const checked = item.folderIds.includes(folder.id);
             return (
               <li key={folder.id}>
                 <button
@@ -1064,7 +1061,7 @@ function AudioPlayButton({
 }
 
 function GalleryCard({
-  job,
+  item,
   isFavorited,
   onSend,
   onDelete,
@@ -1072,50 +1069,39 @@ function GalleryCard({
   onToggleFavorite,
   onAddToFolder,
 }: {
-  job: GalleryJob;
+  item: GalleryItem;
   isFavorited: boolean;
-  onSend: (jobId: string) => Promise<void>;
-  onDelete: (jobId: string) => Promise<void>;
-  onOpenDetails: (job: GalleryJob) => void;
-  onToggleFavorite: (job: GalleryJob) => Promise<void>;
-  onAddToFolder: (job: GalleryJob) => void;
+  onSend: (outputId: string) => Promise<void>;
+  onDelete: (outputId: string) => Promise<void>;
+  onOpenDetails: (item: GalleryItem) => void;
+  onToggleFavorite: (item: GalleryItem) => Promise<void>;
+  onAddToFolder: (item: GalleryItem) => void;
 }) {
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [imgErrors, setImgErrors] = useState<Record<string, true>>({});
-  // Track per-image load state so we can swap the shimmer skeleton out for
-  // the real <img> only once it has actually decoded. Cleared on error so
-  // the placeholder also disappears for broken thumbnails.
-  const [imgLoaded, setImgLoaded] = useState<Record<string, true>>({});
-  const markLoaded = (id: string) => setImgLoaded((p) => ({ ...p, [id]: true }));
-  const markErrored = (id: string) => {
-    setImgErrors((p) => ({ ...p, [id]: true }));
-    setImgLoaded((p) => ({ ...p, [id]: true }));
-  };
+  const [imgError, setImgError] = useState(false);
+  // Local skeleton until <img> actually decodes — swapped to the real bitmap
+  // on `onLoad`, cleared on `onError` so the placeholder doesn't hang forever.
+  const [imgLoaded, setImgLoaded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
-  const [lightboxOutput, setLightboxOutput] = useState<GalleryOutput | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [downloadingLightbox, setDownloadingLightbox] = useState(false);
+  const [favLoading, setFavLoading] = useState(false);
 
-  const isImage = job.section === "image";
-  const isVideo = job.section === "video";
-  const isAudio = job.section === "audio";
-
-  const outputs = job.outputs;
-  // Preview-only "active" output: video poster + audio play button operate on
-  // a single output. For batches the first output is shown; tap-to-switch on
-  // tiles is not exposed here since "Send to chat" now ships the whole job.
-  const previewOutput: GalleryOutput | undefined = outputs[0];
+  const isImage = item.section === "image";
+  const isVideo = item.section === "video";
+  const isAudio = item.section === "audio";
 
   const handleSend = async () => {
     setLoading(true);
     setError(null);
     try {
-      await onSend(job.id);
+      await onSend(item.id);
       setSent(true);
       setTimeout(() => setSent(false), 3000);
     } catch (err) {
@@ -1126,10 +1112,10 @@ function GalleryCard({
   };
 
   const openVideo = async () => {
-    if (videoLoading || videoUrl || !previewOutput) return;
+    if (videoLoading || videoUrl) return;
     setVideoLoading(true);
     try {
-      const res = await api.gallery.previewUrl(previewOutput.id);
+      const res = await api.gallery.previewUrl(item.id);
       setVideoUrl(res.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1139,15 +1125,14 @@ function GalleryCard({
   };
 
   const resolveAudioUrl = async () => {
-    if (!previewOutput) throw new Error("No output");
-    const res = await api.gallery.previewUrl(previewOutput.id);
+    const res = await api.gallery.previewUrl(item.id);
     return res.url;
   };
 
-  const downloadLightboxOriginal = async (outputId: string) => {
+  const downloadLightboxOriginal = async () => {
     setDownloadingLightbox(true);
     try {
-      const { url } = await api.gallery.originalUrl(outputId);
+      const { url } = await api.gallery.originalUrl(item.id);
       openExternalLink(url);
     } catch {
       // silent
@@ -1159,7 +1144,7 @@ function GalleryCard({
   const handleConfirmDelete = async () => {
     setDeleting(true);
     try {
-      await onDelete(job.id);
+      await onDelete(item.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleting(false);
@@ -1167,20 +1152,18 @@ function GalleryCard({
     }
   };
 
-  const collageOutputs = outputs.slice(0, 4);
-
-  const [favLoading, setFavLoading] = useState(false);
-
   const handleToggleFavoriteClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (favLoading) return;
     setFavLoading(true);
     try {
-      await onToggleFavorite(job);
+      await onToggleFavorite(item);
     } finally {
       setFavLoading(false);
     }
   };
+
+  const imageSrc = item.thumbnailUrl ?? item.previewUrl ?? item.outputUrl ?? "";
 
   return (
     <div className="gallery-card">
@@ -1200,7 +1183,7 @@ function GalleryCard({
           className="gallery-card__folder-btn"
           onClick={(e) => {
             e.stopPropagation();
-            onAddToFolder(job);
+            onAddToFolder(item);
           }}
           title={t("gallery.folder.addToFolder")}
           aria-label={t("gallery.folder.addToFolder")}
@@ -1220,62 +1203,23 @@ function GalleryCard({
         </button>
       </div>
 
-      {isImage && outputs.length > 1 ? (
-        <div
-          className={`gallery-card__outputs${
-            collageOutputs.length === 3 ? " gallery-card__outputs--three" : ""
-          }`}
-        >
-          {collageOutputs.map((out, i) => {
-            const showOverlay = i === 3 && outputs.length > 4;
-            const errored = imgErrors[out.id];
-            const loaded = imgLoaded[out.id];
-            const src = out.thumbnailUrl ?? out.previewUrl ?? out.outputUrl ?? "";
-            return (
-              <div
-                key={out.id}
-                className="gallery-card__output-tile"
-                onClick={() => setLightboxOutput(out)}
-                style={{ cursor: "zoom-in" }}
-              >
-                {!loaded && src && <div className="gallery-skeleton" />}
-                {!errored && src && (
-                  <img
-                    src={src}
-                    alt=""
-                    loading="lazy"
-                    onLoad={() => markLoaded(out.id)}
-                    onError={() => markErrored(out.id)}
-                  />
-                )}
-                {showOverlay && (
-                  <div className="gallery-card__output-overlay">
-                    {t("gallery.morePhotos").replace("{n}", String(outputs.length - 4))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ) : isImage && previewOutput ? (
+      {isImage ? (
         <div
           className="gallery-card__preview"
-          onClick={() => setLightboxOutput(previewOutput)}
+          onClick={() => setLightboxOpen(true)}
           style={{ cursor: "zoom-in" }}
         >
-          {!imgLoaded[previewOutput.id] && <div className="gallery-skeleton" />}
-          {!imgErrors[previewOutput.id] && (
+          {!imgLoaded && imageSrc && <div className="gallery-skeleton" />}
+          {!imgError && imageSrc && (
             <img
-              src={
-                previewOutput.thumbnailUrl ??
-                previewOutput.previewUrl ??
-                previewOutput.outputUrl ??
-                ""
-              }
-              alt={job.prompt}
+              src={imageSrc}
+              alt={item.prompt}
               loading="lazy"
-              onLoad={() => markLoaded(previewOutput.id)}
-              onError={() => markErrored(previewOutput.id)}
+              onLoad={() => setImgLoaded(true)}
+              onError={() => {
+                setImgError(true);
+                setImgLoaded(true);
+              }}
             />
           )}
         </div>
@@ -1286,16 +1230,17 @@ function GalleryCard({
           role="button"
           tabIndex={0}
         >
-          {previewOutput?.thumbnailUrl && !imgLoaded[previewOutput.id] && (
-            <div className="gallery-skeleton" />
-          )}
-          {previewOutput?.thumbnailUrl && !imgErrors[previewOutput.id] ? (
+          {item.thumbnailUrl && !imgLoaded && <div className="gallery-skeleton" />}
+          {item.thumbnailUrl && !imgError ? (
             <img
-              src={previewOutput.thumbnailUrl}
-              alt={job.prompt}
+              src={item.thumbnailUrl}
+              alt={item.prompt}
               loading="lazy"
-              onLoad={() => markLoaded(previewOutput.id)}
-              onError={() => markErrored(previewOutput.id)}
+              onLoad={() => setImgLoaded(true)}
+              onError={() => {
+                setImgError(true);
+                setImgLoaded(true);
+              }}
             />
           ) : (
             <div className="gallery-card__placeholder">🎬</div>
@@ -1314,12 +1259,12 @@ function GalleryCard({
           // overflows. Stack model / date vertically and drop the
           // prompt preview entirely — it's available in the details modal.
           <div className="gallery-card__meta gallery-card__meta--stacked">
-            <span className="gallery-card__model" title={job.modelName}>
-              {job.modelName}
+            <span className="gallery-card__model" title={item.modelName}>
+              {item.modelName}
             </span>
-            {job.completedAt && (
+            {item.completedAt && (
               <span className="gallery-card__date">
-                {new Date(job.completedAt).toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US")}
+                {new Date(item.completedAt).toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US")}
               </span>
             )}
           </div>
@@ -1327,19 +1272,19 @@ function GalleryCard({
           <>
             <div className="gallery-card__meta">
               <div className="gallery-card__model-row">
-                <span className="gallery-card__model" title={job.modelName}>
-                  {job.modelName}
+                <span className="gallery-card__model" title={item.modelName}>
+                  {item.modelName}
                 </span>
               </div>
-              {job.completedAt && (
+              {item.completedAt && (
                 <span className="gallery-card__date">
-                  {new Date(job.completedAt).toLocaleDateString(
+                  {new Date(item.completedAt).toLocaleDateString(
                     locale === "ru" ? "ru-RU" : "en-US",
                   )}
                 </span>
               )}
             </div>
-            <p className="gallery-card__prompt">{job.prompt}</p>
+            <p className="gallery-card__prompt">{item.prompt}</p>
           </>
         )}
         {error && <p className="gallery-card__error">{error}</p>}
@@ -1347,14 +1292,14 @@ function GalleryCard({
           <button
             className={`gallery-card__btn${sent ? " gallery-card__btn--sent" : ""}`}
             onClick={handleSend}
-            disabled={loading || sent || outputs.length === 0}
+            disabled={loading || sent}
           >
             {loading ? "…" : sent ? t("gallery.sent") : t("gallery.download")}
           </button>
           <button
             type="button"
             className="gallery-card__btn gallery-card__btn--secondary"
-            onClick={() => onOpenDetails(job)}
+            onClick={() => onOpenDetails(item)}
           >
             {t("gallery.details")}
           </button>
@@ -1406,26 +1351,26 @@ function GalleryCard({
           </div>,
           document.body,
         )}
-      {lightboxOutput &&
+      {lightboxOpen &&
         createPortal(
           <div
             className="modal-overlay gallery-lightbox-overlay"
-            onClick={() => setLightboxOutput(null)}
+            onClick={() => setLightboxOpen(false)}
           >
             <div className="gallery-lightbox" onClick={(e) => e.stopPropagation()}>
               <div className="gallery-lightbox__header">
                 <button
                   type="button"
                   className="gallery-lightbox__close"
-                  onClick={() => setLightboxOutput(null)}
+                  onClick={() => setLightboxOpen(false)}
                   aria-label="Close"
                 >
                   ×
                 </button>
               </div>
               <img
-                src={lightboxOutput.previewUrl ?? lightboxOutput.outputUrl ?? ""}
-                alt={job.prompt}
+                src={item.previewUrl ?? item.outputUrl ?? ""}
+                alt={item.prompt}
                 className="gallery-lightbox__img"
               />
               {error && <p className="gallery-card__error">{error}</p>}
@@ -1441,7 +1386,7 @@ function GalleryCard({
                 <button
                   type="button"
                   className="gallery-card__btn"
-                  onClick={() => void downloadLightboxOriginal(lightboxOutput.id)}
+                  onClick={() => void downloadLightboxOriginal()}
                   disabled={downloadingLightbox}
                 >
                   {downloadingLightbox ? "…" : t("gallery.downloadOriginal")}
@@ -1500,24 +1445,22 @@ interface PickerCatalogs {
 }
 
 function GalleryDetailsModal({
-  job,
+  item,
   model,
   onClose,
 }: {
-  job: GalleryJob;
+  item: GalleryItem;
   model: Model | null;
   onClose: () => void;
 }) {
   const { t, locale } = useI18n();
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [catalogs, setCatalogs] = useState<PickerCatalogs>({});
   const [catalogsLoaded, setCatalogsLoaded] = useState(false);
-  const downloadRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch picker catalogs (voices/avatars/motions/styles) needed to resolve
   // ID-shaped setting values into friendly names. Only the catalogs the
@@ -1618,7 +1561,7 @@ function GalleryDetailsModal({
   // `catalogs`; failures and never-useful companion keys are dropped from the
   // list entirely so the user only sees meaningful rows.
   const settingLocale = SETTING_TRANSLATIONS[locale] ?? SETTING_TRANSLATIONS["en"] ?? {};
-  const rawSettings = job.modelSettings ?? {};
+  const rawSettings = item.modelSettings ?? {};
 
   const resolvePickerValue = (def: ModelSettingDef, value: unknown): string | null => {
     if (def.type === "motion-picker") {
@@ -1743,35 +1686,18 @@ function GalleryDetailsModal({
 
   const settingsEntries = entries;
 
-  // Close the dropdown when the user clicks outside it.
-  useEffect(() => {
-    if (!downloadOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!downloadRef.current?.contains(e.target as Node)) setDownloadOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [downloadOpen]);
-
-  const downloadOutput = async (outputId: string) => {
-    setDownloadingId(outputId);
+  const downloadOriginal = async () => {
+    setDownloading(true);
     setError(null);
     try {
-      const { url } = await api.gallery.originalUrl(outputId);
+      const { url } = await api.gallery.originalUrl(item.id);
       openExternalLink(url);
-      setDownloadOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setDownloadingId(null);
+      setDownloading(false);
     }
   };
-
-  const outputLabelKey = (() => {
-    if (job.section === "video") return "gallery.outputLabel.video" as const;
-    if (job.section === "audio") return "gallery.outputLabel.audio" as const;
-    return "gallery.outputLabel.image" as const;
-  })();
 
   const handleApplySettings = async () => {
     setApplying(true);
@@ -1789,11 +1715,11 @@ function GalleryDetailsModal({
             fullSettings[def.key] = def.default;
         }
       }
-      for (const [k, v] of Object.entries(job.modelSettings ?? {})) {
+      for (const [k, v] of Object.entries(item.modelSettings ?? {})) {
         if (ALWAYS_HIDDEN_SETTING_KEYS.has(k)) continue;
         fullSettings[k] = v;
       }
-      await api.modelSettings.set(job.modelId, fullSettings, { replace: true });
+      await api.modelSettings.set(item.modelId, fullSettings, { replace: true });
       setApplied(true);
       setTimeout(() => setApplied(false), 2500);
     } catch (err) {
@@ -1805,7 +1731,7 @@ function GalleryDetailsModal({
 
   const handleCopyPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(job.prompt);
+      await navigator.clipboard.writeText(item.prompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch (err) {
@@ -1819,11 +1745,11 @@ function GalleryDetailsModal({
         <button type="button" className="modal-close" onClick={onClose} aria-label="close">
           ×
         </button>
-        <h3 className="modal-title">{job.modelName}</h3>
+        <h3 className="modal-title">{item.modelName}</h3>
 
         <div className="gallery-modal__section">
           <div className="gallery-modal__label">{t("gallery.prompt")}</div>
-          <div className="gallery-modal__prompt">{job.prompt}</div>
+          <div className="gallery-modal__prompt">{item.prompt}</div>
         </div>
 
         <div className="gallery-modal__section">
@@ -1845,44 +1771,14 @@ function GalleryDetailsModal({
         {error && <div className="gallery-modal__error">❌ {error}</div>}
 
         <div className="gallery-modal__actions">
-          {job.outputs.length <= 1 ? (
-            <button
-              type="button"
-              className="gallery-card__btn"
-              onClick={() => job.outputs[0] && downloadOutput(job.outputs[0].id)}
-              disabled={downloadingId !== null || job.outputs.length === 0}
-            >
-              {downloadingId ? "…" : t("gallery.downloadOriginal")}
-            </button>
-          ) : (
-            <div className="gallery-modal__download" ref={downloadRef}>
-              <button
-                type="button"
-                className="gallery-card__btn gallery-modal__download-toggle"
-                onClick={() => setDownloadOpen((v) => !v)}
-                disabled={downloadingId !== null}
-              >
-                <span>{downloadingId ? "…" : t("gallery.downloadOriginal")}</span>
-                <span className="gallery-modal__download-caret">▾</span>
-              </button>
-              {downloadOpen && (
-                <div className="gallery-modal__download-menu" role="listbox">
-                  {job.outputs.map((out, i) => (
-                    <button
-                      key={out.id}
-                      type="button"
-                      className="gallery-modal__download-item"
-                      onClick={() => downloadOutput(out.id)}
-                      disabled={downloadingId !== null}
-                      role="option"
-                    >
-                      {t(outputLabelKey).replace("{n}", String(i + 1))}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <button
+            type="button"
+            className="gallery-card__btn"
+            onClick={downloadOriginal}
+            disabled={downloading}
+          >
+            {downloading ? "…" : t("gallery.downloadOriginal")}
+          </button>
           <button
             type="button"
             className={`gallery-card__btn${applied ? " gallery-card__btn--sent" : ""}`}

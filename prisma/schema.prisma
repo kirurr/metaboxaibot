@@ -290,7 +290,6 @@ model GenerationJob {
   completedAt DateTime?
 
   outputs          GenerationJobOutput[]
-  folderItems      GalleryFolderItem[]
   webNotifications WebNotification[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -342,7 +341,8 @@ model GenerationJobOutput {
 
   createdAt DateTime @default(now())
 
-  job GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job         GenerationJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  folderItems GalleryFolderItem[]
 
   @@unique([jobId, index]) // защита от дубликата при stalled-redelivery race в finalize
   @@index([jobId])
@@ -543,14 +543,14 @@ model GalleryFolder {
 
 model GalleryFolderItem {
   folderId String
-  jobId    String
+  outputId String
   addedAt  DateTime @default(now())
 
-  folder GalleryFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  job    GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  folder GalleryFolder       @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  output GenerationJobOutput @relation(fields: [outputId], references: [id], onDelete: Cascade)
 
-  @@id([folderId, jobId])
-  @@index([jobId])
+  @@id([folderId, outputId])
+  @@index([outputId])
   @@map("gallery_folder_items")
 }
 

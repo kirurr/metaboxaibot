@@ -478,6 +478,162 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * POST /gallery/outputs/:id/send
+   * Re-delivers ONE output to the user's Telegram chat. Mirrors the single-
+   * output branch of `/gallery/jobs/:id/send` (refine+action row, ≤10 MB
+   * sendPhoto / ≤50 MB sendDocument / download link otherwise).
+   *
+   * Используется новой gallery UI (1 карточка = 1 output). Старый `jobs/:id/send`
+   * остаётся для resend всей пачки media group'ом — поведение бота сохраняется.
+   */
+  fastify.post<{ Params: { id: string } }>("/gallery/outputs/:id/send", async (request, reply) => {
+    const userId = (request as AuthRequest).userId;
+    const telegramId = (request as AuthRequest).telegramId;
+    const { id } = request.params;
+
+    const output = await db.generationJobOutput.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        index: true,
+        s3Key: true,
+        outputUrl: true,
+        job: {
+          select: {
+            userId: true,
+            section: true,
+            modelId: true,
+            prompt: true,
+          },
+        },
+      },
+    });
+
+    if (!output) return reply.code(404).send({ error: "Not found" });
+    if (output.job.userId !== userId) return reply.code(403).send({ error: "Forbidden" });
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { language: true },
+    });
+    const t = getT((user?.language ?? "ru") as Parameters<typeof getT>[0]);
+
+    const TELEGRAM_DOC_MAX_BYTES = 50 * 1024 * 1024;
+
+    let buffer: Buffer | null = null;
+    if (output.s3Key) {
+      const s3Url = await getFileUrl(output.s3Key);
+      if (s3Url) buffer = await downloadBuffer(s3Url).catch(() => null);
+    }
+    if (!buffer && output.outputUrl) {
+      buffer = await downloadBuffer(output.outputUrl).catch(() => null);
+    }
+    if (!buffer) return reply.code(422).send({ error: "Output not deliverable" });
+
+    const size = buffer.byteLength;
+    const filename = filenameFromS3Key(
+      output.s3Key,
+      defaultFilename(output.job.section, output.index),
+    );
+
+    const caption = buildResultCaption(
+      t,
+      AI_MODELS[output.job.modelId]?.name ?? output.job.modelId,
+      output.job.prompt,
+    );
+    const botUrl = `https://api.telegram.org/bot${config.bot.token}`;
+    const isImage = output.job.section === "image";
+    const sectionMethod = sectionToMethod(output.job.section);
+
+    type InlineButton = {
+      text: string;
+      callback_data?: string;
+      url?: string;
+      web_app?: { url: string };
+    };
+
+    const refineBtn: InlineButton | null = isImage
+      ? { text: t.design.refine, callback_data: `design_ref_${output.id}` }
+      : null;
+
+    let actionBtn: InlineButton | null = null;
+    if (size <= TELEGRAM_DOC_MAX_BYTES) {
+      actionBtn = { text: t.common.sendOriginal, callback_data: `orig_${output.id}` };
+    } else if (output.s3Key) {
+      actionBtn = buildDownloadButton(t.common.downloadFile, output.s3Key, userId);
+    }
+
+    const inlineRows = [refineBtn, actionBtn]
+      .filter((b): b is InlineButton => b !== null)
+      .map((b) => [b]);
+    const replyMarkup = inlineRows.length ? { inline_keyboard: inlineRows } : undefined;
+
+    const downloadMarkup = output.s3Key
+      ? {
+          inline_keyboard: [[buildDownloadButton(t.common.downloadFile, output.s3Key, userId)]],
+        }
+      : undefined;
+
+    const tooLargeForMultipart = sectionMethod !== "sendPhoto" && size > MEDIA_BUFFER_MAX_BYTES;
+
+    if (tooLargeForMultipart) {
+      await fetch(`${botUrl}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: telegramId.toString(),
+          text: `${caption}\n\n${t.errors.fileTooLargeForTelegram}`,
+          parse_mode: "HTML",
+          ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
+        }),
+      });
+      return { success: true };
+    }
+
+    let sendBuffer = buffer;
+    let sendFilename = filename;
+    if (sectionMethod === "sendPhoto") {
+      const prepared = await prepareImageBuffer(buffer, filename);
+      sendBuffer = prepared.buffer;
+      sendFilename = prepared.filename;
+    }
+
+    try {
+      await sendBufferToUser(
+        telegramId,
+        sectionMethod,
+        sendBuffer,
+        sendFilename,
+        caption,
+        replyMarkup,
+      );
+    } catch (err) {
+      const isTooLarge =
+        err instanceof Error &&
+        (err.message.includes("Request Entity Too Large") ||
+          err.message.includes("file is too big") ||
+          err.message.includes("wrong file identifier"));
+
+      if (isTooLarge) {
+        await fetch(`${botUrl}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: telegramId.toString(),
+            text: `${caption}\n\n${t.errors.fileTooLargeForTelegram}`,
+            parse_mode: "HTML",
+            ...(downloadMarkup ? { reply_markup: downloadMarkup } : {}),
+          }),
+        });
+      } else {
+        throw err;
+      }
+    }
+
+    return { success: true };
+  });
+
+  /**
    * GET /gallery/model-counts?section=image|audio|video
    * Returns per-model generation counts for the current user in a section,
    * ordered by count descending. Only models with at least one job are included.
@@ -607,6 +763,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       await galleryService.deleteJob(userId, id);
       return { success: true };
+    } catch (err) {
+      return mapGalleryError(err, reply);
+    }
+  });
+
+  /**
+   * DELETE /gallery/outputs/:id
+   * Удаляет один output (один кадр пачки). Если это был последний — удаляется
+   * вся джоба (`jobDeleted: true`).
+   */
+  fastify.delete<{ Params: { id: string } }>("/gallery/outputs/:id", async (request, reply) => {
+    const userId = (request as AuthRequest).userId;
+    const { id } = request.params;
+    try {
+      return await galleryService.deleteOutput(userId, id);
     } catch (err) {
       return mapGalleryError(err, reply);
     }
@@ -759,16 +930,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /gallery/folders/:folderId/items
-   * Adds a generation job to a folder.
+   * Добавляет один output (картинку из пачки) в папку. После refactor'а
+   * 2026-05-31 фавориты и папки стали output-level — джоба больше не может
+   * быть «в папке» как единое целое.
    */
   fastify.post<{
     Params: { folderId: string };
-    Body: { jobId: string };
+    Body: { outputId: string };
   }>(
     "/gallery/folders/:folderId/items",
     {
       schema: {
-        description: "Add job to folder",
+        description: "Add output to folder",
         params: {
           type: "object",
           properties: { folderId: { type: "string", description: "Folder ID" } },
@@ -776,8 +949,8 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
         },
         body: {
           type: "object",
-          properties: { jobId: { type: "string", description: "Job ID" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string", description: "Output ID" } },
+          required: ["outputId"],
         },
         response: {
           200: {
@@ -801,9 +974,9 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
       const { folderId } = request.params;
-      const { jobId } = request.body;
+      const { outputId } = request.body;
       try {
-        await galleryService.addJobToFolder(userId, folderId, jobId);
+        await galleryService.addOutputToFolder(userId, folderId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);
@@ -812,21 +985,21 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
-   * DELETE /gallery/folders/:folderId/items/:jobId
-   * Removes a generation job from a folder.
+   * DELETE /gallery/folders/:folderId/items/:outputId
+   * Removes a single output from a folder.
    */
-  fastify.delete<{ Params: { folderId: string; jobId: string } }>(
-    "/gallery/folders/:folderId/items/:jobId",
+  fastify.delete<{ Params: { folderId: string; outputId: string } }>(
+    "/gallery/folders/:folderId/items/:outputId",
     {
       schema: {
-        description: "Remove job from folder",
+        description: "Remove output from folder",
         params: {
           type: "object",
           properties: {
             folderId: { type: "string", description: "Folder ID" },
-            jobId: { type: "string", description: "Job ID" },
+            outputId: { type: "string", description: "Output ID" },
           },
-          required: ["folderId", "jobId"],
+          required: ["folderId", "outputId"],
         },
         response: {
           200: {
@@ -849,9 +1022,9 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
-      const { folderId, jobId } = request.params;
+      const { folderId, outputId } = request.params;
       try {
-        await galleryService.removeJobFromFolder(userId, folderId, jobId);
+        await galleryService.removeOutputFromFolder(userId, folderId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);
@@ -861,18 +1034,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /gallery/favorites
-   * Ensures the Favorites folder exists for the user, then adds the job.
+   * Ensures the Favorites folder exists for the user, then adds the output.
    * Returns the Favorites folder id.
    */
-  fastify.post<{ Body: { jobId: string } }>(
+  fastify.post<{ Body: { outputId: string } }>(
     "/gallery/favorites",
     {
       schema: {
-        description: "Add job to Favorites folder",
+        description: "Add output to Favorites folder",
         body: {
           type: "object",
-          properties: { jobId: { type: "string", description: "Job ID" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string", description: "Output ID" } },
+          required: ["outputId"],
         },
         response: {
           200: {
@@ -895,9 +1068,9 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
-      const { jobId } = request.body;
+      const { outputId } = request.body;
       try {
-        return await galleryService.addToFavorites(userId, jobId);
+        return await galleryService.addToFavorites(userId, outputId);
       } catch (err) {
         return mapGalleryError(err, reply);
       }
@@ -905,18 +1078,18 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
-   * DELETE /gallery/favorites/:jobId
-   * Removes a job from the Favorites folder (if it exists).
+   * DELETE /gallery/favorites/:outputId
+   * Removes an output from the Favorites folder (if it exists).
    */
-  fastify.delete<{ Params: { jobId: string } }>(
-    "/gallery/favorites/:jobId",
+  fastify.delete<{ Params: { outputId: string } }>(
+    "/gallery/favorites/:outputId",
     {
       schema: {
-        description: "Remove job from Favorites folder",
+        description: "Remove output from Favorites folder",
         params: {
           type: "object",
-          properties: { jobId: { type: "string", description: "Job ID" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string", description: "Output ID" } },
+          required: ["outputId"],
         },
         response: {
           200: {
@@ -934,9 +1107,9 @@ export const galleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const userId = (request as AuthRequest).userId;
-      const { jobId } = request.params;
+      const { outputId } = request.params;
       try {
-        await galleryService.removeFromFavorites(userId, jobId);
+        await galleryService.removeFromFavorites(userId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);

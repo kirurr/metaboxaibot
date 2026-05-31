@@ -9,19 +9,24 @@
  * Все эндпоинты требуют привязанного Telegram (бэкенд гейтит
  * `webTelegramLinkedPreHandler`). На 403 TELEGRAM_NOT_LINKED `apiClient`
  * сам открывает модалку через `useUIStore`.
+ *
+ * История: до 2026-05-31 список галереи группировал outputs под job'у, а
+ * фавориты/папки висели на job'е. Теперь — один item на output (`GalleryItem`),
+ * фавориты/папки на outputId. `getGalleryJob` остался для лайтбокса.
  */
 
 import z from "zod";
 import { apiClient } from "./client";
 import {
-  galleryJobSchema,
+  galleryJobDetailSchema,
   galleryListResponseSchema,
   galleryFolderSchema,
   galleryModelCountSchema,
   galleryUrlResponseSchema,
   galleryFavoritesResponseSchema,
-  type GalleryJob,
   type GalleryOutput,
+  type GalleryItem,
+  type GalleryJobDetail,
   type GalleryFolder,
   type GalleryListResponse,
   type GalleryModelCount,
@@ -34,8 +39,9 @@ import {
 
 // Re-export для удобства потребителей в `packages/web`.
 export type {
-  GalleryJob,
   GalleryOutput,
+  GalleryItem,
+  GalleryJobDetail,
   GalleryFolder,
   GalleryListResponse,
   GalleryModelCount,
@@ -49,7 +55,9 @@ export type {
 const modelCountsArraySchema = z.array(galleryModelCountSchema);
 const foldersArraySchema = z.array(galleryFolderSchema);
 
-// ── Jobs ────────────────────────────────────────────────────────────────────
+// ── Items ───────────────────────────────────────────────────────────────────
+// (хелперы оставляем под именем "Jobs" для совместимости с импортами в коде —
+// семантика теперь output-flat, но это деталь shape'а ответа.)
 
 export async function listGalleryJobs(
   params: ListGalleryJobsQuery = {},
@@ -94,9 +102,12 @@ export async function getGalleryOriginalUrl(outputId: string): Promise<GalleryUr
   return galleryUrlResponseSchema.parse(data);
 }
 
-export async function getGalleryJob(jobId: string, signal?: AbortSignal): Promise<GalleryJob> {
+export async function getGalleryJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<GalleryJobDetail> {
   const data = await apiClient(`/web/gallery/jobs/${encodeURIComponent(jobId)}`, { signal });
-  return galleryJobSchema.parse(data);
+  return galleryJobDetailSchema.parse(data);
 }
 
 export function deleteGalleryJob(jobId: string) {
@@ -142,32 +153,32 @@ export function deleteGalleryFolder(folderId: string) {
   });
 }
 
-export function addJobToGalleryFolder(folderId: string, jobId: string) {
-  return apiClient<{ success: boolean }, { jobId: string }>(
+export function addOutputToGalleryFolder(folderId: string, outputId: string) {
+  return apiClient<{ success: boolean }, { outputId: string }>(
     `/web/gallery/folders/${encodeURIComponent(folderId)}/items`,
-    { method: "POST", body: { jobId } },
+    { method: "POST", body: { outputId } },
   );
 }
 
-export function removeJobFromGalleryFolder(folderId: string, jobId: string) {
+export function removeOutputFromGalleryFolder(folderId: string, outputId: string) {
   return apiClient<{ success: boolean }>(
-    `/web/gallery/folders/${encodeURIComponent(folderId)}/items/${encodeURIComponent(jobId)}`,
+    `/web/gallery/folders/${encodeURIComponent(folderId)}/items/${encodeURIComponent(outputId)}`,
     { method: "DELETE" },
   );
 }
 
 // ── Favorites (sugar над default-папкой) ────────────────────────────────────
 
-export async function addToGalleryFavorites(jobId: string): Promise<GalleryFavoritesResponse> {
+export async function addToGalleryFavorites(outputId: string): Promise<GalleryFavoritesResponse> {
   const data = await apiClient("/web/gallery/favorites", {
     method: "POST",
-    body: { jobId },
+    body: { outputId },
   });
   return galleryFavoritesResponseSchema.parse(data);
 }
 
-export function removeFromGalleryFavorites(jobId: string) {
-  return apiClient<{ success: boolean }>(`/web/gallery/favorites/${encodeURIComponent(jobId)}`, {
+export function removeFromGalleryFavorites(outputId: string) {
+  return apiClient<{ success: boolean }>(`/web/gallery/favorites/${encodeURIComponent(outputId)}`, {
     method: "DELETE",
   });
 }
