@@ -1,4 +1,12 @@
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type SyntheticEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowRight,
@@ -228,12 +236,10 @@ export function GenerationPreviewModal({
                 <audio key={active.id} src={active.url} controls className="w-full max-w-md" />
               </div>
             ) : (
-              <img
+              <ProgressiveImage
                 key={active.id}
-                src={active.thumbnailUrl ?? active.url}
-                alt=""
-                onClick={(e) => e.stopPropagation()}
-                className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
+                src={active.url}
+                thumbnailUrl={active.thumbnailUrl ?? null}
               />
             )}
 
@@ -314,6 +320,64 @@ export function GenerationPreviewModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Прогрессивная картинка: thumb рисуется как `background-image` контейнера —
+ * стабильный фон без `<img>`-flicker'а. Full абсолютно поверх с `opacity-0`,
+ * грузится с `fetchPriority="high"`; в `onLoad` ждём `decode()` (готовность
+ * к paint без частичного кадра), только потом фейдим в `opacity-100`.
+ * Если thumb нет — рендерим один `<img>` как раньше.
+ */
+function ProgressiveImage({ src, thumbnailUrl }: { src: string; thumbnailUrl: string | null }) {
+  const hasThumb = !!thumbnailUrl && thumbnailUrl !== src;
+  const [fullLoaded, setFullLoaded] = useState(false);
+
+  const handleLoad = (e: SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    img
+      .decode()
+      .then(() => setFullLoaded(true))
+      .catch(() => setFullLoaded(true));
+  };
+
+  if (!hasThumb) {
+    return (
+      <img
+        src={src}
+        alt=""
+        fetchPriority="high"
+        decoding="async"
+        onClick={(e) => e.stopPropagation()}
+        className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="relative w-full h-full"
+      style={{
+        backgroundImage: `url("${thumbnailUrl}")`,
+        backgroundSize: "contain",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <img
+        src={src}
+        alt=""
+        fetchPriority="high"
+        decoding="async"
+        onLoad={handleLoad}
+        className={clsx(
+          "absolute inset-0 w-full h-full object-contain rounded-[var(--radius)] shadow-2xl transition-opacity duration-300",
+          !fullLoaded && "opacity-0",
+        )}
+      />
+    </div>
   );
 }
 
