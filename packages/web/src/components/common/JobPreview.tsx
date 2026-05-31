@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { getGalleryOriginalUrl, type GalleryFolder, type GalleryJob } from "@/api/gallery";
 import {
@@ -13,6 +14,7 @@ import {
   GenerationPreviewModal,
   type PreviewOutput,
 } from "@/components/common/GenerationPreviewModal";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { getModelDisplay } from "@/stores/modelsStore";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
@@ -51,6 +53,7 @@ export function JobPreview({
    *  `jobRemoved` = был удалён последний output и снесена вся джоба. */
   onDeleted?: (jobId: string, jobRemoved: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
   const addToFolder = useAddJobToGalleryFolder();
@@ -63,6 +66,7 @@ export function JobPreview({
   // Локально скрытые (только что удалённые) output'ы — чтобы модалка обновилась
   // сразу, не дожидаясь рефетча `useGalleryJob`.
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const modelDisplay = getModelDisplay(job.modelId, job.modelName);
 
   const previewOutputs = useMemo<PreviewOutput[]>(
@@ -82,7 +86,7 @@ export function JobPreview({
     const section = normalizeSection(job.section);
     if (!section) {
       // Невалидную секцию показываем тостом, модалку оставляем открытой.
-      pushToast({ type: "error", message: "Неизвестная секция" });
+      pushToast({ type: "error", message: t("common.unknownSection") });
       return;
     }
     onClose();
@@ -92,7 +96,7 @@ export function JobPreview({
       prompt: job.prompt,
       settings: job.modelSettings,
     });
-  }, [job, navigate, pushToast, onClose]);
+  }, [job, navigate, pushToast, onClose, t]);
 
   const handleDownload = useCallback(async () => {
     // Ищем в `previewOutputs` (отфильтрован по url), а не в `job.outputs` —
@@ -125,12 +129,12 @@ export function JobPreview({
       createFolder.mutate(
         { name },
         {
-          onSuccess: () => pushToast({ type: "success", message: "Папка создана" }),
+          onSuccess: () => pushToast({ type: "success", message: t("common.folderCreated") }),
           onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
         },
       );
     },
-    [createFolder, pushToast],
+    [createFolder, pushToast, t],
   );
 
   const favId = folders.find((f) => f.isDefault)?.id;
@@ -144,16 +148,18 @@ export function JobPreview({
   }, [isFavorite, addFav, removeFav, job.id, pushToast]);
 
   const handleDelete = useCallback(() => {
+    setConfirmDeleteOpen(true);
+  }, []);
+
+  const performDelete = useCallback(() => {
     const safe = Math.min(activeIdx, previewOutputs.length - 1);
     const out = previewOutputs[safe];
     if (!out) return;
-    const isLast = previewOutputs.length <= 1;
-    const msg = isLast ? "Удалить работу безвозвратно?" : "Удалить этот результат безвозвратно?";
-    if (!window.confirm(msg)) return;
     deleteOutput.mutate(out.id, {
       onSuccess: (res) => {
+        setConfirmDeleteOpen(false);
         if (res.jobDeleted) {
-          pushToast({ type: "success", message: "Работа удалена" });
+          pushToast({ type: "success", message: t("common.jobDeleted") });
           onDeleted?.(job.id, true);
           onClose();
         } else {
@@ -163,13 +169,13 @@ export function JobPreview({
             return next;
           });
           setActiveIdx((i) => Math.max(0, Math.min(i, previewOutputs.length - 2)));
-          pushToast({ type: "success", message: "Результат удалён" });
+          pushToast({ type: "success", message: t("common.resultDeleted") });
           onDeleted?.(job.id, false);
         }
       },
       onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
     });
-  }, [deleteOutput, previewOutputs, activeIdx, job.id, pushToast, onClose, onDeleted]);
+  }, [deleteOutput, previewOutputs, activeIdx, job.id, pushToast, onClose, onDeleted, t]);
 
   // Активный output как источник для «открыть в инструменте». s3Key есть только
   // у сохранённых в наш S3 output'ов (provider-only → null, кнопки прячем).
@@ -222,36 +228,51 @@ export function JobPreview({
   const activeJobOutput = job.outputs.find((o) => o.id === previewOutputs[safeIdx]?.id);
   const canReuse = !!activeJobOutput?.s3Key;
 
+  const isLastOutput = previewOutputs.length <= 1;
+
   return (
-    <GenerationPreviewModal
-      outputs={previewOutputs}
-      activeIdx={safeIdx}
-      onActiveIdxChange={setActiveIdx}
-      section={job.section}
-      onClose={onClose}
-      info={{
-        title: modelDisplay.name,
-        iconPath: modelDisplay.icon,
-        dateIso: job.completedAt,
-        tokensValue,
-        prompt: job.prompt,
-        shots: parseShots(job.modelSettings?.shots),
-        settings: buildSettingsRows(job.modelId, job.modelSettings),
-        isFavorite,
-        onToggleFavorite: handleToggleFavorite,
-        onDelete: handleDelete,
-        onAnimate: sec === "image" && canReuse ? handleAnimate : undefined,
-        onReference: sec === "image" && canReuse ? handleReference : undefined,
-        onUpscale: (sec === "image" || sec === "video") && canReuse ? handleUpscale : undefined,
-        onRepeat: handleRepeat,
-        onDownload: handleDownload,
-        folders: {
-          list: folders,
-          selectedIds: job.folderIds,
-          onToggle: handleToggleFolder,
-          onCreate: handleCreateFolder,
-        },
-      }}
-    />
+    <>
+      <GenerationPreviewModal
+        outputs={previewOutputs}
+        activeIdx={safeIdx}
+        onActiveIdxChange={setActiveIdx}
+        section={job.section}
+        onClose={onClose}
+        info={{
+          title: modelDisplay.name,
+          iconPath: modelDisplay.icon,
+          dateIso: job.completedAt,
+          tokensValue,
+          prompt: job.prompt,
+          shots: parseShots(job.modelSettings?.shots),
+          settings: buildSettingsRows(job.modelId, job.modelSettings),
+          isFavorite,
+          onToggleFavorite: handleToggleFavorite,
+          onDelete: handleDelete,
+          onAnimate: sec === "image" && canReuse ? handleAnimate : undefined,
+          onReference: sec === "image" && canReuse ? handleReference : undefined,
+          onUpscale: (sec === "image" || sec === "video") && canReuse ? handleUpscale : undefined,
+          onRepeat: handleRepeat,
+          onDownload: handleDownload,
+          folders: {
+            list: folders,
+            selectedIds: job.folderIds,
+            onToggle: handleToggleFolder,
+            onCreate: handleCreateFolder,
+          },
+        }}
+      />
+      {confirmDeleteOpen && (
+        <ConfirmDialog
+          title={isLastOutput ? t("common.deleteJob") : t("common.deleteResult")}
+          message={t("common.cannotUndo")}
+          confirmLabel={t("common.delete")}
+          danger
+          pending={deleteOutput.isPending}
+          onConfirm={performDelete}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+      )}
+    </>
   );
 }

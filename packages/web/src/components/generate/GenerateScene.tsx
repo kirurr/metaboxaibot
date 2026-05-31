@@ -1078,7 +1078,7 @@ export function GenerateScene({
     if (!modelExists) {
       pushToast({
         type: "info",
-        message: "Модель из примера больше недоступна — открыли с дефолтной",
+        message: t("generate.exampleModelUnavailableOpenedDefault"),
       });
     }
 
@@ -1095,6 +1095,7 @@ export function GenerateScene({
     navigate,
     setSearchParams,
     pushToast,
+    t,
   ]);
 
   const activeMode = useMemo(
@@ -2143,7 +2144,7 @@ export function GenerateScene({
   function handleApplyPromptExample(ex: PromptExample) {
     const targetSection = ex.model ? normalizeSection(ex.section) : null;
     if (!targetSection || !ex.model) {
-      pushToast({ type: "info", message: "Модель примера недоступна" });
+      pushToast({ type: "info", message: t("generate.exampleModelUnavailable") });
       return;
     }
     const settings =

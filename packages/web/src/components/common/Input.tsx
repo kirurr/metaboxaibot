@@ -31,12 +31,7 @@ export const Input = forwardRef<HTMLInputElement, Props>(function Input(
           id={id}
           ref={ref}
           type={effectiveType}
-          className={clsx(
-            "w-full h-12 px-3.5",
-            togglePassword && "pr-11",
-            error && "!border-danger",
-            className,
-          )}
+          className={clsx("input", togglePassword && "pr-11", error && "!border-danger", className)}
           aria-invalid={!!error}
           {...rest}
         />

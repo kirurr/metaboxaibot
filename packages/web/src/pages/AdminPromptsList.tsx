@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, Edit2, Trash2, Loader2, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/common/Button";
@@ -33,6 +34,7 @@ function formatDate(iso: string): string {
 }
 
 export default function AdminPromptsList() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
   const [section, setSection] = useState<SectionFilter>("");
@@ -44,7 +46,7 @@ export default function AdminPromptsList() {
     const preview = truncate(prompt, 60);
     if (!window.confirm(`Удалить промпт?\n\n«${preview}»`)) return;
     deleteMutation.mutate(id, {
-      onSuccess: () => pushToast({ type: "success", message: "Промпт удалён" }),
+      onSuccess: () => pushToast({ type: "success", message: t("admin.promptDeleted") }),
       onError: (e) => pushToast({ type: "error", message: (e as Error).message }),
     });
   };

@@ -183,7 +183,21 @@
     "upscale": "Upscale",
     "newFolder": "New folder",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "deleteJob": "Delete generation?",
+    "deleteResult": "Delete result?",
+    "deleteFolderTitle": "Delete folder «{{name}}»?",
+    "cannotUndo": "This action cannot be undone.",
+    "foldersKeepItems": "Items inside will be kept.",
+    "folderCreated": "Folder created",
+    "folderRenamed": "Folder renamed",
+    "folderDeleted": "Folder deleted",
+    "jobDeleted": "Generation deleted",
+    "resultDeleted": "Result deleted",
+    "unknownSection": "Unknown section",
+    "jobNotFound": "Generation not found",
+    "saved": "Saved",
+    "deleted": "Deleted"
   },
   "auth": {
     "welcomeBack": "Welcome back.",
@@ -375,7 +389,9 @@
       "errTooMany": "Too many shots",
       "errEmptyPrompt": "Fill in the prompt for every shot",
       "errTotal": "Total duration must be 3–15s"
-    }
+    },
+    "exampleModelUnavailable": "Example model unavailable",
+    "exampleModelUnavailableOpenedDefault": "The example model is no longer available — opened with the default"
   },
   "chat": {
     "newDialog": "New dialog",
@@ -681,5 +697,17 @@
     "cancel": "Cancel",
     "create": "Create",
     "creating": "Creating…"
+  },
+  "admin": {
+    "promptCreated": "Prompt created",
+    "promptUpdated": "Prompt updated",
+    "promptDeleted": "Prompt deleted",
+    "proxySaved": "Proxy saved",
+    "marginSaved": "Global margin saved",
+    "multiplierRange": "Multiplier: number > 0 and ≤ 10",
+    "overrideCleared": "Override cleared",
+    "modelSaved": "{{name}}: saved",
+    "modelCleared": "{{name}}: cleared",
+    "keyValueRequired": "keyValue is required"
   }
 }
