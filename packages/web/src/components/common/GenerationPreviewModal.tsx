@@ -1,4 +1,14 @@
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type SyntheticEvent,
+  type TouchEvent as ReactTouchEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowRight,
@@ -28,6 +38,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import type { ShotEntry } from "@/utils/multishot";
 import type { SettingRow } from "@/utils/settingsDisplay";
 import type { GalleryFolder } from "@/api/gallery";
+import { preloadImage } from "@/utils/imagePreload";
 
 /**
  * Универсальная модалка просмотра output'а(-ов) генерации. Используется и в
@@ -44,6 +55,22 @@ import type { GalleryFolder } from "@/api/gallery";
  * сворачиваемый промпт, опциональные чипы папок (toggle add/remove),
  * кнопки «Повторить» / «Скачать оригинал» — рендерятся по наличию колбэков.
  */
+
+// Bottom-sheet drag thresholds (mobile-only PreviewInfoCard).
+const DRAG_TOGGLE_PX = 60;
+const DRAG_TOGGLE_VELOCITY = 0.4; // px/ms
+// Высота видимой полоски в свёрнутом состоянии (handle + padding).
+const COLLAPSED_PEEK_PX = 24;
+const SHEET_TRANSITION = "transform 220ms cubic-bezier(.22,1,.36,1)";
+
+// Apple-TV-стиль 3D-наклон картинки при наведении (desktop-only). Угол
+// максимален у краёв картинки, в центре — почти плоско. Подъём (scale) даёт
+// лёгкое ощущение «всплытия» под курсором. Transition сглаживает и следование
+// за курсором, и возврат в плоскость на mouseleave.
+const TILT_MAX_DEG = 5;
+const TILT_SCALE = 1.02;
+const TILT_PERSPECTIVE_PX = 1000;
+const TILT_TRANSITION = "transform 150ms ease-out";
 
 export type PreviewOutput = {
   id: string;
@@ -123,6 +150,10 @@ export function GenerationPreviewModal({
   const active = outputs[activeIdx] ?? outputs[0];
   const hasMultiple = outputs.length > 1;
 
+  // На мобилке инфо-карточка рендерится как bottom-sheet: по умолчанию свёрнута
+  // (видна только handle-полоска), раскрывается тапом/свайпом по handle'у.
+  const [infoExpanded, setInfoExpanded] = useState(false);
+
   const backdropUrl = !active
     ? null
     : section === "audio"
@@ -154,6 +185,18 @@ export function GenerationPreviewModal({
       document.body.style.overflow = prevOverflow;
     };
   }, [onClose]);
+
+  // Prefetch prev/next в multi-output, чтобы стрелки переключали без задержки.
+  // Только для image — для video/audio полный preload через `new Image()` не
+  // имеет смысла (это не картинки).
+  useEffect(() => {
+    if (section !== "image" || outputs.length <= 1) return;
+    const n = outputs.length;
+    const next = outputs[(activeIdx + 1) % n];
+    const prev = outputs[(activeIdx - 1 + n) % n];
+    if (next?.url) preloadImage(next.url);
+    if (prev?.url && prev.id !== next?.id) preloadImage(prev.url);
+  }, [activeIdx, outputs, section]);
 
   if (!active) return null;
 
@@ -188,9 +231,10 @@ export function GenerationPreviewModal({
         )}
       />
 
-      {/* Крестик уровня overlay — только когда нет инфо-карточки (она держит
-          свой крестик в шапке). Иначе на экране было бы два крестика. */}
-      {!info && (
+      {/* Крестик уровня overlay — когда нет инфо-карточки (она держит свой
+          крестик в шапке), либо на мобилке когда bottom-sheet свёрнут (хедер
+          карточки за нижним краем экрана и не виден). */}
+      {(!info || (isMobile && !infoExpanded)) && (
         <button
           type="button"
           onClick={onClose}
@@ -201,13 +245,31 @@ export function GenerationPreviewModal({
         </button>
       )}
 
+      {/* Затемнение поверх медиа, когда мобильный bottom-sheet раскрыт. Тап по
+          нему сворачивает панель (не закрывает модалку). */}
+      {isMobile && info && infoExpanded && (
+        <div
+          aria-hidden
+          onClick={(e) => {
+            e.stopPropagation();
+            setInfoExpanded(false);
+          }}
+          className="absolute inset-0 bg-black/40 z-10 transition-opacity"
+        />
+      )}
+
       {/* Внутренний контейнер НЕ останавливает propagation — иначе кликнуть в
           летербокс/гэп для закрытия было бы нельзя (он заполняет весь viewport).
           stopPropagation навешен точечно на сам контент: медиа, навигацию,
           thumbnail strip, инфо-карточку. */}
-      <div className="relative w-full h-full flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden">
-        {/* Media column: media + thumbnails-strip снизу. */}
-        <div className="flex-1 min-h-0 flex flex-col gap-3">
+      {/* Без overflow-hidden: иначе 3D-наклон/тень картинки по краям обрезаются.
+          Скейл фона-backdrop держит крайний root (он fixed → за viewport не
+          вылезет). */}
+      <div className="relative w-full h-full flex flex-col lg:flex-row gap-4 lg:gap-8">
+        {/* Media column: media + thumbnails-strip снизу. На мобилке с инфо-
+            карточкой добавляем pb, чтобы thumb-strip и низ медиа не уходили
+            под handle-полоску bottom-sheet'а (peek 24px + ~8px breathing). */}
+        <div className={clsx("flex-1 min-h-0 flex flex-col gap-3", isMobile && info && "pb-8")}>
           <div className="flex-1 min-h-0 flex items-center justify-center relative">
             {section === "video" ? (
               <video
@@ -228,12 +290,11 @@ export function GenerationPreviewModal({
                 <audio key={active.id} src={active.url} controls className="w-full max-w-md" />
               </div>
             ) : (
-              <img
+              <ProgressiveImage
                 key={active.id}
                 src={active.url}
-                alt=""
-                onClick={(e) => e.stopPropagation()}
-                className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
+                thumbnailUrl={active.thumbnailUrl ?? null}
+                tiltEnabled={!isMobile}
               />
             )}
 
@@ -310,10 +371,163 @@ export function GenerationPreviewModal({
           )}
         </div>
 
-        {info && <PreviewInfoCard info={info} isMobile={isMobile} onClose={onClose} />}
+        {info && (
+          <PreviewInfoCard
+            info={info}
+            isMobile={isMobile}
+            onClose={onClose}
+            expanded={infoExpanded}
+            onToggleExpanded={() => setInfoExpanded((v) => !v)}
+          />
+        )}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Прогрессивная картинка: thumb рисуется фоном (`contain`), full-`<img>` поверх
+ * с `opacity-0` фейдит в `opacity-100` после `decode()`. Element-box full-`<img>`
+ * совпадает с визуальной областью картинки (shadow/rounded по её краям), клик по
+ * летербоксу вокруг проваливается к корневому onClose (stopPropagation только на
+ * самом `<img>`).
+ *
+ * Apple-TV-наклон (`tiltEnabled`, desktop): узел ловит mousemove, считает
+ * нормализованное смещение курсора от центра bounding-box'а картинки и пишет
+ * CSS-переменные наклона прямо в DOM через ref (без re-render'а — как drag
+ * bottom-sheet'а), `transition` сглаживает следование и возврат. Край под
+ * курсором всегда «подаётся» к зрителю (растёт по экрану) → курсор не
+ * выскакивает за узел, лишних mouseleave нет даже без отдельного wrapper'а.
+ * Вне картинки и на mouseleave — возврат в плоскость.
+ */
+function ProgressiveImage({
+  src,
+  thumbnailUrl,
+  tiltEnabled,
+}: {
+  src: string;
+  thumbnailUrl: string | null;
+  tiltEnabled: boolean;
+}) {
+  const hasThumb = !!thumbnailUrl && thumbnailUrl !== src;
+  const [fullLoaded, setFullLoaded] = useState(false);
+
+  // Эффект выключаем на тач/мобиле и при prefers-reduced-motion.
+  const enableTilt =
+    tiltEnabled &&
+    typeof window !== "undefined" &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const tiltRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  const applyTilt = (rx: number, ry: number, scale: number) => {
+    const el = tiltRef.current;
+    if (!el) return;
+    el.style.setProperty("--tilt-rx", `${rx}deg`);
+    el.style.setProperty("--tilt-ry", `${ry}deg`);
+    el.style.setProperty("--tilt-scale", `${scale}`);
+  };
+
+  const resetTilt = () => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    applyTilt(0, 0, 1);
+  };
+
+  // Отменяем pending rAF при размонтировании (key={output.id} ремаунтит при
+  // смене картинки → наклон сбрасывается сам).
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const onMouseMove = (e: ReactMouseEvent) => {
+    pointerRef.current = { x: e.clientX, y: e.clientY };
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const p = pointerRef.current;
+      const img = imgRef.current;
+      if (!p || !img) return;
+      const r = img.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const nx = (p.x - (r.left + r.width / 2)) / (r.width / 2);
+      const ny = (p.y - (r.top + r.height / 2)) / (r.height / 2);
+      // Курсор вне картинки (в летербоксе) — в плоскость: эффект живёт только
+      // над самим изображением.
+      if (nx < -1 || nx > 1 || ny < -1 || ny > 1) {
+        applyTilt(0, 0, 1);
+        return;
+      }
+      // Край под курсором «подаётся» к зрителю (поверхность смотрит на курсор).
+      applyTilt(ny * TILT_MAX_DEG, -nx * TILT_MAX_DEG, TILT_SCALE);
+    });
+  };
+
+  const handleLoad = (e: SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    img
+      .decode()
+      .then(() => setFullLoaded(true))
+      .catch(() => setFullLoaded(true));
+  };
+
+  return (
+    <div
+      ref={tiltRef}
+      className="w-full h-full flex items-center justify-center"
+      onMouseMove={enableTilt ? onMouseMove : undefined}
+      onMouseLeave={enableTilt ? resetTilt : undefined}
+      style={{
+        // Thumb — background самого tilt-узла (background всегда рисуется ПОЗАДИ
+        // контента), `contain` апскейлит его до места узла. Показываем только
+        // ДО загрузки full-картинки: иначе квадратный thumb лежит ровно в том же
+        // прямоугольнике, что и <img>, и заполняет его скруглённые углы сзади +
+        // прячет под собой тень. После загрузки фон убираем → за rounded-углами
+        // и под shadow остаётся прозрачный backdrop, карточка видна целиком.
+        ...(hasThumb && !fullLoaded
+          ? {
+              backgroundImage: `url("${thumbnailUrl}")`,
+              backgroundSize: "contain",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+            }
+          : null),
+        ...(enableTilt
+          ? {
+              transform: `perspective(${TILT_PERSPECTIVE_PX}px) rotateX(var(--tilt-rx, 0deg)) rotateY(var(--tilt-ry, 0deg)) scale(var(--tilt-scale, 1))`,
+              transformOrigin: "center",
+              transition: TILT_TRANSITION,
+              willChange: "transform",
+            }
+          : null),
+      }}
+    >
+      <img
+        ref={imgRef}
+        src={src}
+        alt=""
+        fetchPriority="high"
+        decoding="async"
+        onLoad={hasThumb ? handleLoad : undefined}
+        onClick={(e) => e.stopPropagation()}
+        className={clsx(
+          // max-w-full max-h-full (без w/h-full) — element-box img совпадает
+          // с visible-image, поэтому shadow/rounded ложатся по краям картинки,
+          // а его bounding-rect используется как якорь наклона.
+          "max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl",
+          hasThumb && "transition-opacity duration-300",
+          hasThumb && !fullLoaded && "opacity-0",
+        )}
+      />
+    </div>
   );
 }
 
@@ -339,21 +553,105 @@ function PreviewInfoCard({
   info,
   isMobile,
   onClose,
+  expanded,
+  onToggleExpanded,
 }: {
   info: PreviewInfo;
   isMobile: boolean;
   onClose: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const { t } = useTranslation();
   const hasMeta = Boolean(info.dateIso || info.tokensValue);
   const shots = info.shots ?? [];
 
-  return (
-    <aside
-      className="relative shrink-0 w-full lg:w-[400px] card flex flex-col gap-4 text-white p-4 lg:p-6 min-h-0 overflow-hidden"
-      style={{ background: "var(--bg-elevated)" }}
-      onClick={(e) => e.stopPropagation()}
-    >
+  // Drag-state для мобильного bottom-sheet'а. На десктопе не используется.
+  // dragY и стартовые значения живут в ref — touchmove апдейтит CSS-переменную
+  // напрямую через ref'ом DOM, без re-render'ов компонента (важно для плавности
+  // на больших инфо-карточках).
+  const [dragging, setDragging] = useState(false);
+  // Peek-анимация играет до первого взаимодействия с handle (тап/drag/expand).
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const sheetRef = useRef<HTMLElement>(null);
+  // maxOffset кэшируется на touchstart, чтобы touchmove не дёргал offsetHeight
+  // и не форсил reflow на каждом тике.
+  const dragStateRef = useRef({ startY: 0, startT: 0, dragY: 0, maxOffset: 0 });
+  // Флаг: подавить ближайший click после touchend, если был реальный drag —
+  // иначе мобильные браузеры пошлют синтетический click → лишний toggle.
+  const skipNextClickRef = useRef(false);
+
+  // Раскрытие извне (например, программно) тоже считается взаимодействием.
+  useEffect(() => {
+    if (expanded) setHasInteracted(true);
+  }, [expanded]);
+
+  function onHandleTouchStart(e: ReactTouchEvent) {
+    const touch = e.touches[0];
+    if (!touch) return;
+    const sheetH = sheetRef.current?.offsetHeight ?? 0;
+    dragStateRef.current = {
+      startY: touch.clientY,
+      startT: Date.now(),
+      dragY: 0,
+      // Максимальный сдвиг = высота sheet'а минус видимый peek. За эту границу
+      // тянуть не пускаем — иначе sheet «отрывается» от края, появляется дыра.
+      maxOffset: Math.max(0, sheetH - COLLAPSED_PEEK_PX),
+    };
+    setDragging(true);
+    setHasInteracted(true);
+  }
+
+  function onHandleTouchMove(e: ReactTouchEvent) {
+    const touch = e.touches[0];
+    if (!touch || !sheetRef.current) return;
+    const rawDy = touch.clientY - dragStateRef.current.startY;
+    const { maxOffset } = dragStateRef.current;
+    const clamped = expanded
+      ? Math.max(0, Math.min(maxOffset, rawDy))
+      : Math.max(-maxOffset, Math.min(0, rawDy));
+    dragStateRef.current.dragY = clamped;
+    // Прямая запись в CSS-переменную — без setState, без re-render'а.
+    sheetRef.current.style.setProperty("--sheet-drag-y", `${clamped}px`);
+  }
+
+  function onHandleTouchEnd() {
+    setDragging(false);
+    const elapsed = Math.max(1, Date.now() - dragStateRef.current.startT);
+    const totalDy = dragStateRef.current.dragY;
+    const absDy = Math.abs(totalDy);
+    const velocity = absDy / elapsed;
+    if (absDy >= 5) {
+      const triggered = absDy > DRAG_TOGGLE_PX || velocity > DRAG_TOGGLE_VELOCITY;
+      if (triggered) {
+        if (expanded && totalDy > 0) onToggleExpanded();
+        else if (!expanded && totalDy < 0) onToggleExpanded();
+      }
+      skipNextClickRef.current = true;
+    }
+    dragStateRef.current.dragY = 0;
+    // Активируем transition через ref ДО сброса var'а — иначе snap из drag-
+    // position в resting происходит мгновенно (предыдущий render имел
+    // transition: none из-за dragging=true). React следующим рендером
+    // перезапишет ту же строку — без эффекта.
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = SHEET_TRANSITION;
+      sheetRef.current.style.setProperty("--sheet-drag-y", "0px");
+    }
+  }
+
+  function onHandleClick(e: ReactMouseEvent) {
+    e.stopPropagation();
+    if (skipNextClickRef.current) {
+      skipNextClickRef.current = false;
+      return;
+    }
+    setHasInteracted(true);
+    onToggleExpanded();
+  }
+
+  const content = (
+    <>
       <div className="flex items-center gap-2 shrink-0 min-w-0">
         {info.iconPath && (
           <ModelAvatar
@@ -436,16 +734,23 @@ function PreviewInfoCard({
           </div>
         )}
 
-        {/* Утилиты — компактный ряд иконок с подписью, отделён линией. */}
+        {/* Утилиты — компактный ряд иконок с подписью, отделён линией. На мобилке
+            показываем только иконки (подписи дублируют смысл и съедают экран). */}
         {(info.onDownload || info.onToggleFavorite || info.onDelete) && (
           <>
             <div className="border-t border-[color:var(--border)] mt-1" />
-            <div className="flex items-center gap-1">
+            <div
+              className={clsx(
+                "flex items-center gap-1",
+                isMobile ? "justify-around" : "justify-start",
+              )}
+            >
               {info.onDownload && (
                 <UtilityAction
                   icon={<Download size={16} />}
                   label={t("common.save")}
                   onClick={info.onDownload}
+                  iconOnly={isMobile}
                 />
               )}
               {info.onToggleFavorite && (
@@ -453,6 +758,7 @@ function PreviewInfoCard({
                   icon={<Heart size={16} fill={info.isFavorite ? "currentColor" : "none"} />}
                   label={info.isFavorite ? t("common.inFavorites") : t("common.favorite")}
                   onClick={info.onToggleFavorite}
+                  iconOnly={isMobile}
                 />
               )}
               {info.onDelete && (
@@ -461,12 +767,82 @@ function PreviewInfoCard({
                   label={t("common.delete")}
                   onClick={info.onDelete}
                   danger
+                  iconOnly={isMobile}
                 />
               )}
             </div>
           </>
         )}
       </div>
+    </>
+  );
+
+  if (isMobile) {
+    // Peek-анимация играет до первого взаимодействия. Пока класс активен —
+    // не задаём инлайн transform: keyframes управляют позицией. Базовая
+    // трансформа в классе совпадает с inline-resting → нет jump'а при снятии
+    // класса после первого тапа.
+    const playPeek = !hasInteracted && !expanded && !dragging;
+    // Resting-positions: drag-offset берётся из CSS-переменной --sheet-drag-y,
+    // которую touchmove пишет напрямую в DOM через ref (без re-render'а).
+    const restingTransform = expanded
+      ? "translateY(var(--sheet-drag-y, 0px))"
+      : `translateY(calc(100% - ${COLLAPSED_PEEK_PX}px + var(--sheet-drag-y, 0px)))`;
+    return (
+      <aside
+        ref={sheetRef}
+        className={clsx(
+          "fixed inset-x-0 bottom-0 z-[1100] flex flex-col text-white rounded-t-[20px] border-t overflow-hidden max-h-[85vh]",
+          playPeek && "anim-sheet-peek",
+        )}
+        style={{
+          background: "var(--bg-elevated)",
+          borderColor: "var(--border-strong)",
+          ...(playPeek
+            ? {}
+            : {
+                transform: restingTransform,
+                transition: dragging ? "none" : SHEET_TRANSITION,
+              }),
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Handle-зона: тап toggle, drag по порогам тоже toggle. touch-action:
+            none — отключает нативный pull-to-refresh/скролл во время свайпа. */}
+        <div
+          className="shrink-0 pt-3 pb-2 px-4 select-none flex flex-col cursor-pointer"
+          style={{ touchAction: "none" }}
+          onTouchStart={onHandleTouchStart}
+          onTouchMove={onHandleTouchMove}
+          onTouchEnd={onHandleTouchEnd}
+          onClick={onHandleClick}
+        >
+          {/* Полоска: при playPeek — пульсирует цветом (`anim-handle-pulse`),
+              чтобы привлечь внимание к draggable-зоне без сильного движения
+              самого sheet'а. */}
+          <div
+            className={clsx(
+              "self-center w-12 h-1 rounded-full bg-[color:var(--border-strong)]",
+              playPeek && "anim-handle-pulse",
+            )}
+          />
+        </div>
+        {/* Контент скроллится одним общим контейнером — секции внутри сами не
+            ограничивают высоту на мобилке (`lg:max-h-...`). */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col gap-4">
+          {content}
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      className="relative shrink-0 w-full lg:w-[400px] card flex flex-col gap-4 text-white p-4 lg:p-6 min-h-0 overflow-hidden"
+      style={{ background: "var(--bg-elevated)" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {content}
     </aside>
   );
 }
@@ -493,29 +869,36 @@ function ActionTile({
   );
 }
 
-/** Компактное действие-утилита: иконка + подпись в строку, ghost-стиль. */
+/** Компактное действие-утилита: иконка + подпись в строку, ghost-стиль.
+ *  iconOnly — только иконка (без span) и без `flex-1`, ширина = padding'у; для
+ *  мобилки, где подписи дублируют смысл. */
 function UtilityAction({
   icon,
   label,
   onClick,
   danger,
+  iconOnly,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
   danger?: boolean;
+  iconOnly?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={iconOnly ? label : undefined}
+      title={iconOnly ? label : undefined}
       className={clsx(
-        "flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs transition-colors",
+        "inline-flex items-center justify-center gap-1.5 rounded text-xs transition-colors",
+        iconOnly ? "p-2.5" : "flex-1 min-w-0 px-2 py-2",
         danger ? "text-danger hover:text-text" : "text-text-secondary hover:text-text",
       )}
     >
       {icon}
-      <span className="truncate">{label}</span>
+      {!iconOnly && <span className="truncate">{label}</span>}
     </button>
   );
 }
@@ -578,7 +961,7 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
   }, [prompt]);
 
   return (
-    <div className="flex flex-col gap-2 min-h-0">
+    <div className="flex flex-col gap-2 min-h-0 max-lg:shrink-0">
       <div className="flex items-center justify-between gap-2">
         <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
         <CopyButton text={prompt} />
@@ -588,9 +971,8 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
           ref={promptRef}
           className={clsx(
             "text-sm leading-relaxed whitespace-pre-wrap break-words text-text-secondary m-0",
-            // Мобилка/планшет (<lg): всегда скролл, фикс. высота — карточка
-            // не меняет размер при длинном промпте, нет кнопки «Развернуть».
-            "max-lg:overflow-y-auto max-lg:max-h-[4.5rem] max-lg:pr-1",
+            // Мобилка/планшет (<lg): без ограничения — скроллится bottom-sheet
+            // целиком, нет кнопки «Развернуть».
             // Десктоп (lg+): line-clamp-3 в свёрнутом, max-h+scroll в раскрытом.
             !promptExpanded && "lg:line-clamp-3",
             promptExpanded && "lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1",
@@ -621,9 +1003,9 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
 function MultiShotSection({ shots }: { shots: ShotEntry[] }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-2 min-h-0">
+    <div className="flex flex-col gap-2 min-h-0 max-lg:shrink-0">
       <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
-      <div className="flex flex-col gap-2 overflow-y-auto max-h-[4.5rem] lg:max-h-[40vh] pr-1">
+      <div className="flex flex-col gap-2 lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1">
         {shots.map((shot, i) => (
           <div key={i} className="flex flex-col gap-1 bg-white/[0.04] rounded-[var(--radius)] p-3">
             <div className="flex items-center gap-2 text-xs text-text-hint">
@@ -652,7 +1034,7 @@ function SettingsSection({ rows }: { rows: SettingRow[] }) {
   return (
     <div className="flex flex-col gap-2 shrink-0">
       <PromptSectionLabel>{t("common.settings")}</PromptSectionLabel>
-      <div className="flex flex-col gap-1.5 bg-white/[0.04] rounded-[var(--radius)] p-3 max-h-40 overflow-y-auto">
+      <div className="flex flex-col gap-1.5 bg-white/[0.04] rounded-[var(--radius)] p-3 lg:max-h-40 lg:overflow-y-auto">
         {visible.map((r) => (
           <div key={r.label} className="flex items-start justify-between gap-3 text-sm">
             <span className="text-text-secondary min-w-0 break-words">{r.label}</span>
@@ -691,7 +1073,7 @@ function FoldersSection({ folders }: { folders: PreviewFolders }) {
       <div className="text-xs uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
         {t("common.addToFolders")}
       </div>
-      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+      <div className="flex flex-wrap gap-1.5 lg:max-h-32 lg:overflow-y-auto">
         {nonDefault.map((f) => {
           const active = folders.selectedIds.includes(f.id);
           return (

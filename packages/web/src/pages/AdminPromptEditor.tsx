@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useForm, Controller, type SubmitHandler } from "react-hook-form";
 import { Loader2, ArrowLeft } from "lucide-react";
@@ -55,6 +56,7 @@ function emptyToNull(v: string): string | null {
 }
 
 export default function AdminPromptEditor() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id;
   const navigate = useNavigate();
@@ -141,7 +143,7 @@ export default function AdminPromptEditor() {
           thumbnailS3Key: emptyToNull(values.thumbnailS3Key),
         };
         await updateMutation.mutateAsync(body);
-        pushToast({ type: "success", message: "Промпт обновлён" });
+        pushToast({ type: "success", message: t("admin.promptUpdated") });
       } else {
         const body: CreatePromptExampleBody = {
           modelId: values.modelId,
@@ -152,7 +154,7 @@ export default function AdminPromptEditor() {
           thumbnailS3Key: emptyToUndef(values.thumbnailS3Key),
         };
         await createMutation.mutateAsync(body);
-        pushToast({ type: "success", message: "Промпт создан" });
+        pushToast({ type: "success", message: t("admin.promptCreated") });
       }
       navigate("/admin/prompts");
     } catch (e) {

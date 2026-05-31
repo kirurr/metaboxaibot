@@ -78,7 +78,7 @@ export function PromptExamplesGallery({
   const handleTry = (ex: PromptExample) => {
     const sectionRoute = ex.model ? normalizeSection(ex.section) : null;
     if (!sectionRoute || !ex.model) {
-      pushToast({ type: "info", message: "Модель примера недоступна" });
+      pushToast({ type: "info", message: t("generate.exampleModelUnavailable") });
       return;
     }
     handleDialogClose();

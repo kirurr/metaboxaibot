@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -48,6 +49,7 @@ import {
 import type { GenerationJobDto } from "@/api/generation";
 import { JobPreview } from "@/components/common/JobPreview";
 import { FolderNameDialog } from "@/components/common/FolderNameDialog";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useModelsStore, getModelDisplay } from "@/stores/modelsStore";
 import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useUIStore } from "@/stores/uiStore";
@@ -55,6 +57,7 @@ import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore"
 import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
 import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
+import { preloadImage } from "@/utils/imagePreload";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -175,10 +178,12 @@ function FolderRow({
   active: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
   const update = useUpdateGalleryFolder(folder.id);
   const del = useDeleteGalleryFolder();
   const [renameOpen, setRenameOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const handlePin = (e: MouseEvent) => {
     e.stopPropagation();
@@ -200,7 +205,7 @@ function FolderRow({
       { name },
       {
         onSuccess: () => {
-          pushToast({ type: "success", message: "Папка переименована" });
+          pushToast({ type: "success", message: t("common.folderRenamed") });
           setRenameOpen(false);
         },
         onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
@@ -210,10 +215,19 @@ function FolderRow({
 
   const handleDelete = (e: MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`Удалить папку «${folder.name}»? Работы внутри не удалятся.`)) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const performDelete = () => {
     del.mutate(folder.id, {
-      onSuccess: () => pushToast({ type: "success", message: "Папка удалена" }),
-      onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
+      onSuccess: () => {
+        pushToast({ type: "success", message: t("common.folderDeleted") });
+        setConfirmDeleteOpen(false);
+      },
+      onError: (err) => {
+        pushToast({ type: "error", message: getErrorMessage(err) });
+        setConfirmDeleteOpen(false);
+      },
     });
   };
 
@@ -271,6 +285,17 @@ function FolderRow({
           onClose={() => setRenameOpen(false)}
         />
       )}
+      {confirmDeleteOpen && (
+        <ConfirmDialog
+          title={t("common.deleteFolderTitle", { name: folder.name })}
+          message={t("common.foldersKeepItems")}
+          confirmLabel={t("common.delete")}
+          danger
+          pending={del.isPending}
+          onConfirm={performDelete}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -282,6 +307,7 @@ function FolderSidebar({
   folderId: string | undefined;
   onChange: (id: string | undefined) => void;
 }) {
+  const { t } = useTranslation();
   const { data: folders = [], isLoading, error } = useGalleryFolders();
   const pushToast = useUIStore((s) => s.pushToast);
   const createMut = useCreateGalleryFolder();
@@ -300,7 +326,7 @@ function FolderSidebar({
       { name },
       {
         onSuccess: () => {
-          pushToast({ type: "success", message: "Папка создана" });
+          pushToast({ type: "success", message: t("common.folderCreated") });
           setCreateOpen(false);
         },
         onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
@@ -443,18 +469,24 @@ function JobCardMenu({
   anchorRef,
   onClose,
   onOpenLightbox,
+  onRequestDelete,
+  deletePending,
 }: {
   item: GalleryItem;
   folders: GalleryFolder[];
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onOpenLightbox: () => void;
+  /** Открыть confirm-диалог удаления — рендерится в родителе (JobCard), чтобы
+   *  закрытие меню по outside-click не уносило с собой и диалог. */
+  onRequestDelete: () => void;
+  deletePending: boolean;
 }) {
+  const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
   const navigate = useNavigate();
   const addToFolder = useAddOutputToGalleryFolder();
   const removeFromFolder = useRemoveOutputFromGalleryFolder();
-  const deleteOutput = useDeleteGalleryOutput();
   const menuRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
@@ -519,24 +551,14 @@ function JobCardMenu({
   };
 
   const handleDelete = () => {
-    // Карточка = один output. Удаляем именно его; бэкенд снесёт всю джобу, только
-    // если это был последний output (тогда `jobDeleted: true`).
-    if (!window.confirm("Удалить этот результат безвозвратно?")) return;
-    deleteOutput.mutate(item.id, {
-      onSuccess: (res) =>
-        pushToast({
-          type: "success",
-          message: res.jobDeleted ? "Работа удалена" : "Результат удалён",
-        }),
-      onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
-    });
+    onRequestDelete();
     onClose();
   };
 
   const handleRepeat = () => {
     const section = normalizeSection(item.section);
     if (!section) {
-      pushToast({ type: "error", message: "Неизвестная секция" });
+      pushToast({ type: "error", message: t("common.unknownSection") });
       return;
     }
     navigateToGenerate(navigate, {
@@ -610,7 +632,7 @@ function JobCardMenu({
         type="button"
         onClick={handleDelete}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-bg-secondary rounded text-danger"
-        disabled={deleteOutput.isPending}
+        disabled={deletePending}
       >
         <Trash2 size={14} /> Удалить
       </button>
@@ -632,11 +654,14 @@ function JobCard({
   layout: GridLayout;
   onOpen: () => void;
 }) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const pushToast = useUIStore((s) => s.pushToast);
   const addFav = useAddToGalleryFavorites();
   const removeFav = useRemoveFromGalleryFavorites();
+  const deleteOutput = useDeleteGalleryOutput();
 
   const isFav = favoritesFolderId ? item.folderIds.includes(favoritesFolderId) : false;
   const favPending = addFav.isPending || removeFav.isPending;
@@ -651,6 +676,13 @@ function JobCard({
   // отключаем, иначе тайлы вытягиваются в прямоугольники.
   const isCompact = layout === "compact";
 
+  // Прогрев полного URL картинки — только точечно на hover (массовый
+  // viewport-prefetch упирался в too-many-requests на CDN). Открытие
+  // Lightbox по hover'нутой карточке показывает full из кеша без задержки.
+  const fullUrl = item.section === "image" ? (item.previewUrl ?? item.outputUrl ?? null) : null;
+  const shouldPrefetch = !!fullUrl && fullUrl !== item.thumbnailUrl;
+  const handleHoverPrefetch = shouldPrefetch && fullUrl ? () => preloadImage(fullUrl) : undefined;
+
   const handleToggleFav = (e: MouseEvent) => {
     e.stopPropagation();
     const opts = {
@@ -660,8 +692,27 @@ function JobCard({
     else addFav.mutate(item.id, opts);
   };
 
+  const performDelete = () => {
+    // Карточка = один output. Удаляем именно его; бэкенд снесёт всю джобу, только
+    // если это был последний output (тогда `jobDeleted: true`).
+    deleteOutput.mutate(item.id, {
+      onSuccess: (res) => {
+        pushToast({
+          type: "success",
+          message: res.jobDeleted ? t("common.jobDeleted") : t("common.resultDeleted"),
+        });
+        setConfirmDeleteOpen(false);
+      },
+      onError: (err) => {
+        pushToast({ type: "error", message: getErrorMessage(err) });
+        setConfirmDeleteOpen(false);
+      },
+    });
+  };
+
   return (
     <li
+      onMouseEnter={handleHoverPrefetch}
       style={isCompact ? undefined : { gridRow: `span ${rowSpan}` }}
       className={`group relative card overflow-hidden cursor-pointer ${
         isCompact ? "aspect-square" : ""
@@ -717,6 +768,19 @@ function JobCard({
           anchorRef={triggerRef}
           onClose={() => setMenuOpen(false)}
           onOpenLightbox={onOpen}
+          onRequestDelete={() => setConfirmDeleteOpen(true)}
+          deletePending={deleteOutput.isPending}
+        />
+      )}
+      {confirmDeleteOpen && (
+        <ConfirmDialog
+          title={t("common.deleteResult")}
+          message={t("common.cannotUndo")}
+          confirmLabel={t("common.delete")}
+          danger
+          pending={deleteOutput.isPending}
+          onConfirm={performDelete}
+          onCancel={() => setConfirmDeleteOpen(false)}
         />
       )}
     </li>
@@ -813,6 +877,7 @@ function GridLayoutSwitcher({
 // ── Page root ───────────────────────────────────────────────────────────────
 
 export default function GalleryPage() {
+  const { t } = useTranslation();
   const [section, setSection] = useState<Section>("");
   const [modelId, setModelId] = useState<string | undefined>(undefined);
   const [folderId, setFolderId] = useState<string | undefined>(undefined);
@@ -916,10 +981,10 @@ export default function GalleryPage() {
   // 404 при прямом заходе на /gallery/{несуществующий-id} — toast + редирект.
   useEffect(() => {
     if (jobId && detail.isError) {
-      pushToast({ type: "error", message: "Работа не найдена" });
+      pushToast({ type: "error", message: t("common.jobNotFound") });
       navigate("/gallery", { replace: true });
     }
-  }, [jobId, detail.isError, navigate, pushToast]);
+  }, [jobId, detail.isError, navigate, pushToast, t]);
 
   // Infinite scroll: sentinel внизу страницы; пересечение viewport (с запасом
   // rootMargin) триггерит fetchNextPage. Перевешиваем observer когда меняются

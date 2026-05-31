@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Edit2, Loader2, ShieldOff, RotateCw } from "lucide-react";
 import {
   adminApi,
@@ -21,6 +22,7 @@ const EMPTY: KeyCreateBody = {
 };
 
 export default function AdminKeys() {
+  const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
   const [keys, setKeys] = useState<ProviderKeyDto[]>([]);
   const [proxies, setProxies] = useState<ProxyDto[]>([]);
@@ -93,13 +95,13 @@ export default function AdminKeys() {
         await adminApi.updateKey(editing.id, body);
       } else {
         if (!form.keyValue) {
-          pushToast({ type: "error", message: "keyValue обязателен" });
+          pushToast({ type: "error", message: t("admin.keyValueRequired") });
           setSaving(false);
           return;
         }
         await adminApi.createKey(form);
       }
-      pushToast({ type: "success", message: "Сохранено" });
+      pushToast({ type: "success", message: t("common.saved") });
       cancel();
       await reload();
     } catch (err) {
@@ -113,7 +115,7 @@ export default function AdminKeys() {
     if (!confirm("Удалить ключ?")) return;
     try {
       await adminApi.deleteKey(id);
-      pushToast({ type: "success", message: "Удалено" });
+      pushToast({ type: "success", message: t("common.deleted") });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });

@@ -1,4 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
@@ -24,6 +26,7 @@ export function FolderNameDialog({
   onSubmit: (value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -49,10 +52,13 @@ export function FolderNameDialog({
     onSubmit(trimmed);
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 anim-page-in"
-      onClick={onClose}
+      className="fixed inset-0 z-[1500] flex items-center justify-center p-4 anim-page-in"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
       <div
         className="fixed inset-0"
@@ -67,7 +73,7 @@ export function FolderNameDialog({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Закрыть"
+          aria-label={t("common.close")}
           className="absolute top-3 right-3 text-text-hint hover:text-text"
         >
           <X size={18} />
@@ -82,13 +88,14 @@ export function FolderNameDialog({
         />
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Отмена
+            {t("common.cancel")}
           </Button>
           <Button type="submit" size="sm" disabled={!canSubmit} loading={pending}>
             {submitLabel}
           </Button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }

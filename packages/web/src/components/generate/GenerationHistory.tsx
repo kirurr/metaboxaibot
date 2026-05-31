@@ -16,6 +16,7 @@ import {
 import { JobPreview } from "@/components/common/JobPreview";
 import { useGalleryFolders, useGalleryJob } from "@/hooks/useGallery";
 import { formatTokensSpent } from "@/utils/format";
+import { preloadImage } from "@/utils/imagePreload";
 
 /**
  * Лента всех генераций текущей секции (image/design/video/audio), независимо
@@ -181,29 +182,31 @@ function GenerationHistoryImpl({ selectedModel, onHasContentChange }: Props) {
           />
         ))}
       </ul>
-      {preview &&
-        (detail.data ? (
-          <JobPreview
-            key={detail.data.id}
-            job={detail.data}
-            folders={folders}
-            onClose={() => setPreview(null)}
-            onDeleted={(id, jobRemoved) => {
-              // Снесли всю джобу — убираем её тайлы из локальной истории сразу;
-              // удалили один из нескольких output'ов — рефетчим снапшот ленты.
-              if (jobRemoved) setHistory((h) => h.filter((j) => j.id !== id));
-              else void refetch();
-            }}
-          />
-        ) : (
-          <GenerationPreviewModal
-            outputs={previewOutputs}
-            activeIdx={0}
-            onActiveIdxChange={() => undefined}
-            section={preview.section}
-            onClose={() => setPreview(null)}
-          />
-        ))}
+      {preview && preview.job && detail.data && (
+        <JobPreview
+          key={detail.data.id}
+          job={detail.data}
+          folders={folders}
+          onClose={() => setPreview(null)}
+          onDeleted={(id, jobRemoved) => {
+            // Снесли всю джобу — убираем её тайлы из локальной истории сразу;
+            // удалили один из нескольких output'ов — рефетчим снапшот ленты.
+            if (jobRemoved) setHistory((h) => h.filter((j) => j.id !== id));
+            else void refetch();
+          }}
+        />
+      )}
+      {/* Pending-success: gallery-джобы ещё нет, рендерим минимальную модалку
+          без экшенов. Здесь нет двойного рендера → нет flicker'а. */}
+      {preview && !preview.job && (
+        <GenerationPreviewModal
+          outputs={previewOutputs}
+          activeIdx={0}
+          onActiveIdxChange={() => undefined}
+          section={preview.section}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </section>
   );
 }
@@ -384,6 +387,12 @@ function OutputTile({
   const [aspect, setAspect] = useState<number | null>(section === "audio" ? 1 : null);
   const rowSpan = spanFromAspect(aspect);
 
+  // Прогрев полного URL для image-тайла — только точечно на hover (массовый
+  // viewport-prefetch упирался в too-many-requests на CDN). Video/audio не
+  // трогаем: у video full-файл слишком тяжёлый, у audio thumb→full разницы нет.
+  const shouldPrefetch = section === "image" && !!url && url !== thumb;
+  const handleHoverPrefetch = shouldPrefetch && url ? () => preloadImage(url) : undefined;
+
   if (!url) {
     return (
       <li
@@ -419,6 +428,7 @@ function OutputTile({
 
   return (
     <li
+      onMouseEnter={handleHoverPrefetch}
       style={{ gridRow: `span ${rowSpan}` }}
       className="group relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated"
     >

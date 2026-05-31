@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Edit2, PlugZap, Loader2 } from "lucide-react";
 import { adminApi, type ProxyDto, type ProxyCreateBody } from "@/api/admin";
 import { Button } from "@/components/common/Button";
@@ -16,6 +17,7 @@ const EMPTY: ProxyCreateBody = {
 };
 
 export default function AdminProxies() {
+  const { t } = useTranslation();
   const pushToast = useUIStore((s) => s.pushToast);
   const [proxies, setProxies] = useState<ProxyDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +74,7 @@ export default function AdminProxies() {
       } else {
         await adminApi.createProxy(form);
       }
-      pushToast({ type: "success", message: "Прокси сохранена" });
+      pushToast({ type: "success", message: t("admin.proxySaved") });
       cancel();
       await reload();
     } catch (err) {
@@ -86,7 +88,7 @@ export default function AdminProxies() {
     if (!confirm("Удалить прокси?")) return;
     try {
       await adminApi.deleteProxy(id);
-      pushToast({ type: "success", message: "Удалено" });
+      pushToast({ type: "success", message: t("common.deleted") });
       await reload();
     } catch (err) {
       pushToast({ type: "error", message: (err as Error).message });
