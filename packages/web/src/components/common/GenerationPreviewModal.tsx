@@ -63,6 +63,15 @@ const DRAG_TOGGLE_VELOCITY = 0.4; // px/ms
 const COLLAPSED_PEEK_PX = 24;
 const SHEET_TRANSITION = "transform 220ms cubic-bezier(.22,1,.36,1)";
 
+// Apple-TV-стиль 3D-наклон картинки при наведении (desktop-only). Угол
+// максимален у краёв картинки, в центре — почти плоско. Подъём (scale) даёт
+// лёгкое ощущение «всплытия» под курсором. Transition сглаживает и следование
+// за курсором, и возврат в плоскость на mouseleave.
+const TILT_MAX_DEG = 5;
+const TILT_SCALE = 1.02;
+const TILT_PERSPECTIVE_PX = 1000;
+const TILT_TRANSITION = "transform 150ms ease-out";
+
 export type PreviewOutput = {
   id: string;
   url: string;
@@ -253,7 +262,10 @@ export function GenerationPreviewModal({
           летербокс/гэп для закрытия было бы нельзя (он заполняет весь viewport).
           stopPropagation навешен точечно на сам контент: медиа, навигацию,
           thumbnail strip, инфо-карточку. */}
-      <div className="relative w-full h-full flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden">
+      {/* Без overflow-hidden: иначе 3D-наклон/тень картинки по краям обрезаются.
+          Скейл фона-backdrop держит крайний root (он fixed → за viewport не
+          вылезет). */}
+      <div className="relative w-full h-full flex flex-col lg:flex-row gap-4 lg:gap-8">
         {/* Media column: media + thumbnails-strip снизу. На мобилке с инфо-
             карточкой добавляем pb, чтобы thumb-strip и низ медиа не уходили
             под handle-полоску bottom-sheet'а (peek 24px + ~8px breathing). */}
@@ -282,6 +294,7 @@ export function GenerationPreviewModal({
                 key={active.id}
                 src={active.url}
                 thumbnailUrl={active.thumbnailUrl ?? null}
+                tiltEnabled={!isMobile}
               />
             )}
 
@@ -374,16 +387,89 @@ export function GenerationPreviewModal({
 }
 
 /**
- * Прогрессивная картинка: thumb-`<img>` задаёт размер wrapper'а (естественное
- * aspect-сохранение), full-`<img>` рисуется absolute поверх с `opacity-0` и
- * фейдит в `opacity-100` после `decode()`. Wrapper схлопывается ровно по
- * визуальной области картинки — shadow/rounded ложатся по краям картинки, а
- * клик по летербоксу вокруг проваливается к модальному onClose.
- * Если thumb нет — один `<img>` без обёртки.
+ * Прогрессивная картинка: thumb рисуется фоном (`contain`), full-`<img>` поверх
+ * с `opacity-0` фейдит в `opacity-100` после `decode()`. Element-box full-`<img>`
+ * совпадает с визуальной областью картинки (shadow/rounded по её краям), клик по
+ * летербоксу вокруг проваливается к корневому onClose (stopPropagation только на
+ * самом `<img>`).
+ *
+ * Apple-TV-наклон (`tiltEnabled`, desktop): узел ловит mousemove, считает
+ * нормализованное смещение курсора от центра bounding-box'а картинки и пишет
+ * CSS-переменные наклона прямо в DOM через ref (без re-render'а — как drag
+ * bottom-sheet'а), `transition` сглаживает следование и возврат. Край под
+ * курсором всегда «подаётся» к зрителю (растёт по экрану) → курсор не
+ * выскакивает за узел, лишних mouseleave нет даже без отдельного wrapper'а.
+ * Вне картинки и на mouseleave — возврат в плоскость.
  */
-function ProgressiveImage({ src, thumbnailUrl }: { src: string; thumbnailUrl: string | null }) {
+function ProgressiveImage({
+  src,
+  thumbnailUrl,
+  tiltEnabled,
+}: {
+  src: string;
+  thumbnailUrl: string | null;
+  tiltEnabled: boolean;
+}) {
   const hasThumb = !!thumbnailUrl && thumbnailUrl !== src;
   const [fullLoaded, setFullLoaded] = useState(false);
+
+  // Эффект выключаем на тач/мобиле и при prefers-reduced-motion.
+  const enableTilt =
+    tiltEnabled &&
+    typeof window !== "undefined" &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const tiltRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  const applyTilt = (rx: number, ry: number, scale: number) => {
+    const el = tiltRef.current;
+    if (!el) return;
+    el.style.setProperty("--tilt-rx", `${rx}deg`);
+    el.style.setProperty("--tilt-ry", `${ry}deg`);
+    el.style.setProperty("--tilt-scale", `${scale}`);
+  };
+
+  const resetTilt = () => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    applyTilt(0, 0, 1);
+  };
+
+  // Отменяем pending rAF при размонтировании (key={output.id} ремаунтит при
+  // смене картинки → наклон сбрасывается сам).
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const onMouseMove = (e: ReactMouseEvent) => {
+    pointerRef.current = { x: e.clientX, y: e.clientY };
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const p = pointerRef.current;
+      const img = imgRef.current;
+      if (!p || !img) return;
+      const r = img.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const nx = (p.x - (r.left + r.width / 2)) / (r.width / 2);
+      const ny = (p.y - (r.top + r.height / 2)) / (r.height / 2);
+      // Курсор вне картинки (в летербоксе) — в плоскость: эффект живёт только
+      // над самим изображением.
+      if (nx < -1 || nx > 1 || ny < -1 || ny > 1) {
+        applyTilt(0, 0, 1);
+        return;
+      }
+      // Край под курсором «подаётся» к зрителю (поверхность смотрит на курсор).
+      applyTilt(ny * TILT_MAX_DEG, -nx * TILT_MAX_DEG, TILT_SCALE);
+    });
+  };
 
   const handleLoad = (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -393,47 +479,52 @@ function ProgressiveImage({ src, thumbnailUrl }: { src: string; thumbnailUrl: st
       .catch(() => setFullLoaded(true));
   };
 
-  if (!hasThumb) {
-    return (
-      <img
-        src={src}
-        alt=""
-        fetchPriority="high"
-        decoding="async"
-        onClick={(e) => e.stopPropagation()}
-        className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
-      />
-    );
-  }
-
   return (
     <div
-      className="relative w-full h-full flex items-center justify-center"
+      ref={tiltRef}
+      className="w-full h-full flex items-center justify-center"
+      onMouseMove={enableTilt ? onMouseMove : undefined}
+      onMouseLeave={enableTilt ? resetTilt : undefined}
       style={{
-        // Thumb как background — `contain` масштабирует его до полного места
-        // wrapper'а (в отличие от `max-w-full` на <img>, который не апскейлит
-        // маленький thumbnail). Full <img> поверх центрируется flex'ом, после
-        // fade-in перекрывает thumb.
-        backgroundImage: `url("${thumbnailUrl}")`,
-        backgroundSize: "contain",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
+        // Thumb — background самого tilt-узла (background всегда рисуется ПОЗАДИ
+        // контента), `contain` апскейлит его до места узла. Показываем только
+        // ДО загрузки full-картинки: иначе квадратный thumb лежит ровно в том же
+        // прямоугольнике, что и <img>, и заполняет его скруглённые углы сзади +
+        // прячет под собой тень. После загрузки фон убираем → за rounded-углами
+        // и под shadow остаётся прозрачный backdrop, карточка видна целиком.
+        ...(hasThumb && !fullLoaded
+          ? {
+              backgroundImage: `url("${thumbnailUrl}")`,
+              backgroundSize: "contain",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+            }
+          : null),
+        ...(enableTilt
+          ? {
+              transform: `perspective(${TILT_PERSPECTIVE_PX}px) rotateX(var(--tilt-rx, 0deg)) rotateY(var(--tilt-ry, 0deg)) scale(var(--tilt-scale, 1))`,
+              transformOrigin: "center",
+              transition: TILT_TRANSITION,
+              willChange: "transform",
+            }
+          : null),
       }}
     >
       <img
+        ref={imgRef}
         src={src}
         alt=""
         fetchPriority="high"
         decoding="async"
-        onLoad={handleLoad}
+        onLoad={hasThumb ? handleLoad : undefined}
         onClick={(e) => e.stopPropagation()}
         className={clsx(
           // max-w-full max-h-full (без w/h-full) — element-box img совпадает
-          // с visible-image, поэтому shadow/rounded ложатся по краям картинки.
-          // Клик по летербоксу проваливается к wrapper'у (без stopPropagation)
-          // и далее к корневому onClose.
-          "max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl transition-opacity duration-300",
-          !fullLoaded && "opacity-0",
+          // с visible-image, поэтому shadow/rounded ложатся по краям картинки,
+          // а его bounding-rect используется как якорь наклона.
+          "max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl",
+          hasThumb && "transition-opacity duration-300",
+          hasThumb && !fullLoaded && "opacity-0",
         )}
       />
     </div>
