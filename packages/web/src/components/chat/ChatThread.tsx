@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, File as FileIcon, MoreHorizontal, Sparkles } from "lucide-react";
 import type { MessageAttachmentDto } from "@/api/dialogs";
 import { ImageLightbox } from "@/components/common/ImageLightbox";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { markdownComponents } from "./MarkdownElements";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { splitReasoning } from "./reasoning";
@@ -78,7 +79,17 @@ function AiChatMessage({ message }: { message: Msg }) {
 
         {message.meta && (
           <div className="msg-meta">
-            <span>{message.meta}</span>
+            <span className="msg-meta-model">
+              {message.modelIcon !== undefined && (
+                <ModelAvatar
+                  className="msg-meta-icon"
+                  icon={message.modelIcon}
+                  name={message.modelName ?? "AI"}
+                  iconSize={13}
+                />
+              )}
+              {message.meta}
+            </span>
             <div className="msg-actions">
               <button title="Copy" onClick={() => navigator.clipboard?.writeText(answer)}>
                 <Copy size={14} />

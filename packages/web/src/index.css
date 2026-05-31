@@ -1174,6 +1174,18 @@ select {
   display: flex;
   gap: 10px;
 }
+/* Имя модели + иконка в одну строку под AI-сообщением. */
+.msg-meta-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-meta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
 .msg-actions {
   display: flex;
   gap: 4px;
@@ -1473,11 +1485,25 @@ select {
 }
 .cs-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
   color: var(--text-hint);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+/* Имя модели + иконка слева в meta-строке диалога. */
+.cs-meta-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.cs-meta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
 }
 
 .chat-shell.side-collapsed {

@@ -469,6 +469,8 @@ export default function Chat() {
                 next[next.length - 1] = {
                   ...last,
                   meta: `${modelName} · ${usedFormatted} ${t("chat.tokensSpent")}`,
+                  modelIcon: selectedModel?.webIconPath ?? null,
+                  modelName,
                   inputTokens,
                   outputTokens,
                 };

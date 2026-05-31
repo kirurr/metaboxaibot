@@ -14,6 +14,8 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { listDialogs, type DialogDto } from "@/api/dialogs";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { getModelDisplay } from "@/stores/modelsStore";
+import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { dialogTitle } from "./chatHelpers";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -165,40 +167,53 @@ export const ChatSidebar = memo(function ChatSidebar({
           <div className="cs-group">{search ? t("common.empty") : t("chat.noDialogs")}</div>
         )}
         {filteredDialogs.length > 0 && <div className="cs-group">{t("chat.recent")}</div>}
-        {filteredDialogs.map((d) => (
-          <div key={d.id} style={{ position: "relative" }}>
-            <button
-              className={clsx("cs-item", d.id === activeId && "active")}
-              onClick={() => onSelectDialog(d.id)}
-            >
-              <div className="cs-title">{dialogTitle(d, t("chat.newDialog"))}</div>
-              <div className="cs-meta">
-                <span className="mono">{d.modelId}</span>
-                <span>{formatRelative(d.updatedAt, t)}</span>
-              </div>
-            </button>
-            <button
-              className="cs-item-menu"
-              aria-label={t("common.actions")}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuForId(menuForId === d.id ? null : d.id);
-              }}
-            >
-              <MoreHorizontal size={14} />
-            </button>
-            {menuForId === d.id && (
-              <div className="cs-item-pop" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => onRename(d.id)}>
-                  <Pencil size={13} /> {t("common.rename")}
-                </button>
-                <button className="danger" onClick={() => onDelete(d.id)}>
-                  <Trash2 size={13} /> {t("common.delete")}
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
+        {filteredDialogs.map((d) => {
+          const model = getModelDisplay(d.modelId);
+          return (
+            <div key={d.id} style={{ position: "relative" }}>
+              <button
+                className={clsx("cs-item", d.id === activeId && "active")}
+                onClick={() => onSelectDialog(d.id)}
+              >
+                <div className="cs-title">{dialogTitle(d, t("chat.newDialog"))}</div>
+                <div className="cs-meta">
+                  <span className="cs-meta-model">
+                    {model.icon && (
+                      <ModelAvatar
+                        className="cs-meta-icon"
+                        icon={model.icon}
+                        name={model.name}
+                        iconSize={12}
+                      />
+                    )}
+                    <span className="truncate">{model.name}</span>
+                  </span>
+                  <span>{formatRelative(d.updatedAt, t)}</span>
+                </div>
+              </button>
+              <button
+                className="cs-item-menu"
+                aria-label={t("common.actions")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuForId(menuForId === d.id ? null : d.id);
+                }}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              {menuForId === d.id && (
+                <div className="cs-item-pop" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => onRename(d.id)}>
+                    <Pencil size={13} /> {t("common.rename")}
+                  </button>
+                  <button className="danger" onClick={() => onDelete(d.id)}>
+                    <Trash2 size={13} /> {t("common.delete")}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </aside>
   );
