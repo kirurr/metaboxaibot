@@ -97,6 +97,10 @@ export function SettingsPanel({ settings, values, onChange, modeId }: SettingsPa
   if (modeId !== undefined) {
     effectiveValues._mode = modeId;
   }
+  // Этот пакет = Telegram мини-апп. Скрываем настройки, помеченные
+  // `unavailableIf: { key: "_platform", eq: "telegram" }` — например, Kling
+  // multishot/shots, чей shot-list editor реализован только в `packages/web`.
+  effectiveValues._platform = "telegram";
 
   const basicSettings = settings.filter((s) => !s.advanced);
   const advancedSettings = settings.filter((s) => s.advanced);

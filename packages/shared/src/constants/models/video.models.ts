@@ -537,6 +537,10 @@ const KLING_SETTINGS: ModelSettingDef[] = [
       "Собрать видео из нескольких шотов: у каждого свой промпт и длительность. До 5 шотов, сумма длительностей 3–15 секунд.",
     type: "toggle",
     default: false,
+    // shot-list editor реализован только в `packages/web`; webapp подмешивает
+    // synthetic `_platform: "telegram"` в effectiveValues, и обе настройки
+    // мультишота скрываются здесь.
+    unavailableIf: { key: "_platform", eq: "telegram" },
   },
   {
     key: "shots",
@@ -544,6 +548,7 @@ const KLING_SETTINGS: ModelSettingDef[] = [
     type: "shot-list",
     default: null,
     dependsOn: { key: "multishot", value: true },
+    unavailableIf: { key: "_platform", eq: "telegram" },
   },
 ];
 
