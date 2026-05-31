@@ -54,11 +54,13 @@ export function formatTokensSpent(raw: string | null | undefined): string {
   return String(parseFloat(parseTokens(raw).toFixed(2)));
 }
 
-/** "+2,140" / "−4,410" — со знаком и тысячным разделителем. */
+/** "+2,140" / "−4,410" / "−12.34" — со знаком и тысячным разделителем.
+ *  Дробную часть НЕ округляем (стоимость генерации бывает дробной): до 2 знаков
+ *  без хвостовых нулей (целые — без `.00`). */
 export function formatTokenDelta(raw: string | null | undefined): string {
   const n = parseTokens(raw);
   const sign = n < 0 ? "−" : "+";
-  return sign + Math.round(Math.abs(n)).toLocaleString("en-US");
+  return sign + Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 /** "Today · 14:02" / "Yesterday · 11:47" / "May 1". Locale = ru по дефолту. */

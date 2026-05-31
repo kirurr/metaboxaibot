@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
 import clsx from "clsx";
 import { Trans, useTranslation } from "react-i18next";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -261,14 +261,9 @@ export default function Tokens() {
       )}
 
       <div className="rise d4" style={{ marginTop: 16 }}>
-        <div className="row between" style={{ marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
-          <h2 className="section-title" style={{ margin: 0 }}>
-            {t("tokens.txHistory")}
-          </h2>
-          <button className="btn btn-ghost btn-sm">
-            <Download size={14} /> {t("tokens.exportCsv")}
-          </button>
-        </div>
+        <h2 className="section-title" style={{ marginBottom: 14 }}>
+          {t("tokens.txHistory")}
+        </h2>
 
         <div className="tx-filters">
           {FILTERS.map((f) => (
