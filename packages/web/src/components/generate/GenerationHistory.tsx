@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2, Music2 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
@@ -16,7 +16,7 @@ import {
 import { JobPreview } from "@/components/common/JobPreview";
 import { useGalleryFolders, useGalleryJob } from "@/hooks/useGallery";
 import { formatTokensSpent } from "@/utils/format";
-import { preloadImage, queuePreload } from "@/utils/imagePreload";
+import { preloadImage } from "@/utils/imagePreload";
 
 /**
  * Лента всех генераций текущей секции (image/design/video/audio), независимо
@@ -387,30 +387,10 @@ function OutputTile({
   const [aspect, setAspect] = useState<number | null>(section === "audio" ? 1 : null);
   const rowSpan = spanFromAspect(aspect);
 
-  // Прогрев полного URL для image-тайла: фоном при попадании во вьюпорт + точечно
-  // на hover. Video/audio не трогаем — у video full-файл слишком тяжёлый, а audio
-  // не имеет thumb→full разницы.
-  const tileRef = useRef<HTMLLIElement>(null);
+  // Прогрев полного URL для image-тайла — только точечно на hover (массовый
+  // viewport-prefetch упирался в too-many-requests на CDN). Video/audio не
+  // трогаем: у video full-файл слишком тяжёлый, у audio thumb→full разницы нет.
   const shouldPrefetch = section === "image" && !!url && url !== thumb;
-  useEffect(() => {
-    if (!shouldPrefetch || !url) return;
-    const el = tileRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            queuePreload(url);
-            observer.disconnect();
-            break;
-          }
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [shouldPrefetch, url]);
   const handleHoverPrefetch = shouldPrefetch && url ? () => preloadImage(url) : undefined;
 
   if (!url) {
@@ -448,7 +428,6 @@ function OutputTile({
 
   return (
     <li
-      ref={tileRef}
       onMouseEnter={handleHoverPrefetch}
       style={{ gridRow: `span ${rowSpan}` }}
       className="group relative rounded-[var(--radius)] overflow-hidden bg-bg-elevated"

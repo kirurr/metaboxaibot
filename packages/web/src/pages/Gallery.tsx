@@ -60,7 +60,7 @@ import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore"
 import { useDismissedErrorsStore } from "@/stores/dismissedErrorsStore";
 import { FailedTile, PendingTile } from "@/components/generate/GenerationHistory";
 import { navigateToGenerate, normalizeSection } from "@/utils/navigateToGenerate";
-import { preloadImage, queuePreload } from "@/utils/imagePreload";
+import { preloadImage } from "@/utils/imagePreload";
 
 type Section = "" | "image" | "audio" | "video";
 
@@ -657,30 +657,11 @@ function JobCard({
   // отключаем, иначе тайлы вытягиваются в прямоугольники.
   const isCompact = layout === "compact";
 
-  // Прогрев полного URL картинки: фоном при попадании во вьюпорт + точечно
-  // на hover. Открытие Lightbox показывает full из кеша без задержки.
-  const liRef = useRef<HTMLLIElement>(null);
+  // Прогрев полного URL картинки — только точечно на hover (массовый
+  // viewport-prefetch упирался в too-many-requests на CDN). Открытие
+  // Lightbox по hover'нутой карточке показывает full из кеша без задержки.
   const fullUrl = job.section === "image" ? (output.previewUrl ?? output.outputUrl ?? null) : null;
   const shouldPrefetch = !!fullUrl && fullUrl !== output.thumbnailUrl;
-  useEffect(() => {
-    if (!shouldPrefetch || !fullUrl) return;
-    const el = liRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            queuePreload(fullUrl);
-            observer.disconnect();
-            break;
-          }
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [shouldPrefetch, fullUrl]);
   const handleHoverPrefetch = shouldPrefetch && fullUrl ? () => preloadImage(fullUrl) : undefined;
 
   const handleToggleFav = (e: MouseEvent) => {
@@ -694,7 +675,6 @@ function JobCard({
 
   return (
     <li
-      ref={liRef}
       onMouseEnter={handleHoverPrefetch}
       style={isCompact ? undefined : { gridRow: `span ${rowSpan}` }}
       className={`group relative card overflow-hidden cursor-pointer ${

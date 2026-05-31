@@ -1,13 +1,8 @@
 /**
- * Прогрев картинок в кеш браузера — чтобы при открытии preview-модалки
+ * Точечный прогрев картинок в кеш браузера — чтобы при открытии preview-модалки
  * полноразмерный URL уже был в Disk/Memory Cache и `<img src>` отдавался мгновенно.
- *
- * Два слоя:
- *  - `preloadImage` — точечный прогрев (hover, prev/next в модалке, progressive
- *    fallback). Кэширует Promise по URL, повтор — no-op.
- *  - `queuePreload` — фоновый прогрев из viewport-обсёрверов. Лимит 2
- *    параллельных запроса — больше начинает заметно лагать main thread на
- *    декодинге картинок при скролле грида.
+ * Используется в hover'ах тайлов и для prev/next в модалке. Кэширует Promise
+ * по URL, повтор — no-op.
  */
 type Priority = "high" | "low" | "auto";
 
@@ -32,28 +27,4 @@ export function preloadImage(url: string, priority: Priority = "auto"): Promise<
   });
   cache.set(url, p);
   return p;
-}
-
-const MAX_PARALLEL = 2;
-let active = 0;
-const queue: string[] = [];
-const queued = new Set<string>();
-
-function pump(): void {
-  while (active < MAX_PARALLEL && queue.length > 0) {
-    const url = queue.shift()!;
-    queued.delete(url);
-    active++;
-    preloadImage(url).finally(() => {
-      active--;
-      pump();
-    });
-  }
-}
-
-export function queuePreload(url: string): void {
-  if (cache.has(url) || queued.has(url)) return;
-  queued.add(url);
-  queue.push(url);
-  pump();
 }

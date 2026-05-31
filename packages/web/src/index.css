@@ -3526,6 +3526,48 @@ select {
   animation: page-in 250ms var(--ease);
 }
 
+/* Мобильный bottom-sheet PreviewInfoCard: два едва заметных «подмигивания»
+   sheet'а + цветовая пульсация handle-полоски, чтобы намекнуть на swipe-up
+   не раздражая. Базовая трансформа на классе — нужна и без анимации
+   (prefers-reduced-motion). */
+@keyframes sheetPeek {
+  0%,
+  40%,
+  80%,
+  100% {
+    transform: translateY(calc(100% - 24px));
+  }
+  20%,
+  60% {
+    transform: translateY(calc(100% - 32px));
+  }
+}
+.anim-sheet-peek {
+  transform: translateY(calc(100% - 24px));
+  animation: sheetPeek 2s cubic-bezier(0.4, 0, 0.4, 1) 600ms 1;
+}
+@keyframes handlePulse {
+  0%,
+  40%,
+  80%,
+  100% {
+    background-color: var(--border-strong);
+  }
+  20%,
+  60% {
+    background-color: var(--accent);
+  }
+}
+.anim-handle-pulse {
+  animation: handlePulse 2s cubic-bezier(0.4, 0, 0.4, 1) 600ms 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-sheet-peek,
+  .anim-handle-pulse {
+    animation: none;
+  }
+}
+
 @keyframes toast-out {
   from {
     opacity: 1;
