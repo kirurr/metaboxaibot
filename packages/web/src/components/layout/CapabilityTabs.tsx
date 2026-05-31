@@ -8,7 +8,6 @@ import {
   CAPABILITIES,
   type Capability,
   FEATURE_MENUS,
-  MAX_MODELS_IN_MENU,
   dedupByFamily,
   displayModelDesc,
   displayModelName,
@@ -84,10 +83,30 @@ export function CapabilityTabs() {
     closeTimer.current = setTimeout(() => setHovered(null), 220);
   };
 
-  // Сдвиг popup, чтобы не вылезал за края viewport'а.
   useLayoutEffect(() => {
     const el = menuRef.current;
     if (!el) return;
+
+    // Высота списка моделей — динамическая. Максимум = высота меню (т.е. колонки
+    // пресетов слева): грид иначе растянул бы меню под более длинный список
+    // моделей. Минимум = 6 строк моделей — чтобы при коротком списке пресетов
+    // колонка моделей не схлопывалась. Итог: max(высота пресетов, 6 строк),
+    // дальше — скролл; если моделей мало — высота по контенту.
+    const featuresList = el.querySelector<HTMLElement>(".mega-list:not(.mega-list-models)");
+    const modelsList = el.querySelector<HTMLElement>(".mega-list-models");
+    if (featuresList && modelsList) {
+      modelsList.style.maxHeight = ""; // сброс перед замером натуральной разметки
+      const items = modelsList.querySelectorAll<HTMLElement>(".mega-item");
+      let minSixRows = 0;
+      if (items.length >= 6) {
+        // Замер по реальной разметке: учитывает разную высоту строк и gap'ы.
+        const listTop = modelsList.getBoundingClientRect().top;
+        minSixRows = items[5].getBoundingClientRect().bottom - listTop;
+      }
+      modelsList.style.maxHeight = `${Math.max(featuresList.offsetHeight, minSixRows)}px`;
+    }
+
+    // Сдвиг popup, чтобы не вылезал за края viewport'а.
     el.style.setProperty("--mm-shift", "0px");
     const r = el.getBoundingClientRect();
     const margin = 12;
@@ -95,7 +114,7 @@ export function CapabilityTabs() {
     if (r.right > window.innerWidth - margin) shift = -(r.right - (window.innerWidth - margin));
     else if (r.left < margin) shift = margin - r.left;
     if (shift) el.style.setProperty("--mm-shift", shift + "px");
-  }, [hovered]);
+  }, [hovered, modelsByCap]);
 
   function pick(cap: Capability, modelId?: string, link: string = "") {
     setHovered(null);
@@ -173,12 +192,10 @@ export function CapabilityTabs() {
                   {c.id !== "audio" && (
                     <div className="mega-col">
                       <div className="mega-col-head">{t("capabilities.columns.models")}</div>
-                      {/* Показываем все семейства (порядок = карусель бота). Высота
-                          ограничена MAX_MODELS_IN_MENU строками, дальше — скролл. */}
-                      <div
-                        className="mega-list mega-list-models"
-                        style={{ maxHeight: `calc(${MAX_MODELS_IN_MENU} * 4.6rem)` }}
-                      >
+                      {/* Показываем все семейства (порядок = карусель бота). Высоту
+                          (max = высота колонки пресетов) выставляет useLayoutEffect,
+                          дальше — скролл. */}
+                      <div className="mega-list mega-list-models">
                         {models.length === 0 ? (
                           <div className="mega-empty">{t("capabilities.columns.loading")}</div>
                         ) : (
