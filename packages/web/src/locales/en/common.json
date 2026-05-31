@@ -537,6 +537,7 @@
     "tokensUnit": "tokens",
     "includingSubscription": "including <mono>{{tokens}}</mono> from subscription",
     "last28Days": "Last 28 days · daily usage",
+    "scrollHint": "swipe",
     "choosePack": "Choose a pack",
     "readyPacks": "Ready-made token packs",
     "tokensTotal": "tokens",

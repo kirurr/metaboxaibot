@@ -109,8 +109,26 @@ export interface TransactionDto {
   createdAt: string;
 }
 
+/** Дневной расход токенов за последние 28 дней (для графика на Tokens). */
+export interface DailyUsageDto {
+  /** "YYYY-MM-DD" (зона Europe/Moscow). */
+  date: string;
+  /** Сумма списаний за день, строкой (как amount). "0" если списаний не было. */
+  spent: string;
+}
+
+export const tokensKeys = {
+  all: ["tokens"] as const,
+  transactions: () => [...tokensKeys.all, "transactions"] as const,
+  dailyUsage: () => [...tokensKeys.all, "daily-usage"] as const,
+};
+
 export function getTransactions() {
   return apiClient<{ transactions: TransactionDto[] }>("/auth/web-transactions");
+}
+
+export function getDailyUsage() {
+  return apiClient<{ data: DailyUsageDto[] }>("/web/usage-daily");
 }
 
 export function forgotPassword(email: string) {

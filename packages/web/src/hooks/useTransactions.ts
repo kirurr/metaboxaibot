@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { getTransactions, type TransactionDto } from "@/api/auth";
+import { useQuery } from "@tanstack/react-query";
+import { getTransactions, tokensKeys, type TransactionDto } from "@/api/auth";
 import { ApiError } from "@/api/client";
 
 interface State {
@@ -10,32 +10,22 @@ interface State {
 
 /**
  * Загружает последние 20 транзакций токенов с `/auth/web-transactions`.
- * Если у юзера не привязан Telegram — api отдаст пустой массив (а не 403),
- * чтобы можно было нормально отрендерить empty-state без обработки кода.
+ * Если у юзера не привязан Telegram — api отдаёт пустой массив (а не 403),
+ * поэтому empty-state рендерится без обработки кода.
  */
 export function useTransactions(): State {
-  const [state, setState] = useState<State>({
-    transactions: [],
-    loading: true,
-    error: null,
+  const query = useQuery({
+    queryKey: tokensKeys.transactions(),
+    queryFn: getTransactions,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    getTransactions()
-      .then((res) => {
-        if (cancelled) return;
-        setState({ transactions: res.transactions, loading: false, error: null });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const msg = err instanceof ApiError ? err.message : "Не удалось загрузить транзакции";
-        setState({ transactions: [], loading: false, error: msg });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
+  return {
+    transactions: query.data?.transactions ?? [],
+    loading: query.isLoading,
+    error: query.error
+      ? query.error instanceof ApiError
+        ? query.error.message
+        : "Не удалось загрузить транзакции"
+      : null,
+  };
 }

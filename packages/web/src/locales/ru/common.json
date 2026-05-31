@@ -542,6 +542,7 @@
     "tokensUnit": "токенов",
     "includingSubscription": "включая <mono>{{tokens}}</mono> по подписке",
     "last28Days": "Последние 28 дней · ежедневное использование",
+    "scrollHint": "листайте",
     "choosePack": "Выберите пакет",
     "readyPacks": "Готовые пакеты токенов",
     "tokensTotal": "токенов",

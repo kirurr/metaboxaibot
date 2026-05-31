@@ -26,6 +26,11 @@ export interface CatalogDto {
   tokenPackages: TokenPackDto[];
 }
 
+export const billingKeys = {
+  all: ["billing"] as const,
+  catalog: () => [...billingKeys.all, "catalog"] as const,
+};
+
 export function getCatalog() {
   return apiClient<CatalogDto>("/web/billing/catalog");
 }

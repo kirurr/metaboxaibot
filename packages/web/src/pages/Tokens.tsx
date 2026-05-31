@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Loader2, Plus, RefreshCw, Sparkles, Star } from "lucide-react";
 import clsx from "clsx";
 import { Trans, useTranslation } from "react-i18next";
@@ -6,8 +6,17 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useTransactions } from "@/hooks/useTransactions";
-import { formatTokenDelta, formatTokens, formatTxnTime, parseTokens } from "@/utils/format";
-import { getCatalog, createTokensOrder, type TokenPackDto } from "@/api/billing";
+import { useDailyUsage } from "@/hooks/useDailyUsage";
+import { useCatalog } from "@/hooks/useCatalog";
+import { useBuyTokens } from "@/hooks/useBuyTokens";
+import {
+  formatTokenDelta,
+  formatTokens,
+  formatTokensSpent,
+  formatTxnTime,
+  parseTokens,
+} from "@/utils/format";
+import { type TokenPackDto } from "@/api/billing";
 import { ApiError } from "@/api/client";
 import type { TransactionDto } from "@/api/auth";
 
@@ -66,6 +75,16 @@ function txTitle(tx: TransactionDto, t: (k: string) => string): string {
   }
 }
 
+/** Минимальная высота полоски графика (% от высоты области), чтобы дни с
+ *  нулевым/малым расходом всё равно были видны. */
+const BAR_MIN_PCT = 14;
+
+/** "2026-05-24" → "24 мая" (локальная дата без сдвига часового пояса). */
+function formatDayLabel(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
 export default function Tokens() {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -74,39 +93,29 @@ export default function Tokens() {
   const { transactions, loading, error } = useTransactions();
 
   const [filter, setFilter] = useState<FilterId>("all");
+  // Выбранный день графика. null → дефолт «сегодня» (последний день).
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   // Реальные пакеты токенов из БД (через /web/billing/catalog).
-  const [packs, setPacks] = useState<TokenPackDto[] | null>(null);
-  const [packsError, setPacksError] = useState<string | null>(null);
-  const [buyingId, setBuyingId] = useState<string | null>(null);
+  const catalog = useCatalog();
+  const packs = catalog.data?.tokenPackages ?? null;
+  const packsError = catalog.error
+    ? catalog.error instanceof ApiError
+      ? catalog.error.message
+      : t("tokens.packsError")
+    : null;
+  const buyTokens = useBuyTokens();
 
-  useEffect(() => {
-    let cancelled = false;
-    getCatalog()
-      .then((c) => {
-        if (!cancelled) setPacks(c.tokenPackages);
-      })
-      .catch((err: ApiError) => {
-        if (!cancelled) setPacksError(err.message || t("tokens.packsError"));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [t]);
-
-  async function buyTokens(pkg: TokenPackDto) {
-    if (buyingId) return;
-    setBuyingId(pkg.id);
-    try {
-      const { paymentUrl } = await createTokensOrder(pkg.id);
-      window.location.href = paymentUrl;
-    } catch (err) {
-      setBuyingId(null);
-      pushToast({
-        type: "error",
-        message: err instanceof ApiError ? err.message : t("common.error"),
-      });
-    }
+  function handleBuy(pkg: TokenPackDto) {
+    if (buyTokens.isPending) return;
+    buyTokens.mutate(pkg.id, {
+      onError: (err) => {
+        pushToast({
+          type: "error",
+          message: err instanceof ApiError ? err.message : t("common.error"),
+        });
+      },
+    });
   }
 
   const totalBalanceRaw = user
@@ -114,16 +123,59 @@ export default function Tokens() {
     : "0";
   const totalBalance = formatTokens(totalBalanceRaw);
 
-  // Декоративный sparkline — реальных дневных агрегатов нет, оставляем псевдо-данные.
-  const spark = useMemo(
-    () =>
-      Array.from(
-        { length: 28 },
-        (_, i) => 20 + Math.round(60 * Math.abs(Math.sin(i * 0.7) + Math.cos(i * 0.3))),
-      ),
-    [],
+  // Реальный дневной расход токенов за 28 дней (zero-fill с бэкенда).
+  const { days } = useDailyUsage();
+  const maxSpent = useMemo(
+    () => days.reduce((m, d) => Math.max(m, parseTokens(d.spent)), 0),
+    [days],
   );
-  const max = Math.max(...spark);
+  // По умолчанию выбран сегодня (последний день); readout не пустой при загрузке.
+  const activeIndex = selectedDay ?? days.length - 1;
+  const activeDay = days[activeIndex];
+
+  // На мобилке график — горизонтальный скролл; проматываем к сегодня (вправо),
+  // поэтому история (старые дни) уходит влево — туда же смотрят фейд и подсказка.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const programmaticScroll = useRef(false);
+  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
+  const [hintSeen, setHintSeen] = useState(false);
+
+  function updateEdges() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setEdges({
+      atStart: el.scrollLeft <= 1,
+      atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1,
+    });
+  }
+
+  function onChartScroll() {
+    updateEdges();
+    // Первый скролл — программный (промотка к сегодня), он не должен прятать хинт.
+    if (programmaticScroll.current) {
+      programmaticScroll.current = false;
+      return;
+    }
+    if (!hintSeen) setHintSeen(true);
+  }
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (isMobile && el) {
+      programmaticScroll.current = true;
+      el.scrollLeft = el.scrollWidth;
+      updateEdges();
+    }
+  }, [isMobile, days.length]);
+
+  /** Индекс дня по X-координате указателя (скраб мышью по всей области, десктоп). */
+  function dayFromPointer(e: PointerEvent<HTMLDivElement>) {
+    if (days.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = (e.clientX - rect.left) / rect.width;
+    const idx = Math.min(days.length - 1, Math.max(0, Math.round(ratio * (days.length - 1))));
+    setSelectedDay(idx);
+  }
 
   const categorized = useMemo(
     () => transactions.map((t) => ({ tx: t, kind: categorize(t) })),
@@ -184,17 +236,77 @@ export default function Tokens() {
               />
             </div>
           )}
-          <div className="spark">
-            {spark.map((v, i) => (
-              <span
-                key={i}
-                className={i > spark.length - 4 ? "hi" : ""}
-                style={{ height: `${(v / max) * 100}%` }}
-              />
-            ))}
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            {t("tokens.last28Days")}
+          <div className="usage-chart" role="group" aria-label={t("tokens.last28Days")}>
+            <div className="usage-readout">
+              <span className="usage-readout-value">
+                {formatTokensSpent(activeDay?.spent ?? "0")}
+                <span className="usage-readout-unit">{t("tokens.tokensUnit")}</span>
+              </span>
+              <span className="usage-readout-date">
+                {activeDay ? formatDayLabel(activeDay.date) : ""}
+              </span>
+            </div>
+            <div
+              className={clsx(
+                "spark-viewport",
+                isMobile && !edges.atStart && "fade-left",
+                isMobile && !edges.atEnd && "fade-right",
+              )}
+            >
+              <div
+                ref={scrollRef}
+                className={clsx("spark", isMobile && "spark-scroll")}
+                role="slider"
+                tabIndex={0}
+                aria-valuemin={0}
+                aria-valuemax={Math.max(0, days.length - 1)}
+                aria-valuenow={activeIndex >= 0 ? activeIndex : 0}
+                aria-valuetext={
+                  activeDay
+                    ? `${formatDayLabel(activeDay.date)}: ${formatTokensSpent(activeDay.spent)}`
+                    : ""
+                }
+                onScroll={isMobile ? onChartScroll : undefined}
+                // Десктоп: скраб мышью. Мобилка: нативный горизонтальный скролл +
+                // тап по бару (onClick ниже) — pointer-скраб мешал бы скроллу.
+                onPointerDown={
+                  isMobile
+                    ? undefined
+                    : (e) => {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        dayFromPointer(e);
+                      }
+                }
+                onPointerMove={isMobile ? undefined : dayFromPointer}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowLeft") setSelectedDay(Math.max(0, activeIndex - 1));
+                  else if (e.key === "ArrowRight")
+                    setSelectedDay(Math.min(days.length - 1, activeIndex + 1));
+                }}
+              >
+                {days.map((d, i) => {
+                  const v = parseTokens(d.spent);
+                  const h =
+                    maxSpent > 0 ? Math.max((v / maxSpent) * 100, BAR_MIN_PCT) : BAR_MIN_PCT;
+                  return (
+                    <span
+                      key={d.date}
+                      className={clsx("spark-bar", i === activeIndex && "active")}
+                      style={{ height: `${h}%` }}
+                      onClick={() => setSelectedDay(i)}
+                    />
+                  );
+                })}
+              </div>
+              {isMobile && !hintSeen && days.length > 0 && (
+                <div className="spark-hint" aria-hidden="true">
+                  ← {t("tokens.scrollHint")}
+                </div>
+              )}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              {t("tokens.last28Days")}
+            </div>
           </div>
         </div>
         <div className="token-orb" aria-hidden="true" />
@@ -227,7 +339,7 @@ export default function Tokens() {
                 : p.badge === "profitable" || p.badge === "best_value"
                   ? t("plans.badgeProfitable")
                   : p.badge;
-            const busy = buyingId === p.id;
+            const busy = buyTokens.isPending && buyTokens.variables === p.id;
             const isProfitable = p.badge === "profitable" || p.badge === "best_value";
             return (
               <div key={p.id} className="pack" style={{ cursor: "default" }}>
@@ -243,8 +355,8 @@ export default function Tokens() {
                 <button
                   className={clsx("btn btn-primary", isProfitable && "btn-heartbeat")}
                   style={{ width: "100%", marginTop: 16 }}
-                  onClick={() => buyTokens(p)}
-                  disabled={buyingId !== null}
+                  onClick={() => handleBuy(p)}
+                  disabled={buyTokens.isPending}
                 >
                   {busy ? (
                     <>

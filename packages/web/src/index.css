@@ -3182,6 +3182,7 @@ button.att-chip-image {
 
 /* Sparkline bar */
 .spark {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 4px;
@@ -3196,6 +3197,130 @@ button.att-chip-image {
 }
 .spark span.hi {
   background: var(--accent);
+}
+
+/* Колонки token-hero — grid; без min-width:0 элемент не сжимается ниже своего
+   контента, и скролл-полоса графика растягивала бы всю карточку/страницу. */
+.token-hero > div {
+  min-width: 0;
+}
+
+/* Интерактивный график расхода токенов (readout + скраб). */
+.usage-chart {
+  margin-top: 12px;
+  min-width: 0;
+}
+/* Строка-значение выбранного дня (всегда видна, по умолчанию — сегодня). */
+.usage-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+.usage-readout-value {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.3px;
+}
+.usage-readout-unit {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.usage-readout-date {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* Скраб: вся область — единая тач-цель, без перехвата вертикального скролла. */
+.usage-chart .spark {
+  touch-action: none;
+  cursor: pointer;
+  outline: none;
+}
+.spark span.spark-bar {
+  min-height: 8px;
+}
+/* Подсветка выбранного дня (мышь/палец/клавиатура). */
+.usage-chart .spark span.spark-bar.active {
+  background: var(--accent);
+}
+.usage-chart .spark:focus-visible {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent-lighter);
+}
+
+/* Мобилка: горизонтальный скролл вместо скраба — бары шире и тапаются. */
+.usage-chart .spark.spark-scroll {
+  height: 80px;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.usage-chart .spark.spark-scroll .spark-bar {
+  flex: 0 0 auto;
+  width: 14px;
+  min-height: 10px;
+}
+
+/* Виewport графика: контейнер для edge-фейдов и подсказки о скролле. */
+.spark-viewport {
+  position: relative;
+}
+/* Градиент-затухание у краёв — намёк, что контент продолжается за обрезом.
+   Цвет совпадает с фоном карточки token-hero. */
+.spark-viewport.fade-left::before,
+.spark-viewport.fade-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  z-index: 2;
+}
+.spark-viewport.fade-left::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-card), rgba(0, 0, 0, 0));
+}
+.spark-viewport.fade-right::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-card), rgba(0, 0, 0, 0));
+}
+/* Подсказка «← листайте» — исчезает после первого скролла. */
+.spark-hint {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+  animation: spark-hint-nudge 1.5s var(--ease) infinite;
+}
+@keyframes spark-hint-nudge {
+  0%,
+  100% {
+    transform: translate(0, -50%);
+  }
+  50% {
+    transform: translate(-4px, -50%);
+  }
 }
 
 /* Toggle */
