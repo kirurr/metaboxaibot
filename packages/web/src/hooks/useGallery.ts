@@ -186,59 +186,70 @@ export function useDeleteGalleryFolder() {
   });
 }
 
-export function useAddOutputToGalleryFolder() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ folderId, outputId }: { folderId: string; outputId: string }) =>
-      addOutputToGalleryFolder(folderId, outputId),
-    onSuccess: () => invalidateGallery(qc),
-  });
-}
-
-export function useRemoveOutputFromGalleryFolder() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ folderId, outputId }: { folderId: string; outputId: string }) =>
-      removeOutputFromGalleryFolder(folderId, outputId),
-    onSuccess: () => invalidateGallery(qc),
-  });
-}
-
-// ── Favorites (с optimistic update) ─────────────────────────────────────────
+// ── Optimistic patch (folders + favorites) ─────────────────────────────────
 //
-// Favorites toggle — самое чувствительное к лагу действие в галерее. Накладываем
-// изменения сразу на все кэшированные списки items и откатываем при ошибке.
-// Если default-папки нет в кэше — мутация всё равно отправится, просто без
-// мгновенного UI-эффекта (бэк-данные приедут через `onSettled` invalidate).
+// Folder/favorites toggle — наиболее лаг-чувствительные действия. Накладываем
+// изменения сразу на ВСЕ кэшированные шейпы:
+//   • `galleryKeys.jobs()` — list/infinite шейпы (карточка в гриде);
+//   • `galleryKeys.detail(jobId)` — `GalleryJobDetail` для открытого лайтбокса
+//     (heart/чекбокс папки внутри JobPreview).
+// Без патча detail-кэша heart внутри модалки залипал до round-trip'а
+// invalidate'а (staleTime у detail = 30s; force-refetch через onSettled).
 
-type FavoritesContext = {
-  snapshots: Array<[readonly unknown[], unknown]>;
+type OptimisticSnapshots = {
+  lists: Array<[readonly unknown[], unknown]>;
+  details: Array<[readonly unknown[], unknown]>;
 };
 
-async function snapshotItemsLists(qc: ReturnType<typeof useQueryClient>) {
-  await qc.cancelQueries({ queryKey: galleryKeys.jobs() });
-  return qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() });
-}
+type OptimisticContext = { snapshots: OptimisticSnapshots };
 
-function patchItem(item: GalleryItem, favId: string, mode: "add" | "remove"): GalleryItem {
-  if (mode === "add") {
-    if (item.folderIds.includes(favId)) return item;
-    return { ...item, folderIds: [...item.folderIds, favId] };
-  }
-  return { ...item, folderIds: item.folderIds.filter((id) => id !== favId) };
-}
-
-function patchItemsLists(
+async function snapshotGalleryCaches(
   qc: ReturnType<typeof useQueryClient>,
-  snapshots: FavoritesContext["snapshots"],
+): Promise<OptimisticSnapshots> {
+  await qc.cancelQueries({ queryKey: galleryKeys.all });
+  return {
+    lists: qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() }),
+    details: qc.getQueriesData<unknown>({ queryKey: [...galleryKeys.all, "detail"] }),
+  };
+}
+
+function restoreSnapshots(
+  qc: ReturnType<typeof useQueryClient>,
+  snapshots: OptimisticSnapshots,
+): void {
+  for (const [key, data] of snapshots.lists) qc.setQueryData(key, data);
+  for (const [key, data] of snapshots.details) qc.setQueryData(key, data);
+}
+
+function patchFolderIds(
+  current: readonly string[],
+  folderId: string,
+  mode: "add" | "remove",
+): string[] | undefined {
+  if (mode === "add") {
+    if (current.includes(folderId)) return undefined;
+    return [...current, folderId];
+  }
+  if (!current.includes(folderId)) return undefined;
+  return current.filter((id) => id !== folderId);
+}
+
+function patchItem(item: GalleryItem, folderId: string, mode: "add" | "remove"): GalleryItem {
+  const next = patchFolderIds(item.folderIds, folderId, mode);
+  if (!next) return item;
+  return { ...item, folderIds: next };
+}
+
+function patchGalleryCaches(
+  qc: ReturnType<typeof useQueryClient>,
+  snapshots: OptimisticSnapshots,
   outputId: string,
-  favId: string,
+  folderId: string,
   mode: "add" | "remove",
 ) {
-  // `galleryKeys.jobs()` накрывает и page-based (`GalleryListResponse`), и
-  // infinite (`InfiniteData<GalleryListResponse>`) — структура у них разная,
-  // обрабатываем оба варианта.
-  for (const [key, data] of snapshots) {
+  // Lists: и page-based (`GalleryListResponse`), и infinite
+  // (`InfiniteData<GalleryListResponse>`). Структура разная — две ветки.
+  for (const [key, data] of snapshots.lists) {
     if (!data || typeof data !== "object") continue;
     if ("pages" in data) {
       const inf = data as InfiniteData<GalleryListResponse>;
@@ -246,7 +257,7 @@ function patchItemsLists(
         ...inf,
         pages: inf.pages.map((page) => ({
           ...page,
-          items: page.items.map((it) => (it.id === outputId ? patchItem(it, favId, mode) : it)),
+          items: page.items.map((it) => (it.id === outputId ? patchItem(it, folderId, mode) : it)),
         })),
       });
     } else {
@@ -254,9 +265,27 @@ function patchItemsLists(
       if (!list.items) continue;
       qc.setQueryData<GalleryListResponse>(key, {
         ...list,
-        items: list.items.map((it) => (it.id === outputId ? patchItem(it, favId, mode) : it)),
+        items: list.items.map((it) => (it.id === outputId ? patchItem(it, folderId, mode) : it)),
       });
     }
+  }
+
+  // Detail: ищем output внутри `outputs[]` нужной джобы и патчим его
+  // `folderIds`. JobPreview лайтбокс читает `activeOutput.folderIds` ровно
+  // отсюда, так что heart/чекбоксы папок мгновенно отражают клик.
+  for (const [key, data] of snapshots.details) {
+    if (!data || typeof data !== "object") continue;
+    const detail = data as GalleryJobDetail;
+    if (!Array.isArray(detail.outputs)) continue;
+    if (!detail.outputs.some((o) => o.id === outputId)) continue;
+    qc.setQueryData<GalleryJobDetail>(key, {
+      ...detail,
+      outputs: detail.outputs.map((o) => {
+        if (o.id !== outputId) return o;
+        const next = patchFolderIds(o.folderIds, folderId, mode);
+        return next ? { ...o, folderIds: next } : o;
+      }),
+    });
   }
 }
 
@@ -265,18 +294,59 @@ function getFavoritesFolderId(qc: ReturnType<typeof useQueryClient>): string | u
   return folders?.find((f) => f.isDefault)?.id;
 }
 
+type FolderMutationVars = { folderId: string; outputId: string };
+
+export function useAddOutputToGalleryFolder() {
+  const qc = useQueryClient();
+  return useMutation<unknown, Error, FolderMutationVars, OptimisticContext>({
+    mutationFn: ({ folderId, outputId }) => addOutputToGalleryFolder(folderId, outputId),
+    onMutate: async ({ folderId, outputId }) => {
+      const snapshots = await snapshotGalleryCaches(qc);
+      patchGalleryCaches(qc, snapshots, outputId, folderId, "add");
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    },
+    onSettled: () => invalidateGallery(qc),
+  });
+}
+
+export function useRemoveOutputFromGalleryFolder() {
+  const qc = useQueryClient();
+  return useMutation<unknown, Error, FolderMutationVars, OptimisticContext>({
+    mutationFn: ({ folderId, outputId }) => removeOutputFromGalleryFolder(folderId, outputId),
+    onMutate: async ({ folderId, outputId }) => {
+      const snapshots = await snapshotGalleryCaches(qc);
+      patchGalleryCaches(qc, snapshots, outputId, folderId, "remove");
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    },
+    onSettled: () => invalidateGallery(qc),
+  });
+}
+
+// ── Favorites (sugar над default-папкой) ────────────────────────────────────
+//
+// Делегирует на тот же `patchGalleryCaches`, что и обычные папочные мутации —
+// поведение идентично, отличается только то, что folderId резолвится из кэша
+// (default-папка пользователя). Если её ещё нет — мутация всё равно уйдёт, но
+// без мгновенного UI-эффекта; бэк-данные приедут через `onSettled` invalidate.
+
 export function useAddToGalleryFavorites() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, string, FavoritesContext>({
+  return useMutation<unknown, Error, string, OptimisticContext>({
     mutationFn: (outputId) => addToGalleryFavorites(outputId),
     onMutate: async (outputId) => {
-      const snapshots = await snapshotItemsLists(qc);
+      const snapshots = await snapshotGalleryCaches(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchItemsLists(qc, snapshots, outputId, favId, "add");
+      if (favId) patchGalleryCaches(qc, snapshots, outputId, favId, "add");
       return { snapshots };
     },
     onError: (_err, _outputId, ctx) => {
-      ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) restoreSnapshots(qc, ctx.snapshots);
     },
     onSettled: () => invalidateGallery(qc),
   });
@@ -284,16 +354,16 @@ export function useAddToGalleryFavorites() {
 
 export function useRemoveFromGalleryFavorites() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, string, FavoritesContext>({
+  return useMutation<unknown, Error, string, OptimisticContext>({
     mutationFn: (outputId) => removeFromGalleryFavorites(outputId),
     onMutate: async (outputId) => {
-      const snapshots = await snapshotItemsLists(qc);
+      const snapshots = await snapshotGalleryCaches(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchItemsLists(qc, snapshots, outputId, favId, "remove");
+      if (favId) patchGalleryCaches(qc, snapshots, outputId, favId, "remove");
       return { snapshots };
     },
     onError: (_err, _outputId, ctx) => {
-      ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) restoreSnapshots(qc, ctx.snapshots);
     },
     onSettled: () => invalidateGallery(qc),
   });
