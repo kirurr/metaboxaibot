@@ -311,6 +311,10 @@ export interface GalleryOutput {
   previewUrl: string | null;
   /** Thumbnail WebP (400px wide) — available for images only, null otherwise. */
   thumbnailUrl: string | null;
+  /** Папки, в которых лежит этот output (favorites — это default-папка). */
+  folderIds: string[];
+  /** 0-based индекс в пачке. */
+  index: number;
 }
 
 export interface GalleryFolder {
@@ -323,24 +327,48 @@ export interface GalleryFolder {
   createdAt: string;
 }
 
-export interface GalleryJob {
+/**
+ * Flat-item для GET /gallery. Один output = одна карточка. После refactor'а
+ * 2026-05-31 пачка из N генераций отдаётся как N item'ов, не один с
+ * outputs[]. Сюда заинлайнен job-контекст (prompt, modelId, completedAt, ...)
+ * чтобы фронту хватило данных для рендера карточки без второго запроса.
+ */
+export interface GalleryItem {
+  /** = outputId. */
   id: string;
+  /** ID родительской job'ы — для resend всей пачки и для лайтбокса. */
+  jobId: string;
   section: string;
   modelId: string;
-  /** Display name from AI_MODELS, falls back to modelId. */
   modelName: string;
   prompt: string;
-  /** Per-model settings used at generation time (Record<string, unknown>). */
   modelSettings: Record<string, unknown>;
-  /** Internal tokens debited. Stringified Decimal — null for old jobs / recovery fast-path. */
   tokensSpent: string | null;
   completedAt: string | null;
   folderIds: string[];
+  s3Key: string | null;
+  outputUrl: string | null;
+  previewUrl: string | null;
+  thumbnailUrl: string | null;
+  index: number;
+  /** Всего outputs в исходной джобе — UI рисует «2/4» если нужно. */
+  batchSize: number;
+}
+
+export interface GalleryJobDetail {
+  id: string;
+  section: string;
+  modelId: string;
+  modelName: string;
+  prompt: string;
+  modelSettings: Record<string, unknown>;
+  tokensSpent: string | null;
+  completedAt: string | null;
   outputs: GalleryOutput[];
 }
 
 export interface GalleryResponse {
-  items: GalleryJob[];
+  items: GalleryItem[];
   total: number;
   page: number;
   limit: number;

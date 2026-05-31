@@ -1,13 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getGalleryOriginalUrl, type GalleryFolder, type GalleryJob } from "@/api/gallery";
 import {
-  useAddJobToGalleryFolder,
+  getGalleryOriginalUrl,
+  type GalleryFolder,
+  type GalleryJobDetail,
+  type GalleryOutput,
+} from "@/api/gallery";
+import {
+  useAddOutputToGalleryFolder,
   useAddToGalleryFavorites,
   useCreateGalleryFolder,
   useDeleteGalleryOutput,
   useRemoveFromGalleryFavorites,
-  useRemoveJobFromGalleryFolder,
+  useRemoveOutputFromGalleryFolder,
 } from "@/hooks/useGallery";
 import {
   GenerationPreviewModal,
@@ -22,13 +27,16 @@ import { buildSettingsRows } from "@/utils/settingsDisplay";
 import { openOutputInTool, REUSE_TARGETS, type ReuseOutput } from "@/utils/openOutputInTool";
 
 /**
- * Единый адаптер `GalleryJob` → `GenerationPreviewModal`. Используется и галереей
- * (`Gallery` page), и лентой генерации (`GenerationHistory`, после дотягивания
- * полного `GalleryJob` по id) — чтобы обе модалки выглядели и работали одинаково.
+ * Единый адаптер `GalleryJobDetail` → `GenerationPreviewModal`. Используется и
+ * галереей (`Gallery` page), и лентой генерации (`GenerationHistory`, после
+ * дотягивания полного `GalleryJobDetail` по id) — обе модалки выглядят и
+ * работают одинаково.
  *
- * Внутри проводит все действия над джобой: повтор, скачивание оригинала,
- * избранное, папки (+ создание), удаление. Активный output — локальный стейт
- * (resets на каждое открытие через `key={job.id}` у вызывающего).
+ * Внутри проводит все действия над активным output'ом: повтор, скачивание
+ * оригинала, избранное, папки (+ создание), удаление. Активный output —
+ * локальный стейт (resets на каждое открытие через `key={job.id}` у
+ * вызывающего). Favorites и папки переехали с job-level на output-level в
+ * рефакторе 2026-05-31: каждая картинка в пачке лайкается отдельно.
  */
 
 function getErrorMessage(err: unknown): string {
@@ -42,7 +50,7 @@ export function JobPreview({
   onClose,
   onDeleted,
 }: {
-  job: GalleryJob;
+  job: GalleryJobDetail;
   folders: GalleryFolder[];
   initialOutputIdx?: number;
   onClose: () => void;
@@ -53,8 +61,8 @@ export function JobPreview({
 }) {
   const navigate = useNavigate();
   const pushToast = useUIStore((s) => s.pushToast);
-  const addToFolder = useAddJobToGalleryFolder();
-  const removeFromFolder = useRemoveJobFromGalleryFolder();
+  const addToFolder = useAddOutputToGalleryFolder();
+  const removeFromFolder = useRemoveOutputFromGalleryFolder();
   const addFav = useAddToGalleryFavorites();
   const removeFav = useRemoveFromGalleryFavorites();
   const createFolder = useCreateGalleryFolder();
@@ -65,23 +73,26 @@ export function JobPreview({
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const modelDisplay = getModelDisplay(job.modelId, job.modelName);
 
+  const visibleOutputs: GalleryOutput[] = useMemo(
+    () => job.outputs.filter((o) => !removedIds.has(o.id)),
+    [job.outputs, removedIds],
+  );
+
   const previewOutputs = useMemo<PreviewOutput[]>(
     () =>
-      job.outputs
-        .filter((o) => !removedIds.has(o.id))
+      visibleOutputs
         .map((o) => ({
           id: o.id,
           url: o.previewUrl ?? o.outputUrl ?? "",
           thumbnailUrl: o.thumbnailUrl,
         }))
         .filter((o) => o.url),
-    [job.outputs, removedIds],
+    [visibleOutputs],
   );
 
   const handleRepeat = useCallback(() => {
     const section = normalizeSection(job.section);
     if (!section) {
-      // Невалидную секцию показываем тостом, модалку оставляем открытой.
       pushToast({ type: "error", message: "Неизвестная секция" });
       return;
     }
@@ -94,11 +105,14 @@ export function JobPreview({
     });
   }, [job, navigate, pushToast, onClose]);
 
+  const safeIdx = Math.min(activeIdx, Math.max(0, previewOutputs.length - 1));
+  const activeOutput: GalleryOutput | undefined = useMemo(() => {
+    const id = previewOutputs[safeIdx]?.id;
+    return id ? visibleOutputs.find((o) => o.id === id) : undefined;
+  }, [previewOutputs, safeIdx, visibleOutputs]);
+
   const handleDownload = useCallback(async () => {
-    // Ищем в `previewOutputs` (отфильтрован по url), а не в `job.outputs` —
-    // иначе при отброшенном output'е activeIdx смещается и качаем не ту работу.
-    const safe = Math.min(activeIdx, previewOutputs.length - 1);
-    const out = previewOutputs[safe];
+    const out = previewOutputs[safeIdx];
     if (!out) return;
     try {
       const { url } = await getGalleryOriginalUrl(out.id);
@@ -106,18 +120,19 @@ export function JobPreview({
     } catch (err) {
       pushToast({ type: "error", message: getErrorMessage(err) });
     }
-  }, [previewOutputs, activeIdx, pushToast]);
+  }, [previewOutputs, safeIdx, pushToast]);
 
   const handleToggleFolder = useCallback(
     (folderId: string) => {
-      const isIn = job.folderIds.includes(folderId);
+      if (!activeOutput) return;
+      const isIn = activeOutput.folderIds.includes(folderId);
       const opts = {
         onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
       };
-      if (isIn) removeFromFolder.mutate({ folderId, jobId: job.id }, opts);
-      else addToFolder.mutate({ folderId, jobId: job.id }, opts);
+      if (isIn) removeFromFolder.mutate({ folderId, outputId: activeOutput.id }, opts);
+      else addToFolder.mutate({ folderId, outputId: activeOutput.id }, opts);
     },
-    [job.id, job.folderIds, addToFolder, removeFromFolder, pushToast],
+    [activeOutput, addToFolder, removeFromFolder, pushToast],
   );
 
   const handleCreateFolder = useCallback(
@@ -134,18 +149,18 @@ export function JobPreview({
   );
 
   const favId = folders.find((f) => f.isDefault)?.id;
-  const isFavorite = favId ? job.folderIds.includes(favId) : false;
+  const isFavorite = favId && activeOutput ? activeOutput.folderIds.includes(favId) : false;
   const handleToggleFavorite = useCallback(() => {
+    if (!activeOutput) return;
     const opts = {
       onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
     };
-    if (isFavorite) removeFav.mutate(job.id, opts);
-    else addFav.mutate(job.id, opts);
-  }, [isFavorite, addFav, removeFav, job.id, pushToast]);
+    if (isFavorite) removeFav.mutate(activeOutput.id, opts);
+    else addFav.mutate(activeOutput.id, opts);
+  }, [isFavorite, addFav, removeFav, activeOutput, pushToast]);
 
   const handleDelete = useCallback(() => {
-    const safe = Math.min(activeIdx, previewOutputs.length - 1);
-    const out = previewOutputs[safe];
+    const out = previewOutputs[safeIdx];
     if (!out) return;
     const isLast = previewOutputs.length <= 1;
     const msg = isLast ? "Удалить работу безвозвратно?" : "Удалить этот результат безвозвратно?";
@@ -169,22 +184,18 @@ export function JobPreview({
       },
       onError: (err) => pushToast({ type: "error", message: getErrorMessage(err) }),
     });
-  }, [deleteOutput, previewOutputs, activeIdx, job.id, pushToast, onClose, onDeleted]);
+  }, [deleteOutput, previewOutputs, safeIdx, job.id, pushToast, onClose, onDeleted]);
 
   // Активный output как источник для «открыть в инструменте». s3Key есть только
   // у сохранённых в наш S3 output'ов (provider-only → null, кнопки прячем).
   const makeReuseOutput = useCallback((): ReuseOutput | null => {
-    const idx = Math.min(activeIdx, previewOutputs.length - 1);
-    const out = previewOutputs[idx];
-    if (!out) return null;
-    const jo = job.outputs.find((o) => o.id === out.id);
-    if (!jo?.s3Key) return null;
+    if (!activeOutput?.s3Key) return null;
     return {
-      s3Key: jo.s3Key,
-      url: jo.previewUrl ?? jo.outputUrl ?? null,
+      s3Key: activeOutput.s3Key,
+      url: activeOutput.previewUrl ?? activeOutput.outputUrl ?? null,
       name: modelDisplay.name,
     };
-  }, [activeIdx, previewOutputs, job.outputs, modelDisplay.name]);
+  }, [activeOutput, modelDisplay.name]);
 
   const handleAnimate = useCallback(() => {
     const o = makeReuseOutput();
@@ -215,12 +226,10 @@ export function JobPreview({
 
   const tokensValue =
     job.tokensSpent && job.tokensSpent !== "0" ? formatTokensSpent(job.tokensSpent) : null;
-  const safeIdx = Math.min(activeIdx, previewOutputs.length - 1);
 
   // Доступность reuse-кнопок: тип секции + наличие s3Key у активного output.
   const sec = normalizeSection(job.section);
-  const activeJobOutput = job.outputs.find((o) => o.id === previewOutputs[safeIdx]?.id);
-  const canReuse = !!activeJobOutput?.s3Key;
+  const canReuse = !!activeOutput?.s3Key;
 
   return (
     <GenerationPreviewModal
@@ -247,7 +256,7 @@ export function JobPreview({
         onDownload: handleDownload,
         folders: {
           list: folders,
-          selectedIds: job.folderIds,
+          selectedIds: activeOutput?.folderIds ?? [],
           onToggle: handleToggleFolder,
           onCreate: handleCreateFolder,
         },

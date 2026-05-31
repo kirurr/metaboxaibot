@@ -7,11 +7,10 @@
  * (`GalleryNotFoundError` / `GalleryForbiddenError` / `GalleryBadRequestError`)
  * to HTTP 4xx via the local `mapGalleryError` helper in each route file.
  *
- * Behavior here mirrors the original inline logic in `routes/gallery.ts`
- * byte-for-byte (DTO shape, status code mapping, S3 cleanup fan-out,
- * "cannot rename/delete default folder", Favorites auto-create with the
- * Russian name "Избранное"). Do not change semantics without updating both
- * route files in lockstep.
+ * История: до 2026-05-31 list-эндпоинт группировал outputs под job'у; фавориты
+ * и папки висели на job'е. После — один output = один item в списке, фавориты и
+ * папки на output'е. `getJobById` остался для лайтбокса (`/web/gallery/jobs/:id`):
+ * job + outputs (у каждого свой `folderIds`).
  */
 
 import { db } from "../db.js";
@@ -19,8 +18,9 @@ import { getFileUrl, deleteFile } from "./s3.service.js";
 import { generateDownloadToken } from "../utils/download-token.js";
 import { AI_MODELS, config } from "@metabox/shared";
 import type {
-  GalleryJob,
   GalleryOutput,
+  GalleryItem,
+  GalleryJobDetail,
   GalleryFolder,
   GalleryListResponse,
   ListGalleryJobsQuery,
@@ -47,104 +47,109 @@ export class GalleryBadRequestError extends Error {
   }
 }
 
-// Wire-формат DTO (Date → ISO string) живёт в @metabox/shared-browser/dto.
-// На сервисе мы конвертим Date'ы перед return, чтобы тип service-функций
-// совпадал с тем, что увидит фронт. JSON.stringify сам сериализует Date так
-// же — wire bytes до/после рефакторинга идентичны, что важно для Telegram
-// мини-аппы, чей клиент уже типизирует эти поля как string.
 type GalleryOutputDto = GalleryOutput;
-type GalleryJobDto = GalleryJob;
+type GalleryItemDto = GalleryItem;
+type GalleryJobDetailDto = GalleryJobDetail;
 type GalleryFolderDto = GalleryFolder;
 export type ListJobsParams = ListGalleryJobsQuery;
 
-// SELECT-shape для job'а в gallery-views. Сохраняем как const, чтобы `listJobs`
-// и `getJobById` гарантированно тянули одинаковые поля — тогда `serializeJob`
-// корректен для обоих.
-const JOB_SELECT = {
+// SELECT-shape для output'а. Тащим job-контекст inline через relation — этого
+// достаточно и для серилизации в `GalleryItem`, и для проверки ownership при
+// folder-операциях.
+const OUTPUT_SELECT = {
   id: true,
-  section: true,
-  modelId: true,
-  prompt: true,
-  inputData: true,
-  tokensSpent: true,
-  completedAt: true,
+  index: true,
+  s3Key: true,
+  thumbnailS3Key: true,
+  outputUrl: true,
   folderItems: { select: { folderId: true } },
-  outputs: {
-    orderBy: { index: "asc" as const },
+  job: {
     select: {
       id: true,
-      s3Key: true,
-      thumbnailS3Key: true,
-      outputUrl: true,
+      userId: true,
+      section: true,
+      modelId: true,
+      prompt: true,
+      inputData: true,
+      tokensSpent: true,
+      completedAt: true,
+      _count: { select: { outputs: true } },
     },
   },
 } as const;
 
-// Структурный тип под JOB_SELECT. Prisma возвращает Decimal у tokensSpent —
-// {toString(): string} | null покрывает и Decimal, и unit-test моки.
-type RawJobOutput = {
+type RawOutput = {
   id: string;
+  index: number;
   s3Key: string | null;
   thumbnailS3Key: string | null;
   outputUrl: string | null;
-};
-
-type RawJob = {
-  id: string;
-  section: string;
-  modelId: string;
-  prompt: string;
-  inputData: unknown;
-  tokensSpent: { toString(): string } | null;
-  completedAt: Date | null;
   folderItems: { folderId: string }[];
-  outputs: RawJobOutput[];
+  job: {
+    id: string;
+    userId: bigint;
+    section: string;
+    modelId: string;
+    prompt: string;
+    inputData: unknown;
+    tokensSpent: { toString(): string } | null;
+    completedAt: Date | null;
+    _count: { outputs: number };
+  };
 };
 
-function serializeJob(job: RawJob, userId: bigint): GalleryJobDto {
+function buildPreviewUrl(
+  section: string,
+  s3Key: string | null,
+  outputUrl: string | null,
+  userId: bigint,
+): string | null {
   const base = config.api.publicUrl;
-  const model = AI_MODELS[job.modelId];
-  const inputData = (job.inputData ?? {}) as Record<string, unknown>;
+  // section === "design" — legacy guard: dev-инструмент рисовал на чужом домене,
+  // короткоживущий outputUrl всё ещё нужен. Сохраняем поведение byte-for-byte.
+  if (section !== "design" && s3Key && base) {
+    return `${base}/download/${generateDownloadToken(s3Key, userId)}`;
+  }
+  return outputUrl;
+}
+
+function buildThumbnailUrl(thumbnailS3Key: string | null, userId: bigint): string | null {
+  const base = config.api.publicUrl;
+  if (thumbnailS3Key && base) {
+    return `${base}/download/${generateDownloadToken(thumbnailS3Key, userId)}`;
+  }
+  return null;
+}
+
+function serializeItem(row: RawOutput, userId: bigint): GalleryItemDto {
+  const inputData = (row.job.inputData ?? {}) as Record<string, unknown>;
   const modelSettings = (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
-
-  const outputs: GalleryOutputDto[] = job.outputs.map((output) => {
-    const previewUrl =
-      job.section !== "design" && output.s3Key && base
-        ? `${base}/download/${generateDownloadToken(output.s3Key, userId)}`
-        : output.outputUrl;
-    const thumbnailUrl =
-      output.thumbnailS3Key && base
-        ? `${base}/download/${generateDownloadToken(output.thumbnailS3Key, userId)}`
-        : null;
-    return {
-      id: output.id,
-      s3Key: output.s3Key,
-      outputUrl: output.outputUrl,
-      previewUrl,
-      thumbnailUrl,
-    };
-  });
-
+  const model = AI_MODELS[row.job.modelId];
   return {
-    id: job.id,
-    section: job.section,
-    modelId: job.modelId,
-    modelName: model?.name ?? job.modelId,
-    prompt: job.prompt,
+    id: row.id,
+    jobId: row.job.id,
+    section: row.job.section,
+    modelId: row.job.modelId,
+    modelName: model?.name ?? row.job.modelId,
+    prompt: row.job.prompt,
     modelSettings,
-    tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
-    completedAt: job.completedAt ? job.completedAt.toISOString() : null,
-    folderIds: job.folderItems.map((fi) => fi.folderId),
-    outputs,
+    tokensSpent: row.job.tokensSpent ? row.job.tokensSpent.toString() : null,
+    completedAt: row.job.completedAt ? row.job.completedAt.toISOString() : null,
+    folderIds: row.folderItems.map((fi) => fi.folderId),
+    s3Key: row.s3Key,
+    outputUrl: row.outputUrl,
+    previewUrl: buildPreviewUrl(row.job.section, row.s3Key, row.outputUrl, userId),
+    thumbnailUrl: buildThumbnailUrl(row.thumbnailS3Key, userId),
+    index: row.index,
+    batchSize: row.job._count.outputs,
   };
 }
 
 type ListJobsOpts = {
   /**
-   * Когда true — выводит избранные jobs первыми (sorted by completedAt desc),
-   * затем остальные. Кросс-страничная пагинация: total и порядок согласованы.
-   * Web-роут включает этот флаг; Telegram-роут — нет, чтобы поведение
-   * `/gallery/*` осталось байт-в-байт (порядок ровно `completedAt desc`).
+   * Когда true — выводит favorite outputs первыми (sorted by job.completedAt
+   * desc, затем index asc), затем остальные. Кросс-страничная пагинация: total
+   * и порядок согласованы. Web-роут включает этот флаг; Telegram-роут — нет.
    */
   favoritesFirst?: boolean;
 };
@@ -160,13 +165,24 @@ async function listJobs(
   const page = Math.max(params.page ?? 1, 1);
 
   const modelIdsArray = modelIds ? modelIds.split(",").filter(Boolean) : null;
+
+  // Where строится на уровне output'а — фильтры по section/modelId/userId
+  // пробрасываются через relation `job`. Filter по `folderId` — через own
+  // `folderItems`, т.к. фавориты и папки теперь output-level.
   const where = {
-    userId,
-    status: "done",
-    ...(section ? { section } : {}),
-    ...(modelIdsArray ? { modelId: { in: modelIdsArray } } : modelId ? { modelId } : {}),
+    job: {
+      userId,
+      status: "done",
+      ...(section ? { section } : {}),
+      ...(modelIdsArray ? { modelId: { in: modelIdsArray } } : modelId ? { modelId } : {}),
+    },
     ...(folderId ? { folderItems: { some: { folderId } } } : {}),
   };
+
+  // Сортировка: новые джобы сверху, внутри пачки — по index. Output'ы одной
+  // джобы получают одинаковый `completedAt`, так что secondary key даёт
+  // стабильный порядок 0,1,2,3 внутри пачки.
+  const orderBy = [{ job: { completedAt: "desc" as const } }, { index: "asc" as const }];
 
   // Favorites-first path — только если флаг и есть default-папка.
   if (opts.favoritesFirst) {
@@ -176,81 +192,147 @@ async function listJobs(
     });
     const favId = favFolder?.id;
     if (favId) {
-      // AND, а не spread: иначе where.folderItems (фильтр пользователя по
-      // папке) был бы перезаписан вторым folderItems-условием.
       const favWhere = { AND: [where, { folderItems: { some: { folderId: favId } } }] };
       const nonFavWhere = { AND: [where, { folderItems: { none: { folderId: favId } } }] };
 
       const [favCount, nonFavCount] = await Promise.all([
-        db.generationJob.count({ where: favWhere }),
-        db.generationJob.count({ where: nonFavWhere }),
+        db.generationJobOutput.count({ where: favWhere }),
+        db.generationJobOutput.count({ where: nonFavWhere }),
       ]);
 
-      const rawJobs: RawJob[] = [];
+      const rows: RawOutput[] = [];
 
       if (skip < favCount) {
         const favTake = Math.min(take, favCount - skip);
-        const favs = await db.generationJob.findMany({
+        const favs = await db.generationJobOutput.findMany({
           where: favWhere,
-          orderBy: { completedAt: "desc" },
+          orderBy,
           skip,
           take: favTake,
-          select: JOB_SELECT,
+          select: OUTPUT_SELECT,
         });
-        rawJobs.push(...favs);
+        rows.push(...favs);
         if (favTake < take) {
-          const rest = await db.generationJob.findMany({
+          const rest = await db.generationJobOutput.findMany({
             where: nonFavWhere,
-            orderBy: { completedAt: "desc" },
+            orderBy,
             skip: 0,
             take: take - favTake,
-            select: JOB_SELECT,
+            select: OUTPUT_SELECT,
           });
-          rawJobs.push(...rest);
+          rows.push(...rest);
         }
       } else {
-        const rest = await db.generationJob.findMany({
+        const rest = await db.generationJobOutput.findMany({
           where: nonFavWhere,
-          orderBy: { completedAt: "desc" },
+          orderBy,
           skip: skip - favCount,
           take,
-          select: JOB_SELECT,
+          select: OUTPUT_SELECT,
         });
-        rawJobs.push(...rest);
+        rows.push(...rest);
       }
 
       return {
-        items: rawJobs.map((job) => serializeJob(job, userId)),
+        items: rows.map((row) => serializeItem(row, userId)),
         total: favCount + nonFavCount,
         page,
         limit: take,
       };
     }
-    // favId не найден → fall-through на простой путь.
   }
 
-  const [rawJobs, total] = await Promise.all([
-    db.generationJob.findMany({
+  const [rows, total] = await Promise.all([
+    db.generationJobOutput.findMany({
       where,
-      orderBy: { completedAt: "desc" },
+      orderBy,
       take,
       skip,
-      select: JOB_SELECT,
+      select: OUTPUT_SELECT,
     }),
-    db.generationJob.count({ where }),
+    db.generationJobOutput.count({ where }),
   ]);
 
-  const items = rawJobs.map((job) => serializeJob(job, userId));
-  return { items, total, page, limit: take };
+  return {
+    items: rows.map((row) => serializeItem(row, userId)),
+    total,
+    page,
+    limit: take,
+  };
 }
 
-async function getJobById(userId: bigint, jobId: string): Promise<GalleryJobDto> {
+const JOB_DETAIL_SELECT = {
+  id: true,
+  section: true,
+  modelId: true,
+  prompt: true,
+  inputData: true,
+  tokensSpent: true,
+  completedAt: true,
+  outputs: {
+    orderBy: { index: "asc" as const },
+    select: {
+      id: true,
+      index: true,
+      s3Key: true,
+      thumbnailS3Key: true,
+      outputUrl: true,
+      folderItems: { select: { folderId: true } },
+    },
+  },
+} as const;
+
+type RawJobDetail = {
+  id: string;
+  section: string;
+  modelId: string;
+  prompt: string;
+  inputData: unknown;
+  tokensSpent: { toString(): string } | null;
+  completedAt: Date | null;
+  outputs: Array<{
+    id: string;
+    index: number;
+    s3Key: string | null;
+    thumbnailS3Key: string | null;
+    outputUrl: string | null;
+    folderItems: { folderId: string }[];
+  }>;
+};
+
+function serializeJobDetail(job: RawJobDetail, userId: bigint): GalleryJobDetailDto {
+  const inputData = (job.inputData ?? {}) as Record<string, unknown>;
+  const modelSettings = (inputData.modelSettings as Record<string, unknown> | undefined) ?? {};
+  const model = AI_MODELS[job.modelId];
+  const outputs: GalleryOutputDto[] = job.outputs.map((output) => ({
+    id: output.id,
+    s3Key: output.s3Key,
+    outputUrl: output.outputUrl,
+    previewUrl: buildPreviewUrl(job.section, output.s3Key, output.outputUrl, userId),
+    thumbnailUrl: buildThumbnailUrl(output.thumbnailS3Key, userId),
+    folderIds: output.folderItems.map((fi) => fi.folderId),
+    index: output.index,
+  }));
+  return {
+    id: job.id,
+    section: job.section,
+    modelId: job.modelId,
+    modelName: model?.name ?? job.modelId,
+    prompt: job.prompt,
+    modelSettings,
+    tokensSpent: job.tokensSpent ? job.tokensSpent.toString() : null,
+    completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+    outputs,
+  };
+}
+
+async function getJobById(userId: bigint, jobId: string): Promise<GalleryJobDetailDto> {
   const job = await db.generationJob.findFirst({
     where: { id: jobId, userId, status: "done" },
-    select: JOB_SELECT,
+    select: JOB_DETAIL_SELECT,
   });
   if (!job) throw new GalleryNotFoundError("Job not found");
-  return serializeJob(job, userId);
+  return serializeJobDetail(job, userId);
 }
 
 async function getModelCounts(
@@ -258,29 +340,36 @@ async function getModelCounts(
   section?: string,
   folderId?: string,
 ): Promise<{ modelId: string; count: number }[]> {
-  const rows = await db.generationJob.groupBy({
-    by: ["modelId"],
+  // Считаем количество outputs по модели — после refactor'а карточек.
+  // Group by modelId через `job` relation: Prisma groupBy не умеет включать
+  // поля через relation, поэтому делаем raw-aggregation в два прохода:
+  // 1) тащим plane (outputId, modelId), 2) считаем в JS. Альтернатива —
+  // raw query, но это hot path только при смене секции, объём — десятки
+  // тысяч записей max, в JS быстро.
+  const rows = await db.generationJobOutput.findMany({
     where: {
-      userId,
-      status: "done",
-      ...(section ? { section } : {}),
+      job: {
+        userId,
+        status: "done",
+        ...(section ? { section } : {}),
+      },
       ...(folderId ? { folderItems: { some: { folderId } } } : {}),
     },
-    _count: { id: true },
-    orderBy: { _count: { id: "desc" } },
+    select: { job: { select: { modelId: true } } },
   });
-  return rows.map((r) => ({ modelId: r.modelId, count: r._count.id }));
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    counts.set(r.job.modelId, (counts.get(r.job.modelId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([modelId, count]) => ({ modelId, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 /**
  * Resolves a playable URL for a single output. Used by both the per-output
  * preview endpoint and the original-url endpoint (when `forceDownload` is
  * true, the S3 URL is signed with attachment-disposition).
- *
- * Note: this is intentionally NOT the same shape as the previewUrl produced
- * inside `listJobs` — that one short-circuits on `section === "design"`,
- * which is a legacy guard preserved verbatim. The per-output endpoints
- * always render `${base}/download/${token}` when s3Key is present.
  */
 async function resolveOutputUrl(
   userId: bigint,
@@ -340,7 +429,8 @@ async function deleteJob(userId: bigint, jobId: string): Promise<void> {
     ]),
   );
 
-  // outputs cascade-delete via the FK on GenerationJobOutput
+  // outputs cascade-delete via the FK on GenerationJobOutput; folderItems
+  // cascade-delete за outputs.
   await db.generationJob.delete({ where: { id: jobId } });
 }
 
@@ -369,7 +459,6 @@ async function deleteOutput(userId: bigint, outputId: string): Promise<{ jobDele
   ]);
 
   if (job._count.outputs <= 1) {
-    // Последний output — сносим джобу целиком (outputs каскадно).
     await db.generationJob.delete({ where: { id: job.id } });
     return { jobDeleted: true };
   }
@@ -456,40 +545,56 @@ async function deleteFolder(userId: bigint, folderId: string): Promise<void> {
   await db.galleryFolder.delete({ where: { id: folderId } });
 }
 
-async function addJobToFolder(userId: bigint, folderId: string, jobId: string): Promise<void> {
+/**
+ * Загружает output вместе с владельцем-job'ой; бросает 404/403 если нет/чужой.
+ * Используется всеми folder/favorites операциями — выносим вверх чтобы не
+ * дублировать проверку в каждой функции.
+ */
+async function assertOutputOwned(
+  userId: bigint,
+  outputId: string,
+): Promise<{ outputId: string; jobUserId: bigint }> {
+  const output = await db.generationJobOutput.findUnique({
+    where: { id: outputId },
+    select: { id: true, job: { select: { userId: true } } },
+  });
+  if (!output) throw new GalleryNotFoundError("Output not found");
+  if (output.job.userId !== userId) throw new GalleryForbiddenError();
+  return { outputId: output.id, jobUserId: output.job.userId };
+}
+
+async function addOutputToFolder(
+  userId: bigint,
+  folderId: string,
+  outputId: string,
+): Promise<void> {
   const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
   if (!folder) throw new GalleryNotFoundError();
   if (folder.userId !== userId) throw new GalleryForbiddenError();
 
-  const job = await db.generationJob.findUnique({
-    where: { id: jobId },
-    select: { userId: true },
-  });
-  if (!job) throw new GalleryNotFoundError("Job not found");
-  if (job.userId !== userId) throw new GalleryForbiddenError();
+  await assertOutputOwned(userId, outputId);
 
   await db.galleryFolderItem.upsert({
-    where: { folderId_jobId: { folderId, jobId } },
-    create: { folderId, jobId },
+    where: { folderId_outputId: { folderId, outputId } },
+    create: { folderId, outputId },
     update: {},
   });
 }
 
-async function removeJobFromFolder(userId: bigint, folderId: string, jobId: string): Promise<void> {
+async function removeOutputFromFolder(
+  userId: bigint,
+  folderId: string,
+  outputId: string,
+): Promise<void> {
   const folder = await db.galleryFolder.findUnique({ where: { id: folderId } });
   if (!folder) throw new GalleryNotFoundError();
   if (folder.userId !== userId) throw new GalleryForbiddenError();
 
-  await db.galleryFolderItem.deleteMany({ where: { folderId, jobId } });
+  await db.galleryFolderItem.deleteMany({ where: { folderId, outputId } });
 }
 
-async function addToFavorites(userId: bigint, jobId: string): Promise<{ folderId: string }> {
-  const job = await db.generationJob.findUnique({
-    where: { id: jobId },
-    select: { userId: true },
-  });
-  if (!job) throw new GalleryNotFoundError("Job not found");
-  if (job.userId !== userId) throw new GalleryForbiddenError();
+async function addToFavorites(userId: bigint, outputId: string): Promise<{ folderId: string }> {
+  await assertOutputOwned(userId, outputId);
 
   let favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
   if (!favorites) {
@@ -499,19 +604,19 @@ async function addToFavorites(userId: bigint, jobId: string): Promise<{ folderId
   }
 
   await db.galleryFolderItem.upsert({
-    where: { folderId_jobId: { folderId: favorites.id, jobId } },
-    create: { folderId: favorites.id, jobId },
+    where: { folderId_outputId: { folderId: favorites.id, outputId } },
+    create: { folderId: favorites.id, outputId },
     update: {},
   });
 
   return { folderId: favorites.id };
 }
 
-async function removeFromFavorites(userId: bigint, jobId: string): Promise<void> {
+async function removeFromFavorites(userId: bigint, outputId: string): Promise<void> {
   const favorites = await db.galleryFolder.findFirst({ where: { userId, isDefault: true } });
   if (!favorites) throw new GalleryNotFoundError("No favorites folder");
 
-  await db.galleryFolderItem.deleteMany({ where: { folderId: favorites.id, jobId } });
+  await db.galleryFolderItem.deleteMany({ where: { folderId: favorites.id, outputId } });
 }
 
 export const galleryService = {
@@ -526,8 +631,8 @@ export const galleryService = {
   createFolder,
   updateFolder,
   deleteFolder,
-  addJobToFolder,
-  removeJobFromFolder,
+  addOutputToFolder,
+  removeOutputFromFolder,
   addToFavorites,
   removeFromFavorites,
 };

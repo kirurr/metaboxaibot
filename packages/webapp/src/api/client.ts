@@ -357,13 +357,15 @@ export const api = {
       if (params.folderId) qs.set("folderId", params.folderId);
       return request<GalleryResponse>(`/gallery?${qs.toString()}`);
     },
-    sendJob: (jobId: string) =>
-      request<{ success: boolean }>(`/gallery/jobs/${jobId}/send`, { method: "POST" }),
+    sendOutput: (outputId: string) =>
+      request<{ success: boolean }>(`/gallery/outputs/${outputId}/send`, { method: "POST" }),
     previewUrl: (outputId: string) => request<{ url: string }>(`/gallery/${outputId}/preview-url`),
     originalUrl: (outputId: string) =>
       request<{ url: string }>(`/gallery/outputs/${outputId}/original-url`),
     deleteJob: (jobId: string) =>
       request<{ success: boolean }>(`/gallery/jobs/${jobId}`, { method: "DELETE" }),
+    deleteOutput: (outputId: string) =>
+      request<{ jobDeleted: boolean }>(`/gallery/outputs/${outputId}`, { method: "DELETE" }),
     modelCounts: (section?: string) =>
       request<{ modelId: string; count: number }[]>(
         `/gallery/model-counts${section ? `?section=${encodeURIComponent(section)}` : ""}`,
@@ -382,24 +384,24 @@ export const api = {
         }),
       delete: (folderId: string) =>
         request<{ success: boolean }>(`/gallery/folders/${folderId}`, { method: "DELETE" }),
-      addItem: (folderId: string, jobId: string) =>
+      addItem: (folderId: string, outputId: string) =>
         request<{ success: boolean }>(`/gallery/folders/${folderId}/items`, {
           method: "POST",
-          body: JSON.stringify({ jobId }),
+          body: JSON.stringify({ outputId }),
         }),
-      removeItem: (folderId: string, jobId: string) =>
-        request<{ success: boolean }>(`/gallery/folders/${folderId}/items/${jobId}`, {
+      removeItem: (folderId: string, outputId: string) =>
+        request<{ success: boolean }>(`/gallery/folders/${folderId}/items/${outputId}`, {
           method: "DELETE",
         }),
     },
     favorites: {
-      add: (jobId: string) =>
+      add: (outputId: string) =>
         request<{ folderId: string }>("/gallery/favorites", {
           method: "POST",
-          body: JSON.stringify({ jobId }),
+          body: JSON.stringify({ outputId }),
         }),
-      remove: (jobId: string) =>
-        request<{ success: boolean }>(`/gallery/favorites/${jobId}`, { method: "DELETE" }),
+      remove: (outputId: string) =>
+        request<{ success: boolean }>(`/gallery/favorites/${outputId}`, { method: "DELETE" }),
     },
   },
 

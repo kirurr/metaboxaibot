@@ -29,14 +29,9 @@ import {
   Trash2,
   Video as VideoIcon,
 } from "lucide-react";
+import { getGalleryOriginalUrl, type GalleryFolder, type GalleryItem } from "@/api/gallery";
 import {
-  getGalleryOriginalUrl,
-  type GalleryFolder,
-  type GalleryJob,
-  type GalleryOutput,
-} from "@/api/gallery";
-import {
-  useAddJobToGalleryFolder,
+  useAddOutputToGalleryFolder,
   useAddToGalleryFavorites,
   useCreateGalleryFolder,
   useDeleteGalleryFolder,
@@ -47,7 +42,7 @@ import {
   useGalleryModelCounts,
   useInfiniteGalleryJobs,
   useRemoveFromGalleryFavorites,
-  useRemoveJobFromGalleryFolder,
+  useRemoveOutputFromGalleryFolder,
   useUpdateGalleryFolder,
 } from "@/hooks/useGallery";
 import type { GenerationJobDto } from "@/api/generation";
@@ -385,7 +380,11 @@ function JobCardThumbnail({
   onAspect,
 }: {
   section: string;
-  output: GalleryOutput;
+  output: {
+    thumbnailUrl: string | null;
+    previewUrl: string | null;
+    outputUrl: string | null;
+  };
   onAspect: (aspect: number) => void;
 }) {
   const imgSrc = output.thumbnailUrl ?? (section === "image" ? output.previewUrl : null);
@@ -439,15 +438,13 @@ function JobCardThumbnail({
 const MENU_WIDTH = 224;
 
 function JobCardMenu({
-  job,
-  output,
+  item,
   folders,
   anchorRef,
   onClose,
   onOpenLightbox,
 }: {
-  job: GalleryJob;
-  output: GalleryOutput;
+  item: GalleryItem;
   folders: GalleryFolder[];
   anchorRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
@@ -455,8 +452,8 @@ function JobCardMenu({
 }) {
   const pushToast = useUIStore((s) => s.pushToast);
   const navigate = useNavigate();
-  const addToFolder = useAddJobToGalleryFolder();
-  const removeFromFolder = useRemoveJobFromGalleryFolder();
+  const addToFolder = useAddOutputToGalleryFolder();
+  const removeFromFolder = useRemoveOutputFromGalleryFolder();
   const deleteOutput = useDeleteGalleryOutput();
   const menuRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
@@ -500,20 +497,20 @@ function JobCardMenu({
   }, [onClose]);
 
   const toggleFolder = (folder: GalleryFolder) => {
-    const isIn = job.folderIds.includes(folder.id);
+    const isIn = item.folderIds.includes(folder.id);
     const opts = {
       onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
     };
     if (isIn) {
-      removeFromFolder.mutate({ folderId: folder.id, jobId: job.id }, opts);
+      removeFromFolder.mutate({ folderId: folder.id, outputId: item.id }, opts);
     } else {
-      addToFolder.mutate({ folderId: folder.id, jobId: job.id }, opts);
+      addToFolder.mutate({ folderId: folder.id, outputId: item.id }, opts);
     }
   };
 
   const handleDownload = async () => {
     try {
-      const { url } = await getGalleryOriginalUrl(output.id);
+      const { url } = await getGalleryOriginalUrl(item.id);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       pushToast({ type: "error", message: getErrorMessage(err) });
@@ -525,7 +522,7 @@ function JobCardMenu({
     // Карточка = один output. Удаляем именно его; бэкенд снесёт всю джобу, только
     // если это был последний output (тогда `jobDeleted: true`).
     if (!window.confirm("Удалить этот результат безвозвратно?")) return;
-    deleteOutput.mutate(output.id, {
+    deleteOutput.mutate(item.id, {
       onSuccess: (res) =>
         pushToast({
           type: "success",
@@ -537,16 +534,16 @@ function JobCardMenu({
   };
 
   const handleRepeat = () => {
-    const section = normalizeSection(job.section);
+    const section = normalizeSection(item.section);
     if (!section) {
       pushToast({ type: "error", message: "Неизвестная секция" });
       return;
     }
     navigateToGenerate(navigate, {
       section,
-      modelId: job.modelId,
-      prompt: job.prompt,
-      settings: job.modelSettings,
+      modelId: item.modelId,
+      prompt: item.prompt,
+      settings: item.modelSettings,
     });
     onClose();
   };
@@ -575,7 +572,7 @@ function JobCardMenu({
               >
                 <input
                   type="checkbox"
-                  checked={job.folderIds.includes(f.id)}
+                  checked={item.folderIds.includes(f.id)}
                   onChange={() => toggleFolder(f)}
                 />
                 <span className="truncate">{f.name}</span>
@@ -623,15 +620,13 @@ function JobCardMenu({
 }
 
 function JobCard({
-  job,
-  output,
+  item,
   folders,
   favoritesFolderId,
   layout,
   onOpen,
 }: {
-  job: GalleryJob;
-  output: GalleryOutput;
+  item: GalleryItem;
   folders: GalleryFolder[];
   favoritesFolderId: string | undefined;
   layout: GridLayout;
@@ -643,14 +638,14 @@ function JobCard({
   const addFav = useAddToGalleryFavorites();
   const removeFav = useRemoveFromGalleryFavorites();
 
-  const isFav = favoritesFolderId ? job.folderIds.includes(favoritesFolderId) : false;
+  const isFav = favoritesFolderId ? item.folderIds.includes(favoritesFolderId) : false;
   const favPending = addFav.isPending || removeFav.isPending;
   // Имя + иконка модели (без эмодзи) из каталога; фоллбек — сохранённый modelName.
-  const modelDisplay = getModelDisplay(job.modelId, job.modelName);
+  const modelDisplay = getModelDisplay(item.modelId, item.modelName);
 
   // Аудио — нет визуального аспекта; всегда квадрат. Для image/video подождём
   // metadata из <img>/<video>, до этого рендерим квадрат-дефолт (span 4).
-  const [aspect, setAspect] = useState<number | null>(job.section === "audio" ? 1 : null);
+  const [aspect, setAspect] = useState<number | null>(item.section === "audio" ? 1 : null);
   const rowSpan = spanFromAspect(aspect);
   // В compact-режиме все тайлы квадратные на всех брейкпоинтах — masonry-span
   // отключаем, иначе тайлы вытягиваются в прямоугольники.
@@ -661,8 +656,8 @@ function JobCard({
     const opts = {
       onError: (err: unknown) => pushToast({ type: "error", message: getErrorMessage(err) }),
     };
-    if (isFav) removeFav.mutate(job.id, opts);
-    else addFav.mutate(job.id, opts);
+    if (isFav) removeFav.mutate(item.id, opts);
+    else addFav.mutate(item.id, opts);
   };
 
   return (
@@ -673,7 +668,7 @@ function JobCard({
       }`}
       onClick={onOpen}
     >
-      <JobCardThumbnail section={job.section} output={output} onAspect={setAspect} />
+      <JobCardThumbnail section={item.section} output={item} onAspect={setAspect} />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
@@ -712,13 +707,12 @@ function JobCard({
           )}
           <span className="truncate">{modelDisplay.name}</span>
         </div>
-        {job.prompt && <div className="truncate text-white/70">{job.prompt}</div>}
+        {item.prompt && <div className="truncate text-white/70">{item.prompt}</div>}
       </div>
 
       {menuOpen && (
         <JobCardMenu
-          job={job}
-          output={output}
+          item={item}
           folders={folders}
           anchorRef={triggerRef}
           onClose={() => setMenuOpen(false)}
@@ -762,14 +756,14 @@ function formatDayLabel(key: string): string {
 }
 
 function groupByDay(
-  jobs: GalleryJob[],
-): Array<{ key: string; label: string; items: GalleryJob[] }> {
-  const map = new Map<string, GalleryJob[]>();
-  for (const j of jobs) {
-    const key = dayKey(j.completedAt);
+  items: GalleryItem[],
+): Array<{ key: string; label: string; items: GalleryItem[] }> {
+  const map = new Map<string, GalleryItem[]>();
+  for (const it of items) {
+    const key = dayKey(it.completedAt);
     const bucket = map.get(key);
-    if (bucket) bucket.push(j);
-    else map.set(key, [j]);
+    if (bucket) bucket.push(it);
+    else map.set(key, [it]);
   }
   // Сортируем по убыванию ключа (новые сверху). "unknown" — в конец.
   return [...map.entries()]
@@ -778,7 +772,7 @@ function groupByDay(
       if (b === "unknown") return -1;
       return a < b ? 1 : -1;
     })
-    .map(([key, items]) => ({ key, label: formatDayLabel(key), items }));
+    .map(([key, group]) => ({ key, label: formatDayLabel(key), items: group }));
 }
 
 function GridLayoutSwitcher({
@@ -845,7 +839,7 @@ export default function GalleryPage() {
     [section, modelId, folderId],
   );
 
-  const { jobs, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error } =
+  const { items, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error } =
     useInfiniteGalleryJobs(params);
   const { data: folders = [] } = useGalleryFolders();
   const detail = useGalleryJob(jobId);
@@ -863,7 +857,9 @@ export default function GalleryPage() {
   // увидел причину и dismiss'нул.
   const visiblePending = useMemo<PendingJob[]>(() => {
     if (folderId) return [];
-    const jobIds = new Set(jobs.map((j) => j.id));
+    // У pending'ов id — это generation jobId. Сопоставляем с item.jobId, а не
+    // с item.id (item.id теперь outputId после переезда на flat-список).
+    const jobIds = new Set(items.map((it) => it.jobId));
     return pendingJobs.filter((p) => {
       if (p.status === "success") return false;
       if (jobIds.has(p.id)) return false;
@@ -871,7 +867,7 @@ export default function GalleryPage() {
       if (modelId && p.modelId !== modelId) return false;
       return true;
     });
-  }, [pendingJobs, folderId, section, modelId, jobs]);
+  }, [pendingJobs, folderId, section, modelId, items]);
 
   // Сегодняшние failed-генерации. Gallery API возвращает только "done", поэтому
   // тянем отдельным запросом через `/web/generations` (тот же эндпоинт, что у
@@ -893,7 +889,7 @@ export default function GalleryPage() {
     });
   }, [failedToday, folderId, modelId, dismissedIds, pendingJobs]);
 
-  const groups = useMemo(() => groupByDay(jobs), [jobs]);
+  const groups = useMemo(() => groupByDay(items), [items]);
 
   // Pending'и и сегодняшние failed идут в группу «Сегодня» — они логически
   // часть сегодняшней ленты. Если такой группы ещё нет (только что зашли,
@@ -904,18 +900,18 @@ export default function GalleryPage() {
     if (visiblePending.length === 0 && visibleFailed.length === 0) return groups;
     if (groups.some((g) => g.key === todayKey)) return groups;
     return [
-      { key: todayKey, label: formatDayLabel(todayKey), items: [] as GalleryJob[] },
+      { key: todayKey, label: formatDayLabel(todayKey), items: [] as GalleryItem[] },
       ...groups,
     ];
   }, [groups, visiblePending.length, visibleFailed.length, todayKey]);
 
-  // Избранные работы — отдельной секцией наверху, дублируются в датах (видны и
-  // там, и там, как «закреплённые» сверху). Скрываем секцию когда юзер уже
+  // Избранное — отдельной секцией наверху, дублируется в датах (видно и
+  // там, и там, как «закреплённое» сверху). Скрываем секцию когда юзер уже
   // отфильтровал по папке — там и так показывается её содержимое.
-  const favoriteJobs = useMemo<GalleryJob[]>(() => {
+  const favoriteItems = useMemo<GalleryItem[]>(() => {
     if (folderId !== undefined || !favoritesFolderId) return [];
-    return jobs.filter((j) => j.folderIds.includes(favoritesFolderId));
-  }, [jobs, folderId, favoritesFolderId]);
+    return items.filter((it) => it.folderIds.includes(favoritesFolderId));
+  }, [items, folderId, favoritesFolderId]);
 
   // 404 при прямом заходе на /gallery/{несуществующий-id} — toast + редирект.
   useEffect(() => {
@@ -970,8 +966,10 @@ export default function GalleryPage() {
   }, []);
 
   const handleOpen = useCallback(
-    (job: GalleryJob, outputIdx: number) =>
-      navigate(outputIdx > 0 ? `/gallery/${job.id}?o=${outputIdx}` : `/gallery/${job.id}`),
+    (item: GalleryItem) =>
+      navigate(
+        item.index > 0 ? `/gallery/${item.jobId}?o=${item.index}` : `/gallery/${item.jobId}`,
+      ),
     [navigate],
   );
 
@@ -983,7 +981,7 @@ export default function GalleryPage() {
 
   const gridClass = GRID_CLASS[gridLayout];
   const isEmpty =
-    !isLoading && jobs.length === 0 && visiblePending.length === 0 && visibleFailed.length === 0;
+    !isLoading && items.length === 0 && visiblePending.length === 0 && visibleFailed.length === 0;
 
   return (
     <div className="page">
@@ -1021,7 +1019,7 @@ export default function GalleryPage() {
 
           {!isLoading && !error && (
             <div className="space-y-8">
-              {favoriteJobs.length > 0 &&
+              {favoriteItems.length > 0 &&
                 (() => {
                   const FAV_KEY = "__favorites";
                   const isCollapsed = collapsed.has(FAV_KEY);
@@ -1038,23 +1036,20 @@ export default function GalleryPage() {
                         />
                         <Heart size={14} fill="currentColor" className="text-danger" />
                         <span className="text-sm font-semibold">Избранное</span>
-                        <span className="text-xs text-text-hint">({favoriteJobs.length})</span>
+                        <span className="text-xs text-text-hint">({favoriteItems.length})</span>
                       </button>
                       {!isCollapsed && (
                         <ul className={gridClass}>
-                          {favoriteJobs.flatMap((j) =>
-                            j.outputs.map((o, idx) => (
-                              <JobCard
-                                key={`fav-${j.id}-${o.id}`}
-                                job={j}
-                                output={o}
-                                folders={folders}
-                                favoritesFolderId={favoritesFolderId}
-                                layout={gridLayout}
-                                onOpen={() => handleOpen(j, idx)}
-                              />
-                            )),
-                          )}
+                          {favoriteItems.map((it) => (
+                            <JobCard
+                              key={`fav-${it.id}`}
+                              item={it}
+                              folders={folders}
+                              favoritesFolderId={favoritesFolderId}
+                              layout={gridLayout}
+                              onOpen={() => handleOpen(it)}
+                            />
+                          ))}
                         </ul>
                       )}
                     </section>
@@ -1099,19 +1094,16 @@ export default function GalleryPage() {
                             compact={gridLayout === "compact"}
                           />
                         ))}
-                        {g.items.flatMap((j) =>
-                          j.outputs.map((o, idx) => (
-                            <JobCard
-                              key={`${j.id}-${o.id}`}
-                              job={j}
-                              output={o}
-                              folders={folders}
-                              favoritesFolderId={favoritesFolderId}
-                              layout={gridLayout}
-                              onOpen={() => handleOpen(j, idx)}
-                            />
-                          )),
-                        )}
+                        {g.items.map((it) => (
+                          <JobCard
+                            key={it.id}
+                            item={it}
+                            folders={folders}
+                            favoritesFolderId={favoritesFolderId}
+                            layout={gridLayout}
+                            onOpen={() => handleOpen(it)}
+                          />
+                        ))}
                       </ul>
                     )}
                   </section>

@@ -55,7 +55,7 @@ vi.mock("../src/services/s3.service.js", async (importOriginal) => {
 import {
   galleryFavoritesResponseSchema,
   galleryFolderSchema,
-  galleryJobSchema,
+  galleryJobDetailSchema,
   galleryListResponseSchema,
   galleryModelCountSchema,
   galleryUrlResponseSchema,
@@ -84,9 +84,12 @@ interface SeedJobOverrides {
 }
 
 /**
- * Insert a completed GenerationJob with optional nested outputs. Defaults
+ * Insert a completed GenerationJob with at least one nested output. Defaults
  * mirror a "happy" image-job that gallery.service.ts will accept (status
- * "done" — фильтр в listJobs/getJobById).
+ * "done" — фильтр в listJobs/getJobById). После переезда галереи на
+ * output-level один output создаётся по умолчанию: list-эндпоинт теперь
+ * возвращает один item на output, и job без outputs в нём вообще не
+ * появляется.
  */
 async function seedJob(
   userId: bigint,
@@ -98,7 +101,7 @@ async function seedJob(
     prompt = `prompt-${Math.random().toString(36).slice(2, 8)}`,
     status = "done",
     completedAt = new Date(),
-    outputs,
+    outputs = [{}],
   } = overrides;
 
   return db.generationJob.create({
@@ -110,20 +113,27 @@ async function seedJob(
       status,
       prompt,
       completedAt,
-      ...(outputs
-        ? {
-            outputs: {
-              create: outputs.map((o, i) => ({
-                index: o.index ?? i,
-                outputUrl: o.outputUrl ?? `https://provider.test/${i}.png`,
-                s3Key: o.s3Key ?? null,
-                thumbnailS3Key: o.thumbnailS3Key ?? null,
-              })),
-            },
-          }
-        : {}),
+      outputs: {
+        create: outputs.map((o, i) => ({
+          index: o.index ?? i,
+          outputUrl: o.outputUrl ?? `https://provider.test/${i}.png`,
+          s3Key: o.s3Key ?? null,
+          thumbnailS3Key: o.thumbnailS3Key ?? null,
+        })),
+      },
     },
   });
+}
+
+/** Дёргает первый output созданной джобы — после refactor'а 2026-05-31 list-
+ *  эндпоинт возвращает item на каждый output, и тестам нужен сам outputId. */
+async function firstOutputId(jobId: string): Promise<string> {
+  const out = await db.generationJobOutput.findFirst({
+    where: { jobId },
+    orderBy: { index: "asc" },
+  });
+  if (!out) throw new Error(`Job ${jobId} has no outputs`);
+  return out.id;
 }
 
 interface SeedFolderOverrides {
@@ -303,10 +313,10 @@ describe("web-gallery: GET /web/gallery", () => {
 // ── 3. favoritesFirst ordering ─────────────────────────────────────────────
 
 describe("web-gallery: favoritesFirst (always on for web-route)", () => {
-  it("places favorite jobs ahead of newer non-favorites", async () => {
+  it("places favorite outputs ahead of newer non-favorites", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
-    // 4 job'а, у каждого свой completedAt. Берём в favorites два *более
-    // старых* — favoritesFirst должен поднять их над более свежими.
+    // 4 job'а, у каждого свой completedAt. Берём в favorites первый output
+    // двух *более старых* — favoritesFirst должен поднять их над более свежими.
     const oldFav1 = await seedJob(aibUserId, {
       prompt: "old-fav-1",
       completedAt: new Date(2026, 0, 1),
@@ -324,11 +334,16 @@ describe("web-gallery: favoritesFirst (always on for web-route)", () => {
       completedAt: new Date(2026, 0, 11),
     });
 
+    const oldFav1Out = await firstOutputId(oldFav1.id);
+    const oldFav2Out = await firstOutputId(oldFav2.id);
+    const newPlain1Out = await firstOutputId(newPlain1.id);
+    const newPlain2Out = await firstOutputId(newPlain2.id);
+
     const favFolder = await seedFolder(aibUserId, { name: "Избранное", isDefault: true });
     await db.galleryFolderItem.createMany({
       data: [
-        { folderId: favFolder.id, jobId: oldFav1.id },
-        { folderId: favFolder.id, jobId: oldFav2.id },
+        { folderId: favFolder.id, outputId: oldFav1Out },
+        { folderId: favFolder.id, outputId: oldFav2Out },
       ],
     });
 
@@ -338,11 +353,11 @@ describe("web-gallery: favoritesFirst (always on for web-route)", () => {
     expect(body.total).toBe(4);
     expect(body.items.map((i) => i.id)).toEqual([
       // фавориты сами в completedAt desc внутри favs-блока
-      oldFav2.id,
-      oldFav1.id,
+      oldFav2Out,
+      oldFav1Out,
       // затем не-фавориты в completedAt desc
-      newPlain2.id,
-      newPlain1.id,
+      newPlain2Out,
+      newPlain1Out,
     ]);
   });
 
@@ -366,9 +381,12 @@ describe("web-gallery: favoritesFirst (always on for web-route)", () => {
         }),
       );
     }
+    const favOutputIds = await Promise.all(favs.map((j) => firstOutputId(j.id)));
+    const plainOutputIds = await Promise.all(plains.map((p) => firstOutputId(p.id)));
+
     const favFolder = await seedFolder(aibUserId, { name: "Избранное", isDefault: true });
     await db.galleryFolderItem.createMany({
-      data: favs.map((j) => ({ folderId: favFolder.id, jobId: j.id })),
+      data: favOutputIds.map((outputId) => ({ folderId: favFolder.id, outputId })),
     });
 
     const p1 = galleryListResponseSchema.parse(
@@ -383,8 +401,8 @@ describe("web-gallery: favoritesFirst (always on for web-route)", () => {
     expect(p1.total).toBe(5);
     expect(p1.items).toHaveLength(2);
     // первая страница целиком в favs — два самых свежих fav'а
-    const favIds = new Set(favs.map((f) => f.id));
-    for (const item of p1.items) expect(favIds.has(item.id)).toBe(true);
+    const favIdSet = new Set(favOutputIds);
+    for (const item of p1.items) expect(favIdSet.has(item.id)).toBe(true);
 
     const p2 = galleryListResponseSchema.parse(
       (
@@ -398,9 +416,9 @@ describe("web-gallery: favoritesFirst (always on for web-route)", () => {
     expect(p2.total).toBe(5);
     expect(p2.items).toHaveLength(2);
     // вторая страница пересекает границу: 1 last fav + 1 first plain
-    const plainIds = new Set(plains.map((p) => p.id));
-    const onP2Fav = p2.items.filter((i) => favIds.has(i.id));
-    const onP2Plain = p2.items.filter((i) => plainIds.has(i.id));
+    const plainIdSet = new Set(plainOutputIds);
+    const onP2Fav = p2.items.filter((i) => favIdSet.has(i.id));
+    const onP2Plain = p2.items.filter((i) => plainIdSet.has(i.id));
     expect(onP2Fav).toHaveLength(1);
     expect(onP2Plain).toHaveLength(1);
   });
@@ -439,7 +457,7 @@ describe("web-gallery: GET /web/gallery/model-counts", () => {
     await seedJob(aibUserId, { modelId: "model-a", section: "video" });
     const folder = await seedFolder(aibUserId);
     await db.galleryFolderItem.create({
-      data: { folderId: folder.id, jobId: imgA.id },
+      data: { folderId: folder.id, outputId: await firstOutputId(imgA.id) },
     });
 
     const bySection = z.array(galleryModelCountSchema).parse(
@@ -482,7 +500,7 @@ describe("web-gallery: GET /web/gallery/jobs/:id", () => {
       headers,
     });
     expect(res.statusCode).toBe(200);
-    const body = galleryJobSchema.parse(res.json());
+    const body = galleryJobDetailSchema.parse(res.json());
     expect(body.id).toBe(job.id);
     expect(body.prompt).toBe("deep-link");
     expect(body.outputs).toHaveLength(1);
@@ -805,42 +823,44 @@ describe("web-gallery: folders", () => {
 // ── 10. Folder items ───────────────────────────────────────────────────────
 
 describe("web-gallery: folder items", () => {
-  it("POST /web/gallery/folders/:folderId/items adds a job", async () => {
+  it("POST /web/gallery/folders/:folderId/items adds an output", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
     const folder = await seedFolder(aibUserId);
     const job = await seedJob(aibUserId);
+    const outputId = await firstOutputId(job.id);
 
     const res = await app.inject({
       method: "POST",
       url: `/web/gallery/folders/${folder.id}/items`,
       headers,
-      payload: { jobId: job.id },
+      payload: { outputId },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ success: true });
 
     const item = await db.galleryFolderItem.findUnique({
-      where: { folderId_jobId: { folderId: folder.id, jobId: job.id } },
+      where: { folderId_outputId: { folderId: folder.id, outputId } },
     });
     expect(item).not.toBeNull();
   });
 
-  it("DELETE /web/gallery/folders/:folderId/items/:jobId removes a job", async () => {
+  it("DELETE /web/gallery/folders/:folderId/items/:outputId removes an output", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
     const folder = await seedFolder(aibUserId);
     const job = await seedJob(aibUserId);
+    const outputId = await firstOutputId(job.id);
     await db.galleryFolderItem.create({
-      data: { folderId: folder.id, jobId: job.id },
+      data: { folderId: folder.id, outputId },
     });
 
     const res = await app.inject({
       method: "DELETE",
-      url: `/web/gallery/folders/${folder.id}/items/${job.id}`,
+      url: `/web/gallery/folders/${folder.id}/items/${outputId}`,
       headers,
     });
     expect(res.statusCode).toBe(200);
     const item = await db.galleryFolderItem.findUnique({
-      where: { folderId_jobId: { folderId: folder.id, jobId: job.id } },
+      where: { folderId_outputId: { folderId: folder.id, outputId } },
     });
     expect(item).toBeNull();
   });
@@ -852,12 +872,13 @@ describe("web-gallery: favorites", () => {
   it("POST /web/gallery/favorites auto-creates the default 'Избранное' folder", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
     const job = await seedJob(aibUserId);
+    const outputId = await firstOutputId(job.id);
 
     const res = await app.inject({
       method: "POST",
       url: "/web/gallery/favorites",
       headers,
-      payload: { jobId: job.id },
+      payload: { outputId },
     });
     expect(res.statusCode).toBe(200);
     const body = galleryFavoritesResponseSchema.parse(res.json());
@@ -870,14 +891,15 @@ describe("web-gallery: favorites", () => {
     expect(fav!.userId).toBe(aibUserId);
 
     const link = await db.galleryFolderItem.findUnique({
-      where: { folderId_jobId: { folderId: body.folderId, jobId: job.id } },
+      where: { folderId_outputId: { folderId: body.folderId, outputId } },
     });
     expect(link).not.toBeNull();
   });
 
-  it("a second POST with the same jobId is idempotent (upsert, same folderId)", async () => {
+  it("a second POST with the same outputId is idempotent (upsert, same folderId)", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
     const job = await seedJob(aibUserId);
+    const outputId = await firstOutputId(job.id);
 
     const first = galleryFavoritesResponseSchema.parse(
       (
@@ -885,7 +907,7 @@ describe("web-gallery: favorites", () => {
           method: "POST",
           url: "/web/gallery/favorites",
           headers,
-          payload: { jobId: job.id },
+          payload: { outputId },
         })
       ).json(),
     );
@@ -895,7 +917,7 @@ describe("web-gallery: favorites", () => {
           method: "POST",
           url: "/web/gallery/favorites",
           headers,
-          payload: { jobId: job.id },
+          payload: { outputId },
         })
       ).json(),
     );
@@ -908,13 +930,14 @@ describe("web-gallery: favorites", () => {
     expect(favCount).toBe(1);
   });
 
-  it("DELETE /web/gallery/favorites/:jobId returns 404 when no favorites folder exists", async () => {
+  it("DELETE /web/gallery/favorites/:outputId returns 404 when no favorites folder exists", async () => {
     const { aibUserId, headers } = await seedUserAndAuth();
     const job = await seedJob(aibUserId);
+    const outputId = await firstOutputId(job.id);
 
     const res = await app.inject({
       method: "DELETE",
-      url: `/web/gallery/favorites/${job.id}`,
+      url: `/web/gallery/favorites/${outputId}`,
       headers,
     });
     expect(res.statusCode).toBe(404);

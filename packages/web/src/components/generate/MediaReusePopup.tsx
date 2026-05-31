@@ -158,24 +158,24 @@ export function MediaReusePopup({
 
   const generatedTiles: Tile[] = useMemo(
     () =>
-      generated.jobs.flatMap((job) => {
-        const modelName = getModelDisplay(job.modelId, job.modelName).name;
-        return job.outputs
-          .filter((o) => o.s3Key)
-          .map((o) => ({
-            key: o.id,
-            previewUrl: o.thumbnailUrl ?? o.previewUrl,
+      generated.items
+        .filter((it) => it.s3Key)
+        .map((it) => {
+          const modelName = getModelDisplay(it.modelId, it.modelName).name;
+          return {
+            key: it.id,
+            previewUrl: it.thumbnailUrl ?? it.previewUrl,
             media: {
-              s3Key: o.s3Key as string,
-              url: o.previewUrl,
+              s3Key: it.s3Key as string,
+              url: it.previewUrl,
               mimeType: synthMime(slotType),
               name: modelName,
               type: slotType,
             },
-            label: job.prompt || modelName,
-          }));
-      }),
-    [generated.jobs, slotType],
+            label: it.prompt || modelName,
+          };
+        }),
+    [generated.items, slotType],
   );
 
   // Картинки открытого элемента как выбираемые плитки (тот же механизм, что Uploads).

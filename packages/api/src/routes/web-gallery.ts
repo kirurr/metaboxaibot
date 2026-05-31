@@ -405,12 +405,12 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post<{
     Params: { folderId: string };
-    Body: { jobId: string };
+    Body: { outputId: string };
   }>(
     "/web/gallery/folders/:folderId/items",
     {
       schema: {
-        description: "Add a job to a folder",
+        description: "Add an output to a folder",
         params: {
           type: "object",
           properties: { folderId: { type: "string" } },
@@ -418,17 +418,17 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
         },
         body: {
           type: "object",
-          properties: { jobId: { type: "string" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string" } },
+          required: ["outputId"],
         },
       },
     },
     async (request, reply) => {
       const aibUserId = request.webUser!.aibUserId!;
       const { folderId } = request.params;
-      const { jobId } = request.body;
+      const { outputId } = request.body;
       try {
-        await galleryService.addJobToFolder(aibUserId, folderId, jobId);
+        await galleryService.addOutputToFolder(aibUserId, folderId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);
@@ -436,26 +436,26 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  fastify.delete<{ Params: { folderId: string; jobId: string } }>(
-    "/web/gallery/folders/:folderId/items/:jobId",
+  fastify.delete<{ Params: { folderId: string; outputId: string } }>(
+    "/web/gallery/folders/:folderId/items/:outputId",
     {
       schema: {
-        description: "Remove a job from a folder",
+        description: "Remove an output from a folder",
         params: {
           type: "object",
           properties: {
             folderId: { type: "string" },
-            jobId: { type: "string" },
+            outputId: { type: "string" },
           },
-          required: ["folderId", "jobId"],
+          required: ["folderId", "outputId"],
         },
       },
     },
     async (request, reply) => {
       const aibUserId = request.webUser!.aibUserId!;
-      const { folderId, jobId } = request.params;
+      const { folderId, outputId } = request.params;
       try {
-        await galleryService.removeJobFromFolder(aibUserId, folderId, jobId);
+        await galleryService.removeOutputFromFolder(aibUserId, folderId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);
@@ -465,15 +465,15 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
 
   // ── Favorites (sugar over a default folder) ───────────────────────────────
 
-  fastify.post<{ Body: { jobId: string } }>(
+  fastify.post<{ Body: { outputId: string } }>(
     "/web/gallery/favorites",
     {
       schema: {
-        description: "Add a job to the user's Favorites folder (auto-created)",
+        description: "Add an output to the user's Favorites folder (auto-created)",
         body: {
           type: "object",
-          properties: { jobId: { type: "string" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string" } },
+          required: ["outputId"],
         },
         response: {
           200: {
@@ -486,32 +486,32 @@ export const webGalleryRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const aibUserId = request.webUser!.aibUserId!;
-      const { jobId } = request.body;
+      const { outputId } = request.body;
       try {
-        return await galleryService.addToFavorites(aibUserId, jobId);
+        return await galleryService.addToFavorites(aibUserId, outputId);
       } catch (err) {
         return mapGalleryError(err, reply);
       }
     },
   );
 
-  fastify.delete<{ Params: { jobId: string } }>(
-    "/web/gallery/favorites/:jobId",
+  fastify.delete<{ Params: { outputId: string } }>(
+    "/web/gallery/favorites/:outputId",
     {
       schema: {
-        description: "Remove a job from the user's Favorites folder",
+        description: "Remove an output from the user's Favorites folder",
         params: {
           type: "object",
-          properties: { jobId: { type: "string" } },
-          required: ["jobId"],
+          properties: { outputId: { type: "string" } },
+          required: ["outputId"],
         },
       },
     },
     async (request, reply) => {
       const aibUserId = request.webUser!.aibUserId!;
-      const { jobId } = request.params;
+      const { outputId } = request.params;
       try {
-        await galleryService.removeFromFavorites(aibUserId, jobId);
+        await galleryService.removeFromFavorites(aibUserId, outputId);
         return { success: true };
       } catch (err) {
         return mapGalleryError(err, reply);

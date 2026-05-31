@@ -7,7 +7,7 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import {
-  addJobToGalleryFolder,
+  addOutputToGalleryFolder,
   addToGalleryFavorites,
   createGalleryFolder,
   deleteGalleryFolder,
@@ -19,11 +19,12 @@ import {
   listGalleryFolders,
   listGalleryJobs,
   removeFromGalleryFavorites,
-  removeJobFromGalleryFolder,
+  removeOutputFromGalleryFolder,
   updateGalleryFolder,
   type CreateGalleryFolderBody,
   type GalleryFolder,
-  type GalleryJob,
+  type GalleryItem,
+  type GalleryJobDetail,
   type GalleryListResponse,
   type ListGalleryJobsQuery,
   type UpdateGalleryFolderBody,
@@ -48,8 +49,9 @@ export function useGalleryJobs(params: ListGalleryJobsQuery = {}) {
 /**
  * Инфинит-список завершённых генераций — используется как в попапе
  * переиспользования медиа (фильтр только по section), так и в галерее
- * (section + modelId + folderId). Page-based (`/web/gallery` отдаёт
- * page/limit/total); `keepPreviousData` чтобы грид не фликал при подгрузке.
+ * (section + modelId + folderId). После refactor'а 2026-05-31 каждый item =
+ * один output (см. `GalleryItem`). Page-based; `keepPreviousData` чтобы грид
+ * не фликал при подгрузке.
  */
 export function useInfiniteGalleryJobs(params: {
   section?: string;
@@ -67,10 +69,10 @@ export function useInfiniteGalleryJobs(params: {
     placeholderData: keepPreviousData,
   });
 
-  const jobs = query.data?.pages.flatMap((p) => p.items) ?? [];
+  const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 
   return {
-    jobs,
+    items,
     isLoading: query.isLoading,
     isFetchingNextPage: query.isFetchingNextPage,
     hasNextPage: query.hasNextPage,
@@ -88,38 +90,15 @@ export function useGalleryFolders() {
 }
 
 /**
- * Single job для лайтбокса (deep-link `/gallery/:jobId`). `initialData` сначала
- * ищет job в кэше любого `useGalleryJobs` — это даёт мгновенный рендер при
- * клике по карточке. Cold-load делает fetch.
+ * Single job для лайтбокса (deep-link `/gallery/:jobId`). Cold-load делает
+ * fetch — кэш `jobsList`/`infiniteJobs` хранит item'ы (outputs), а тут нужен
+ * job-detail (job + все outputs одной пачки), shape отличается.
  */
 export function useGalleryJob(jobId: string | undefined) {
-  const qc = useQueryClient();
-  return useQuery<GalleryJob>({
+  return useQuery<GalleryJobDetail>({
     queryKey: galleryKeys.detail(jobId ?? ""),
     queryFn: ({ signal }) => getGalleryJob(jobId!, signal),
     enabled: !!jobId,
-    initialData: () => {
-      if (!jobId) return undefined;
-      // Под `galleryKeys.jobs()` живут и page-based, и infinite queries
-      // (data shape: `GalleryListResponse` vs `InfiniteData<GalleryListResponse>`).
-      // Ищем jobId в обоих вариантах.
-      const queries = qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() });
-      for (const [, data] of queries) {
-        if (!data) continue;
-        if (typeof data === "object" && "pages" in data) {
-          const inf = data as InfiniteData<GalleryListResponse>;
-          for (const page of inf.pages) {
-            const hit = page.items.find((j) => j.id === jobId);
-            if (hit) return hit;
-          }
-        } else {
-          const list = data as GalleryListResponse;
-          const hit = list.items?.find((j) => j.id === jobId);
-          if (hit) return hit;
-        }
-      }
-      return undefined;
-    },
     staleTime: 30_000,
   });
 }
@@ -201,26 +180,26 @@ export function useDeleteGalleryFolder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (folderId: string) => deleteGalleryFolder(folderId),
-    // Удаление папки задевает и jobs (отфильтрованные по folderId списки) —
+    // Удаление папки задевает и items (отфильтрованные по folderId списки) —
     // инвалидируем всё gallery-семейство.
     onSuccess: () => invalidateGallery(qc),
   });
 }
 
-export function useAddJobToGalleryFolder() {
+export function useAddOutputToGalleryFolder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ folderId, jobId }: { folderId: string; jobId: string }) =>
-      addJobToGalleryFolder(folderId, jobId),
+    mutationFn: ({ folderId, outputId }: { folderId: string; outputId: string }) =>
+      addOutputToGalleryFolder(folderId, outputId),
     onSuccess: () => invalidateGallery(qc),
   });
 }
 
-export function useRemoveJobFromGalleryFolder() {
+export function useRemoveOutputFromGalleryFolder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ folderId, jobId }: { folderId: string; jobId: string }) =>
-      removeJobFromGalleryFolder(folderId, jobId),
+    mutationFn: ({ folderId, outputId }: { folderId: string; outputId: string }) =>
+      removeOutputFromGalleryFolder(folderId, outputId),
     onSuccess: () => invalidateGallery(qc),
   });
 }
@@ -228,7 +207,7 @@ export function useRemoveJobFromGalleryFolder() {
 // ── Favorites (с optimistic update) ─────────────────────────────────────────
 //
 // Favorites toggle — самое чувствительное к лагу действие в галерее. Накладываем
-// изменения сразу на все кэшированные списки jobs и откатываем при ошибке.
+// изменения сразу на все кэшированные списки items и откатываем при ошибке.
 // Если default-папки нет в кэше — мутация всё равно отправится, просто без
 // мгновенного UI-эффекта (бэк-данные приедут через `onSettled` invalidate).
 
@@ -236,23 +215,23 @@ type FavoritesContext = {
   snapshots: Array<[readonly unknown[], unknown]>;
 };
 
-async function snapshotJobsLists(qc: ReturnType<typeof useQueryClient>) {
+async function snapshotItemsLists(qc: ReturnType<typeof useQueryClient>) {
   await qc.cancelQueries({ queryKey: galleryKeys.jobs() });
   return qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() });
 }
 
-function patchJob(job: GalleryJob, favId: string, mode: "add" | "remove"): GalleryJob {
+function patchItem(item: GalleryItem, favId: string, mode: "add" | "remove"): GalleryItem {
   if (mode === "add") {
-    if (job.folderIds.includes(favId)) return job;
-    return { ...job, folderIds: [...job.folderIds, favId] };
+    if (item.folderIds.includes(favId)) return item;
+    return { ...item, folderIds: [...item.folderIds, favId] };
   }
-  return { ...job, folderIds: job.folderIds.filter((id) => id !== favId) };
+  return { ...item, folderIds: item.folderIds.filter((id) => id !== favId) };
 }
 
-function patchJobsLists(
+function patchItemsLists(
   qc: ReturnType<typeof useQueryClient>,
   snapshots: FavoritesContext["snapshots"],
-  jobId: string,
+  outputId: string,
   favId: string,
   mode: "add" | "remove",
 ) {
@@ -267,7 +246,7 @@ function patchJobsLists(
         ...inf,
         pages: inf.pages.map((page) => ({
           ...page,
-          items: page.items.map((j) => (j.id === jobId ? patchJob(j, favId, mode) : j)),
+          items: page.items.map((it) => (it.id === outputId ? patchItem(it, favId, mode) : it)),
         })),
       });
     } else {
@@ -275,7 +254,7 @@ function patchJobsLists(
       if (!list.items) continue;
       qc.setQueryData<GalleryListResponse>(key, {
         ...list,
-        items: list.items.map((j) => (j.id === jobId ? patchJob(j, favId, mode) : j)),
+        items: list.items.map((it) => (it.id === outputId ? patchItem(it, favId, mode) : it)),
       });
     }
   }
@@ -289,14 +268,14 @@ function getFavoritesFolderId(qc: ReturnType<typeof useQueryClient>): string | u
 export function useAddToGalleryFavorites() {
   const qc = useQueryClient();
   return useMutation<unknown, Error, string, FavoritesContext>({
-    mutationFn: (jobId) => addToGalleryFavorites(jobId),
-    onMutate: async (jobId) => {
-      const snapshots = await snapshotJobsLists(qc);
+    mutationFn: (outputId) => addToGalleryFavorites(outputId),
+    onMutate: async (outputId) => {
+      const snapshots = await snapshotItemsLists(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchJobsLists(qc, snapshots, jobId, favId, "add");
+      if (favId) patchItemsLists(qc, snapshots, outputId, favId, "add");
       return { snapshots };
     },
-    onError: (_err, _jobId, ctx) => {
+    onError: (_err, _outputId, ctx) => {
       ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
     },
     onSettled: () => invalidateGallery(qc),
@@ -306,14 +285,14 @@ export function useAddToGalleryFavorites() {
 export function useRemoveFromGalleryFavorites() {
   const qc = useQueryClient();
   return useMutation<unknown, Error, string, FavoritesContext>({
-    mutationFn: (jobId) => removeFromGalleryFavorites(jobId),
-    onMutate: async (jobId) => {
-      const snapshots = await snapshotJobsLists(qc);
+    mutationFn: (outputId) => removeFromGalleryFavorites(outputId),
+    onMutate: async (outputId) => {
+      const snapshots = await snapshotItemsLists(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchJobsLists(qc, snapshots, jobId, favId, "remove");
+      if (favId) patchItemsLists(qc, snapshots, outputId, favId, "remove");
       return { snapshots };
     },
-    onError: (_err, _jobId, ctx) => {
+    onError: (_err, _outputId, ctx) => {
       ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
     },
     onSettled: () => invalidateGallery(qc),
