@@ -186,7 +186,19 @@
     "upscale": "Апскейл",
     "newFolder": "Новая папка",
     "on": "Вкл",
-    "off": "Выкл"
+    "off": "Выкл",
+    "deleteJob": "Удалить работу?",
+    "deleteResult": "Удалить результат?",
+    "deleteFolderTitle": "Удалить папку «{{name}}»?",
+    "cannotUndo": "Действие нельзя отменить.",
+    "foldersKeepItems": "Работы внутри не удалятся.",
+    "folderCreated": "Папка создана",
+    "folderRenamed": "Папка переименована",
+    "folderDeleted": "Папка удалена",
+    "jobDeleted": "Работа удалена",
+    "resultDeleted": "Результат удалён",
+    "unknownSection": "Неизвестная секция",
+    "jobNotFound": "Работа не найдена"
   },
   "auth": {
     "welcomeBack": "С возвращением.",

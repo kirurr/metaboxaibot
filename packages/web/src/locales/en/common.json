@@ -183,7 +183,19 @@
     "upscale": "Upscale",
     "newFolder": "New folder",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "deleteJob": "Delete generation?",
+    "deleteResult": "Delete result?",
+    "deleteFolderTitle": "Delete folder «{{name}}»?",
+    "cannotUndo": "This action cannot be undone.",
+    "foldersKeepItems": "Items inside will be kept.",
+    "folderCreated": "Folder created",
+    "folderRenamed": "Folder renamed",
+    "folderDeleted": "Folder deleted",
+    "jobDeleted": "Generation deleted",
+    "resultDeleted": "Result deleted",
+    "unknownSection": "Unknown section",
+    "jobNotFound": "Generation not found"
   },
   "auth": {
     "welcomeBack": "Welcome back.",

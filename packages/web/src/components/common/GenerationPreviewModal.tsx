@@ -643,16 +643,23 @@ function PreviewInfoCard({
           </div>
         )}
 
-        {/* Утилиты — компактный ряд иконок с подписью, отделён линией. */}
+        {/* Утилиты — компактный ряд иконок с подписью, отделён линией. На мобилке
+            показываем только иконки (подписи дублируют смысл и съедают экран). */}
         {(info.onDownload || info.onToggleFavorite || info.onDelete) && (
           <>
             <div className="border-t border-[color:var(--border)] mt-1" />
-            <div className="flex items-center gap-1">
+            <div
+              className={clsx(
+                "flex items-center gap-1",
+                isMobile ? "justify-around" : "justify-start",
+              )}
+            >
               {info.onDownload && (
                 <UtilityAction
                   icon={<Download size={16} />}
                   label={t("common.save")}
                   onClick={info.onDownload}
+                  iconOnly={isMobile}
                 />
               )}
               {info.onToggleFavorite && (
@@ -660,6 +667,7 @@ function PreviewInfoCard({
                   icon={<Heart size={16} fill={info.isFavorite ? "currentColor" : "none"} />}
                   label={info.isFavorite ? t("common.inFavorites") : t("common.favorite")}
                   onClick={info.onToggleFavorite}
+                  iconOnly={isMobile}
                 />
               )}
               {info.onDelete && (
@@ -668,6 +676,7 @@ function PreviewInfoCard({
                   label={t("common.delete")}
                   onClick={info.onDelete}
                   danger
+                  iconOnly={isMobile}
                 />
               )}
             </div>
@@ -769,29 +778,36 @@ function ActionTile({
   );
 }
 
-/** Компактное действие-утилита: иконка + подпись в строку, ghost-стиль. */
+/** Компактное действие-утилита: иконка + подпись в строку, ghost-стиль.
+ *  iconOnly — только иконка (без span) и без `flex-1`, ширина = padding'у; для
+ *  мобилки, где подписи дублируют смысл. */
 function UtilityAction({
   icon,
   label,
   onClick,
   danger,
+  iconOnly,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
   danger?: boolean;
+  iconOnly?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={iconOnly ? label : undefined}
+      title={iconOnly ? label : undefined}
       className={clsx(
-        "flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs transition-colors",
+        "inline-flex items-center justify-center gap-1.5 rounded text-xs transition-colors",
+        iconOnly ? "p-2.5" : "flex-1 min-w-0 px-2 py-2",
         danger ? "text-danger hover:text-text" : "text-text-secondary hover:text-text",
       )}
     >
       {icon}
-      <span className="truncate">{label}</span>
+      {!iconOnly && <span className="truncate">{label}</span>}
     </button>
   );
 }
@@ -854,7 +870,7 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
   }, [prompt]);
 
   return (
-    <div className="flex flex-col gap-2 min-h-0">
+    <div className="flex flex-col gap-2 min-h-0 max-lg:shrink-0">
       <div className="flex items-center justify-between gap-2">
         <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
         <CopyButton text={prompt} />
@@ -896,7 +912,7 @@ function SinglePromptSection({ prompt }: { prompt: string }) {
 function MultiShotSection({ shots }: { shots: ShotEntry[] }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-2 min-h-0">
+    <div className="flex flex-col gap-2 min-h-0 max-lg:shrink-0">
       <PromptSectionLabel>{t("prompts.prompt")}</PromptSectionLabel>
       <div className="flex flex-col gap-2 lg:overflow-y-auto lg:max-h-[40vh] lg:pr-1">
         {shots.map((shot, i) => (
