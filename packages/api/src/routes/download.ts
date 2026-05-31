@@ -7,6 +7,14 @@ export async function downloadRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { "*": string } }>(
     "/download/*",
     {
+      config: {
+        // Отдельный (щедрый) лимит вместо общего 120/мин: грид галереи легко
+        // открывает десятки тумб разом, и они НЕ должны делить бюджет с обычными
+        // API-запросами — иначе один просмотр галереи валит 429 на весь IP.
+        // Токены HMAC-подписаны, user-scoped и истекают, так что свой бакет
+        // безопасен.
+        rateLimit: { max: 600, timeWindow: "1 minute" },
+      },
       schema: {
         hide: true,
         description: "Download file via signed token",
@@ -59,6 +67,11 @@ export async function downloadRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: "File not found or S3 not configured" });
       }
 
+      // Кэшируем 302 на стороне браузера: при стабильном токене (см.
+      // download-token.ts) URL не меняется, и повторные рендеры берут редирект
+      // из кэша вместо удара по роуту. max-age < PRESIGN_TTL (3600s), чтобы
+      // закэшированный редирект не указывал на протухший presigned-S3 URL.
+      reply.header("cache-control", "private, max-age=600");
       return reply.redirect(presignedUrl, 302);
     },
   );
