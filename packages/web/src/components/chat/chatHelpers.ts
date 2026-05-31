@@ -71,6 +71,16 @@ export function formatTokensK(n: number): string {
   return v >= 10 ? `${Math.round(v)}K` : `${v.toFixed(1)}K`;
 }
 
+/** Обрезает имя файла, сохраняя расширение: "длинное-имя.png" → "длинн….png". */
+export function truncateFileName(name: string, max = 16): string {
+  if (name.length <= max) return name;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot) : "";
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const keep = Math.max(1, max - ext.length - 1);
+  return base.slice(0, keep) + "…" + ext;
+}
+
 export function formatBytes(bytes: number | null | undefined, t: (k: string) => string): string {
   if (!bytes || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} ${t("chat.byteShort")}`;

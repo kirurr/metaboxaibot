@@ -1174,6 +1174,18 @@ select {
   display: flex;
   gap: 10px;
 }
+/* Имя модели + иконка в одну строку под AI-сообщением. */
+.msg-meta-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-meta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
 .msg-actions {
   display: flex;
   gap: 4px;
@@ -1473,11 +1485,25 @@ select {
 }
 .cs-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
   color: var(--text-hint);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+/* Имя модели + иконка слева в meta-строке диалога. */
+.cs-meta-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.cs-meta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
 }
 
 .chat-shell.side-collapsed {
@@ -1973,7 +1999,7 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  max-width: 120px;
 }
 .att-chip-meta {
   font-size: 11px;
@@ -1998,6 +2024,14 @@ select {
   color: var(--text);
 }
 
+/* Кликабельная картинка-превью (открывает лайтбокс): сброс button-стилей. */
+.att-chip-thumb-btn {
+  cursor: zoom-in;
+}
+.att-chip-icon.att-chip-thumb-btn {
+  padding: 0;
+}
+
 /* Картинка-превью в bubble'е: квадратный thumbnail без подписи. */
 .att-chip-image {
   padding: 0;
@@ -2007,11 +2041,54 @@ select {
   overflow: hidden;
   border-radius: 12px;
 }
+button.att-chip-image {
+  font: inherit;
+  color: inherit;
+}
 .att-chip-image img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Лёгкий лайтбокс просмотра картинки (ImageLightbox) — поверх всего контента. */
+.img-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  cursor: zoom-out;
+}
+.img-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+.img-lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 120ms var(--ease);
+}
+.img-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .topbar {

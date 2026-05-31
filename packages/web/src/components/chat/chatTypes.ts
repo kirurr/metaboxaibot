@@ -5,6 +5,10 @@ export type Msg = {
   role: "user" | "ai";
   text: string;
   meta?: string;
+  /** Иконка модели-автора (assistant-only) — рендерится рядом с `meta`. `null` → буква. */
+  modelIcon?: string | null;
+  /** Имя модели-автора (assistant-only) — буква-фолбек для иконки. */
+  modelName?: string;
   /** Локальный id для оптимистичных user-сообщений (бэк не возвращает их id до done). */
   localId?: string;
   /** Прикреплённые файлы — рендерятся над bubble. */

@@ -50,7 +50,7 @@ import type { GenerationJobDto } from "@/api/generation";
 import { JobPreview } from "@/components/common/JobPreview";
 import { FolderNameDialog } from "@/components/common/FolderNameDialog";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { useModelsStore, getModelDisplay } from "@/stores/modelsStore";
+import { getModelDisplay } from "@/stores/modelsStore";
 import { ModelAvatar } from "@/components/common/ModelAvatar";
 import { useUIStore } from "@/stores/uiStore";
 import { usePendingJobsStore, type PendingJob } from "@/stores/pendingJobsStore";
@@ -123,12 +123,6 @@ function ModelFilterChips({
 }) {
   const countsQuery = useGalleryModelCounts(section || undefined, folderId);
   const counts = countsQuery.data ?? [];
-  const models = useModelsStore((s) => s.models);
-  const modelNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const model of models) m.set(model.id, model.webName);
-    return m;
-  }, [models]);
 
   // Мобилка: два ряда с горизонтальным скроллом (моделей бывает много);
   // на md+ возвращаемся к привычному flex-wrap (grid-* утилиты инертны под flex).
@@ -150,16 +144,25 @@ function ModelFilterChips({
   return (
     <div className={containerClass}>
       {counts.map((c) => {
-        const label = modelNameById.get(c.modelId) ?? c.modelId;
+        const display = getModelDisplay(c.modelId, c.modelId);
         const active = modelId === c.modelId;
         return (
           <button
             key={c.modelId}
             type="button"
             onClick={() => onChange(active ? undefined : c.modelId)}
-            className={`${chipClass(active)} shrink-0 whitespace-nowrap`}
+            className={`${chipClass(active)} shrink-0 whitespace-nowrap inline-flex items-center gap-1.5`}
           >
-            {label} <span className="text-text-hint ml-1">({c.count})</span>
+            {display.icon && (
+              <ModelAvatar
+                className="shrink-0 flex items-center justify-center"
+                icon={display.icon}
+                name={display.name}
+                iconSize={14}
+              />
+            )}
+            <span>{display.name}</span>
+            <span className="text-text-hint">({c.count})</span>
           </button>
         );
       })}
