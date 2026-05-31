@@ -1,14 +1,15 @@
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, File as FileIcon, MoreHorizontal, Sparkles } from "lucide-react";
 import type { MessageAttachmentDto } from "@/api/dialogs";
+import { ImageLightbox } from "@/components/common/ImageLightbox";
 import { markdownComponents } from "./MarkdownElements";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { splitReasoning } from "./reasoning";
-import { formatBytes } from "./chatHelpers";
+import { formatBytes, truncateFileName } from "./chatHelpers";
 import type { Msg } from "./chatTypes";
 
 export const ChatThread = memo(function ChatThread({
@@ -119,19 +120,28 @@ function UserChatMessage({ message }: { message: Msg }) {
 /** Chip уже-сохранённого вложения внутри bubble треда. */
 function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
   const { t } = useTranslation();
+  const [zoom, setZoom] = useState(false);
   const isImage = attachment.kind === "image" && !!attachment.url;
   if (isImage) {
-    // Картинку показываем превью с возможностью открыть полноразмер.
+    // Картинку показываем превью с возможностью открыть крупно в лайтбоксе.
     return (
-      <a
-        href={attachment.url ?? "#"}
-        target="_blank"
-        rel="noreferrer"
-        className="att-chip att-chip-image"
-        title={attachment.name}
-      >
-        <img src={attachment.url ?? undefined} alt={attachment.name} />
-      </a>
+      <>
+        <button
+          type="button"
+          className="att-chip att-chip-image att-chip-thumb-btn"
+          title={attachment.name}
+          onClick={() => setZoom(true)}
+        >
+          <img src={attachment.url ?? undefined} alt={attachment.name} />
+        </button>
+        {zoom && attachment.url && (
+          <ImageLightbox
+            src={attachment.url}
+            alt={attachment.name}
+            onClose={() => setZoom(false)}
+          />
+        )}
+      </>
     );
   }
   const inner = (
@@ -141,7 +151,7 @@ function AttachmentChip({ attachment }: { attachment: MessageAttachmentDto }) {
       </div>
       <div className="att-chip-body">
         <div className="att-chip-name" title={attachment.name}>
-          {attachment.name}
+          {truncateFileName(attachment.name)}
         </div>
         <div className="att-chip-meta">{formatBytes(attachment.size, t)}</div>
       </div>

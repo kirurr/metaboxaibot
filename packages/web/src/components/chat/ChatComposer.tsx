@@ -16,7 +16,8 @@ import { uploadChatFile } from "@/api/uploads";
 import { useObjectUrl } from "@/hooks/useObjectUrl";
 import { ChipPopover } from "@/components/settings/ChipPopover";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
-import { formatBytes, formatTokensK } from "./chatHelpers";
+import { ImageLightbox } from "@/components/common/ImageLightbox";
+import { formatBytes, formatTokensK, truncateFileName } from "./chatHelpers";
 import type { PendingAttachment } from "./chatTypes";
 
 /** `accept` для file picker'а — синхронизирован с серверным `isAllowedUploadMime`. */
@@ -252,6 +253,7 @@ export function ChatComposer({
 /** Chip pending-загрузки в composer'е (uploading / ready / error). */
 function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemove: () => void }) {
   const { t } = useTranslation();
+  const [zoom, setZoom] = useState(false);
   const isImage =
     pending.status === "ready"
       ? pending.dto.kind === "image"
@@ -269,18 +271,23 @@ function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemo
         (pending.status === "uploading" ? " att-chip-loading" : "")
       }
     >
-      <div className="att-chip-icon">
-        {isImage && url ? (
+      {isImage && url ? (
+        <button
+          type="button"
+          className="att-chip-icon att-chip-thumb-btn"
+          onClick={() => setZoom(true)}
+          aria-label={pending.file.name}
+        >
           <img src={url} alt={pending.file.name} />
-        ) : isImage ? (
-          <ImageIcon size={14} />
-        ) : (
-          <FileIcon size={14} />
-        )}
-      </div>
+        </button>
+      ) : (
+        <div className="att-chip-icon">
+          {isImage ? <ImageIcon size={14} /> : <FileIcon size={14} />}
+        </div>
+      )}
       <div className="att-chip-body">
         <div className="att-chip-name" title={pending.file.name}>
-          {pending.file.name}
+          {truncateFileName(pending.file.name)}
         </div>
         <div className="att-chip-meta">
           {pending.status === "uploading"
@@ -293,6 +300,9 @@ function PendingChip({ pending, onRemove }: { pending: PendingAttachment; onRemo
       <button className="att-chip-remove" onClick={onRemove} aria-label={t("chat.removeFile")}>
         <X size={12} />
       </button>
+      {zoom && url && (
+        <ImageLightbox src={url} alt={pending.file.name} onClose={() => setZoom(false)} />
+      )}
     </div>
   );
 }
