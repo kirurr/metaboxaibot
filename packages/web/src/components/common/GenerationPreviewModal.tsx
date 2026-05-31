@@ -230,7 +230,7 @@ export function GenerationPreviewModal({
             ) : (
               <img
                 key={active.id}
-                src={active.url}
+                src={active.thumbnailUrl ?? active.url}
                 alt=""
                 onClick={(e) => e.stopPropagation()}
                 className="max-w-full max-h-full object-contain rounded-[var(--radius)] shadow-2xl"
