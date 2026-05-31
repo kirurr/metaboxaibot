@@ -36,6 +36,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import type { ShotEntry } from "@/utils/multishot";
 import type { SettingRow } from "@/utils/settingsDisplay";
 import type { GalleryFolder } from "@/api/gallery";
+import { preloadImage } from "@/utils/imagePreload";
 
 /**
  * Универсальная модалка просмотра output'а(-ов) генерации. Используется и в
@@ -162,6 +163,18 @@ export function GenerationPreviewModal({
       document.body.style.overflow = prevOverflow;
     };
   }, [onClose]);
+
+  // Prefetch prev/next в multi-output, чтобы стрелки переключали без задержки.
+  // Только для image — для video/audio полный preload через `new Image()` не
+  // имеет смысла (это не картинки).
+  useEffect(() => {
+    if (section !== "image" || outputs.length <= 1) return;
+    const n = outputs.length;
+    const next = outputs[(activeIdx + 1) % n];
+    const prev = outputs[(activeIdx - 1 + n) % n];
+    if (next?.url) preloadImage(next.url);
+    if (prev?.url && prev.id !== next?.id) preloadImage(prev.url);
+  }, [activeIdx, outputs, section]);
 
   if (!active) return null;
 
