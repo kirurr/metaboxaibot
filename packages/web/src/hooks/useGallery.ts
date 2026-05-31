@@ -196,29 +196,24 @@ export function useDeleteGalleryFolder() {
 // Без патча detail-кэша heart внутри модалки залипал до round-trip'а
 // invalidate'а (staleTime у detail = 30s; force-refetch через onSettled).
 
-type OptimisticSnapshots = {
-  lists: Array<[readonly unknown[], unknown]>;
-  details: Array<[readonly unknown[], unknown]>;
-};
+// Откат: вместо snapshot/restore (который при параллельных мутациях мог
+// затереть optimistic-патч соседней мутации) используем inverse-patch —
+// `onError` применяет обратное действие на тот же `(outputId, folderId)`.
+// `patchFolderIds` идемпотентен (no-op если уже в нужном состоянии), так что
+// повторный inverse поверх уже откатанного кэша безопасен.
 
-type OptimisticContext = { snapshots: OptimisticSnapshots };
-
-async function snapshotGalleryCaches(
-  qc: ReturnType<typeof useQueryClient>,
-): Promise<OptimisticSnapshots> {
-  await qc.cancelQueries({ queryKey: galleryKeys.all });
-  return {
-    lists: qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() }),
-    details: qc.getQueriesData<unknown>({ queryKey: [...galleryKeys.all, "detail"] }),
-  };
+async function cancelInflightGalleryFetches(qc: ReturnType<typeof useQueryClient>): Promise<void> {
+  // Отменяем только те запросы, чьи кэши мы трогаем оптимистично —
+  // lists + detail. Папки/model-counts/failed-today/preview-url не патчим,
+  // нет смысла обрывать их in-flight refetch'и.
+  await Promise.all([
+    qc.cancelQueries({ queryKey: galleryKeys.jobs() }),
+    qc.cancelQueries({ queryKey: [...galleryKeys.all, "detail"] }),
+  ]);
 }
 
-function restoreSnapshots(
-  qc: ReturnType<typeof useQueryClient>,
-  snapshots: OptimisticSnapshots,
-): void {
-  for (const [key, data] of snapshots.lists) qc.setQueryData(key, data);
-  for (const [key, data] of snapshots.details) qc.setQueryData(key, data);
+function inverseMode(mode: "add" | "remove"): "add" | "remove" {
+  return mode === "add" ? "remove" : "add";
 }
 
 function patchFolderIds(
@@ -242,14 +237,17 @@ function patchItem(item: GalleryItem, folderId: string, mode: "add" | "remove"):
 
 function patchGalleryCaches(
   qc: ReturnType<typeof useQueryClient>,
-  snapshots: OptimisticSnapshots,
   outputId: string,
   folderId: string,
   mode: "add" | "remove",
-) {
+): void {
+  // Iterate LIVE cache (не snapshot) — при concurrent-мутациях каждая
+  // накладывает свой патч поверх предыдущего, inverse откатывает только своё.
+
   // Lists: и page-based (`GalleryListResponse`), и infinite
   // (`InfiniteData<GalleryListResponse>`). Структура разная — две ветки.
-  for (const [key, data] of snapshots.lists) {
+  const lists = qc.getQueriesData<unknown>({ queryKey: galleryKeys.jobs() });
+  for (const [key, data] of lists) {
     if (!data || typeof data !== "object") continue;
     if ("pages" in data) {
       const inf = data as InfiniteData<GalleryListResponse>;
@@ -273,7 +271,8 @@ function patchGalleryCaches(
   // Detail: ищем output внутри `outputs[]` нужной джобы и патчим его
   // `folderIds`. JobPreview лайтбокс читает `activeOutput.folderIds` ровно
   // отсюда, так что heart/чекбоксы папок мгновенно отражают клик.
-  for (const [key, data] of snapshots.details) {
+  const details = qc.getQueriesData<unknown>({ queryKey: [...galleryKeys.all, "detail"] });
+  for (const [key, data] of details) {
     if (!data || typeof data !== "object") continue;
     const detail = data as GalleryJobDetail;
     if (!Array.isArray(detail.outputs)) continue;
@@ -298,15 +297,14 @@ type FolderMutationVars = { folderId: string; outputId: string };
 
 export function useAddOutputToGalleryFolder() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, FolderMutationVars, OptimisticContext>({
+  return useMutation<unknown, Error, FolderMutationVars>({
     mutationFn: ({ folderId, outputId }) => addOutputToGalleryFolder(folderId, outputId),
     onMutate: async ({ folderId, outputId }) => {
-      const snapshots = await snapshotGalleryCaches(qc);
-      patchGalleryCaches(qc, snapshots, outputId, folderId, "add");
-      return { snapshots };
+      await cancelInflightGalleryFetches(qc);
+      patchGalleryCaches(qc, outputId, folderId, "add");
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    onError: (_err, { folderId, outputId }) => {
+      patchGalleryCaches(qc, outputId, folderId, inverseMode("add"));
     },
     onSettled: () => invalidateGallery(qc),
   });
@@ -314,15 +312,14 @@ export function useAddOutputToGalleryFolder() {
 
 export function useRemoveOutputFromGalleryFolder() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, FolderMutationVars, OptimisticContext>({
+  return useMutation<unknown, Error, FolderMutationVars>({
     mutationFn: ({ folderId, outputId }) => removeOutputFromGalleryFolder(folderId, outputId),
     onMutate: async ({ folderId, outputId }) => {
-      const snapshots = await snapshotGalleryCaches(qc);
-      patchGalleryCaches(qc, snapshots, outputId, folderId, "remove");
-      return { snapshots };
+      await cancelInflightGalleryFetches(qc);
+      patchGalleryCaches(qc, outputId, folderId, "remove");
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    onError: (_err, { folderId, outputId }) => {
+      patchGalleryCaches(qc, outputId, folderId, inverseMode("remove"));
     },
     onSettled: () => invalidateGallery(qc),
   });
@@ -334,19 +331,25 @@ export function useRemoveOutputFromGalleryFolder() {
 // поведение идентично, отличается только то, что folderId резолвится из кэша
 // (default-папка пользователя). Если её ещё нет — мутация всё равно уйдёт, но
 // без мгновенного UI-эффекта; бэк-данные приедут через `onSettled` invalidate.
+//
+// `favId` фиксируется в context при `onMutate` чтобы inverse-patch в `onError`
+// откатил ровно тот folderId, который был запатчен (а не другой, если
+// default-папка успела поменяться между `onMutate` и `onError`).
+
+type FavoritesContext = { favId?: string };
 
 export function useAddToGalleryFavorites() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, string, OptimisticContext>({
+  return useMutation<unknown, Error, string, FavoritesContext>({
     mutationFn: (outputId) => addToGalleryFavorites(outputId),
     onMutate: async (outputId) => {
-      const snapshots = await snapshotGalleryCaches(qc);
+      await cancelInflightGalleryFetches(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchGalleryCaches(qc, snapshots, outputId, favId, "add");
-      return { snapshots };
+      if (favId) patchGalleryCaches(qc, outputId, favId, "add");
+      return { favId };
     },
-    onError: (_err, _outputId, ctx) => {
-      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    onError: (_err, outputId, ctx) => {
+      if (ctx?.favId) patchGalleryCaches(qc, outputId, ctx.favId, inverseMode("add"));
     },
     onSettled: () => invalidateGallery(qc),
   });
@@ -354,16 +357,16 @@ export function useAddToGalleryFavorites() {
 
 export function useRemoveFromGalleryFavorites() {
   const qc = useQueryClient();
-  return useMutation<unknown, Error, string, OptimisticContext>({
+  return useMutation<unknown, Error, string, FavoritesContext>({
     mutationFn: (outputId) => removeFromGalleryFavorites(outputId),
     onMutate: async (outputId) => {
-      const snapshots = await snapshotGalleryCaches(qc);
+      await cancelInflightGalleryFetches(qc);
       const favId = getFavoritesFolderId(qc);
-      if (favId) patchGalleryCaches(qc, snapshots, outputId, favId, "remove");
-      return { snapshots };
+      if (favId) patchGalleryCaches(qc, outputId, favId, "remove");
+      return { favId };
     },
-    onError: (_err, _outputId, ctx) => {
-      if (ctx) restoreSnapshots(qc, ctx.snapshots);
+    onError: (_err, outputId, ctx) => {
+      if (ctx?.favId) patchGalleryCaches(qc, outputId, ctx.favId, inverseMode("remove"));
     },
     onSettled: () => invalidateGallery(qc),
   });

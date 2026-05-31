@@ -67,7 +67,16 @@ export function JobPreview({
   const removeFav = useRemoveFromGalleryFavorites();
   const createFolder = useCreateGalleryFolder();
   const deleteOutput = useDeleteGalleryOutput();
-  const [activeIdx, setActiveIdx] = useState(initialOutputIdx);
+  // `initialOutputIdx` — это DB-поле `GenerationJobOutput.index`, а не позиция в
+  // массиве. После удаления одного output'а из середины пачки индексы становятся
+  // несплошными (например, 0,2,3), и наивная индексация массивом откроет не ту
+  // картинку (или undefined). Конвертируем DB-index → array idx; если совпадения
+  // нет (output уже удалён) — открываем первый.
+  const initialArrayIdx = useMemo(() => {
+    const found = job.outputs.findIndex((o) => o.index === initialOutputIdx);
+    return found >= 0 ? found : 0;
+  }, [job.outputs, initialOutputIdx]);
+  const [activeIdx, setActiveIdx] = useState(initialArrayIdx);
   // Локально скрытые (только что удалённые) output'ы — чтобы модалка обновилась
   // сразу, не дожидаясь рефетча `useGalleryJob`.
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
