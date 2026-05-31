@@ -18,7 +18,15 @@ export type DownloadInlineButton =
   | { text: string; url: string }
   | { text: string; web_app: { url: string } };
 
-const TOKEN_TTL_SEC = 86_400; // 24 hours
+const TOKEN_TTL_SEC = 86_400; // 24 hours (нижняя граница валидности)
+// Округляем exp вверх до часовой границы, чтобы один и тот же (s3Key, userId)
+// давал ИДЕНТИЧНУЮ строку токена в течение часа. Иначе exp = now+24h меняется
+// посекундно, а с ним — и URL тумбы `/download/<token>`: каждый рефетч списка
+// галереи отдаёт новые URL → React меняет `src` у всех видимых `<img>` →
+// браузер перекачивает весь грид → шторм запросов на /download и 429.
+// Стабильная строка URL = браузер держит тот же DOM-узел и кэш, повторных
+// запросов нет.
+const TOKEN_BUCKET_SEC = 3_600; // 1 hour
 
 interface TokenPayload {
   k: string; // s3Key
@@ -43,7 +51,9 @@ function sign(rawPayload: string, secret: string): string {
 }
 
 export function generateDownloadToken(s3Key: string, userId: bigint | string): string {
-  const exp = Math.floor(Date.now() / 1000) + TOKEN_TTL_SEC;
+  const exp =
+    Math.ceil((Math.floor(Date.now() / 1000) + TOKEN_TTL_SEC) / TOKEN_BUCKET_SEC) *
+    TOKEN_BUCKET_SEC;
   const payload: TokenPayload = { k: s3Key, u: String(userId), e: exp };
   const rawPayload = b64urlEncode(JSON.stringify(payload));
   const hmac = sign(rawPayload, getSecret());
